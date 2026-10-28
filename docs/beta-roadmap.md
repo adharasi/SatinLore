@@ -62,7 +62,7 @@ Measure repeat use after a meaningful observation window, separating reward-qual
 28 October 2026, hardware-free reading-loop implementation:
 
 - Local checks: 22 Python and 45 JavaScript tests passed (67 total), with syntax/configuration and whitespace checks.
-- Expanded Chromium integration: implemented; CI verification pending. It uses neutral fixtures, a clock-controlled simulator and a separate native-timer context for the mocked vendor flow.
+- Expanded Chromium integration: [passed in GitHub Actions](https://github.com/adharasi/SatinLore/actions/runs/40620105720) for code commit `57304af`. Verified suggestions/manual zero and reset, settled scrolling, ceilings/Stop, reflow/mobile layout, inactivity, lock contention and pending-Start cancellation, delayed imports, literal text and memory-only storage. Reader timing uses a controlled clock; the existing mocked vendor flow runs separately with native browser timers. No physical hardware or live vendor service was used.
 - Live SDK, physical stop/expiry and real story-to-device playback: not qualified or enabled.
 
 Record build/commit, checks, tested configurations, observed behaviour, issues and next task. Automated evidence, browser evidence and live hardware evidence must have separate statuses. Do not mark physical qualification complete from a mock SDK or simulator result.
