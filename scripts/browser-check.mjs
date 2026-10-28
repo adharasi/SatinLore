@@ -144,10 +144,11 @@ try {
   await page.locator("#toy-select").selectOption("toy-a");
   await page.waitForFunction(() => !document.querySelector("#test-pulse").disabled);
   await page.locator("#test-pulse").click();
-  await frame.waitForFunction(() => globalThis.__fakeSdk.commands.length === 1);
+  // The bridge is deliberately hidden; requestAnimationFrame polling is paused there.
+  await frame.waitForFunction(() => globalThis.__fakeSdk.commands.length === 1, null, {polling: 50});
   assert.deepEqual(await frame.evaluate(() => globalThis.__fakeSdk.commands[0]), {vibrate: 1, time: 2, toyId: "toy-a"});
   await page.locator("#stop-real").click();
-  await frame.waitForFunction(() => globalThis.__fakeSdk.stops.includes("toy-a"));
+  await frame.waitForFunction(() => globalThis.__fakeSdk.stops.includes("toy-a"), null, {polling: 50});
 
   // Stop during the authentication round trip must invalidate the queued pulse.
   await delay(2100); // Wait outside the previous pulse's enforced two-second window.
