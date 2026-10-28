@@ -83,7 +83,7 @@ Only one tab may hold the device-check lock. Hiding the active tab tears down it
 
 ## Privacy and lifecycle limits
 
-The reader never loads the vendor SDK. The device-check page hosts it in a sandboxed iframe without same-origin permission, and the bridge exchanges only connection/control messages. No story content is passed to it. Browser and network qualification of that boundary is still required.
+The reader never loads the vendor SDK. The device-check page hosts it in a sandboxed iframe without same-origin permission, and the bridge exchanges only connection/control messages. No story content is passed to it. The mocked Chromium test verifies that the frame cannot read its parent's DOM; live SDK/network and supported-browser qualification remain required. See the [evidence ledger](beta-roadmap.md#evidence-ledger).
 
 Invitation and application-session bearer tokens are hashed in SQLite. The database also contains temporary user IDs, timestamps and hashed rate-limit keys. Expired rows and unused identities are removed opportunistically during invitation creation/redemption or rate-limit writes; there is no scheduled retention job. Logout invalidates the application session. Neither logout nor local database removal promises vendor-side token revocation or an immediate physical stop after transport failure.
 

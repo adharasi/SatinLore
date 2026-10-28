@@ -50,7 +50,7 @@ Measure repeat use after a meaningful observation window, separating reward-qual
 28 October 2026, authenticated connection implementation:
 
 - Local checks: 22 Python tests and 19 JavaScript tests passed, with syntax/configuration and whitespace checks.
-- Chromium browser smoke: added for CI with an ephemeral database, fake SDK and mocked vendor HTTP. Local browser installation failed; CI result pending.
+- Chromium browser smoke: [passed in GitHub Actions](https://github.com/adharasi/SatinLore/actions/runs/40617085053) for code commit `7041372`, with an ephemeral database, fake SDK and mocked vendor HTTP. Verified local reader behaviour, invitation sessions, sandbox DOM isolation, targeted finite dispatch, pending-test cancellation after Stop, reconnect, logout and mobile width. This is mocked browser evidence; the live SDK was not exercised.
 - Live vendor pairing, physical stop/expiry and supported-device/browser qualification: not performed.
 
 Record build/commit, checks, tested configurations, observed behaviour, issues and next task. Automated evidence, browser evidence and live hardware evidence must have separate statuses. Do not mark physical qualification complete from a mock SDK or simulator result.
