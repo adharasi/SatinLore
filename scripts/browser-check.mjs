@@ -10,6 +10,7 @@ import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {setTimeout as delay} from "node:timers/promises";
 import {chromium} from "playwright";
+import {checkReader} from "./reader-browser-check.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const python = path.join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
@@ -75,9 +76,9 @@ try {
   }
   assert.ok(ready, "Local test server did not become ready.");
   browser = await chromium.launch({headless: true});
-  const context = await browser.newContext();
+  let context = await browser.newContext();
   const externalRequests = [];
-  await context.route("**/*", async route => {
+  const routeNetwork = async route => {
     const url = new URL(route.request().url());
     if (url.origin === origin) return route.continue();
     if (url.href === "https://api.lovense-api.com/basic-sdk/core.min.js") {
@@ -88,42 +89,34 @@ try {
     }
     externalRequests.push(url.origin);
     return route.abort();
-  });
+  };
+  await context.route("**/*", routeNetwork);
   page = await context.newPage();
   page.setDefaultTimeout(10_000);
-  page.on("response", response => {
-    const url = new URL(response.url());
-    responseStatuses.push({path: url.pathname, status: response.status()});
-  });
-  page.on("requestfailed", request => {
-    responseStatuses.push({path: new URL(request.url()).pathname, error: request.failure()?.errorText});
-  });
-  page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message => {
-    if (/content security policy|blocked by cors/i.test(message.text())) policyErrors.push(message.text());
-  });
-  const story = "An ordinary walk.\n\nA quiet afternoon.";
-  const transmittedStories = [];
-  page.on("request", request => {
-    if ((request.postData() || "").includes("An ordinary walk")) transmittedStories.push(request.url());
-  });
-  await page.goto(origin);
-  await page.locator("#source").fill(story);
-  await page.locator("#load").click();
-  await page.locator("#connect").click();
-  for (const [id, value] of [["level", "10"], ["cap", "3"]]) {
-    await page.locator(`#${id}`).evaluate((element, next) => {
-      element.value = next;
-      element.dispatchEvent(new Event("input", {bubbles: true}));
-    }, value);
+  function diagnostics(target) {
+    target.on("response", response => {
+      const url = new URL(response.url());
+      responseStatuses.push({path: url.pathname, status: response.status()});
+    });
+    target.on("requestfailed", request => {
+      responseStatuses.push({path: new URL(request.url()).pathname, error: request.failure()?.errorText});
+    });
+    target.on("pageerror", error => errors.push(error.message));
+    target.on("console", message => {
+      if (/content security policy|blocked by cors/i.test(message.text())) policyErrors.push(message.text());
+    });
   }
-  await page.locator("#start").click();
-  await page.waitForFunction(() => document.querySelector("#output").textContent === "3 / 20");
-  await page.locator("#stop").click();
-  assert.equal(await page.locator("#output").textContent(), "0 / 20");
-  await page.reload();
-  assert.equal(await page.locator("#source").inputValue(), "");
-  assert.deepEqual(transmittedStories, []);
+  diagnostics(page);
+  await checkReader(page, context, origin);
+  await context.close();
+
+  // Keep vendor-adapter coverage on native Window timers. Reader clock tests
+  // belong in a separate context so they cannot hide receiver/binding errors.
+  context = await browser.newContext();
+  await context.route("**/*", routeNetwork);
+  page = await context.newPage();
+  page.setDefaultTimeout(10_000);
+  diagnostics(page);
 
   await page.goto(`${origin}/device-check`);
   await page.locator("#invite-token").fill(invite);

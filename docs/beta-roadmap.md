@@ -25,13 +25,19 @@ Remaining gate:
 
 No hardware support or device beta is certified by the automated suite. If hardware/access is delayed, continue local reading-loop work while keeping real playback unqualified.
 
-## 2. Reading loop — next implementation phase
+## 2. Reading loop — simulator code implemented; evaluation pending
 
-Add experimental paragraph scoring, manual corrections, a stable reading anchor and coalesced output. Keep the user ceiling authoritative and require explicit Start. Connect the reader to a qualified isolated device bridge only after its acceptance checks.
+Implemented without hardware:
 
-Add controller tests for rapid scrolling, stale messages, session/device/story changes, tab competition, inactivity, Stop and reconnection. Optional local progress requires deletion controls. Validate orientation/font changes and retain manual navigation.
+- Local experimental five-band suggestions, stable paragraph IDs and separate manual overrides, including zero and per-paragraph reset.
+- Settled scroll-following, boundary hysteresis, manual navigation and reader sizing.
+- A simulator-only controller with an authoritative ceiling, finite cadence, latest-value coalescing, explicit Start, priority Stop, inactivity pause and interruption handling.
+- Same-origin simulator playback ownership; no automatic restart after visibility, reconnect or layout changes.
+- A [step-by-step testing guide](test-today.md), [neutral sample](test-sample.txt) and [blank hardware record](hardware-test-record.md).
 
-Gate: predictable controls and useful scoring with neutral fixtures, plus physical verification of real playback. If corrections are frequent, automatic synchronisation remains unproven.
+Remaining gate: evaluate suggestion accuracy/correction burden and the full user flow against the documented checks. A keyword match does not establish useful automatic synchronisation. Record actual browser evidence separately from pure controller/model tests.
+
+Next integration: qualify the separate device-check screen with hardware, then connect reading playback to a qualified isolated real adapter. The current reader does not drive real hardware. Add/verify real transport latency, stale callbacks, session revocation, competing control, physical expiry and interrupted-network behaviour before enabling that path. Optional local progress still needs deletion controls.
 
 ## 3. Private beta operations
 
@@ -52,5 +58,11 @@ Measure repeat use after a meaningful observation window, separating reward-qual
 - Local checks: 22 Python tests and 19 JavaScript tests passed, with syntax/configuration and whitespace checks.
 - Chromium browser smoke: [passed in GitHub Actions](https://github.com/adharasi/SatinLore/actions/runs/40617085053) for code commit `7041372`, with an ephemeral database, fake SDK and mocked vendor HTTP. Verified local reader behaviour, invitation sessions, sandbox DOM isolation, targeted finite dispatch, pending-test cancellation after Stop, reconnect, logout and mobile width. This is mocked browser evidence; the live SDK was not exercised.
 - Live vendor pairing, physical stop/expiry and supported-device/browser qualification: not performed.
+
+28 October 2026, hardware-free reading-loop implementation:
+
+- Local checks: 22 Python and 45 JavaScript tests passed (67 total), with syntax/configuration and whitespace checks.
+- Expanded Chromium integration: [passed in GitHub Actions](https://github.com/adharasi/SatinLore/actions/runs/40620105720) for code commit `57304af`. Verified suggestions/manual zero and reset, settled scrolling, ceilings/Stop, reflow/mobile layout, inactivity, lock contention and pending-Start cancellation, delayed imports, literal text and memory-only storage. Reader timing uses a controlled clock; the existing mocked vendor flow runs separately with native browser timers. No physical hardware or live vendor service was used.
+- Live SDK, physical stop/expiry and real story-to-device playback: not qualified or enabled.
 
 Record build/commit, checks, tested configurations, observed behaviour, issues and next task. Automated evidence, browser evidence and live hardware evidence must have separate statuses. Do not mark physical qualification complete from a mock SDK or simulator result.
