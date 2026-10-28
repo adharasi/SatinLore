@@ -25,7 +25,9 @@ export function supportedToys(value) {
 }
 
 export class LovenseCheck {
-  constructor({sdkFactory, emit, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout}) {
+  constructor({sdkFactory, emit, now = Date.now,
+    setTimer = (callback, delay) => setTimeout(callback, delay),
+    clearTimer = timer => clearTimeout(timer)}) {
     this.sdkFactory = sdkFactory;
     this.emit = emit;
     this.now = now;
