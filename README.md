@@ -4,11 +4,13 @@ A browser-first reader for synchronising users' text with a supported Lovense de
 
 ## Current status
 
-Implemented: TXT/paste, paragraph navigation, manual levels, simulator, ceiling and Stop/Pause; one-use beta invitations and expiring sessions; server-side Lovense token exchange; a separate device-check screen with explicit device selection, a bounded test command and Stop.
+Implemented: TXT/paste, local experimental paragraph suggestions, separate manual corrections, scroll-following and manual navigation, coalesced simulator playback, an authoritative ceiling, Stop/Pause, inactivity pause and same-origin playback ownership; one-use invitations, expiring sessions and a separate authenticated device-check screen.
 
-The reader still drives the simulator only. Real-device behaviour and the vendor connection need qualification with your credentials and hardware. Scoring, scroll tracking, story-to-device playback, feedback and production deployment remain outstanding. Text stays in reader-page memory and clears on reload.
+The reader still drives the simulator only. Real-device behaviour and the vendor connection need qualification with your credentials and hardware. Suggestion quality needs user evaluation. Story-to-real-device playback, feedback, data-deletion operations and production deployment remain outstanding. Text stays in reader-page memory and clears on reload.
 
-Read the [specification](docs/development-spec.md), [roadmap](docs/beta-roadmap.md) and [hardware-check setup](docs/hardware-check.md).
+**Start testing today:** [hardware-free front-end and authentication guide](docs/test-today.md). It includes a neutral sample and expected results.
+
+For the device session, use [hardware setup](docs/hardware-check.md) and the [blank hardware record](docs/hardware-test-record.md). Technical scope and evidence are in the [specification](docs/development-spec.md), [roadmap](docs/beta-roadmap.md) and [QA checklist](docs/qa.md).
 
 ## Quick start
 
@@ -61,10 +63,10 @@ Optional browser integration checks use Playwright and a fake vendor SDK. See th
 | `app/main.py`, `app/api/` | HTTP assembly, invitations, session identity, logout and vendor-token issuance |
 | `app/core/` | Local-only configuration and mode validation |
 | `app/services/`, `app/db/` | Server-side vendor exchange and SQLite invitation/session records |
-| `app/static/reader/` | Local text import; future scoring/position modules |
+| `app/static/reader/` | Local import, experimental scoring, override model and reading-position selection |
 | `app/static/devices/` | Device adapters and testable control logic |
 | `app/static/device-check.*`, `device-bridge.*` | Separate hardware check and sandboxed vendor SDK bridge |
-| `app/static/playback/` | Future story playback controller boundary |
+| `app/static/playback/` | Simulator playback state, cadence, ceiling and interruption control |
 | `scripts/create_invite.py` | Local one-use invitation issuance |
 | `tests/`, `scripts/check.py` | Automated checks and their common entry point |
 | `docs/`, `deploy/` | Scope, roadmap, QA, setup and deployment planning |
@@ -74,4 +76,4 @@ Optional browser integration checks use Playwright and a fake vendor SDK. See th
 
 Install the official OpenAI Codex VS Code extension, sign in and open this repository root. See [the Codex workflow](docs/codex.md).
 
-Next: qualify the connection screen with one device, then implement the reading loop and its controller tests. Keep hardware qualification, simulated evidence and planned work separate. Supply credentials through local configuration, never chat or committed files.
+Next: test the full simulator flow, evaluate suggestion/correction quality, then qualify the separate connection screen with one device before wiring real story playback. Keep hardware qualification, simulated evidence and planned work separate. Supply credentials through local configuration, never chat or committed files.

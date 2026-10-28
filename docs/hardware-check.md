@@ -1,6 +1,6 @@
 # Local authenticated device check
 
-This screen exercises pairing and one short device command. It does not connect story reading to a real device and is not an external beta deployment.
+This screen exercises pairing and one short device command. It does not connect story reading to a real device and is not an external beta deployment. Until the device arrives, use [test-today.md](test-today.md). Prepare a copy of [hardware-test-record.md](hardware-test-record.md) to record observed results for each device/browser configuration.
 
 ## Prerequisites
 

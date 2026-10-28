@@ -1,5 +1,7 @@
 # QA and release checklist
 
+For a practical front-end session without a device, start with **[test-today.md](test-today.md)** and its neutral sample. Use this document for the wider release checklist.
+
 Track automated, browser and hardware evidence separately. Record each supported device, firmware, Remote version, phone, browser and build. A passing mock does not certify hardware.
 
 ## Automated checks
@@ -16,14 +18,19 @@ npm run test:browser
 
 Linux may need `npx playwright install --with-deps --only-shell chromium`. Browser installation requires internet access. These checks establish application/browser behaviour against the fixture, not live SDK compatibility. Record an installation failure as unexecuted browser evidence, not a passing test.
 
-## Simulator smoke test
+## Reader and simulator checks
 
-1. Connect the simulator and load two neutral paragraphs.
-2. Set the first level to 10 and ceiling to 3; Start must show 3.
-3. Move to an unassigned paragraph; output must become zero.
-4. Stop, switch tabs, disconnect and reconnect. Each path stays paused until Start.
-5. Clear during an import; delayed completion must not restore text. Reload must clear memory-only content.
-6. Check mobile width, keyboard access and readable error messages.
+Use the action/expected-result table in [test-today.md](test-today.md). Cover:
+
+- Import bounds (500,000 UTF-8 bytes; 2,000 paragraphs), empty/malformed input, literal HTML-looking strings and delayed-import cancellation.
+- Five-band local predictions, distinct manual overrides, zero overrides, reset and new-document/clear lifecycle. Record scoring errors separately from control failures.
+- Scroll settling and boundary hysteresis, rapid jumps, long paragraphs/gaps, manual navigation, font/window reflow and keyboard/mobile usability.
+- Explicit Start, authoritative ceiling, immediate Stop on reductions, finite dispatch cadence and coalescing of the latest desired level.
+- Stop while a selection is pending, hide/return, disconnect/reconnect, replaced stories, inactivity, delayed timers and adapter errors. None may automatically resume output.
+- Two visible same-origin windows in one browser profile: the second cannot take over active simulator playback. Ordinary hidden-tab interruption is a separate case.
+- No story text in network requests, URLs or browser storage. Use neutral fixtures and do not export sensitive request data.
+
+Current continuous playback supports the synchronous simulator only. Passing these checks does not qualify a real asynchronous adapter or continuous physical output.
 
 ## Authentication and bridge checks
 
@@ -38,7 +45,7 @@ Linux may need `npx playwright install --with-deps --only-shell chromium`. Brows
 
 ## Hardware qualification
 
-Follow [local setup](hardware-check.md). Start with a paired device on a desk and one control tab. The current check page sends discrete commands; continuous reading playback remains separate work.
+Follow [local setup](hardware-check.md) and record each configuration/trial using [hardware-test-record.md](hardware-test-record.md). Start with a paired device on a desk and one control tab. The current check page sends discrete commands; continuous reading playback remains separate work.
 
 | Check | Required result |
 | --- | --- |
@@ -50,7 +57,7 @@ Follow [local setup](hardware-check.md). Start with a paired device on a desk an
 | Same-phone flow | Qualify QR/app switching and screen lock separately on each claimed platform |
 | Privacy | No story text or developer token in client/vendor payloads, logs or analytics |
 
-Repeat physical expiry tests and record requested duration versus observed stop time. A UI timer, API response or one passing model is not evidence of broader support. Test tab competition and inactivity when the real reading controller is introduced.
+Repeat physical expiry tests and record requested duration versus observed stop time. A UI timer, API response or one passing model is not evidence of broader support. Repeat tab competition and inactivity checks when the real reading controller is introduced; simulator evidence does not transfer to physical control.
 
 ## Operational release checks
 

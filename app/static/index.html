@@ -2,24 +2,54 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SatinLore · development starter</title>
+  <title>SatinLore · reader simulator</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/reader.css">
   <script type="module" src="/static/app.mjs"></script>
 </head>
 <body><main>
-  <p class="eyebrow">SATINLORE / DEVELOPMENT STARTER</p>
-  <h1>Your text. A testable connection.</h1>
-  <p class="intro">Simulator only. Nothing here controls physical hardware. Text stays in this page’s memory and is lost when you reload.</p>
+  <p class="eyebrow">SATINLORE / READER SIMULATOR</p>
+  <h1>Read at your own pace.</h1>
+  <p class="intro">Watch simulated output follow your current paragraph. This reader does not control hardware. Text and corrections stay in page memory and disappear on Clear or reload.</p>
   <p><a href="/device-check">Open the separate Lovense connection check</a></p>
-  <section class="controls" aria-label="Device controls">
-    <div><strong id="status">Disconnected</strong><p>Simulated output <output id="output">0 / 20</output></p><meter id="meter" min="0" max="20" value="0">0</meter></div>
-    <div class="buttons"><button id="connect">Connect simulator</button><button id="disconnect">Disconnect</button><button id="start">Start</button><button id="stop" class="stop">Stop / pause</button></div>
-    <label for="cap">Output ceiling: <output id="capValue">5</output> / 20</label><input id="cap" type="range" min="0" max="20" value="5">
+  <section class="controls transport" aria-label="Simulator controls">
+    <div class="transport-heading"><strong id="status">Disconnected</strong><span>Simulated output <output id="output">0 / 20</output></span></div>
+    <meter id="meter" min="0" max="20" value="0" aria-label="Simulated intensity">0</meter>
+    <div class="buttons"><button id="connect">Connect simulator</button><button id="disconnect" disabled>Disconnect</button><button id="start" disabled>Start</button><button id="stop" class="stop">Stop / pause</button></div>
+    <label class="ceiling-label" for="cap">Output ceiling: <output id="capValue">5</output> / 20</label><input id="cap" type="range" min="0" max="20" value="5">
   </section>
-  <p id="message" role="status" aria-live="polite">Connect the simulator, load text, then choose a level.</p>
-  <div class="grid">
-    <section><h2>1. Load text</h2><label for="source">Paste text, separating paragraphs with a blank line</label><textarea id="source" rows="9" maxlength="500000" placeholder="Start with a short, non-sensitive sample…"></textarea><div class="buttons"><button id="load">Load text</button><button id="clear">Clear</button></div><label for="file">Or import a TXT file</label><input id="file" type="file" accept=".txt,text/plain"></section>
-    <section><h2>2. Test the reading loop</h2><p id="position">No text loaded</p><article id="paragraph"></article><div class="buttons"><button id="previous">Previous</button><button id="next">Next</button></div><label for="level">This paragraph’s level: <output id="levelValue">0</output> / 20</label><input id="level" type="range" min="0" max="20" value="0"><p class="note">Levels are manual in this starter. Automatic analysis and scroll tracking are next steps.</p></section>
-  </div>
-  <footer>Local reader simulator · Live device qualification, story synchronisation and beta hosting remain outstanding.</footer>
+  <p id="message" role="status" aria-live="polite">Load text and connect the simulator. Start is always explicit.</p>
+  <details class="import-panel" open>
+    <summary>Load or replace text</summary>
+    <label for="source">Paste text, separating paragraphs with a blank line</label>
+    <textarea id="source" rows="5" maxlength="500000" placeholder="Start with a short, non-sensitive sample…"></textarea>
+    <div class="buttons"><button id="load">Load text</button><button id="clear">Clear text</button></div>
+    <label for="file">Or import a UTF-8 TXT file</label><input id="file" type="file" accept=".txt,text/plain">
+    <p class="note">Up to 500 KB and 2,000 paragraphs. Importing new text pauses playback and removes the previous corrections.</p>
+  </details>
+  <section class="reader-section" aria-labelledby="reader-heading">
+    <div class="reader-heading"><h2 id="reader-heading">Your reading space</h2><p id="position" aria-live="polite">No text loaded</p></div>
+    <div class="reader-options">
+      <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow scrolling</label>
+      <label for="font-size">Reading size <select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select></label>
+    </div>
+    <p id="reader-help" class="note">Scroll inside the reading space. The highlighted paragraph follows the reading line after you settle. Previous and Next also work without scroll tracking.</p>
+    <div class="reader-frame">
+      <div class="reading-band" aria-hidden="true"><span>Reading line</span></div>
+      <div id="reader" class="reader-size-normal" role="region" aria-label="Scrollable story reader" aria-describedby="reader-help" tabindex="0">
+        <div id="paragraph"><p class="empty-reader">Load text to begin.</p></div>
+      </div>
+    </div>
+    <div class="buttons"><button id="previous" disabled>Previous</button><button id="next" disabled>Next</button></div>
+    <div class="paragraph-controls">
+      <p>Suggested: <output id="suggested-level">0 / 20</output> <span class="experimental">Experimental</span></p>
+      <p id="level-source">No paragraph selected.</p>
+      <label for="level">This paragraph’s level: <output id="levelValue">0</output> / 20</label>
+      <input id="level" type="range" min="0" max="20" value="0" disabled>
+      <button id="reset-level" disabled>Use suggestion</button>
+      <p>Target after ceiling: <output id="effective-level">0 / 20</output></p>
+      <p class="note">Suggestions use a small local word-based rule set, not a language model. Context can be missed; unknown passages default to zero. Review and correct each paragraph. A manual zero stays zero until you use its suggestion again.</p>
+    </div>
+  </section>
+  <footer>Simulator playback only · Hiding this tab, changing the layout or two minutes without activity pauses output. Live device qualification and real story playback remain outstanding.</footer>
 </main></body></html>

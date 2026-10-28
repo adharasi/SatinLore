@@ -4,7 +4,7 @@
 
 - Read `README.md`, `docs/development-spec.md` and the relevant milestone in `docs/beta-roadmap.md`.
 - Inspect current code and applicable nested instructions. Implementation status requires code and evidence, not plans.
-- This local FastAPI/static-JavaScript build has a simulator and an authenticated device-check flow. Live vendor/hardware qualification and production deployment remain outstanding.
+- This local FastAPI/static-JavaScript build has a scored, scroll-following simulator reader and an authenticated device-check flow. Live vendor/hardware qualification and production deployment remain outstanding.
 - Complete the requested milestone without unrelated frameworks or placeholders.
 
 ## Setup and checks
@@ -13,6 +13,7 @@
 - Windows: `py bootstrap.py`, then `py run.py`.
 - macOS/Linux: `python3 bootstrap.py`, then `python3 run.py`.
 - Full local checks: `py scripts/check.py` on Windows, `python3 scripts/check.py` elsewhere.
+- Start manual hardware-free checks with `docs/test-today.md`; hardware evidence belongs in `docs/hardware-test-record.md`.
 - Browser checks are separate: see `docs/qa.md` for Playwright setup and the distinction between fake SDK and real-device evidence.
 - Run relevant tests and the common checks before handoff; report failures and unverified browser/hardware behaviour.
 - Keep documentation and tests consistent with actual paths, commands and behaviour.
@@ -23,6 +24,8 @@
 - Defer generation, payments, public publishing, marketplaces, native apps and additional brands.
 - Use FastAPI, browser ES modules and the existing SQLite invitation/session store. Expand persistence only when a requested feature needs it.
 - Keep text parsing, scoring and reading position in the browser. Backend data should be minimal session, feedback and entitlement records.
+- Treat the keyword scorer as experimental, not a semantic, consent or safety classifier. Keep manual zero overrides distinct from unset overrides; do not silently rescore corrections.
+- Preserve the simulator controller's finite dispatch, latest-value coalescing, explicit Start, immediate reduction-to-Stop and inactivity/tab-ownership rules.
 - Check current official Lovense documentation before implementing its API. Developer credentials remain server-side; user identities derive from authenticated sessions.
 - Preserve simulator mode; never use a mode flag to imply an unimplemented integration works.
 
