@@ -74,4 +74,13 @@ Defer generated stories, subscriptions/checkout, token wallets, native apps, pub
 - Expanded Chromium integration: [passed in GitHub Actions](https://github.com/adharasi/SatinLore/actions/runs/40620105720) for code commit `57304af`. Verified suggestions/manual zero and reset, settled scrolling, ceilings/Stop, reflow/mobile layout, inactivity, lock contention and pending-Start cancellation, delayed imports, literal text and memory-only storage. Reader timing uses a controlled clock; the existing mocked vendor flow runs separately with native browser timers. No physical hardware or live vendor service was used.
 - Live SDK, physical stop/expiry and real story-to-device playback: not qualified or enabled.
 
+28 October 2026, approved frontend F1/F2 implementation:
+
+- Source commit `ca597e99a74af40b9dac92d367a9ac0b1513c95e`: 22 Python and 49 JavaScript tests passed (71 total). Syntax/configuration and whitespace checks passed.
+- Full local browser suite passed on Chromium 134.0.6998.35. [GitHub Actions also passed](https://github.com/adharasi/SatinLore/actions/runs/40746279856) on Chromium 151.0.7922.34, including the existing mocked vendor flow on native timers. Reader tests use a controlled clock.
+- Verified Light/Dark/System and blocked-storage behaviour; Add/Review/Read, cancelled replacement, manual zero/reset, persistent settings/navigation, reading-position preservation, document scrolling, lower/zero ceiling, Pause/Stop, synthetic hidden-tab return, inactivity, competing ownership, stale imports and text privacy. Responsive checks cover 1440 × 1000, 390 × 844, 320 CSS px, landscape and 200% CSS text enlargement.
+- Six neutral screenshots are in that run's **frontend-evidence** artifact (14-day retention). These cover desktop/phone in both themes plus Add and Review. Screenshots were visually inspected alongside the functional assertions.
+- F1/F2 implementation and automated acceptance slice pass. Native browser zoom, real-phone keyboard/browser-bar/background behaviour and representative-reader usability still need manual checks. Synthetic visibility and emulated viewports are not physical-phone evidence.
+- F3 deterministic failure scenarios are next. F4–F6 services/evaluation and H1/H2 hardware/release gates remain pending; the reader still drives only the simulator.
+
 Record build/commit, checks, tested configurations, observed behaviour, issues and next task. Automated evidence, browser evidence and live hardware evidence must have separate statuses. Do not mark physical qualification complete from a mock SDK or simulator result.

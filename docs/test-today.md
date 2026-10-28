@@ -36,7 +36,7 @@ In **Add story**, import [test-sample.txt](test-sample.txt) from the repository'
 
 The scorer uses local English word cues, not a model that understands a passage. It needs contact and contextual cues together; repeated words do not raise a score, and broad negation/metalinguistic filters return zero. It is not a language detector, consent check or safety classifier and can produce false positives and false negatives. Its five suggested levels are **0, 1, 2, 3 and 5 out of 20**. Zero also means insufficient evidence. A plausible suggestion is not evidence of useful synchronisation; review and correct it. No story is generated or sent to an AI service.
 
-For predictable playback, use the paragraph sliders in **Review** to assign paragraph 1 a level of **2**, paragraph 2 **4**, paragraph 3 **0**, and paragraph 4 **5**. Leave paragraphs 5–6 at their zero suggestions. Choose **Open reading space** (or the **Read** step), open **Reading & section settings** and uncheck **Follow scrolling**. Close settings when finished. Use **Previous/Next** to select paragraphs. These assignments test the controller independently of scoring quality; review and reader corrections edit the same model.
+For predictable playback, use the paragraph sliders in **Review** to assign paragraph 1 a level of **2**, paragraph 2 **4**, paragraph 3 **0**, and paragraph 4 **5**. Leave paragraphs 5–6 at their zero suggestions. Choose **Open reading space** (or the **Read** step), open **Settings** and uncheck **Follow scrolling**. Close settings when finished. Use **Previous/Next** to select paragraphs. These assignments test the controller independently of scoring quality; review and reader corrections edit the same model.
 
 For an optional suggestion sanity check, load each of these short, non-graphic fixtures as a separate paragraph:
 
@@ -52,7 +52,7 @@ Set the last paragraph's manual override to zero in **Review**, move to **Read**
 
 ## 3. Front-end checklist
 
-Start each row from a known paused state where necessary. Opening or closing **Reading & section settings** pauses output; follow-scroll selection is suspended while that panel is open. Close it before testing scrolling and press Start again when ready. Follow-scroll changes settle briefly before selecting a paragraph; output increases can wait for the next one-second dispatch tick. A reduction can first show zero because the controller stops the previous output immediately.
+Start each row from a known paused state where necessary. Opening or closing **Settings** pauses output; follow-scroll selection is suspended while that panel is open. Close it before testing scrolling and press Start again when ready. Follow-scroll changes settle briefly before selecting a paragraph; output increases can wait for the next one-second dispatch tick. A reduction can first show zero because the controller stops the previous output immediately.
 
 | Action | Expected result |
 | --- | --- |
@@ -84,7 +84,7 @@ Use the same browser profile and exact origin for a two-window ownership check. 
 - Import a UTF-8 `.txt` file, try empty input, then try a file larger than **500,000 bytes**. Invalid/oversized input should show a useful error and keep playback paused. The byte limit also applies to pasted text; non-ASCII characters can occupy multiple bytes. A story is also limited to 2,000 paragraphs.
 - Try a non-TXT file and a deliberately invalid UTF-8 TXT file. Automated import tests also cover these cases; do not alter a personal document to create a fixture.
 - Paste `<b>Plain text only</b>` as a paragraph. It must display literally, never render a bold HTML element or execute markup.
-- Test **Light**, **Dark** and **System** appearance. System should follow OS changes; an explicit Light/Dark choice should not. Reload should keep the chosen appearance but clear the story/corrections.
+- Test **Light**, **Dark** and **System** appearance using the header or the persistent **Settings** panel while reading. System should follow OS changes; an explicit Light/Dark choice should not. Reload should keep the chosen appearance but clear the story/corrections.
 - At **390 × 844**, **1440 × 1000** and **320 CSS px** width, check horizontal fit, readable controls and reachable Stop. On narrow screens the bottom dock must not cover the final paragraph or focused control. Also check landscape, 200% text/zoom, small/large reader fonts and a real phone's keyboard/browser bars when possible. Use [frontend-design.md](frontend-design.md) for the full visual checklist.
 - Use Tab/Shift+Tab and keyboard activation for buttons, sliders and reader navigation. Focus should be visible and labels should identify their controls.
 - With only the neutral sample loaded, inspect browser Network and Application/Storage panels. Reading, scoring and corrections must not upload the story, place it in URLs or save it in local/session storage. The only permitted reader preference is local-storage key `satinlore.appearance` with `system`, `light` or `dark`; selecting appearance can create it. Clear removes the story, not this appearance preference. Normal same-origin asset requests are expected. Do not export a HAR containing invitation cookies or hardware pairing payloads.
