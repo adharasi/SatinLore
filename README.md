@@ -8,6 +8,8 @@ Implemented: TXT/paste, local experimental paragraph suggestions, separate manua
 
 The reader still drives the simulator only. Real-device behaviour and the vendor connection need qualification with your credentials and hardware. Suggestion quality needs user evaluation. Story-to-real-device playback, feedback, data-deletion operations and production deployment remain outstanding. Text stays in reader-page memory and clears on reload.
 
+**Approved frontend direction:** [Satin Editorial with Midnight Ink dark mode](docs/frontend-design.md). The next phase completes the beta software journey using simulation, without hardware or vendor credentials.
+
 **Start testing today:** [hardware-free front-end and authentication guide](docs/test-today.md). It includes a neutral sample and expected results.
 
 For the device session, use [hardware setup](docs/hardware-check.md) and the [blank hardware record](docs/hardware-test-record.md). Technical scope and evidence are in the [specification](docs/development-spec.md), [roadmap](docs/beta-roadmap.md) and [QA checklist](docs/qa.md).
@@ -76,4 +78,4 @@ Optional browser integration checks use Playwright and a fake vendor SDK. See th
 
 Install the official OpenAI Codex VS Code extension, sign in and open this repository root. See [the Codex workflow](docs/codex.md).
 
-Next: test the full simulator flow, evaluate suggestion/correction quality, then qualify the separate connection screen with one device before wiring real story playback. Keep hardware qualification, simulated evidence and planned work separate. Supply credentials through local configuration, never chat or committed files.
+Next: implement the approved frontend and hardware-free F1–F6 work in the [roadmap](docs/beta-roadmap.md), starting with the theme system and focused reader. Evaluate scoring in parallel. Later, qualify the separate connection screen with one device before wiring real story playback. Keep hardware qualification, simulated evidence and planned work separate. Supply credentials through local configuration, never chat or committed files.
