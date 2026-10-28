@@ -3,7 +3,9 @@
 These supplement the repository-root `AGENTS.md` for this directory.
 
 - Use browser ES modules and existing DOM controls; keep the starter build-free.
-- Keep text in browser memory unless the user explicitly opts into local persistence.
+- Keep text in browser memory unless the user explicitly opts into local persistence. Only allowlisted `satinlore.appearance` (`system`, `light`, `dark`) may persist in this phase; do not put story/account data in preferences.
+- Follow `docs/frontend-design.md`: shared semantic themes, pre-paint theme resolution, native colour-scheme and continuous document scrolling. Preserve the selected paragraph and pause on appearance/reflow changes.
+- Keep Add/Review/Read transitions explicit. Leaving Read cancels pending Start and pauses output; returning never resumes automatically. Confirm a valid story replacement before discarding corrections, and invalidate delayed import callbacks on clear/navigation/hide.
 - Render imported strings with `textContent`; do not use `innerHTML` for stories.
 - Never send story text, titles or excerpts to backend, vendor, analytics or error services.
 - Keep third-party scripts off the reader page. Load the vendor SDK only in the dedicated sandboxed bridge without `allow-same-origin`.

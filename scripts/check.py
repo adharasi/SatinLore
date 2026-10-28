@@ -29,7 +29,8 @@ def main():
     for path in [ROOT / "bootstrap.py", ROOT / "run.py"]:
         compile(path.read_text(encoding="utf-8"), str(path), "exec")
     subprocess.run([str(python), "-m", "pytest", "-q"], cwd=ROOT, check=True)
-    modules = [*(ROOT / "app/static").rglob("*.mjs"), *(ROOT / "scripts").glob("*.mjs")]
+    modules = [*(ROOT / "app/static").rglob("*.mjs"), *(ROOT / "app/static").rglob("*.js"),
+               *(ROOT / "scripts").glob("*.mjs")]
     for path in sorted(modules):
         subprocess.run([node, "--check", str(path)], cwd=ROOT, check=True)
     tests = sorted(str(path) for path in (ROOT / "tests").glob("*.test.mjs"))

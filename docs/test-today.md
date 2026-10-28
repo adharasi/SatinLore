@@ -28,15 +28,15 @@ python3 run.py
 
 Open <http://127.0.0.1:8000>. Leave the terminal running; Ctrl+C stops it. Use that exact address throughout these checks. Keep local changes before pulling; do not discard your work to make a pull succeed. Bootstrap needs internet access; the ordinary checks run locally after installation.
 
-Record the build with `git rev-parse --short HEAD`, plus browser/version and screen size. A useful first target is: import text → adjust levels → Start → scroll → observe bounded simulator output → Stop.
+Record the build with `git rev-parse --short HEAD`, plus browser/version and screen size. A useful first target is: Add story → analyse locally → Review suggestions and set corrections → Read → connect simulator → Start → scroll → Stop. The separately managed marketing waitlist is not served by this local app.
 
 ## 2. Use a predictable sample
 
-Import [test-sample.txt](test-sample.txt) from the repository's `docs` directory, or paste its contents and load them. It has six ordinary, non-sensitive paragraphs. All should receive a zero suggestion from the current experimental scorer.
+In **Add story**, import [test-sample.txt](test-sample.txt) from the repository's `docs` directory, or paste its contents and choose **Analyse & review**. Successful import opens **Review**. It has six ordinary, non-sensitive paragraphs. All should receive a zero suggestion from the current experimental scorer.
 
 The scorer uses local English word cues, not a model that understands a passage. It needs contact and contextual cues together; repeated words do not raise a score, and broad negation/metalinguistic filters return zero. It is not a language detector, consent check or safety classifier and can produce false positives and false negatives. Its five suggested levels are **0, 1, 2, 3 and 5 out of 20**. Zero also means insufficient evidence. A plausible suggestion is not evidence of useful synchronisation; review and correct it. No story is generated or sent to an AI service.
 
-For predictable playback, uncheck **Follow scrolling**, then use **Previous/Next** and assign paragraph 1 a level of **2**, paragraph 2 **4**, paragraph 3 **0**, and paragraph 4 **5**. Leave paragraphs 5–6 at their zero suggestions. These assignments test the controller independently of scoring quality.
+For predictable playback, use the paragraph sliders in **Review** to assign paragraph 1 a level of **2**, paragraph 2 **4**, paragraph 3 **0**, and paragraph 4 **5**. Leave paragraphs 5–6 at their zero suggestions. Choose **Open reading space** (or the **Read** step), open **Reading & section settings** and uncheck **Follow scrolling**. Close settings when finished. Use **Previous/Next** to select paragraphs. These assignments test the controller independently of scoring quality; review and reader corrections edit the same model.
 
 For an optional suggestion sanity check, load each of these short, non-graphic fixtures as a separate paragraph:
 
@@ -48,30 +48,34 @@ For an optional suggestion sanity check, load each of these short, non-graphic f
 | A romantic and tender kiss expressed affection. | 3 |
 | A romantic embrace, a tender kiss and affection. | 5 |
 
-Set the last paragraph's manual override to zero, navigate away and return: it must stay zero until **Use suggestion** restores 5. These constructed fixtures check the rule implementation; they do not establish accuracy on real stories. Reload the longer neutral sample for scrolling tests.
+Set the last paragraph's manual override to zero in **Review**, move to **Read**, then return to **Review**: it must stay zero until **Use suggestion** restores 5. These constructed fixtures check the rule implementation; they do not establish accuracy on real stories. Reload the longer neutral sample for scrolling tests.
 
 ## 3. Front-end checklist
 
-Start each row from a known paused state where necessary. Follow-scroll changes settle briefly before selecting a paragraph; output increases can wait for the next one-second dispatch tick. A reduction can first show zero because the controller stops the previous output immediately.
+Start each row from a known paused state where necessary. Opening or closing **Reading & section settings** pauses output; follow-scroll selection is suspended while that panel is open. Close it before testing scrolling and press Start again when ready. Follow-scroll changes settle briefly before selecting a paragraph; output increases can wait for the next one-second dispatch tick. A reduction can first show zero because the controller stops the previous output immediately.
 
 | Action | Expected result |
 | --- | --- |
-| Load the sample, connect the simulator, but do not Start | Text is readable, a current paragraph is identified, output remains zero. |
+| Import the sample into Review, connect the simulator, but do not Start | All sections and suggestions are readable, output remains zero, and Start stays disabled until Read. |
+| Continue to Read | The same corrections are retained; a current paragraph is identified. Playback remains paused until Start. |
 | Select paragraph 1, set its manual level to 2, then Start | Status shows simulation playing; output is 2 with the default ceiling of 5. |
 | Move to paragraph 2 | Its manual level is retained; output becomes 4 without a new Start while already playing. |
 | Move to paragraph 3, whose manual override is 0 | Output becomes zero. Zero must remain a real override, not fall back to a suggestion. |
 | Click **Use suggestion** for a paragraph | The source switches back to the experimental suggestion; this neutral sample returns to zero. Other paragraph overrides remain unchanged. |
 | Set paragraph 2 to 4 and lower the ceiling to 1 | Output never remains above 1. It may stop to zero before the next bounded update. A ceiling of zero produces zero. |
-| Enable **Follow scrolling**, press Start, then slowly scroll the reader panel | The highlighted current paragraph follows the reading band after settling. Its effective level drives the simulator. |
+| Enable **Follow scrolling**, close settings, press Start, then slowly scroll the document | The subtle current-paragraph cue follows the reading anchor after settling. Its effective level drives the simulator. Text scrolls with the page, not inside a fixed-height reader box. |
 | Scroll quickly across several paragraphs and stop | Selection settles on the final position; intermediate paragraphs are not replayed as a command backlog. |
 | Disable **Follow scrolling** and use Previous/Next | Changing mode pauses playback. Manual navigation remains usable; press Start again when ready. Scrolling alone does not take over selection. |
-| Press Stop, then scroll or change a level | Output stays zero until a new explicit Start. No delayed command may restart it. |
+| Press Pause or Stop, then scroll or change a level | Output stays zero until a new explicit Start. No delayed command may restart it. Stop requires no confirmation. |
+| Leave Read for Add story or Review while playing, then return | Output stops. Returning preserves the story/corrections and active paragraph, but requires a new Start. |
 | Hide the tab, then return | Playback is paused and stays paused. Returning does not restart output. |
 | Disconnect, reconnect and wait | Output stays zero until Start. |
-| Load replacement text while playing | Playback pauses; the new story has fresh suggestions and no previous overrides. Invalid replacement text should show an error and leave playback paused. |
+| Open Add story and analyse valid replacement text, then Cancel the confirmation | Playback stays paused. The original story and its corrections remain available in Review/Read. |
+| Analyse the replacement again and confirm | The new story opens in Review with fresh suggestions and no old overrides. No automatic restart. |
+| Try invalid replacement text | A specific error appears; the previous loaded story/corrections remain intact and playback stays paused. |
 | Clear, including during a file import | Loaded text and overrides disappear; a delayed import must not restore them. Reload also clears story state. |
 | Leave playback without interaction for a little over two minutes | It pauses for inactivity and does not resume on the next interaction alone. |
-| Change **Reading size** or resize the window while playing | Playback pauses before layout-driven repositioning. The reading controls remain usable after reflow. |
+| Change **Reading size**, appearance or window size while playing | Playback pauses and preserves the selected paragraph. Controls remain usable after reflow and Start remains explicit. |
 
 Use the same browser profile and exact origin for a two-window ownership check. Put two windows side by side so both remain visible; load text and connect both simulators. Start window A, then attempt Start in B: B must not take over. Stop A, then explicitly Start B. Ordinary tab switching hides A and releases its playback, so that different result is expected. If Web Locks are unavailable, reading/manual editing remain available but simulator playback reports that limitation.
 
@@ -80,9 +84,10 @@ Use the same browser profile and exact origin for a two-window ownership check. 
 - Import a UTF-8 `.txt` file, try empty input, then try a file larger than **500,000 bytes**. Invalid/oversized input should show a useful error and keep playback paused. The byte limit also applies to pasted text; non-ASCII characters can occupy multiple bytes. A story is also limited to 2,000 paragraphs.
 - Try a non-TXT file and a deliberately invalid UTF-8 TXT file. Automated import tests also cover these cases; do not alter a personal document to create a fixture.
 - Paste `<b>Plain text only</b>` as a paragraph. It must display literally, never render a bold HTML element or execute markup.
-- At roughly 390 px width, check that the page fits horizontally, controls are readable and Stop stays reachable. Check browser zoom and both small/large reader fonts.
+- Test **Light**, **Dark** and **System** appearance. System should follow OS changes; an explicit Light/Dark choice should not. Reload should keep the chosen appearance but clear the story/corrections.
+- At **390 × 844**, **1440 × 1000** and **320 CSS px** width, check horizontal fit, readable controls and reachable Stop. On narrow screens the bottom dock must not cover the final paragraph or focused control. Also check landscape, 200% text/zoom, small/large reader fonts and a real phone's keyboard/browser bars when possible. Use [frontend-design.md](frontend-design.md) for the full visual checklist.
 - Use Tab/Shift+Tab and keyboard activation for buttons, sliders and reader navigation. Focus should be visible and labels should identify their controls.
-- With only the neutral sample loaded, inspect browser Network and Application/Storage panels. Reading, scoring and corrections must not upload the story, place it in URLs or save it in local/session storage. Normal asset requests are expected. Do not export a HAR containing invitation cookies or hardware pairing payloads.
+- With only the neutral sample loaded, inspect browser Network and Application/Storage panels. Reading, scoring and corrections must not upload the story, place it in URLs or save it in local/session storage. The only permitted reader preference is local-storage key `satinlore.appearance` with `system`, `light` or `dark`; selecting appearance can create it. Clear removes the story, not this appearance preference. Normal same-origin asset requests are expected. Do not export a HAR containing invitation cookies or hardware pairing payloads.
 
 ## 5. Test invitations without Lovense credentials
 
@@ -112,10 +117,12 @@ npx playwright install --only-shell chromium
 npm run test:browser
 ```
 
-On Linux, system packages may require `npx playwright install --with-deps --only-shell chromium`. Installation needs internet access. If installation fails, the browser check is unexecuted—not passed. The smaller `py scripts/check.py` / `python3 scripts/check.py` command remains useful without Chromium. See [QA](qa.md) for release-level checks and the [roadmap evidence ledger](beta-roadmap.md#evidence-ledger) for recorded results.
+On Linux, system packages may require `npx playwright install --with-deps --only-shell chromium`. Installation needs internet access. If installation fails, the browser check is unexecuted—not passed. The smaller `py scripts/check.py` / `python3 scripts/check.py` command remains useful without Chromium. The run writes neutral screenshots to ignored `artifacts/frontend/`; GitHub Actions publishes them as the **frontend-evidence** artifact. View these alongside the assertions rather than treating screenshots alone as functional evidence. See [QA](qa.md) for release-level checks and the [roadmap evidence ledger](beta-roadmap.md#evidence-ledger) for recorded results.
 
-## 7. Record issues and prepare the device session
+## 7. Record issues and continue without hardware
 
 For each issue, record build, browser/version, viewport, the neutral fixture used, exact actions, expected result and observed result. Include whether it reproduces after reload. A screenshot may show neutral test text but must exclude invitation tokens, cookies, QR codes and vendor responses. Mark checks as **pass**, **fail** or **not tested**; never infer a physical result from the output meter.
 
-Before the device arrives, arrange developer access, note the exact Lovense Website Name, install Lovense Remote on your phone and read [hardware-check.md](hardware-check.md). Those account/phone steps must be completed on your own devices. Prepare a copy of [hardware-test-record.md](hardware-test-record.md) for observations. Pairing, selected-device response, actual expiry after connection loss and physical Stop must wait for the device. Story-to-real-device playback remains disabled even if today's simulator checks pass.
+Continue with F3 simulation scenarios and F4 software journeys in the [roadmap](beta-roadmap.md) while hardware is unavailable. Scoring evaluation can run in parallel. There is no device deadline attached to frontend progress.
+
+For later hardware qualification, arrange developer access, note the exact Lovense Website Name, install Lovense Remote on your phone and read [hardware-check.md](hardware-check.md). Those account/phone steps must be completed on your own devices. Prepare a copy of [hardware-test-record.md](hardware-test-record.md). Pairing, selected-device response, actual expiry after connection loss and physical Stop require physical observations. Story-to-real-device playback remains disabled even if the simulator checks pass.

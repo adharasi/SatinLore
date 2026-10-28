@@ -75,7 +75,11 @@ try {
     await delay(100);
   }
   assert.ok(ready, "Local test server did not become ready.");
-  browser = await chromium.launch({headless: true});
+  browser = await chromium.launch({headless: true,
+    ...(process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH ?
+      {executablePath: process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH} : {}),
+  });
+  console.log(`Browser verification: Chromium ${browser.version()}.`);
   let context = await browser.newContext();
   const externalRequests = [];
   const routeNetwork = async route => {
