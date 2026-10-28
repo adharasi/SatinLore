@@ -1,0 +1,14 @@
+input[type=password], select {
+  width: 100%;
+  border: 1px solid #cfcbdc;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+  background: #fff;
+  color: inherit;
+}
+button:disabled { opacity: .5; cursor: default; }
+#pairing-code { display: block; max-width: 240px; width: 100%; height: auto; }
+#pairing-code[hidden] { display: none; }
+a { color: #633d7e; }
+select:focus-visible { outline: 3px solid #796199; outline-offset: 3px; }

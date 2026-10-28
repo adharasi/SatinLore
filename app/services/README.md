@@ -1,8 +1,10 @@
-# Server-side services
+# External service boundary
 
-Add authenticated invitation/session and vendor-token services here in the next milestone.
-Keep HTTP request handling in `app/api/` and persistence in `app/db/`.
+`lovense.py` exchanges the server-held developer token for a token belonging to the
+authenticated random SatinLore user ID. The endpoint is fixed, redirects are disabled,
+timeout is eight seconds and the response size is bounded. Provider errors are replaced
+with a generic message. Tokens are neither cached in SQLite nor written to logs.
 
-The server must derive the Lovense user identity from its own authenticated session.
-Developer credentials never reach the browser. No vendor client or authentication is
-implemented in this scaffold; the Lovense route deliberately returns HTTP 501.
+The browser receives its individual vendor token; never send the developer token.
+Application logout revokes the SatinLore session. It does not promise remote revocation
+of a token already issued by Lovense; the browser must stop and destroy its SDK instance.
