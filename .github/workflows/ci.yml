@@ -1,4 +1,4 @@
-name: Scaffold checks
+name: Development checks
 
 on:
   push:
@@ -23,3 +23,6 @@ jobs:
           node-version: '24'
       - run: python bootstrap.py
       - run: python scripts/check.py
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps --only-shell chromium
+      - run: npm run test:browser

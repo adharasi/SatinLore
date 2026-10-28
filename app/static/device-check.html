@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SatinLore · device connection check</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/device-check.css">
+  <script type="module" src="/static/device-check.mjs"></script>
+</head>
+<body><main>
+  <p class="eyebrow">SATINLORE / DEVICE CONNECTION CHECK</p>
+  <h1>Connect one device. Test one short pulse.</h1>
+  <p class="intro">Development check for a Lush 3 or Lush 4 using Lovense Remote. Keep the device on a desk while testing. This screen does not read or synchronise stories.</p>
+  <p><a href="/">Return to the local reader simulator</a></p>
+  <p id="message" role="status" aria-live="polite">Checking your beta session…</p>
+  <div class="grid">
+    <section aria-labelledby="session-heading">
+      <h2 id="session-heading">1. Your beta invitation</h2>
+      <p id="session-status">Checking session…</p>
+      <form id="invite-form">
+        <label for="invite-token">Private invitation token</label>
+        <input id="invite-token" type="password" autocomplete="off" spellcheck="false" maxlength="256" required>
+        <div class="buttons"><button id="redeem" type="submit">Redeem invitation</button></div>
+      </form>
+      <button id="logout" type="button" disabled>Sign out</button>
+      <p class="note">Tokens and pairing codes are private. Keep them out of screenshots and support reports.</p>
+    </section>
+    <section aria-labelledby="pairing-heading">
+      <h2 id="pairing-heading">2. Pair with Lovense Remote</h2>
+      <p id="connection-status">Disconnected</p>
+      <div class="buttons">
+        <button id="connect-real" type="button" disabled>Connect Lovense</button>
+        <button id="disconnect-real" type="button" disabled>Disconnect</button>
+      </div>
+      <img id="pairing-code" alt="Scan this private pairing code with Lovense Remote" referrerpolicy="no-referrer" hidden>
+      <p class="note">Open Lovense Remote, connect your device, then scan this code. Same-phone app switching and QR workflows still need physical verification.</p>
+    </section>
+  </div>
+  <section class="controls" aria-labelledby="test-heading">
+    <h2 id="test-heading">3. Select and test</h2>
+    <label for="toy-select">Connected Lush 3 or Lush 4</label>
+    <select id="toy-select" disabled><option value="">Select a device explicitly</option></select>
+    <label for="test-level">Requested level: <output id="test-level-value">1</output> / 20</label>
+    <input id="test-level" type="range" min="1" max="5" value="1">
+    <label for="test-ceiling">Test ceiling: <output id="test-ceiling-value">5</output> / 20</label>
+    <input id="test-ceiling" type="range" min="0" max="5" value="5">
+    <div class="buttons">
+      <button id="test-pulse" type="button" disabled>Test for 2 seconds</button>
+      <button id="stop-real" class="stop" type="button" disabled>Stop</button>
+    </div>
+    <p class="note">Every test targets the selected device and requests a two-second duration. Stop is best effort after connection loss; verify actual expiry on hardware. Changing tabs disconnects this check, and returning never resumes output.</p>
+  </section>
+  <div id="bridge-container" hidden></div>
+  <footer>Local development milestone · Live pairing, physical stopping and supported browser combinations are not yet qualified.</footer>
+</main></body>
+</html>

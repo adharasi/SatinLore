@@ -1,20 +1,18 @@
 # SatinLore
 
-A browser-first reader for synchronising users' text with a supported Lovense device. Currently a **local simulator scaffold**.
+A browser-first reader for synchronising users' text with a supported Lovense device. The current development build contains a **local reader simulator and an authenticated device-check screen**.
 
 ## Current status
 
-Working: TXT/paste, paragraph navigation, manual levels, simulator, ceiling and Stop/Pause. Text stays in page memory and clears on reload.
+Implemented: TXT/paste, paragraph navigation, manual levels, simulator, ceiling and Stop/Pause; one-use beta invitations and expiring sessions; server-side Lovense token exchange; a separate device-check screen with explicit device selection, a bounded test command and Stop.
 
-Not implemented: real pairing, authentication, scoring, scroll tracking, persistence, feedback or deployment. The Lovense session endpoint returns HTTP 501. Automated tests do not certify physical devices.
+The reader still drives the simulator only. Real-device behaviour and the vendor connection need qualification with your credentials and hardware. Scoring, scroll tracking, story-to-device playback, feedback and production deployment remain outstanding. Text stays in reader-page memory and clears on reload.
 
-Read the [specification](docs/development-spec.md) and [roadmap](docs/beta-roadmap.md) for scope and next steps.
+Read the [specification](docs/development-spec.md), [roadmap](docs/beta-roadmap.md) and [hardware-check setup](docs/hardware-check.md).
 
 ## Quick start
 
-Install Python 3.12+, Git and VS Code; Node.js 24 for JavaScript checks. Simulator mode needs no hardware or credentials.
-
-Clone and open the repository:
+Install Python 3.12+, Git and VS Code; Node.js 24 for JavaScript checks. The simulator needs no hardware or credentials.
 
 ```sh
 git clone https://github.com/adharasi/SatinLore.git
@@ -36,7 +34,9 @@ python3 bootstrap.py
 python3 run.py
 ```
 
-Open <http://127.0.0.1:8000>; Ctrl+C stops the server. Bootstrap installs dependencies into `.venv` using internet access. Select that VS Code interpreter with **Python: Select Interpreter**.
+Open <http://127.0.0.1:8000>; Ctrl+C stops the server. Bootstrap installs dependencies into `.venv` using internet access. Select that VS Code interpreter with **Python: Select Interpreter**. Keep the exact configured origin: `localhost` and `127.0.0.1` are not interchangeable for authenticated requests.
+
+For hardware work, follow [the dedicated setup](docs/hardware-check.md). `.env.example` documents process variables; the application does not automatically load `.env` files.
 
 ## Run checks
 
@@ -50,25 +50,28 @@ py scripts/check.py
 python3 scripts/check.py
 ```
 
-Use the [QA checklist](docs/qa.md) for browser and physical-device evidence; simulator tests cannot prove hardware behaviour.
+Use the [QA checklist](docs/qa.md) for browser and physical-device evidence. Fake SDK tests do not certify real hardware.
+
+Optional browser integration checks use Playwright and a fake vendor SDK. See the QA checklist for installation; `scripts/check.py` remains the offline unit/syntax check command.
 
 ## Repository map
 
 | Path | Purpose |
 | --- | --- |
-| `app/main.py`, `app/api/` | FastAPI assembly, health route and disabled real-session route |
-| `app/core/` | Application configuration |
-| `app/services/`, `app/db/` | Boundaries for future authenticated services and SQLite persistence |
-| `app/static/reader/` | Local text import and future scoring/position modules |
-| `app/static/devices/` | Simulator; future real adapter belongs here |
-| `app/static/playback/` | Future playback controller boundary |
+| `app/main.py`, `app/api/` | HTTP assembly, invitations, session identity, logout and vendor-token issuance |
+| `app/core/` | Local-only configuration and mode validation |
+| `app/services/`, `app/db/` | Server-side vendor exchange and SQLite invitation/session records |
+| `app/static/reader/` | Local text import; future scoring/position modules |
+| `app/static/devices/` | Device adapters and testable control logic |
+| `app/static/device-check.*`, `device-bridge.*` | Separate hardware check and sandboxed vendor SDK bridge |
+| `app/static/playback/` | Future story playback controller boundary |
+| `scripts/create_invite.py` | Local one-use invitation issuance |
 | `tests/`, `scripts/check.py` | Automated checks and their common entry point |
-| `docs/` | Technical scope, roadmap, QA and Codex workflow |
-| `deploy/` | Deployment planning; not a live environment |
-| `AGENTS.md`, `app/static/AGENTS.md` | Repository and browser-code instructions for Codex |
+| `docs/`, `deploy/` | Scope, roadmap, QA, setup and deployment planning |
+| `AGENTS.md`, `app/static/AGENTS.md` | Repository and browser instructions for Codex |
 
 ## Work with Codex
 
 Install the official OpenAI Codex VS Code extension, sign in and open this repository root. See [the Codex workflow](docs/codex.md).
 
-Next milestone: implement authenticated, per-user Lovense session issuance and one explicitly selected device's bounded test command and Stop, while retaining simulator mode. See the roadmap for prerequisites and acceptance criteria. Provide credentials through local configuration, never chat or committed files.
+Next: qualify the connection screen with one device, then implement the reading loop and its controller tests. Keep hardware qualification, simulated evidence and planned work separate. Supply credentials through local configuration, never chat or committed files.
