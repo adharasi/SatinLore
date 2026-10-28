@@ -2,7 +2,7 @@
 
 For a practical front-end session without a device, start with **[test-today.md](test-today.md)** and its neutral sample. Use this document for the wider release checklist.
 
-Track automated, browser and hardware evidence separately. Record each supported device, firmware, Remote version, phone, browser and build. A passing mock does not certify hardware.
+Use software gates S1/S2 and separate hardware/release gates H1/H2 from the [roadmap](beta-roadmap.md). Hardware does not block the current software milestones. Track automated, browser and hardware evidence separately. Record each supported device, firmware, Remote version, phone, browser and build. A passing mock does not certify hardware.
 
 ## Automated checks
 
@@ -18,6 +18,16 @@ npm run test:browser
 
 Linux may need `npx playwright install --with-deps --only-shell chromium`. Browser installation requires internet access. These checks establish application/browser behaviour against the fixture, not live SDK compatibility. Record an installation failure as unexecuted browser evidence, not a passing test.
 
+The browser run writes neutral screenshots to ignored `artifacts/frontend/`. CI uploads the **frontend-evidence** artifact with desktop/phone Light and Dark captures plus Add/Review views. Screenshots support visual inspection; assertions provide functional evidence. Mobile emulation does not prove real phone or physical device behaviour.
+
+## Frontend appearance and journey checks
+
+Use [frontend-design.md](frontend-design.md) for the full matrix. Verify System follows the OS, explicit Light/Dark overrides it, preference resolves before paint, and storage failure leaves the page usable. Inspect both themes at 390 × 844 and 1440 × 1000, 320 CSS px, landscape and 200% text/zoom. Check essential contrast, 44 px targets, visible focus, readable labels and dock clearance.
+
+Verify Add → Review → Read with real local parsing, loading/errors, manual zero/reset and corrections shared between views. Start is disabled outside Read. Leaving Read pauses and cancels pending Start; returning preserves position without restart. Cancelling a valid replacement or rejecting invalid input preserves the current story/corrections; accepting a replacement clears old corrections. Clear/navigation/hide must invalidate delayed imports. Reflow and theme changes preserve the active paragraph and pause.
+
+Only `satinlore.appearance` with allowlisted `system`, `light` or `dark` values may be stored in the current reader. Story/progress persistence and deletion are planned F4 features, not a current claim. Clearing/reloading a story does not need to erase appearance. The reader is independent of the separate device-check session.
+
 ## Reader and simulator checks
 
 Use the action/expected-result table in [test-today.md](test-today.md). Cover:
@@ -28,7 +38,7 @@ Use the action/expected-result table in [test-today.md](test-today.md). Cover:
 - Explicit Start, authoritative ceiling, immediate Stop on reductions, finite dispatch cadence and coalescing of the latest desired level.
 - Stop while a selection is pending, hide/return, disconnect/reconnect, replaced stories, inactivity, delayed timers and adapter errors. None may automatically resume output.
 - Two visible same-origin windows in one browser profile: the second cannot take over active simulator playback. Ordinary hidden-tab interruption is a separate case.
-- No story text in network requests, URLs or browser storage. Use neutral fixtures and do not export sensitive request data.
+- No story text in network requests, URLs or browser storage; allow only the documented appearance preference. Use neutral fixtures and do not export sensitive request data.
 
 Current continuous playback supports the synchronous simulator only. Passing these checks does not qualify a real asynchronous adapter or continuous physical output.
 

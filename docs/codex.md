@@ -6,9 +6,11 @@ Codex recognises root `AGENTS.md` and applicable directory instructions. `app/st
 
 For today's validation work:
 
-> Read AGENTS.md, README.md, docs/test-today.md and the current evidence ledger. Run the existing checks and reproduce the reported failure with neutral fixtures. Preserve the simulator-only reader, local text boundary, explicit Start, zero overrides and interruption rules. Fix the smallest supported issue, update relevant tests and record the evidence without claiming physical behaviour.
+> Read AGENTS.md, README.md, docs/frontend-design.md, docs/test-today.md and the current roadmap/evidence ledger. Run the existing checks and reproduce the reported failure with neutral fixtures. Preserve the approved semantic themes, Add/Review/Read journey, appearance-only preference, simulator-only reader, local text boundary, explicit Start, zero overrides and interruption rules. Fix the smallest supported issue, update relevant tests and record the evidence without claiming physical behaviour.
 
-After hardware qualification, the next integration milestone is connecting the reader controller to the qualified isolated bridge. Keep simulator mode and the separate device-check screen. Do not enable continuous real playback merely because unit or fake-SDK tests pass.
+The next software milestone is F3: a deterministic device-scenario harness with explicit failure/unknown-output states and a deliberate asynchronous adapter contract. Follow F4 for remaining local persistence, feedback/account and support journeys; F5 scoring evaluation can proceed in parallel. No hardware or paid AI service is required to continue this work.
+
+After hardware qualification, a later integration milestone is connecting the reader controller to the qualified isolated bridge. Keep simulator mode and the separate device-check screen. Do not enable continuous real playback merely because unit or fake-SDK tests pass.
 
 For device qualification, follow `docs/hardware-check.md` with your own device and locally configured credentials. Codex can inspect contracts, automate browser checks and analyse redacted observations; it cannot infer physical output from a mock or API response.
 
