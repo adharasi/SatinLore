@@ -55,6 +55,10 @@ globalThis.LovenseBasicSdk = class {
 let browser;
 let server;
 let serverErrors = "";
+let page;
+const errors = [];
+const policyErrors = [];
+const responseStatuses = [];
 try {
   server = spawn(python, ["-m", "uvicorn", "browser_server:app", "--app-dir", "tests",
     "--host", "127.0.0.1", "--port", String(port), "--no-access-log"],
@@ -85,10 +89,15 @@ try {
     externalRequests.push(url.origin);
     return route.abort();
   });
-  const page = await context.newPage();
+  page = await context.newPage();
   page.setDefaultTimeout(10_000);
-  const errors = [];
-  const policyErrors = [];
+  page.on("response", response => {
+    const url = new URL(response.url());
+    responseStatuses.push({path: url.pathname, status: response.status()});
+  });
+  page.on("requestfailed", request => {
+    responseStatuses.push({path: new URL(request.url()).pathname, error: request.failure()?.errorText});
+  });
   page.on("pageerror", error => errors.push(error.message));
   page.on("console", message => {
     if (/content security policy|blocked by cors/i.test(message.text())) policyErrors.push(message.text());
@@ -142,13 +151,12 @@ try {
 
   // Stop during the authentication round trip must invalidate the queued pulse.
   await delay(2100); // Wait outside the previous pulse's enforced two-second window.
-  let intercepted;
-  const interceptReady = new Promise(resolve => { intercepted = resolve; });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   await page.route(`${origin}/api/me`, async route => {
-    intercepted(); await gate; await route.continue();
+    await gate; await route.continue();
   });
+  const interceptReady = page.waitForRequest(`${origin}/api/me`);
   await page.locator("#test-pulse").click();
   await interceptReady;
   await page.locator("#stop-real").click();
@@ -175,6 +183,13 @@ try {
   assert.deepEqual(errors, [], "Browser runtime errors.");
   assert.deepEqual(policyErrors, [], "Unexpected CSP or CORS errors.");
   console.log("Browser checks passed: local reader, invitation session, sandbox isolation, selected finite command, Stop cancellation, reconnect, logout and mobile layout. Vendor SDK/HTTP mocked; hardware unverified.");
+} catch (error) {
+  // Fixture-only diagnostics: no DOM snapshot, token, cookie, body or QR payload.
+  console.error(JSON.stringify({errors, policyErrors, responseStatuses,
+    status: await page?.locator("#connection-status").textContent({timeout: 500}).catch(() => null),
+    message: await page?.locator("#message").textContent({timeout: 500}).catch(() => null),
+  }));
+  throw error;
 } finally {
   await browser?.close();
   if (server && server.exitCode === null) {
