@@ -10,6 +10,18 @@ Required beta: individual invitations, TXT/paste, paragraph scoring with correct
 
 Implemented locally: experimental paragraph suggestions, separate manual overrides, settled scroll-following/manual navigation, a bounded simulator playback controller, invitation sessions, server-side vendor-token issuance and a separate device-check flow. Suggestion usefulness and live SDK/hardware qualification remain unproven. Real story playback, feedback, data-deletion operations and deployment remain unimplemented.
 
+## Approved frontend direction and next phase
+
+On 28 October 2026, Satin Editorial was selected as the main light identity, with Midnight Ink as the dark theme and a Light/Dark/System preference. The [frontend implementation specification](frontend-design.md) defines semantic tokens, screen/state coverage, responsive control placement and acceptance criteria. These requirements are approved design work, not a claim that the current UI implements them.
+
+Complete the beta software journey against simulated devices before hardware is available. No physical device or vendor credential is required for themes, import/review/reading, connection-state simulation, corrections, local feedback/deletion, or scoring evaluation. Use the [F1–F6 roadmap](beta-roadmap.md) as the immediate work order. Real-device integration and operational release remain separately gated.
+
+Keep the current `[0, 1, 2, 3, 5]` suggestion mapping. A proposed 0–4 display scale must not silently increase output or discard arbitrary manual corrections. Earlier exploratory mockups that imply `[0, 5, 10, 15, 20]` are superseded by this conservative mapping requirement.
+
+The current continuous controller is synchronous. Rich asynchronous simulation and eventual real transport require explicit cancellation/epoch, timeout, stale-response and output-certainty contracts; they cannot be added by simply supplying a Promise-returning adapter. UI output may be unknown after an uncertain command/Stop outcome.
+
+Algorithm work starts with a local, versioned benchmark and measured errors. Local processing remains the default; hosted classification needs a separate provider-permission and data-handling decision before any text transfer. Analysis never starts output, overrides a manual correction or bypasses the independent ceiling. See [scoring requirements](frontend-design.md#scoring-and-output-semantics).
+
 ## Architecture
 
 | Component | Responsibility | Current boundary |
