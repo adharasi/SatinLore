@@ -4,7 +4,7 @@
 
 - Read `README.md`, `docs/development-spec.md` and the relevant milestone in `docs/beta-roadmap.md`.
 - Inspect current code and applicable nested instructions. Implementation status requires code and evidence, not plans.
-- This local FastAPI/static-JavaScript build has a themed Add/Review/Read simulator journey and a separate authenticated device-check flow. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for frontend/application work. Live vendor/hardware qualification and production deployment remain outstanding.
+- This local FastAPI/static-JavaScript build has a themed saved-story workspace with optional review and simulator playback and a separate authenticated device-check flow. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for frontend/application work. Live vendor/hardware qualification and production deployment remain outstanding.
 - Complete the requested milestone without unrelated frameworks or placeholders.
 
 ## Setup and checks
@@ -23,10 +23,11 @@
 - Browser-first, users' own private TXT/pasted text, one qualified Lovense model, vibration only.
 - Defer generation, payments, public publishing, marketplaces, native apps and additional brands.
 - Use FastAPI, browser ES modules and the existing SQLite invitation/session store. Expand persistence only when a requested feature needs it.
-- Preserve Satin Editorial light and Midnight Ink dark semantic tokens, System/Light/Dark selection and document-scroll reading. Appearance must not change output semantics.
+- Follow the approved workspace v1.2: a collapsible story library, continuous reader, Wide default, optional settings/review and focus mode. Preserve Satin Editorial/Midnight Ink, System/Light/Dark and document scrolling. Do not reintroduce a compulsory review step.
+- Story storage requires an explicit Save on this browser choice. Keep Session only as the default, preserve truthful save/delete failure states, and restore every story paused without saved strength, ceiling or playback arming.
 - Keep text parsing, scoring and reading position in the browser. Backend data should be minimal session, feedback and entitlement records.
 - Treat the keyword scorer as experimental, not a semantic, consent or safety classifier. Keep manual zero overrides distinct from unset overrides; do not silently rescore corrections.
-- Preserve the simulator controller's finite dispatch, latest-value coalescing, explicit Start, immediate reduction-to-Stop and inactivity/tab-ownership rules.
+- Preserve finite dispatch, coalescing and inactivity/tab ownership. Start explicitly confirms the current ceiling. Lower ceilings apply immediately; increases require separate confirmation. Session strength is bounded, does not rewrite corrections, and cannot bypass zero or the confirmed ceiling.
 - Check current official Lovense documentation before implementing its API. Developer credentials remain server-side; user identities derive from authenticated sessions.
 - Preserve simulator mode; never use a mode flag to imply an unimplemented integration works.
 
@@ -45,7 +46,8 @@
 - Flag client-controlled identity used to issue another user's vendor token.
 - Flag developer credentials or raw story content reaching vendor/client payloads, and QR/auth payloads reaching logs or unintended users. A per-user vendor authToken may be issued only to that authenticated session.
 - Preserve invitation replay prevention, hashed bearer-token storage, exact-origin/CSRF checks, bounded requests and session revalidation after vendor requests.
-- Flag omitted `toyId`, indefinite nonzero commands, stale command queues, ceiling bypasses or automatic resume after interruption.
+- Flag omitted `toyId`, indefinite nonzero commands, stale queues, unconfirmed ceiling increases, zero/ceiling bypasses, or automatic resume after interruption, restoration or story switching.
+- Flag silent story persistence, saved playback arming, success before storage completes, and stale writes that restore deleted stories.
 - Flag unsupported hardware/browser claims based only on mock tests.
 - Flag new scope that adds generation, billing or public sharing without a task requesting it.
 

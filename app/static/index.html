@@ -10,116 +10,76 @@
   <link rel="stylesheet" href="/static/reader.css">
   <script type="module" src="/static/app.mjs"></script>
 </head>
-<body data-view="add">
+<body data-library-open="true" data-settings-open="false" data-focus="false" data-reading-width="wide">
   <a class="skip-link" href="#main-content">Skip to your story</a>
-  <div class="app-shell">
-    <header class="app-header">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span><span>SatinLore<span class="brand-caption">A SPACE FOR YOUR STORIES</span></span></div>
-      <label class="appearance-control" for="appearance">Appearance
-        <select id="appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
-      </label>
-    </header>
-    <nav class="journey-nav" aria-label="Reading steps">
-      <ol>
-        <li><button id="step-add" aria-current="step"><span class="step-number" aria-hidden="true">01</span> Add story</button></li>
-        <li><button id="step-review" disabled><span class="step-number" aria-hidden="true">02</span> Review</button></li>
-        <li><button id="step-read" disabled><span class="step-number" aria-hidden="true">03</span> Read</button></li>
-      </ol>
-      <span class="mode-badge"><span aria-hidden="true">◇</span> Simulator</span>
-    </nav>
+  <header id="workspace-header" class="workspace-header">
+    <div class="header-library"><button id="toggle-library" class="icon-label" aria-controls="library-panel" aria-expanded="true"><span aria-hidden="true">☷</span><span>Stories</span></button><span class="wordmark">SatinLore</span></div>
+    <div class="header-story"><span class="header-kicker">YOUR READING SPACE</span><span id="header-story-title">A little space to get lost.</span></div>
+    <div class="header-actions"><button id="focus-mode" class="quiet-control" aria-pressed="false">Focus</button><button id="toggle-settings" class="quiet-control" aria-controls="settings-panel" aria-expanded="false"><span aria-hidden="true">☷</span> Settings</button></div>
+  </header>
 
-    <main id="main-content" class="workspace" tabindex="-1">
-      <div class="story-column">
-        <section id="view-add" class="journey-view" aria-labelledby="add-heading">
-          <div class="view-intro">
-            <p class="eyebrow">YOUR STORY. YOUR PACE.</p>
-            <h1 id="add-heading" tabindex="-1">Settle into a story.</h1>
-            <p class="lede">Bring your own words. Review the suggested levels, then find your rhythm in a quiet reading space.</p>
-          </div>
-          <div class="import-panel surface">
-            <div class="panel-heading"><h2>Add your text</h2><span class="small-label">PASTE OR TXT</span></div>
-            <label for="source">Paste a story</label>
-            <textarea id="source" rows="8" maxlength="500000" placeholder="Your story begins here…" aria-describedby="import-help"></textarea>
-            <p id="import-help" class="note">Separate paragraphs with a blank line. Up to 500,000 UTF-8 bytes and 2,000 paragraphs.</p>
-            <div class="import-actions"><button id="load" class="primary">Analyse &amp; review <span aria-hidden="true">→</span></button></div>
-            <div class="file-divider"><span>or choose a text file</span></div>
-            <label for="file">Import a UTF-8 TXT file</label>
-            <input id="file" type="file" accept=".txt,text/plain">
-            <p id="import-status" class="note" role="status" aria-live="polite"></p>
-          </div>
-          <div class="privacy-note"><span class="privacy-symbol" aria-hidden="true">○</span><p><strong>A private moment.</strong> Your text and corrections stay in this tab. Clear them at any time; reloading removes them too.</p></div>
-        </section>
+  <aside id="library-panel" class="workspace-panel library-panel" aria-label="Your story library">
+    <div class="panel-heading"><div><p class="eyebrow">YOUR OWN LITTLE WORLD</p><h2>Your stories</h2></div><button id="close-library" class="icon-button" aria-label="Close story library">×</button></div>
+    <button id="new-story" class="primary new-story-button"><span aria-hidden="true">+</span> New story</button>
+    <p id="library-status" class="note" role="status" aria-live="polite">Your stories will appear here.</p>
+    <div id="story-list" class="story-list" aria-label="Stories"></div>
+    <div class="library-footer"><div id="story-actions" class="story-actions" hidden><p class="small-label">CURRENT STORY</p><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Rename</button><button id="delete-story" class="quiet-control">Delete story</button></div></div><p class="note">Saved stories stay in this browser. Session-only stories disappear when you reload.</p><button id="delete-all" class="quiet-button" disabled>Delete all stories</button><details class="about-preview"><summary>About this preview</summary><p class="note">Device output is simulated. Real-device support is not yet qualified.</p><p class="note">Your story text is processed on this page. No cloud sync or account backup.</p><a href="/device-check">Separate connection check</a></details></div>
+  </aside>
 
-        <section id="view-review" class="journey-view" aria-labelledby="review-heading" hidden>
-          <div class="view-intro">
-            <p class="eyebrow">A MOMENT TO MAKE IT YOURS</p>
-            <h1 id="review-heading" tabindex="-1">Review your rhythm.</h1>
-            <p class="lede">Check each section and change any level you like. Zero keeps that section quiet.</p>
-          </div>
-          <div class="review-explainer surface">
-            <span class="small-label">EXPERIMENTAL SUGGESTIONS</span>
-            <p>These levels come from simple local word rules. They can miss context. Your changes take priority, and your output limit always applies.</p>
-            <p id="review-summary" class="note">No story to review yet.</p>
-          </div>
-          <div id="review-list" class="review-list" aria-label="Story sections and corrections"></div>
-          <div class="review-finish"><p>Ready for a little reading time?</p><button id="begin-reading" class="primary">Open reading space <span aria-hidden="true">→</span></button></div>
-        </section>
+  <main id="main-content" class="reading-canvas" tabindex="-1">
+    <section id="empty-workspace" class="empty-workspace" aria-labelledby="empty-heading">
+      <div class="empty-mark" aria-hidden="true">S</div><p class="eyebrow">WORDS, WITH ROOM TO BREATHE</p><h1 id="empty-heading">Make yourself<br>comfortable.</h1><p class="empty-copy">Open a story from your library, or bring a new one. A quiet reading space is waiting.</p><button id="empty-new-story" class="primary">Add a story <span aria-hidden="true">→</span></button><p class="note">Read straight away. Adjust whenever you want.</p>
+    </section>
+    <section id="reading-workspace" class="reading-workspace" aria-labelledby="story-title" hidden>
+      <div class="story-heading"><p class="eyebrow">TAKE YOUR TIME</p><h1 id="story-title" tabindex="-1">Your story</h1><div class="story-meta"><span id="save-status" role="status" aria-live="polite">Session only</span><span class="meta-divider" aria-hidden="true">·</span><span id="analysis-status" role="status" aria-live="polite">Analysing locally</span></div></div>
 
-        <section id="view-read" class="journey-view" aria-labelledby="reader-heading" hidden>
-          <div class="view-intro reader-intro">
-            <p class="eyebrow">TAKE YOUR TIME</p>
-            <h1 id="reader-heading" tabindex="-1">Your reading space.</h1>
-            <p id="position" class="reading-progress" aria-live="polite">No text loaded</p>
-          </div>
-          <p id="reader-help" class="reader-help note">Read and scroll at your own pace. The marked section follows your place after scrolling settles.</p>
-          <div id="reader" class="reader-size-normal" role="region" aria-label="Story reader" aria-describedby="reader-help" tabindex="0">
-            <div id="paragraph"><p class="empty-reader">Add a story to begin.</p></div>
-          </div>
+      <p id="reader-help" class="visually-hidden">One continuous story. Scroll at your own pace or use Previous and Next section. Optional settings and review are available without starting playback.</p>
+      <div id="reader" class="reader-size-normal" data-spacing="normal" role="region" aria-label="Story reader" aria-describedby="reader-help" tabindex="0"><div id="paragraph"></div></div>
+      <p class="end-note">A moment to stay with the story.</p>
+    </section>
+    <p id="message" class="session-message" role="status" aria-live="polite">Read without playback, or connect the simulator when you are ready.</p>
+  </main>
 
-        </section>
-
-        <div class="session-tools">
-          <p id="message" class="session-message" role="status" aria-live="polite">Add text and connect the simulator. Start is always your choice.</p>
-          <div class="story-tools"><button id="clear" class="quiet-button">Clear text &amp; corrections</button><span class="note">Stored only in this tab</span></div>
-        </div>
+  <aside id="settings-panel" class="workspace-panel settings-panel" aria-label="Reading settings" hidden>
+    <div class="panel-heading"><div><p class="eyebrow">MAKE IT YOURS</p><h2>Reading settings</h2></div><button id="close-settings" class="icon-button" aria-label="Close reading settings">×</button></div>
+    <div class="settings-section">
+      <label for="reading-appearance">Appearance</label><select id="reading-appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+      <p id="appearance-note" class="note" role="status" aria-live="polite"></p>
+      <label for="reading-width">Reading width</label><select id="reading-width"><option value="comfortable">Comfortable</option><option value="wide" selected>Wide</option><option value="full">Full</option></select>
+      <label for="font-size">Text size</label><select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select>
+      <label for="reading-spacing">Line spacing</label><select id="reading-spacing"><option value="compact">Compact</option><option value="normal" selected>Normal</option><option value="relaxed">Relaxed</option></select>
+      <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow my reading position</label>
+    </div>
+    <details id="review-settings" class="review-settings">
+      <summary>Review intensities <span class="optional-tag">Optional</span></summary>
+      <div class="review-content"><p class="note">Suggestions use simple local word rules and can miss context. Change only what you want.</p>
+        <div class="paragraph-controls"><p id="correction-position" class="small-label">Current section</p><p>Suggested <output id="suggested-level">0 / 20</output></p><p id="level-source" class="note">No section selected.</p><label for="level">Your correction <span class="numeric"><output id="levelValue">0</output> / 20</span></label><input id="level" type="range" min="0" max="20" value="0" disabled><button id="reset-level" disabled>Use suggestion</button><p class="note">After strength and ceiling <output id="effective-level">0 / 20</output></p></div>
+        <div id="review-list" class="review-list" aria-label="Read sections and corrections"></div>
+        <button id="show-upcoming" class="quiet-button" disabled>Show upcoming sections</button><p class="note">Future passages stay out of review until you choose to reveal them.</p><button id="reanalyze" disabled>Analyse again</button><p class="note">Your corrections are kept when you analyse again.</p>
       </div>
+    </details>
+  </aside>
 
-      <aside id="transport" class="transport surface" aria-label="Simulator controls">
-        <div class="transport-title"><span class="small-label">SIMULATOR</span><span class="simulator-icon" aria-hidden="true">◇</span></div>
-        <div class="transport-heading"><strong><span class="mobile-simulator">Simulator · </span><span id="status">Disconnected</span></strong><span class="output-label">Simulated output <output id="output">0 / 20</output></span></div>
-        <meter id="meter" min="0" max="20" value="0" aria-label="Simulated intensity">0</meter>
-        <div class="playback-buttons"><button id="start" class="primary" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
-        <div class="ceiling-control"><label for="cap">Output limit <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5"></div>
-        <div class="transport-secondary">
-          <div class="connection-controls"><button id="connect">Connect simulator</button><button id="disconnect" disabled>Disconnect</button></div>
-          <div id="reader-tools" class="reader-navigation">
-            <button id="previous" aria-label="Previous section" title="Previous section" disabled><span aria-hidden="true">←</span><span class="navigation-word"> Previous</span></button>
-          <details id="adjustments" class="adjustments surface">
-            <summary>Settings</summary>
-            <div class="adjustment-content">
-              <div class="reader-options">
-                <label for="reading-appearance">Appearance <select id="reading-appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-                <label for="font-size">Reading size <select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select></label>
-                <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow scrolling</label>
-              </div>
-              <div class="paragraph-controls">
-                <p id="correction-position" class="small-label">No section selected</p>
-                <p>Suggested level <output id="suggested-level">0 / 20</output> <span class="experimental">Experimental</span></p>
-                <p id="level-source" class="note">No paragraph selected.</p>
-                <label for="level">This section’s level <span class="numeric"><output id="levelValue">0</output> / 20</span></label>
-                <input id="level" type="range" min="0" max="20" value="0" disabled>
-                <div class="correction-actions"><button id="reset-level" disabled>Use suggestion</button><span>After your limit <output id="effective-level">0 / 20</output></span></div>
-                <p class="note">A manual zero stays zero until you choose “Use suggestion”. These are simulated levels, not measured device output.</p>
-              </div>
-            </div>
-          </details>
-            <button id="next" aria-label="Next section" title="Next section" disabled><span class="navigation-word">Next </span><span aria-hidden="true">→</span></button>
-          </div>
-        </div>
-        <p class="transport-note note">You set the limit. Playback only starts when you choose Start.</p>
-      </aside>
-    </main>
-    <footer class="app-footer"><span>SatinLore · internal software preview</span><details><summary>About this preview</summary><p>This reader uses simulated output only. Hiding the tab, changing the layout or two minutes without activity pauses playback. Hardware support is not yet qualified.</p><p id="appearance-note" role="status" aria-live="polite"></p><p><a href="/device-check">Separate Lovense connection check</a></p></details></footer>
-  </div>
+  <aside id="transport" class="transport" aria-label="Simulator playback controls">
+    <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong>Simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line">Simulated output <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Simulated intensity">0</meter></div>
+    <div class="strength-control"><span id="strength-label" class="control-caption">Session strength</span><div class="strength-buttons" role="group" aria-labelledby="strength-label"><button id="strength-minus" class="icon-button" aria-label="Decrease session strength">−</button><output id="strength-value" aria-live="polite">1.0×</output><button id="strength-plus" class="icon-button" aria-label="Increase session strength">+</button><button id="strength-reset" class="reset-button">Reset</button></div></div>
+    <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Lower limits apply now. A higher limit requires confirmation.</span></div>
+    <div class="playback-buttons"><button id="start" class="primary" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
+    <div class="transport-navigation"><div class="connection-controls"><button id="connect" class="quiet-control">Connect simulator</button><button id="disconnect" class="quiet-control" disabled>Disconnect</button></div><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div></div>
+  </aside>
+
+  <dialog id="new-story-dialog" class="story-dialog" aria-labelledby="new-story-heading">
+    <div class="dialog-heading"><div><p class="eyebrow">YOUR NEXT CHAPTER</p><h2 id="new-story-heading">Bring a story.</h2></div><button id="cancel-import" class="icon-button" aria-label="Close new story">×</button></div>
+    <p class="note">Open your text and start reading. Suggestions are prepared quietly in the background.</p>
+    <label for="story-title-input">Story title</label><input id="story-title-input" type="text" maxlength="120" placeholder="Untitled story" autocomplete="off">
+    <label for="source">Paste your text</label><textarea id="source" rows="8" maxlength="500000" placeholder="Your story begins here…" aria-describedby="import-help"></textarea>
+    <p id="import-help" class="note">Separate paragraphs with a blank line. Up to 500,000 UTF-8 bytes and 2,000 paragraphs.</p>
+    <div class="file-divider"><span>or choose a text file</span></div><label for="file">Import a UTF-8 TXT file</label><input id="file" type="file" accept=".txt,text/plain">
+    <p id="import-status" class="note" role="status" aria-live="polite"></p><p class="privacy-note">Session only to begin with. Nothing is saved until you choose “Save on this browser”.</p>
+    <div class="dialog-actions"><button id="import-stop" class="stop">Stop</button><button id="load" class="primary">Open story <span aria-hidden="true">→</span></button></div>
+  </dialog>
+  <dialog id="start-dialog" class="confirmation-dialog" aria-labelledby="start-heading"><p class="eyebrow">A MOMENT BEFORE YOU START</p><h2 id="start-heading">Ready to begin?</h2><p id="start-summary">Simulator · maximum 5/20 · session strength 1.0×</p><p class="note">The strength stays within your confirmed maximum. You can lower it or stop at any time.</p><div class="dialog-actions"><button id="start-stop" class="stop">Stop</button><button id="cancel-start">Keep reading</button><button id="confirm-start" class="primary">Start with maximum 5/20</button></div></dialog>
+  <dialog id="ceiling-dialog" class="confirmation-dialog" aria-labelledby="ceiling-heading"><p class="eyebrow">YOUR MAXIMUM, YOUR CHOICE</p><h2 id="ceiling-heading">Raise the maximum?</h2><p id="ceiling-summary">Confirm the new maximum before it can take effect.</p><p class="note">Session strength cannot go above this limit. Lowering the maximum never needs confirmation.</p><div class="dialog-actions"><button id="ceiling-stop" class="stop">Stop</button><button id="cancel-ceiling">Keep current maximum</button><button id="confirm-ceiling" class="primary">Confirm maximum</button></div></dialog>
+  <dialog id="save-dialog" class="confirmation-dialog" aria-labelledby="save-heading"><p class="eyebrow">KEEP IT CLOSE</p><h2 id="save-heading">Save on this browser?</h2><p>Your story, title, corrections and reading position will stay here after you close the page.</p><p class="note">Anyone using this browser profile may be able to see them. Clearing browser data can remove them. There is no cloud sync or account backup.</p><div class="dialog-actions"><button id="save-stop" class="stop">Stop</button><button id="cancel-save">Session only</button><button id="confirm-save" class="primary">Save on this browser</button></div></dialog>
 </body>
 </html>
