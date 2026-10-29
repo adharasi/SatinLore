@@ -22,7 +22,7 @@
       if (select) select.value = preference;
     }
     const note = document.getElementById("appearance-note");
-    if (note) note.textContent = storageAvailable ? "Only your appearance choice is saved." :
+    if (note) note.textContent = storageAvailable ? "Appearance is saved separately from stories you choose to save." :
       "Appearance works for this visit. Browser storage is unavailable.";
     if (notify) window.dispatchEvent(new CustomEvent("satinlore:appearance", {detail: {preference, theme}}));
   }

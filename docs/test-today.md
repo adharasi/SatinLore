@@ -28,17 +28,17 @@ python3 run.py
 
 Open <http://127.0.0.1:8000>. Leave the terminal running; Ctrl+C stops it. Use that exact address throughout these checks. Keep local changes before pulling; do not discard your work to make a pull succeed. Bootstrap needs internet access; the ordinary checks run locally after installation.
 
-Record the build with `git rev-parse --short HEAD`, plus browser/version and screen size. A useful first target is: Add story → analyse locally → Review suggestions and set corrections → Read → connect simulator → Start → scroll → Stop. The separately managed marketing waitlist is not served by this local app.
+Record the build with `git rev-parse --short HEAD`, plus browser/version and screen size. A useful first target is: New story → read immediately → optionally adjust the current section → connect simulator → confirm Start → scroll/adjust strength → Stop → optionally save and reopen paused. The separately managed marketing waitlist is not served by this local app.
 
-## 2. Use a predictable sample
+## 2. Open a story and read immediately
 
-In **Add story**, import [test-sample.txt](test-sample.txt) from the repository's `docs` directory, or paste its contents and choose **Analyse & review**. Successful import opens **Review**. It has six ordinary, non-sensitive paragraphs. All should receive a zero suggestion from the current experimental scorer.
+Choose **New story**, give it a neutral title such as `Test A`, then import [test-sample.txt](test-sample.txt) from `docs` or paste its contents. Open it into the reader. You should see the full continuous story without a compulsory Review step. The six sample paragraphs are ordinary, non-sensitive text; the current scorer should give all of them zero. Analysis is local and may show a brief pending state. You can read while it runs; Start waits for a valid mapping.
 
-The scorer uses local English word cues, not a model that understands a passage. It needs contact and contextual cues together; repeated words do not raise a score, and broad negation/metalinguistic filters return zero. It is not a language detector, consent check or safety classifier and can produce false positives and false negatives. Its five suggested levels are **0, 1, 2, 3 and 5 out of 20**. Zero also means insufficient evidence. A plausible suggestion is not evidence of useful synchronisation; review and correct it. No story is generated or sent to an AI service.
+The scorer uses English word cues, not semantic understanding, consent classification or a safety model. Its suggestion map remains **0, 1, 2, 3 and 5 out of 20**. False positives/negatives and correction burden require separate evaluation. No story is generated or sent to an AI service.
 
-For predictable playback, use the paragraph sliders in **Review** to assign paragraph 1 a level of **2**, paragraph 2 **4**, paragraph 3 **0**, and paragraph 4 **5**. Leave paragraphs 5–6 at their zero suggestions. Choose **Open reading space** (or the **Read** step), open **Settings** and uncheck **Follow scrolling**. Close settings when finished. Use **Previous/Next** to select paragraphs. These assignments test the controller independently of scoring quality; review and reader corrections edit the same model.
+For visible simulator output, open **Settings** and the optional intensity review for the current first paragraph. Set its manual level to **4**. Close settings. Your correction is independent of the story's automatic suggestion. Connect the simulator, choose **Start**, inspect the selected simulator, strength **1.0×** and maximum **5/20**, then confirm the labelled Start action. Output should become 4. Minus changes strength to 0.9× and the floored target to 3; Plus returns it to 1.0× and target 4. Stop must act immediately and need no confirmation.
 
-For an optional suggestion sanity check, load each of these short, non-graphic fixtures as a separate paragraph:
+For optional scorer checks, create a separate story with these as individual paragraphs:
 
 | Fixture | Expected suggested level |
 | --- | --- |
@@ -48,46 +48,58 @@ For an optional suggestion sanity check, load each of these short, non-graphic f
 | A romantic and tender kiss expressed affection. | 3 |
 | A romantic embrace, a tender kiss and affection. | 5 |
 
-Set the last paragraph's manual override to zero in **Review**, move to **Read**, then return to **Review**: it must stay zero until **Use suggestion** restores 5. These constructed fixtures check the rule implementation; they do not establish accuracy on real stories. Reload the longer neutral sample for scrolling tests.
+These constructed fixtures test rule behaviour, not accuracy on real stories. Use manual Previous/Next to visit a paragraph before opening its review. Set a nonzero suggested paragraph's manual correction to zero; it must remain zero at every strength until **Use suggestion** resets the correction. Reanalysis must preserve deliberate corrections. Optional review must not reveal future passages until you explicitly choose to show them.
 
-## 3. Front-end checklist
+## 3. Workspace and playback checklist
 
-Start each row from a known paused state where necessary. Opening or closing **Settings** pauses output; follow-scroll selection is suspended while that panel is open. Close it before testing scrolling and press Start again when ready. Follow-scroll changes settle briefly before selecting a paragraph; output increases can wait for the next one-second dispatch tick. A reduction can first show zero because the controller stops the previous output immediately.
+Start each row from a paused state when needed. Panel/theme/width/font changes preserve your place and pause playback. Close adjustments before testing scroll-follow and explicitly Start again. Nonzero output changes can wait for the next one-second tick; a reduction first stops the prior output before the next bounded update.
 
 | Action | Expected result |
 | --- | --- |
-| Import the sample into Review, connect the simulator, but do not Start | All sections and suggestions are readable, output remains zero, and Start stays disabled until Read. |
-| Continue to Read | The same corrections are retained; a current paragraph is identified. Playback remains paused until Start. |
-| Select paragraph 1, set its manual level to 2, then Start | Status shows simulation playing; output is 2 with the default ceiling of 5. |
-| Move to paragraph 2 | Its manual level is retained; output becomes 4 without a new Start while already playing. |
-| Move to paragraph 3, whose manual override is 0 | Output becomes zero. Zero must remain a real override, not fall back to a suggestion. |
-| Click **Use suggestion** for a paragraph | The source switches back to the experimental suggestion; this neutral sample returns to zero. Other paragraph overrides remain unchanged. |
-| Set paragraph 2 to 4 and lower the ceiling to 1 | Output never remains above 1. It may stop to zero before the next bounded update. A ceiling of zero produces zero. |
-| Enable **Follow scrolling**, close settings, press Start, then slowly scroll the document | The subtle current-paragraph cue follows the reading anchor after settling. Its effective level drives the simulator. Text scrolls with the page, not inside a fixed-height reader box. |
-| Scroll quickly across several paragraphs and stop | Selection settles on the final position; intermediate paragraphs are not replayed as a command backlog. |
-| Disable **Follow scrolling** and use Previous/Next | Changing mode pauses playback. Manual navigation remains usable; press Start again when ready. Scrolling alone does not take over selection. |
-| Press Pause or Stop, then scroll or change a level | Output stays zero until a new explicit Start. No delayed command may restart it. Stop requires no confirmation. |
-| Leave Read for Add story or Review while playing, then return | Output stops. Returning preserves the story/corrections and active paragraph, but requires a new Start. |
-| Hide the tab, then return | Playback is paused and stays paused. Returning does not restart output. |
-| Disconnect, reconnect and wait | Output stays zero until Start. |
-| Open Add story and analyse valid replacement text, then Cancel the confirmation | Playback stays paused. The original story and its corrections remain available in Review/Read. |
-| Analyse the replacement again and confirm | The new story opens in Review with fresh suggestions and no old overrides. No automatic restart. |
-| Try invalid replacement text | A specific error appears; the previous loaded story/corrections remain intact and playback stays paused. |
-| Clear, including during a file import | Loaded text and overrides disappear; a delayed import must not restore them. Reload also clears story state. |
-| Leave playback without interaction for a little over two minutes | It pauses for inactivity and does not resume on the next interaction alone. |
-| Change **Reading size**, appearance or window size while playing | Playback pauses and preserves the selected paragraph. Controls remain usable after reflow and Start remains explicit. |
+| Open New story and cancel, or import empty/invalid/oversized input | Existing stories remain intact; no stale import replaces one later. |
+| Open a valid story in a freshly loaded workspace | Continuous text is readable immediately, Wide is selected, settings are closed and playback is paused. No mandatory review. |
+| Begin reading while analysis is pending or fails | Text remains readable; invalid mapping stays zero and Start is unavailable until analysis succeeds. |
+| Connect the simulator | Ready/paused, output zero. Connection never starts output. |
+| Choose Start, then cancel the confirmation | No output; the shown ceiling remains authoritative. |
+| Confirm Start with the current maximum | Only the current story/selection may start. The confirmation shows simulator, strength and maximum. |
+| Press Stop while a confirmation or delayed Start is pending | Dialog/pending work is cancelled; no late callback starts output. Stop is available in the dialog too. |
+| Use −/+ across paragraphs | Strength stays within 0.0×–2.0× in 0.1× steps, retains across paragraphs and does not rewrite their corrections. The capped target is shown. |
+| Use −/+ on an automatic or manual zero | Output remains zero. Plus cannot raise the ceiling or start paused playback. |
+| Press Reset beside Session strength | Returns to 1.0×; other controls/corrections are unchanged. |
+| Lower the ceiling, including to zero, while playing | Reduction takes priority immediately; zero blocks every nonzero command. |
+| Raise the ceiling | Output pauses and a separate confirmation shows the proposed maximum. Cancel keeps the old ceiling; confirmation does not auto-resume. |
+| Pause or Stop, then edit strength or a correction | Output remains zero until a newly confirmed Start. Strength is retained across Pause/Stop. |
+| Scroll slowly, then rapidly across several paragraphs | The active cue settles on the current position; intermediate output is not replayed as a backlog. |
+| Disable Follow my reading position and use Previous/Next section | Manual navigation remains available; arbitrary scrolling does not change selection. |
+| Switch from Test A to another story while playing | Output stops, old pending analysis/control work is invalidated, and the new story opens paused with strength 1.0×. |
+| Reopen Test A in the same session | Its text/corrections/position remain available, but no playback resumes. |
+| Hide the tab or disconnect/reconnect | Output pauses and stays paused after return/reconnect; fresh Start confirmation is required. |
+| Leave playback inactive for over two minutes | It pauses; the next interaction alone cannot resume it. |
+| Toggle library/settings, choose Comfortable/Wide/Full or change font/theme | The active paragraph remains selected; reflow never starts playback. |
+| Enter and leave Focus | Both sidebars close while the dock stays reachable; leaving restores the prior panel arrangement. |
+| Open optional review | Current/already-read sections only; future sections appear only after deliberate reveal. |
 
-Use the same browser profile and exact origin for a two-window ownership check. Put two windows side by side so both remain visible; load text and connect both simulators. Start window A, then attempt Start in B: B must not take over. Stop A, then explicitly Start B. Ordinary tab switching hides A and releases its playback, so that different result is expected. If Web Locks are unavailable, reading/manual editing remain available but simulator playback reports that limitation.
+For ownership, use two visible windows with the same browser profile and exact origin. Load stories/connect both. Start A, then confirm Start in B: B must not take over A. Stop A and explicitly start B. Ordinary tab switching hides A and releases playback, which is a separate expected result. Without Web Locks, reading remains available but simulator playback cannot start.
 
-## 4. Input, privacy and usability checks
+## 4. Local saving, privacy and usability
 
-- Import a UTF-8 `.txt` file, try empty input, then try a file larger than **500,000 bytes**. Invalid/oversized input should show a useful error and keep playback paused. The byte limit also applies to pasted text; non-ASCII characters can occupy multiple bytes. A story is also limited to 2,000 paragraphs.
-- Try a non-TXT file and a deliberately invalid UTF-8 TXT file. Automated import tests also cover these cases; do not alter a personal document to create a fixture.
-- Paste `<b>Plain text only</b>` as a paragraph. It must display literally, never render a bold HTML element or execute markup.
-- Test **Light**, **Dark** and **System** appearance using the header or the persistent **Settings** panel while reading. System should follow OS changes; an explicit Light/Dark choice should not. Reload should keep the chosen appearance but clear the story/corrections.
-- At **390 × 844**, **1440 × 1000** and **320 CSS px** width, check horizontal fit, readable controls and reachable Stop. On narrow screens the bottom dock must not cover the final paragraph or focused control. Also check landscape, 200% text/zoom, small/large reader fonts and a real phone's keyboard/browser bars when possible. Use [frontend-design.md](frontend-design.md) for the full visual checklist.
-- Use Tab/Shift+Tab and keyboard activation for buttons, sliders and reader navigation. Focus should be visible and labels should identify their controls.
-- With only the neutral sample loaded, inspect browser Network and Application/Storage panels. Reading, scoring and corrections must not upload the story, place it in URLs or save it in local/session storage. The only permitted reader preference is local-storage key `satinlore.appearance` with `system`, `light` or `dark`; selecting appearance can create it. Clear removes the story, not this appearance preference. Normal same-origin asset requests are expected. Do not export a HAR containing invitation cookies or hardware pairing payloads.
+New stories are **Session only**. Reload before saving: their text, title, corrections and progress must disappear, while appearance may remain. To retain `Test A`, choose **Save on this browser** explicitly and read the shared-browser/no-cloud-backup explanation. Confirm a successful saved state before relying on persistence. This is browser-local storage, visible to other users of that profile and removable by clearing browser data.
+
+After saving, change a correction (including zero), move to a later paragraph and rename the story. Reload and reopen it from the library: retained content/corrections/title/position should match, playback must be paused, strength must be 1.0× and no connection or armed session may return. Add a second unsaved story and reload; only opted-in stories should remain.
+
+Choose **Session only** for a previously saved story to remove its retained copy while continuing to read in memory. Delete one story and verify it is absent after reload. Save two neutral stories, choose **Delete all**, then reload: no story should reappear. These operations do not erase appearance or delete server account data. A failed deletion must say it failed, not claim the data is gone.
+
+The store is bounded to 20 saved stories and 2,000,000 UTF-8 JSON bytes, with per-story limits of 500,000 bytes / 2,000 paragraphs and 120-character titles; at most 20 stories can be open in the workspace. Storage may fail earlier due to browser quota or privacy settings. Saving/deletion also requires Web Locks; without support, the operation must report failure while session-only reading remains usable. Automated checks use isolated fixtures for quota, denial, corruption and stale/deleted revisions; do not corrupt a browser profile that holds your own saved stories. On failure, the in-memory story stays readable and the UI must not claim a successful save. Corrupt storage needs an explicit Delete all recovery rather than silent deletion.
+
+With two tabs on the same origin, update or delete a saved story in one. The other tab must pause and explain that the library changed. A stale autosave must not overwrite the newer copy or recreate the deleted one. Reload only after retaining any unsaved session-only text you still need.
+
+- Try UTF-8 TXT, empty input, too-large files, more than 2,000 paragraphs, non-TXT and invalid UTF-8. Errors must not destroy existing library stories.
+- Paste `<b>Plain text only</b>`. It must render literally, never as HTML.
+- Inspect Network using neutral fixtures. Story text/title, corrections and reading history must never enter requests, URLs, analytics or routine logs. Normal same-origin asset requests are expected. Do not export sensitive HAR data.
+- Before Save, storage may contain only the separate `satinlore.appearance` preference (`system`, `light`, `dark`). After explicit Save, `satinlore.library.v1` may contain allowlisted local story fields; it must contain no strength, ceiling, credentials or armed-playback state.
+- Test Light/Dark/System: System follows OS changes; an explicit choice wins. Blocked preference storage must leave the page usable.
+- Check 390 × 844, 1440 × 1000, 320 CSS px, landscape and 200% text/zoom. Both sidebars, optional review, confirmation dialogs and the dock must fit without hidden Stop or unreachable final text. Inspect keyboard, visible focus, slider labels, Escape and focus restoration. Use [frontend-design.md](frontend-design.md) for the complete matrix.
+- Real-phone keyboard/browser bars, rotation and backgrounding still need their own checks; emulated screenshots are not phone or physical-device qualification.
 
 ## 5. Test invitations without Lovense credentials
 

@@ -62,3 +62,72 @@ test("paragraph count is bounded before scoring or replacing the current documen
   assert.equal(model.documentId, originalId);
   assert.equal(model.paragraphs.length, MAX_PARAGRAPHS);
 });
+
+test("deferred analysis opens readable text with zero output and preserves corrections", async () => {
+  const model = new ReaderModel();
+  model.load("A tender kiss.\n\nA quiet afternoon.", {deferAnalysis: true, documentId: "saved-1"});
+  model.setOverride(0, 0);
+  model.setOverride(1, 4);
+  assert.equal(model.analysisStatus, "pending");
+  assert.equal(model.paragraphs[0].text, "A tender kiss.");
+  assert.deepEqual(model.effectiveLevels(), [0, 0]);
+  let yielded = 0;
+  assert.equal(await model.analyse({batchSize: 1, yieldTask: async () => { yielded++; }}), true);
+  assert.ok(yielded >= 2);
+  assert.equal(model.analysisReady, true);
+  assert.deepEqual(model.effectiveLevels(), [0, 4]);
+  assert.equal(model.paragraphs[0].suggestedLevel, 1);
+  assert.equal(await model.analyse({yieldTask: async () => {}}), true);
+  assert.deepEqual(model.effectiveLevels(), [0, 4], "Reanalysis cannot erase deliberate corrections.");
+});
+
+test("cancelled and superseded analysis cannot revive a different story", async () => {
+  const model = new ReaderModel();
+  model.load("A tender kiss.", {deferAnalysis: true});
+  let resume;
+  const work = model.analyse({yieldTask: () => new Promise(resolve => { resume = resolve; })});
+  assert.equal(model.analysisStatus, "analysing");
+  model.cancelAnalysis();
+  resume();
+  assert.equal(await work, false);
+  assert.equal(model.analysisStatus, "pending");
+  assert.deepEqual(model.effectiveLevels(), [0]);
+  const stale = model.analyse({yieldTask: () => new Promise(resolve => { resume = resolve; })});
+  model.load("The neutral new story.", {deferAnalysis: true});
+  resume();
+  assert.equal(await stale, false);
+  assert.equal(model.paragraphs[0].text, "The neutral new story.");
+  assert.equal(model.analysisStatus, "pending");
+  assert.equal(await model.analyse({yieldTask: async () => {}}), true);
+  assert.deepEqual(model.effectiveLevels(), [0]);
+});
+
+test("analysis failure or invalid mapping fails closed and remains recoverable", async () => {
+  const model = new ReaderModel();
+  model.load("A tender kiss.");
+  model.setOverride(0, 8);
+  for (const score of [() => { throw Error("private error must not escape"); }, () => ({band: 2, level: 10, reason: "Invalid"})]) {
+    assert.equal(await model.analyse({score, yieldTask: async () => {}}), false);
+    assert.equal(model.analysisStatus, "error");
+    assert.equal(model.analysisReady, false);
+    assert.deepEqual(model.effectiveLevels(), [0]);
+    assert.equal(model.paragraphs[0].override, 8);
+  }
+  assert.equal(await model.analyse({yieldTask: async () => {}}), true);
+  assert.deepEqual(model.effectiveLevels(), [8]);
+});
+
+test("aborted analysis clears partial results without losing manual zero", async () => {
+  const model = new ReaderModel();
+  const controller = new AbortController();
+  model.load("A tender kiss.\n\nA tender kiss.", {deferAnalysis: true});
+  model.setOverride(1, 0);
+  let calls = 0;
+  const result = await model.analyse({signal: controller.signal, batchSize: 1, yieldTask: async () => {
+    if (++calls === 2) controller.abort();
+  }});
+  assert.equal(result, false);
+  assert.equal(model.analysisStatus, "pending");
+  assert.deepEqual(model.effectiveLevels(), [0, 0]);
+  assert.equal(model.paragraphs[1].override, 0);
+});

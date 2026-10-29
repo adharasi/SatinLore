@@ -32,7 +32,7 @@
 html { background: var(--page); color: var(--text); scroll-padding-bottom: calc(var(--dock-space) + 24px); }
 body { margin: 0; font: 1rem/1.55 var(--sans); background: var(--page); color: var(--text); }
 button, input, textarea, select { font: inherit; color: inherit; }
-button, select, input[type=file] { min-height: 44px; }
+button, select, input[type=file], input[type=text] { min-height: 44px; }
 button { border: 1px solid var(--secondary); border-radius: 8px; background: transparent; padding: 10px 16px; cursor: pointer; font-size: .9375rem; font-weight: 550; line-height: 1.4; }
 button:hover:not(:disabled) { background: var(--selection); }
 button:disabled { opacity: .48; cursor: default; }
@@ -41,7 +41,8 @@ button.primary:hover:not(:disabled) { opacity: .9; }
 button.stop { color: var(--stop); border-color: var(--stop); }
 button.quiet-button { border-color: transparent; text-decoration: underline; text-underline-offset: 4px; padding-left: 0; }
 label { display: block; font-size: .9375rem; font-weight: 550; }
-select, textarea, input[type=file] { border: 1px solid var(--secondary); border-radius: 8px; background: var(--surface); }
+select, textarea, input[type=file], input[type=text] { border: 1px solid var(--secondary); border-radius: 8px; background: var(--surface); }
+input[type=text] { padding: 10px 12px; }
 select { padding: 8px 32px 8px 12px; max-width: 100%; }
 textarea { display: block; width: 100%; padding: 16px; resize: vertical; line-height: 1.65; min-height: 200px; }
 textarea::placeholder { color: var(--secondary); opacity: 1; }
@@ -67,3 +68,9 @@ summary { cursor: pointer; font-size: .9375rem; font-weight: 550; min-height: 44
 .skip-link { position: absolute; z-index: 20; top: 8px; left: 16px; transform: translateY(-180%); background: var(--surface); padding: 12px; border: 1px solid var(--action); border-radius: 8px; }
 .skip-link:focus { transform: translateY(0); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+dialog { color: var(--text); background: var(--surface); border: 1px solid var(--secondary); border-radius: 16px; padding: 28px; width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; box-shadow: 0 24px 100px #00000030; }
+dialog::backdrop { background: #13101966; }
+.confirmation-dialog { width: min(520px, calc(100vw - 32px)); }
+@media (max-width: 699px) { dialog { padding: 20px; } }
