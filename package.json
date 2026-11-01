@@ -8,9 +8,16 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node scripts/browser-check.mjs"
+    "test:browser": "node scripts/browser-check.mjs",
+    "build:worker": "node scripts/build-private-app.mjs",
+    "deploy:worker": "npm run build:worker && wrangler deploy --config wrangler.jsonc",
+    "test:worker": "node --test tests/private-worker.test.mjs"
   },
   "devDependencies": {
-    "playwright": "1.62.1"
+    "playwright": "1.62.1",
+    "wrangler": "4.92.0"
+  },
+  "dependencies": {
+    "jose": "6.1.3"
   }
 }

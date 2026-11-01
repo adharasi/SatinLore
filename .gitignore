@@ -14,6 +14,7 @@ dist/
 data/
 uploads/
 node_modules/
+.wrangler/
 test-results/
 playwright-report/
 *.log

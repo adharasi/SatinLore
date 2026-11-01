@@ -1,13 +1,19 @@
-# Deployment follows hardware and operational qualification
+# Deployment options
 
-This is a local development build with a simulator and authenticated hardware-check flow. It is not an externally deployable beta. Production mode and nonlocal app origins intentionally fail configuration validation.
+## Founder-only reader preview
 
-The planned minimum is a single VPS with Caddy HTTPS, a non-root FastAPI service and SQLite outside the web root. Before deployment, complete:
+The product owner's 1 November 2026 request authorises a private simulator release at `app.satinlore.com`, protected by Cloudflare Access. The [Cloudflare adapter and runbook](cloudflare/README.md) host only the browser reader, with signed Access-token validation on every request. Reader text and opted-in saved stories remain browser-local. The local Python authentication database and vendor/device-check routes are not deployed by that adapter.
 
-- Live SDK/device/browser qualification and a reviewed story-privacy boundary.
+This allows software review without representing simulator output as qualified hardware behaviour. Full external beta readiness remains a separate roadmap gate. Follow the runbook's Access-first order: a successful build alone is not proof of a protected live hostname.
+
+## Future full Python backend
+
+The FastAPI development server still rejects production mode and nonlocal origins. The planned minimum for that backend is a single VPS with Caddy HTTPS, a non-root FastAPI service and SQLite outside the web root. Before exposing it, complete:
+
 - Production origin, secure-cookie, proxy/rate-limit and secret-management configuration.
-- Data deletion and explicit retention, including existing invitation/session records.
+- Data deletion and explicit retention, including invitation/session records.
 - Database-consistent backup/restore, rollback, support and access-revocation procedures.
+- Reviewed story-privacy boundaries and live SDK/device/browser qualification before real story playback.
 - A clear response to output continuing after transport failure; backend revocation cannot guarantee physical Stop.
 
-Invitation sessions, CSRF/origin checks, bounded requests and local rate limits already exist. Their presence does not establish internet-facing readiness. Keep the app on loopback behind the future reverse proxy; never deploy the development `--reload` command. The health response must continue to distinguish availability from beta readiness.
+Keep the development service on loopback; never deploy the `--reload` command. Health responses distinguish availability from beta readiness.

@@ -23,7 +23,7 @@ test("paste and file share a byte limit including non-ASCII text", async () => {
 });
 test("file import rejects invalid UTF-8 and non-TXT files", async () => {
   const importer = new TextImporter();
-  await assert.rejects(() => importer.read(new File([new Uint8Array([0xff])], "bad.txt")));
+  await assert.rejects(() => importer.read(new File([new Uint8Array([0xff])], "bad.txt")), /valid UTF-8 TXT file/);
   await assert.rejects(() => importer.read(new File(["plain"], "book.epub")));
   assert.equal(await importer.read(file("Valid text")), "Valid text");
 });

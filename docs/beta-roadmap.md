@@ -4,6 +4,12 @@ Approved workspace revision: 29 October 2026 (frontend specification v1.2). Buil
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The reader remains simulator-only. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
+## Private hosting decision — 1 November 2026
+
+The product owner has requested `app.satinlore.com` behind founder-only Cloudflare Access. A separate static-reader Worker provides this simulator preview without enabling the local Python invitation/vendor backend or weakening its local-origin restrictions. The adapter validates a dedicated Access token before every asset; failed or expired hosted access stops simulated playback and blocks Start. This request supersedes the earlier workspace milestone's no-deployment scope for this private preview only. It does not pass hardware qualification or the full software-beta gates.
+
+Deployment configuration and operational verification are recorded in [the Cloudflare runbook](../deploy/cloudflare/README.md). A committed adapter is not evidence that DNS, Access or a live deployment has been provisioned.
+
 ## Existing baseline
 
 The local FastAPI/static ES-module application includes TXT/paste import, stable paragraphs, experimental local suggestions, manual corrections, scroll tracking, finite/coalesced simulator playback, a ceiling, explicit Start and interruption/tab-ownership rules. SQLite-backed one-use invitations and expiring sessions support a separate sandboxed device-check screen. New stories stay session-only until an explicit local-save choice. Live SDK compatibility, continuous real-device reading, production deployment and physical qualification remain outstanding.
@@ -14,7 +20,7 @@ Satin Editorial light, Midnight Ink dark and Light/Dark/System appearance are im
 
 ## Workspace v2 — direct reading and saved stories
 
-**Implementation status:** the workspace is implemented and its local automated/browser acceptance slice passes; publication and CI evidence are pending. The evidence ledger distinguishes these checks from remaining manual usability and hardware qualification.
+**Implementation status:** the workspace is implemented; the evidence ledger distinguishes each revision's source publication, automated checks, browser review and hosting state. The evidence ledger distinguishes these checks from remaining manual usability and hardware qualification.
 
 The 29 October decision moves the next frontend milestone ahead of the deeper F3 transport harness. Implement a collapsible library, continuous reading canvas and optional right settings panel, closed initially. Wide is the default; Comfortable/Full and Focus let the reader use the available window. Phone/tablet layouts use drawers/sheets while keeping controls reachable. Review is optional, shows current/already-read sections first and requires a deliberate reveal of future sections.
 
@@ -67,6 +73,13 @@ Only then invite 5–10 matching hardware-beta users; ask for two attempted sess
 Defer generated stories, subscriptions/checkout, token wallets, native apps, public publishing, marketplaces, creator payouts, multiple device brands and affiliate dashboards. EPUB is optional after the core gates and must preserve TXT support. The separately managed marketing waitlist is not this local reader application. No hosting purchase or public deployment is part of the workspace milestone.
 
 ## Evidence ledger
+
+1 November 2026, private reader preparation:
+
+- Common checks: 22 Python and 90 JavaScript tests passed. The new checks include signed Access-token enforcement, fail-closed asset routing, session expiry/refresh races, fresh authorization before Start and the cryptographic story-ID fallback. Worker bundle and Wrangler deployment dry run passed; these are local packaging checks, not remote provisioning.
+- Cloud Browser review: Satin Editorial/Midnight Ink, direct paste import, active-story focus, strength adjustments, explicit Start confirmation, Stop, settings and Full reading width inspected. Phone frames at 390 and 320 CSS pixels fit without horizontal overflow; the settings drawer leaves Stop reachable. [Neutral desktop evidence](images/private-reader-desktop.jpg).
+- The managed preview uses HTTP, so browser Web Locks are unavailable there. Actual simulated dispatch and saved-story persistence are covered by unit tests and the repository's separate CI browser suite, rather than claimed from that preview. No physical hardware, vendor credentials or live SDK were used.
+- Cloudflare Access application, dedicated audience, DNS, authenticated live-app checks and remote deployment require account provisioning. No live-hosting success is inferred from source publication.
 
 28 October 2026, authenticated connection implementation:
 

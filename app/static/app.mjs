@@ -1,9 +1,11 @@
 import {MockDevice} from "./devices/mock.mjs";
 import {TextImporter} from "./reader/import.mjs";
+import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
 import {StoryStore} from "./reader/storage.mjs";
 import {selectReadingParagraph} from "./reader/position.mjs";
 import {PlaybackController} from "./playback/controller.mjs";
+import {HostedAccessGuard} from "./access.mjs";
 
 const $ = id => document.getElementById(id);
 const importer = new TextImporter();
@@ -33,6 +35,10 @@ let libraryLoading = true;
 let libraryMutation = false;
 let focusArrangement = null;
 const dialogOpeners = new Map();
+const hostedMode = document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
+let hostedAccess = null;
+let hostedAccessReady = !hostedMode;
+const canStartHere = () => !hostedMode || Boolean(hostedAccessReady && hostedAccess?.isAuthorized());
 let latest = {state: "DISCONNECTED", connected: false, running: false, output: 0,
   ceiling: 5, strength: 1, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
 
@@ -94,7 +100,7 @@ function renderLibrary() {
   }
   $("story-list").replaceChildren(fragment);
   text("library-status", libraryLoading ? "Opening your local library…" : libraryError || (stories.length ?
-    "Saved stories stay on this browser. Session-only stories clear on reload." : "Your reading space is ready for a story."));
+    "Saved stories stay on this browser. Session-only stories clear on reload." : "No stories yet. Add one to start reading."));
   $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.length && !libraryError);
 }
 
@@ -140,7 +146,7 @@ function display(state = latest) {
   $("connect").disabled = state.connected && state.state !== "ERROR_PAUSED";
   text("connect", state.state === "ERROR_PAUSED" ? "Reconnect simulator" : "Connect simulator");
   $("disconnect").disabled = !state.connected && !pendingStart;
-  $("start").disabled = !story?.model.analysisReady || importing || !state.connected || state.running ||
+  $("start").disabled = !canStartHere() || !story?.model.analysisReady || importing || !state.connected || state.running ||
     pendingStart || state.state === "ERROR_PAUSED" || story?.deleting;
   $("pause").disabled = !state.running && !pendingStart;
   $("previous").disabled = libraryMutation || !story || story.deleting || state.position === 0;
@@ -150,7 +156,7 @@ function display(state = latest) {
   }
   $("session-only").disabled ||= !story?.saved;
   text("story-title", story?.title ?? "Your reading space");
-  text("header-story-title", story?.title ?? "A little space to get lost");
+  text("header-story-title", story?.title ?? "Add a story to begin");
   text("position", story ? `Section ${state.position + 1} of ${story.model.paragraphs.length}` : "");
   const analysis = story?.model.analysisStatus ?? "pending";
   $("analysis-status").dataset.state = analysis;
@@ -231,7 +237,7 @@ function persistStory(story, {explicit = false} = {}) {
   story.saveChain = story.saveChain.catch(() => {}).then(task);
   return story.saveChain;
 }
-function makeStory({id = crypto.randomUUID(), title = "Untitled story", text: source, corrections = [],
+function makeStory({id = createStoryId(), title = "Untitled story", text: source, corrections = [],
   position = 0, revision = null}) {
   const model = new ReaderModel();
   model.load(source, {deferAnalysis: true, documentId: id});
@@ -341,13 +347,14 @@ async function analyse(story, {force = false} = {}) {
     if (story === currentStory() && story.model.analysisStatus === "pending" && !story.analysisPromise && !story.deleting) void analyse(story);
   }
 }
-function selectStory(id) {
+function selectStory(id, {focusReader = isNarrow()} = {}) {
   const story = stories.find(value => value.id === id);
   if (!story || story.deleting || libraryMutation) return;
   if (story.id === activeId) {
     pause("Story remains open. Confirm Start when ready.");
     if (isNarrow()) setPanel("library", false, {restore: false});
     scrollToCurrent();
+    if (focusReader) $("story-title").focus({preventScroll: true});
     return;
   }
   cancelImport(); closeDialogs();
@@ -367,6 +374,7 @@ function selectStory(id) {
   if (isNarrow()) setPanel("library", false, {restore: false});
   display(); renderLibrary();
   scrollToCurrent();
+  if (focusReader) $("story-title").focus({preventScroll: true});
   void analyse(story);
 }
 
@@ -479,11 +487,11 @@ async function prepareText(read) {
     stories.push(story);
     closeDialog("new-story-dialog", {restore: false});
     $("source").value = ""; $("story-title-input").value = "";
-    selectStory(story.id);
+    selectStory(story.id, {focusReader: true});
     show("Your story is open. Read now; suggestions are prepared quietly on this page.");
   } catch (error) {
     if (operation !== importEpoch) return;
-    text("import-status", error instanceof TypeError ? "Choose a valid UTF-8 TXT file." : error.message);
+    text("import-status", error instanceof TypeError ? "Could not open this story. Your other stories are unchanged. Please try again." : error.message);
   } finally {
     if (operation === importEpoch) { setImporting(false); $("file").value = ""; display(); }
   }
@@ -505,14 +513,19 @@ async function confirmStart() {
   closeDialog("start-dialog");
   startIntent = null;
   const story = currentStory();
-  if (!intent || story?.id !== intent.id || !story.model.analysisReady || document.hidden ||
+  if (!canStartHere() || !intent || story?.id !== intent.id || !story.model.analysisReady || document.hidden ||
       latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || !latest.connected) return;
   const operation = ++startEpoch;
   pendingStart = true; display();
   let release = null;
   try {
+    if (hostedMode) {
+      const allowed = await hostedAccess.check({fresh: true});
+      if (!allowed || !canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story ||
+          !story.model.analysisReady || latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || !latest.connected) return;
+    }
     release = await acquirePlayback();
-    if (operation !== startEpoch || document.hidden || currentStory() !== story || !story.model.analysisReady ||
+    if (!canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story || !story.model.analysisReady ||
         latest.ceiling !== intent.ceiling || latest.strength !== intent.strength) { release?.(); return; }
     if (!release) {
       show(navigator.locks ? "Another tab is playing the simulator. Pause it first." :
@@ -563,7 +576,11 @@ for (const id of ["new-story", "empty-new-story"]) $(id).addEventListener("click
   if (libraryMutation || libraryLoading) return;
   cancelImport(); text("import-status", ""); openDialog("new-story-dialog"); $("story-title-input").focus();
 });
-$("load").addEventListener("click", () => { const source = $("source").value; void prepareText(() => source); });
+$("load").addEventListener("click", () => {
+  const source = $("source").value;
+  if (!source.trim()) { text("import-status", "Paste some story text, or choose a TXT file below."); $("source").focus(); return; }
+  void prepareText(() => source);
+});
 $("file").addEventListener("change", event => { const file = event.target.files[0]; if (file) void prepareText(() => importer.read(file)); });
 $("cancel-import").addEventListener("click", () => { cancelImport(); closeDialog("new-story-dialog"); });
 for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop"]) $(id).addEventListener("click", stopEverything);
@@ -572,7 +589,7 @@ for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-di
 });
 $("start").addEventListener("click", () => {
   const story = currentStory();
-  if (!story?.model.analysisReady || !latest.connected || latest.running || pendingStart || document.hidden) return;
+  if (!canStartHere() || !story?.model.analysisReady || !latest.connected || latest.running || pendingStart || document.hidden) return;
   cancelPosition(); followPosition();
   openDialog("start-dialog");
   startIntent = {id: story.id, ceiling: latest.ceiling, strength: latest.strength};
@@ -738,16 +755,51 @@ for (const eventName of ["pointerdown", "keydown", "wheel", "touchstart"]) {
   document.addEventListener(eventName, event => { if (event.isTrusted) controller.activity(); }, {passive: true});
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { cancelImport(); pause("Paused when this tab became hidden. Confirm Start to continue."); closeDialogs(); }
+  if (document.hidden) {
+    cancelImport(); pause("Paused when this tab became hidden. Confirm Start to continue."); closeDialogs();
+    hostedAccess?.suspend();
+  } else if (hostedAccess) void hostedAccess.resume();
   controller.setVisible(!document.hidden);
 });
-window.addEventListener("pagehide", () => { cancelImport(); pause("Page closed."); closeDialogs(); });
+window.addEventListener("pagehide", () => { cancelImport(); pause("Page closed."); closeDialogs(); hostedAccess?.suspend(); });
+window.addEventListener("pageshow", () => { if (hostedAccess && !document.hidden) void hostedAccess.resume(); });
 window.addEventListener("storage", event => {
   if (event.key !== "satinlore.library.v1" && event.key !== null) return;
   pause("The local library changed in another tab. Saved copies will not be overwritten silently.");
   libraryError = "The library changed in another tab. Reload to see its saved stories; session-only text remains in this tab until reload.";
   renderLibrary();
 });
+
+if (hostedMode) {
+  // Local hardware checks stay available only in the local application.
+  for (const link of document.querySelectorAll('a[href="/device-check"]')) link.hidden = true;
+  const accessStatus = $("access-status");
+  hostedAccess = new HostedAccessGuard({
+    onChange: state => {
+      hostedAccessReady = state.allowed;
+      if (accessStatus && state.allowed) { accessStatus.hidden = true; accessStatus.replaceChildren(); }
+      else if (accessStatus && state.state === "checking" && !state.allowed) {
+        accessStatus.hidden = false; accessStatus.textContent = "Checking your private preview access…";
+      }
+      display();
+    },
+    onLost: reason => {
+      pause(reason);
+      closeDialog("start-dialog");
+      if (accessStatus) {
+        const explanation = document.createElement("span");
+        explanation.textContent = `${reason} Your story is still readable. Save session-only stories before reloading to sign in. `;
+        const retry = document.createElement("button"); retry.type = "button"; retry.className = "quiet-control";
+        retry.textContent = "Check sign-in again";
+        retry.addEventListener("click", () => void hostedAccess.check());
+        const login = document.createElement("a"); login.href = "/"; login.textContent = "Reload to sign in";
+        accessStatus.replaceChildren(explanation, retry, document.createTextNode(" "), login);
+        accessStatus.hidden = false;
+      }
+    },
+  });
+  void hostedAccess.start({visible: !document.hidden});
+}
 
 setPanel("library", !isNarrow(), {restore: false});
 setPanel("settings", false, {restore: false});

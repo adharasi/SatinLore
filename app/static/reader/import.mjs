@@ -22,7 +22,9 @@ export class TextImporter {
       }
       const buffer = await file.arrayBuffer();
       if (generation !== this.generation) return null;
-      const text = new TextDecoder("utf-8", {fatal: true}).decode(buffer);
+      let text;
+      try { text = new TextDecoder("utf-8", {fatal: true}).decode(buffer); }
+      catch { throw new Error("Choose a valid UTF-8 TXT file."); }
       splitText(text); // Apply the same bounds before handing data to the UI.
       return text;
     } catch (error) {
