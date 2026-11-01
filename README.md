@@ -50,6 +50,8 @@ This is a private **simulator preview**. It does not claim qualified physical-de
 
 ## Run checks
 
+Install the pinned JavaScript dependencies once with `npm ci --ignore-scripts` before running the common checks. These include the private Worker's token-verification tests; the browser reader itself remains build-free.
+
 ```powershell
 # Windows
 py scripts/check.py

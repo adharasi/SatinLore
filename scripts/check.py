@@ -20,6 +20,8 @@ def main():
     version = subprocess.check_output([node, "--version"], text=True).strip()
     if int(version.lstrip("v").split(".")[0]) < 24:
         raise SystemExit("Use Node.js 24 or newer for these checks.")
+    if not (ROOT / "node_modules" / "jose" / "package.json").exists():
+        raise SystemExit("Run npm ci --ignore-scripts first to install the pinned JavaScript test dependencies.")
     for path in [ROOT / "package.json", *(ROOT / ".vscode").glob("*.json")]:
         json.loads(path.read_text(encoding="utf-8"))
     tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))

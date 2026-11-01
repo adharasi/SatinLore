@@ -22,8 +22,10 @@ jobs:
         with:
           node-version: '24'
       - run: python bootstrap.py
-      - run: python scripts/check.py
       - run: npm ci --ignore-scripts
+      - run: python scripts/check.py
+      - run: npm run build:worker
+      - run: npm exec wrangler deploy -- --dry-run
       - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run test:browser
       - name: Upload neutral frontend screenshots
