@@ -153,6 +153,11 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.equal(config.workers_dev, false); assert.equal(config.preview_urls, false);
   assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }]);
   assert.equal(config.d1_databases, undefined); assert.equal(config.r2_buckets, undefined);
+  assert.equal(config.keep_vars, true);
+  for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED"]) assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
+  assert.equal(config.vars.PUBLIC_APP_ORIGIN, ORIGIN);
+  assert.equal(config.vars.FOUNDER_EMAIL, "team@satinlore.com");
+  assert.equal(privateAppConfiguration(config.vars), null);
   assert.equal(privateAppConfiguration({ ...config.vars, ACCESS_AUD: "" }), null);
   const localIndex = await readFile(resolve(ROOT, "app/static/index.html"), "utf8");
   execFileSync(process.execPath, [resolve(ROOT, "scripts/build-private-app.mjs")], { cwd: ROOT });
@@ -170,4 +175,21 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.match(hosted, /<meta name="satinlore-hosted-access" content="true">/);
   assert.doesNotMatch(hosted, /device-check|device-bridge|lovense\.mjs/);
   assert.equal(await readFile(resolve(ROOT, "app/static/index.html"), "utf8"), localIndex);
+});
+
+test("a first deployment without dashboard Access settings is unavailable and the runtime pause remains fail closed", async () => {
+  const config = JSON.parse(await readFile(resolve(ROOT, "wrangler.jsonc"), "utf8"));
+  const f = fixture();
+  const jwt = await token({ email: config.vars.FOUNDER_EMAIL });
+  const initial = { ...config.vars, ASSETS: f.env.ASSETS };
+  assert.equal((await f.worker.fetch(request("/", jwt), initial)).status, 503);
+  assert.equal(f.reads.length, 0); assert.equal(f.keyRequests.length, 0);
+  const configured = { ...initial, ACCESS_TEAM_DOMAIN: ENV.ACCESS_TEAM_DOMAIN, ACCESS_AUD: ENV.ACCESS_AUD, PRIVATE_APP_ENABLED: "true" };
+  assert.equal((await f.worker.fetch(request("/api/access", jwt), configured)).status, 200);
+  assert.equal((await f.worker.fetch(request("/", jwt), { ...configured, PRIVATE_APP_ENABLED: "false" })).status, 503);
+  for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED"]) {
+    const missing = { ...configured }; delete missing[key];
+    assert.equal((await f.worker.fetch(request("/", jwt), missing)).status, 503, `missing runtime ${key}`);
+  }
+  assert.equal(f.reads.length, 0);
 });

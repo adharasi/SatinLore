@@ -8,7 +8,7 @@ There are separate gates: **S** for the software experience and **H** for physic
 
 The product owner has requested `app.satinlore.com` behind founder-only Cloudflare Access. A separate static-reader Worker provides this simulator preview without enabling the local Python invitation/vendor backend or weakening its local-origin restrictions. The adapter validates a dedicated Access token before every asset; failed or expired hosted access stops simulated playback and blocks Start. This request supersedes the earlier workspace milestone's no-deployment scope for this private preview only. It does not pass hardware qualification or the full software-beta gates.
 
-Deployment configuration and operational verification are recorded in [the Cloudflare runbook](../deploy/cloudflare/README.md). A committed adapter is not evidence that DNS, Access or a live deployment has been provisioned.
+The repository is prepared for a one-time owner-side dashboard setup and automatic Git deployments. Access team/audience and the enable/pause flag remain dashboard-owned and survive later source deployments. Deployment configuration and operational verification are recorded in [the Cloudflare runbook](../deploy/cloudflare/README.md). A committed adapter is not evidence that DNS, Access or a live deployment has been provisioned.
 
 ## Existing baseline
 

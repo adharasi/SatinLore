@@ -44,7 +44,7 @@ For hardware work, follow [the dedicated setup](docs/hardware-check.md). `.env.e
 
 The requested `app.satinlore.com` deployment uses the same reader and local story processing behind Cloudflare Access. Its Worker validates a dedicated Access application's signed token before serving **every** reader asset. Missing configuration fails closed; direct Worker and preview hostnames are disabled. Access expiry or failed revalidation pauses the simulator, blocks Start and leaves the current text readable.
 
-This is a private **simulator preview**. It does not claim qualified physical-device playback, cloud story storage, account sync or the remaining beta services. The Python invitation/device-check backend stays local and is excluded from the hosted build. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for configuration, checks and rollback; source publication alone does not establish a live, protected deployment.
+This is a private **simulator preview**. It does not claim qualified physical-device playback, cloud story storage, account sync or the remaining beta services. The Python invitation/device-check backend stays local and is excluded from the hosted build. The one-time browser setup connects this GitHub repository to Cloudflare for automatic deployment on future pushes. Access settings remain in the Cloudflare dashboard and survive those deployments. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for the exact setup, checks and rollback; source publication alone does not establish a live, protected deployment.
 
 ![Satin Editorial private-reader preview with neutral sample text](docs/images/private-reader-desktop.jpg)
 
