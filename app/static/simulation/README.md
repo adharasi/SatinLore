@@ -1,0 +1,15 @@
+# Deterministic simulator lab
+
+Open `/simulator-lab` locally, or behind the private founder Access gate when the Cloudflare allowlist includes it. This surface is outside ordinary reading navigation. It has no story input, vendor SDK, physical connection or server-side scenario data.
+
+Select a scenario, choose an eligible simulated device explicitly, connect it, then advance virtual time by 500 ms. A successful connection includes a targeted zero acknowledgement and stays paused. Start opens a confirmation showing the device, ceiling, strength and capped target. Advance virtual time manually or select **Run virtual time**. Changing a scenario resets its fixture and timers; that is not evidence of a physical Stop.
+
+`ScenarioTransport` supplies deterministic asynchronous connect/command/stop/disconnect promises. Request envelopes carry only `kind`, `deviceId`, `operationId`, `generation` and, for nonzero commands, an integer `level` plus `durationMs: 2000`. Responses must acknowledge the matching identity and bounds. Diagnostic records add only virtual times. Device selection is never inferred, and the controller never broadcasts.
+
+`AsyncPlaybackController` is separate from the ordinary synchronous reader controller. It uses bounded connection/request timeouts, generation invalidation, one outstanding nonzero request per target, latest-value coalescing, a minimum one-second dispatch cadence, and explicit Start/ceiling confirmations. Hidden tabs, lost access, cancellation, context changes, inactivity, connection failures and malformed acknowledgements stop scheduling. Returning or reconnecting never starts playback automatically.
+
+Stop is prioritised ahead of a pending command. Cancellation is only a request to the transport; a fixture can deliberately ignore it. A late command cannot update a new context or restart playback. Where possible, a fresh targeted Stop after that old command settles clears output uncertainty. A Stop dispatched before an old command settles cannot certify zero, including when both acknowledgements arrive in the same microtask turn; a distinct post-settlement Stop is required. Failed or unacknowledged Stop leaves `output: null`; repeated Pause, new mappings and elapsed UI time cannot turn that into a successful zero or clear the recovery requirement. A command that never settles keeps its target uncertain until the scenario fixture is reset. Even a known fixture expiry is not proof about a real device.
+
+Native Escape, closing a confirmation, Stop and scenario reset invalidate a pending Start even while its fresh hosted-access check is still in flight. Reauthentication cannot reopen that intent. The higher-ceiling dialog has the same cancellation boundary.
+
+Run `node --test tests/async-playback.test.mjs tests/simulation-ui.test.mjs` for fake-clock/controller coverage and the actual lab's event-wiring regressions. Browser layout/usability, live vendor behaviour and physical command expiry remain separate checks. This implementation is an experimental software transport contract, not a qualified real-device adapter.

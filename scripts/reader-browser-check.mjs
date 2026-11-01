@@ -1,11 +1,13 @@
 // Browser-level workspace checks use neutral fixtures and simulated output only.
 import assert from "node:assert/strict";
-import {mkdir} from "node:fs/promises";
+import {mkdir, readFile} from "node:fs/promises";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 
 const evidence = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../artifacts/frontend");
 const libraryKey = "satinlore.library.v1";
+const preferencesKey = "satinlore.reader-preferences.v1";
+const presentationKeys = ["satinlore.appearance", preferencesKey].sort();
 const neutralStory = Array.from({length: 8}, (_, index) =>
   `Section ${index + 1}. ` + "An ordinary walk passed the library, garden and station. ".repeat(7)).join("\n\n");
 
@@ -24,15 +26,17 @@ async function current(page, index) {
 async function analysed(page) {
   await page.waitForFunction(() => document.querySelector("#analysis-status").dataset.state === "ready");
 }
-async function openSettings(page) {
-  if (await page.locator("#settings-panel").isHidden()) await page.locator("#toggle-settings").click();
-  await page.locator("#reading-appearance").waitFor({state: "visible"});
+async function openSettings(page, section = "reader") {
+  if (await page.locator("#settings-panel").isHidden()) await page.getByRole("button", {name: "Settings", exact: true}).click();
+  const tab = page.locator(`#settings-${section}-tab`);
+  if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
+  await page.locator(`#${section}-settings`).waitFor({state: "visible"});
 }
 async function closeSettings(page) {
   if (await page.locator("#settings-panel").isVisible()) await page.locator("#close-settings").click();
 }
 async function openReview(page) {
-  await openSettings(page);
+  await openSettings(page, "story");
   if (!await page.locator("#review-settings").evaluate(element => element.open)) {
     await page.locator("#review-settings > summary").click();
   }
@@ -76,11 +80,12 @@ async function start(page, confirm = true) {
   }
 }
 async function save(page) {
-  await openLibrary(page);
+  await openSettings(page, "story");
   await page.locator("#save-story").click();
   await page.locator("#save-dialog").waitFor({state: "visible"});
   await page.locator("#confirm-save").click();
   await page.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+  await closeSettings(page);
 }
 async function scrollTo(page, index) {
   await page.evaluate(value => {
@@ -175,8 +180,9 @@ async function captureLayouts(page) {
   }
   await page.setViewportSize({width: 1440, height: 1000});
   await page.waitForTimeout(100);
-  await openReview(page);
+  await openSettings(page);
   await page.locator("#reading-appearance").selectOption("dark");
+  await openReview(page);
   await page.screenshot({path: path.join(evidence, "settings-dark.png"), animations: "disabled"});
   await closeSettings(page);
   await start(page, false);
@@ -237,7 +243,7 @@ async function storageFailureChecks(context, origin) {
   });
   await restricted.goto(origin);
   await add(restricted, "An ordinary walk.", "Storage unavailable");
-  await openLibrary(restricted); await restricted.locator("#save-story").click();
+  await openSettings(restricted, "story"); await restricted.locator("#save-story").click();
   await restricted.locator("#confirm-save").click();
   await restricted.waitForFunction(() => document.querySelector("#save-status").dataset.state === "error");
   assert.equal(await restricted.locator(".story-paragraph").textContent(), "An ordinary walk.");
@@ -246,6 +252,87 @@ async function storageFailureChecks(context, origin) {
   assert.equal(await restricted.locator("html").getAttribute("data-theme"), "dark");
   assert.deepEqual(errors, [], "Storage denial must be handled without runtime errors.");
   await restricted.close();
+}
+
+async function libraryDiscoveryChecks(page) {
+  const title = await page.locator("#story-title").textContent();
+  await openLibrary(page);
+  await page.locator("#library-search").fill("afternoon walk");
+  assert.equal(await page.locator("#story-list button[data-story-id]").count(), 1, "Title search filters the local library.");
+  assert.equal(await page.locator("#story-title").textContent(), title, "Filtering never switches the open story.");
+  await page.locator("#library-search").fill("no such neutral title");
+  assert.equal(await page.locator("#story-list button[data-story-id]").count(), 0);
+  assert.equal(await page.locator("#story-title").textContent(), title);
+  await page.locator("#library-search").fill("");
+  await page.locator("#library-sort").selectOption("title");
+  const titles = await page.locator("#story-list .story-item-title").allTextContents();
+  assert.deepEqual(titles, [...titles].sort((a, b) => a.localeCompare(b, "en", {numeric: true, sensitivity: "base"})), "Title sorting matches the selected order.");
+  await page.locator("#library-sort").selectOption("progress");
+  assert.equal(await page.locator("#story-title").textContent(), title, "Changing the sort preserves the current story.");
+  await page.locator("#library-sort").selectOption("updated");
+  const firstTab = page.locator("#story-tabs [role=tab]").filter({hasText: "First story"});
+  await firstTab.click();
+  await page.waitForFunction(() => document.querySelector("#story-title").textContent === "First story");
+  await analysed(page); await output(page, 0);
+  assert.equal(await firstTab.getAttribute("aria-selected"), "true");
+  await page.locator("#story-tabs [role=tab]").filter({hasText: title}).click();
+  await page.waitForFunction(value => document.querySelector("#story-title").textContent === value, title);
+  await analysed(page); await output(page, 0);
+  assert.equal(await page.locator("#strength-value").textContent(), "1.0×", "Tab changes reset session strength without starting output.");
+}
+
+async function backupAndPreferenceChecks(page) {
+  await add(page, "A neutral backup fixture.\n\nA quiet walk home.", "Backup fixture");
+  await openReview(page); await setRange(page, "level", 0); await closeSettings(page);
+  await save(page);
+  await openLibrary(page);
+  if (!await page.locator(".library-tools").evaluate(element => element.open)) await page.locator(".library-tools > summary").click();
+  const [download] = await Promise.all([page.waitForEvent("download"), page.locator("#export-story").click()]);
+  assert.equal(download.suggestedFilename(), "satinlore-story-backup.json", "A private title must not enter the downloaded filename.");
+  const downloadedPath = await download.path();
+  assert.ok(downloadedPath, "The browser produces a real local download for the backup.");
+  const raw = await readFile(downloadedPath, "utf8");
+  const backup = JSON.parse(raw);
+  assert.equal(backup.format, "satinlore-story-backup");
+  assert.equal(backup.stories.length, 1);
+  assert.equal(backup.stories[0].title, "Backup fixture");
+  assert.equal(backup.stories[0].corrections[0], 0, "A backup preserves manual zero.");
+  assert.deepEqual(Object.keys(backup.stories[0]).sort(), ["analysisVersion", "corrections", "position", "text", "title"].sort(), "Backup carries story data only, without playback/session state or retained IDs.");
+  await page.locator("#import-backup").setInputFiles({name: "restore.json", mimeType: "application/json", buffer: Buffer.from(raw)});
+  await page.waitForFunction(() => document.querySelectorAll("#story-list button[data-story-id]").length === 2);
+  await analysed(page); await output(page, 0);
+  assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).stories.length, libraryKey), 1, "Restoring adds session-only copies; it does not silently persist a second story.");
+  assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
+  assert.equal(await page.locator("#strength-value").textContent(), "1.0×");
+  await openReview(page);
+  assert.equal(await page.locator("#level").inputValue(), "0", "A restored manual zero survives fresh local analysis.");
+  await closeSettings(page); await openLibrary(page);
+  await page.locator("#import-backup").setInputFiles({name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("{}")});
+  await page.waitForFunction(() => /could not|invalid/i.test(document.querySelector("#library-transfer-status").textContent));
+  assert.equal(await page.locator("#story-list button[data-story-id]").count(), 2, "Rejected backups preserve existing stories.");
+  await page.locator("#delete-all").click();
+  await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
+  await openSettings(page);
+  await page.locator("#reading-width").selectOption("full");
+  await page.locator("#font-size").selectOption("large");
+  await page.locator("#reading-spacing").selectOption("relaxed");
+  await page.locator("#follow-scroll").uncheck();
+  await page.reload();
+  await page.waitForFunction(() => !document.querySelector("#new-story").disabled);
+  await openSettings(page);
+  assert.equal(await page.locator("#reading-width").inputValue(), "full");
+  assert.equal(await page.locator("#font-size").inputValue(), "large");
+  assert.equal(await page.locator("#reading-spacing").inputValue(), "relaxed");
+  assert.equal(await page.locator("#follow-scroll").isChecked(), false);
+  assert.equal(await page.locator("body").getAttribute("data-reading-width"), "full");
+  assert.equal(await page.locator("#start").isDisabled(), true, "Presentation restoration cannot connect or arm playback.");
+  const preferences = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), preferencesKey);
+  assert.deepEqual(Object.keys(preferences.preferences).sort(), ["follow", "fontSize", "spacing", "width"].sort());
+  await page.locator("#reading-width").selectOption("wide");
+  await page.locator("#font-size").selectOption("normal");
+  await page.locator("#reading-spacing").selectOption("normal");
+  await page.locator("#follow-scroll").check();
+  await closeSettings(page);
 }
 
 export async function checkReader(page, context, origin) {
@@ -282,8 +369,9 @@ export async function checkReader(page, context, origin) {
   assert.deepEqual(await page.evaluate(() => Object.keys(localStorage)), ["satinlore.appearance"], "Import and analysis do not opt into persistence.");
 
   await add(page, neutralStory, "The afternoon walk");
+  await libraryDiscoveryChecks(page);
+  await openSettings(page); await page.locator("#follow-scroll").uncheck();
   await openReview(page);
-  await page.locator("#follow-scroll").uncheck();
   await setRange(page, "level", 3);
   await closeSettings(page);
   if (!await page.locator("#connect").isDisabled()) await page.locator("#connect").click();
@@ -297,6 +385,14 @@ export async function checkReader(page, context, origin) {
   await output(page, 0);
   await start(page);
   await output(page, 3);
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await page.locator("#stop").click();
+    await output(page, 0);
+    assert.equal(await page.locator("#start").isDisabled(), false, `Stop ${cycle + 1} leaves Start available without reconnecting.`);
+    await page.clock.runFor(1100); await output(page, 0);
+    await start(page);
+    await page.clock.runFor(1100); await output(page, 3);
+  }
   for (let i = 0; i < 5; i++) await page.locator("#strength-plus").click();
   assert.equal(await page.locator("#strength-value").textContent(), "1.5×");
   await page.clock.runFor(1100);
@@ -354,6 +450,7 @@ export async function checkReader(page, context, origin) {
   await page.locator("#level").focus(); await page.locator("#level").press("Home");
   assert.equal(await page.locator("#level").inputValue(), "0");
   await setRange(page, "level", 3);
+  await openSettings(page);
   await page.locator("#reading-width").selectOption("full");
   await current(page, 6);
   assert.equal(await page.locator("body").getAttribute("data-reading-width"), "full");
@@ -410,7 +507,7 @@ export async function checkReader(page, context, origin) {
 
   await captureLayouts(page);
   await openSettings(page); await page.locator("#follow-scroll").uncheck(); await closeSettings(page);
-  await openLibrary(page); await page.locator("#rename-story").click();
+  await openSettings(page, "story"); await page.locator("#rename-story").click();
   assert.equal(await page.locator("#story-title").textContent(), promptReply);
   await save(page);
   await page.locator("#next").evaluate(element => { if (!element.disabled) element.click(); });
@@ -443,11 +540,11 @@ export async function checkReader(page, context, origin) {
   assert.match(await page.locator("#level-source").textContent(), /manual|your/i, "Restored zero remains a correction rather than an unset value.");
   await closeSettings(page);
   await add(page, "A second saved story.", "Second saved story"); await save(page);
-  await openLibrary(page); await page.locator("#delete-story").click();
+  await openSettings(page, "story"); await page.locator("#delete-story").click();
   await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).stories.length === 1, libraryKey);
   await page.reload(); await analysed(page);
   assert.equal(await page.locator("#story-list button[data-story-id]").count(), 1);
-  await openLibrary(page); await page.locator("#session-only").click();
+  await openSettings(page, "story"); await page.locator("#session-only").click();
   await page.waitForFunction(key => !localStorage.getItem(key) || JSON.parse(localStorage.getItem(key)).stories.length === 0, libraryKey);
   assert.equal(await page.locator(".story-paragraph").count(), 8, "Session only removes the saved copy but keeps text readable.");
   await save(page);
@@ -470,7 +567,7 @@ export async function checkReader(page, context, origin) {
     };
   }, libraryKey);
   await add(page, "Still readable after a failed save.", "Quota fixture");
-  await openLibrary(page); await page.locator("#save-story").click(); await page.locator("#confirm-save").click();
+  await openSettings(page, "story"); await page.locator("#save-story").click(); await page.locator("#confirm-save").click();
   await page.waitForFunction(() => document.querySelector("#save-status").dataset.state === "error");
   assert.equal(await page.locator(".story-paragraph").textContent(), "Still readable after a failed save.");
   assert.equal(await page.evaluate(key => localStorage.getItem(key), libraryKey), null);
@@ -499,6 +596,8 @@ export async function checkReader(page, context, origin) {
   await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
   await page.waitForFunction(() => !document.querySelector("#new-story").disabled);
 
+  await backupAndPreferenceChecks(page);
+
   const literal = '<img src="invalid" onerror="globalThis.__storyExecuted=true">';
   await add(page, literal, "Literal text");
   assert.equal(await page.locator("#paragraph img").count(), 0);
@@ -522,9 +621,9 @@ export async function checkReader(page, context, origin) {
   assert.equal(await page.locator("#story-title").textContent(), "Literal text", "Closing import invalidates its delayed completion.");
   await storageFailureChecks(context, origin);
   await page.bringToFront();
-  assert.deepEqual(await page.evaluate(() => ({local: Object.keys(localStorage), session: sessionStorage.length})),
-    {local: ["satinlore.appearance"], session: 0}, "Only allowlisted appearance remains after local deletion.");
+  assert.deepEqual(await page.evaluate(() => ({local: Object.keys(localStorage).sort(), session: sessionStorage.length})),
+    {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct workspace, optional review, confirmed Start/ceiling, bounded session strength, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct workspace, Reader/Story settings, optional review, repeated Start/Stop/restart, confirmed ceiling, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

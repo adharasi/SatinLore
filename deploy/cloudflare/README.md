@@ -4,7 +4,7 @@ This adapter hosts the existing browser reader at `https://app.satinlore.com` fo
 
 ## What is published
 
-`npm run build:worker` copies only the reader files listed in `assets.mjs` to the ignored `dist/private-app` directory. It adds a hosted-access marker to the copied HTML and removes the local device-check link. The source HTML remains unchanged. Neither device-check/bridge files nor Lovense modules, source instructions, databases, environment files or story content are bundled. The Worker refuses unknown paths and exposes no story-upload or feedback endpoint.
+`npm run build:worker` copies only the reader files listed in `assets.mjs` to the ignored `dist/private-app` directory. It adds a hosted-access marker to the copied HTML and removes the local device-check link. The source HTML remains unchanged. Neither device-check/bridge files nor Lovense modules, source instructions, databases, environment files or story content are bundled. The Worker refuses unknown paths and exposes no story-upload endpoint. The private `/support` page uses a separate SQLite Durable Object for feedback deliberately submitted by the signed-in user; feedback never includes automatic reader text or context.
 
 The existing reader still processes text locally. New stories remain session-only until the explicit **Save on this browser** choice. Saved stories belong to this browser and this origin; localhost stories are not transferred to the hosted app. No story cloud backup is introduced.
 
@@ -12,7 +12,7 @@ Every request, including HTML, JavaScript, CSS, health and access probes, passes
 
 ## One-time setup in your own browser
 
-Use your normal Windows browser and the Cloudflare account that already owns `satinlore.com`. This is a separate Worker connected to **`adharasi/SatinLore`**, not the marketing website project. Once connected, future pushes to `main` build and deploy automatically. No local terminal or Cloudflare credentials shared with a coding assistant are needed for this dashboard workflow.
+Use your normal Windows browser and the Cloudflare account that already owns `satinlore.com`. This is a separate Worker connected to **`adharasi/SatinLore`**, not the marketing website project. Once connected, future pushes to `main` build and deploy automatically. No local terminal or Cloudflare credentials shared with a coding assistant are needed for this dashboard workflow. The app now provisions its `PrivateFeedback` SQLite Durable Object namespace through the tracked `v1` migration; it does not use marketing D1 or SES resources.
 
 ### 1. Protect the app hostname first
 
@@ -62,7 +62,7 @@ The canonical hostname is **`app.satinlore.com`**. A `www.app.satinlore.com` ali
 
 ### 4. Verify login and the reader
 
-17. In a new private/incognito session, open `https://app.satinlore.com`. It should ask you to sign in through Cloudflare Access. Do the next check before entering the PIN.
+17. Close existing incognito windows, then in a fresh private/incognito session, open `https://app.satinlore.com`. It should ask you to sign in through Cloudflare Access. Do the next check before entering the PIN.
 18. While still logged out, visit `https://app.satinlore.com/static/app.mjs` and `https://app.satinlore.com/api/access`. Both must require Access login or deny access; neither should reveal reader code or access data before login.
 19. Return to `https://app.satinlore.com`, sign in with `team@satinlore.com` and the emailed PIN, then paste neutral sample text. Connect the simulator, confirm Start, try strength −/+, Pause and Stop. Choose **Save on this browser**, reload and confirm the story returns **paused**. Check Light/Dark and phone layout. The hosted app remains simulator-only.
 20. Open `https://app.satinlore.com/api/health` while signed in. Expect `status: "ok"`, `device_mode: "simulator"`, `beta_ready: false`. This endpoint reports availability, not physical-device qualification.
@@ -92,12 +92,25 @@ This workflow does not require SES, the questionnaire webhook secret, D1, Google
 
 For a developer deploying from a local checkout, set up Python with `bootstrap.py`, install Node.js 24, then run `npm ci --ignore-scripts`, `python3 scripts/check.py`, `npm run build:worker` and `npm exec wrangler deploy -- --dry-run`. Windows uses `py scripts/check.py`. Authenticate privately with `npm exec wrangler login`, then `npm run deploy:worker`. The same three runtime settings must still be saved on the Worker; dry-run is not remote provisioning.
 
+## Hosted services and migration
+
+The `PRIVATE_FEEDBACK` binding points to the exported `PrivateFeedback` class. Its first append-only `v1` migration uses `new_sqlite_classes`; Wrangler provisions the namespace during deployment, with no hand-entered database ID or new runtime secret. The Worker verifies the existing Access assertion before routing every API call. Each store name is a one-way hash derived only from verified application audience and subject; identity is never selected from a request body or query.
+
+Feedback has a 4 KB request bound, a 2 KB/2,000-character note limit, exact allowlisted fields, same-origin JSON writes and per-person limits of two new notes/minute, ten/hour, twenty/day and 100 retained notes. Repeating a request with the same idempotency key/payload returns the original saved record; a changed payload with the same key is rejected. Delete removes live feedback while preserving message-free short-lived request counts. Feedback expires after 30 days; security counts expire within 24 hours, with request/alarm cleanup. Provider recovery history may retain earlier copies for up to 30 further days after live deletion.
+
+The support UI waits for actual server acknowledgements. Failed or ambiguous sends keep the draft/key for retry; fields are locked during a request. Export contains only that sign-in's feedback. Deletion has a native dialog and explicit confirmation; cancelling while authentication is pending cannot cause a delayed deletion. Neither action deletes browser stories, the marketing waitlist or a Cloudflare identity.
+
+SQLite Durable Objects are supported on Workers Free. A Free-plan resource/quota error is reported as unavailable rather than as a successful send. Do not enable a paid subscription merely to complete this setup. If migration/deployment fails, inspect the Cloudflare build output before retrying; the prior production version remains the operational baseline.
+
 ## HTTP contract and session behaviour
 
 - Authenticated `GET /api/access` returns only `{ "authenticated": true, "expiresAt": 1234567890000 }`; `expiresAt` is the verified JWT expiry in Unix **milliseconds**. No email, user ID, token or cookie is returned.
 - Missing, malformed, expired or disallowed assertions return 403 with a generic error. Missing/invalid/paused configuration returns 503. The reader must pause and block Start on a probe failure or expiry, and never resume automatically after reauthentication.
 - Authenticated `GET /api/health` returns `{ "status": "ok", "device_mode": "simulator", "beta_ready": false }`. Availability does not mean a hardware beta is ready.
-- Only `GET` and `HEAD` are accepted. Unknown and real-device routes return 404 after authentication. There is no invitation, vendor-token, account-data or feedback API in this adapter.
+- Reader assets and health/access probes accept `GET`/`HEAD`. The deliberate feedback routes below accept their specified methods. Unknown and real-device routes remain unavailable; there is no hosted invitation or vendor-token API.
+- Authenticated `GET /api/feedback` lists that sign-in's live notes. `POST /api/feedback` accepts only `{idempotencyKey,category,message,rating?}` and returns a real saved acknowledgement. No automatic story context or client identity field is accepted.
+- Authenticated `GET /api/my-data` exports only app feedback. `POST /api/my-data/delete` requires exact JSON `{ "confirm": true }` and deletes the live feedback records. Writes require the exact app Origin and JSON content type; cookies, assertions, query values and identity are not forwarded into the store.
+- `/help`, `/support` and `/simulator-lab` plus their assets are covered by the same founder-only authentication gate. Help shows the public source revision inserted by the Cloudflare build; the lab contains simulated devices and no private story input.
 - Reauthenticating uses Cloudflare Access. Access revocation prevents subsequent requests; it does not remotely erase a document already loaded in the browser or saved locally. The reader's periodic, visibility and expiry checks pause its simulator. Local story deletion remains a separate explicit browser operation.
 
 ## Verify the deployed boundary
@@ -111,14 +124,16 @@ Use neutral fixture text and an inbox you control. Check these separately from m
 5. Expiry, sign-out/revocation, failed probes, hidden-page return and offline errors block Start and leave output paused. Logging in again must not automatically start playback. Check that unsaved text is not silently persisted or uploaded.
 6. Inspect network requests while reading a neutral story. No text, title, excerpts, private tokens, third-party analytics or vendor scripts may leave the reader.
 
-`PRIVATE_APP_ENABLED=false` is an operational pause: save and deploy that runtime setting to deny new requests and fail subsequent reader probes. It is not a remote browser-storage deletion mechanism. To revoke an existing Access session, use the dedicated Access application's controls. To roll back, deploy a known previous Worker version; no database migration or story-data restore is involved.
+`PRIVATE_APP_ENABLED=false` is an operational pause: save and deploy that runtime setting to deny new requests and fail subsequent reader probes. It is not a remote browser-storage deletion mechanism. To revoke an existing Access session, use the dedicated Access application's controls. For a code rollback after introducing feedback, preserve the `PrivateFeedback` class export, binding and migration history. A version predating the class may not be a valid direct rollback target. Use a corrective release retaining the storage contract; do not delete the namespace or migration history to make a rollback succeed. Browser story data is independent.
 
 ## Why this adapter rather than a Python port
 
-Cloudflare currently supports FastAPI through its Python ASGI entrypoint and supports D1 from Python. That could host a future minimal session/feedback service, but the current SQLite store, local-origin restrictions, invitation transactions and device integration would need a separate, tested port. The existing simulator reader needs none of those services, so this release keeps the Python local boundary intact and adds only the authenticated static host.
+Cloudflare currently supports FastAPI through its Python ASGI entrypoint and supports D1 from Python. That could host a future minimal session/feedback service, but the current SQLite store, local-origin restrictions, invitation transactions and device integration would need a separate, tested port. The reader itself needs none of the Python session/vendor services. This release keeps the Python local boundary intact, hosts the authenticated reader and adds the deliberately bounded private feedback store.
 
 Official references:
 
+- [SQLite Durable Object storage and recovery](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
+- [Durable Object availability and Free-plan limits](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 - [Workers static assets and binding](https://developers.cloudflare.com/workers/static-assets/)
 - [Run a Worker before every asset request](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/)
 - [Keep dashboard runtime variables across deployment](https://developers.cloudflare.com/workers/wrangler/configuration/#source-of-truth)

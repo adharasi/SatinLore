@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
-import { PRIVATE_ASSET_PATHS } from "../deploy/cloudflare/assets.mjs";
+import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES } from "../deploy/cloudflare/assets.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://app.satinlore.com";
@@ -57,7 +57,7 @@ test("private preview requires complete exact-origin, issuer, dedicated-audience
 
 test("every static reader route denies missing tokens before fetching assets or signing keys", async () => {
   const f = fixture();
-  for (const path of ["/", ...PRIVATE_ASSET_PATHS]) {
+  for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const result = await f.worker.fetch(request(path), f.env);
     assert.equal(result.status, 403, path);
     assert.deepEqual(await result.json(), { error: "Founder access required." });
@@ -69,7 +69,7 @@ test("every static reader route denies missing tokens before fetching assets or 
 
 test("valid founder assertions grant only read-only allowlisted files and strip input metadata from asset fetch", async () => {
   const f = fixture(), jwt = await token();
-  for (const path of ["/", ...PRIVATE_ASSET_PATHS]) {
+  for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const response = await f.worker.fetch(request(path, jwt), f.env);
     assert.equal(response.status, 200, path);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
@@ -153,6 +153,8 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.equal(config.workers_dev, false); assert.equal(config.preview_urls, false);
   assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }]);
   assert.equal(config.d1_databases, undefined); assert.equal(config.r2_buckets, undefined);
+  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" }]);
+  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] }]);
   assert.equal(config.keep_vars, true);
   for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED"]) assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
   assert.equal(config.vars.PUBLIC_APP_ORIGIN, ORIGIN);
@@ -173,6 +175,11 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.deepEqual((await list(output)).sort(), [...PRIVATE_ASSET_PATHS].sort());
   const hosted = await readFile(resolve(output, "index.html"), "utf8");
   assert.match(hosted, /<meta name="satinlore-hosted-access" content="true">/);
+  for (const path of Object.values(PRIVATE_DOCUMENT_ROUTES)) {
+    const page = await readFile(resolve(output, path.slice(1)), "utf8");
+    assert.match(page, /<meta name="satinlore-hosted-access" content="true">/);
+    assert.match(page, /<meta name="satinlore-build" content="(?:[a-f0-9]{40}|local)">/);
+  }
   assert.doesNotMatch(hosted, /device-check|device-bridge|lovense\.mjs/);
   assert.equal(await readFile(resolve(ROOT, "app/static/index.html"), "utf8"), localIndex);
 });
@@ -192,4 +199,77 @@ test("a first deployment without dashboard Access settings is unavailable and th
     assert.equal((await f.worker.fetch(request("/", jwt), missing)).status, 503, `missing runtime ${key}`);
   }
   assert.equal(f.reads.length, 0);
+});
+
+function feedbackFixture() {
+  const f = fixture(), names = [], forwarded = [];
+  f.env.PRIVATE_FEEDBACK = {
+    idFromName(name) { names.push(name); return name; },
+    get(id) { return { async fetch(input) {
+      forwarded.push({ id, request: input, body: input.method === "POST" ? await input.json() : null });
+      return Response.json({ ok: true });
+    } }; },
+  };
+  return { ...f, names, forwarded };
+}
+const validFeedback = { idempotencyKey: "6d8cfa2b-8b90-4ea0-a98e-4137bc3f4620", category: "bug", message: "Synthetic control check." };
+const feedbackPost = body => ({ method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+test("private feedback requires signed identity and the exact writing origin before touching storage", async () => {
+  const f = feedbackFixture(), jwt = await token();
+  for (const path of ["/api/feedback", "/api/my-data", "/api/my-data/delete"]) {
+    assert.equal((await f.worker.fetch(request(path), f.env)).status, 403);
+  }
+  assert.equal((await f.worker.fetch(request("/api/feedback", await token({ email: "another@example.test" }), feedbackPost(validFeedback)), f.env)).status, 403);
+  for (const headers of [
+    { Origin: "https://attacker.example.test", "Content-Type": "application/json" },
+    { "Content-Type": "application/json" },
+    { Origin: ORIGIN, "Content-Type": "application/json", "Sec-Fetch-Site": "same-site" },
+  ]) assert.equal((await f.worker.fetch(request("/api/feedback", jwt, { ...feedbackPost(validFeedback), headers }), f.env)).status, 403);
+  assert.equal(f.names.length, 0); assert.equal(f.forwarded.length, 0);
+});
+
+test("feedback storage is selected only from verified identity and never receives identity headers or query values", async () => {
+  const f = feedbackFixture(), jwt = await token();
+  const response = await f.worker.fetch(request("/api/feedback?user=untrusted", jwt, feedbackPost(validFeedback)), f.env);
+  assert.equal(response.status, 200); assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(f.forwarded[0].body, { ...validFeedback, rating: null });
+  const firstName = f.names[0]; assert.match(firstName, /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(firstName, /synthetic|founder/);
+  await f.worker.fetch(request("/api/my-data?email=untrusted", jwt, { headers: { Cookie: "private=synthetic" } }), f.env);
+  assert.equal(f.names[1], firstName);
+  const forwarded = f.forwarded[1].request;
+  assert.equal(forwarded.url, "https://feedback.internal/api/my-data");
+  assert.equal(forwarded.headers.get("Cookie"), null); assert.equal(forwarded.headers.get("Cf-Access-Jwt-Assertion"), null);
+  await f.worker.fetch(request("/api/my-data", await token({ sub: "other-synthetic-subject" })), f.env);
+  assert.notEqual(f.names[2], firstName);
+  const access = await (await f.worker.fetch(request("/api/access", jwt), f.env)).json();
+  assert.deepEqual(Object.keys(access).sort(), ["authenticated", "expiresAt"]);
+  assert.equal(access.authenticated, true); assert.equal(Number.isSafeInteger(access.expiresAt), true);
+});
+
+test("feedback rejects identity fields, excess bodies and unconfirmed deletion before forwarding a mutation", async () => {
+  const f = feedbackFixture(), jwt = await token();
+  for (const body of [{ ...validFeedback, email: ENV.FOUNDER_EMAIL }, { ...validFeedback, story: "Synthetic text" }, { ...validFeedback, userId: "untrusted" }]) {
+    assert.equal((await f.worker.fetch(request("/api/feedback", jwt, feedbackPost(body)), f.env)).status, 400);
+  }
+  assert.equal((await f.worker.fetch(request("/api/feedback", jwt, feedbackPost({ ...validFeedback, message: "x".repeat(5000) })), f.env)).status, 413);
+  for (const body of [{}, { confirm: false }, { confirm: true, userId: "untrusted" }]) {
+    assert.equal((await f.worker.fetch(request("/api/my-data/delete", jwt, feedbackPost(body)), f.env)).status, 400);
+  }
+  assert.equal(f.forwarded.length, 0);
+  assert.equal((await f.worker.fetch(request("/api/my-data/delete", jwt, feedbackPost({ confirm: true })), f.env)).status, 200);
+  assert.deepEqual(f.forwarded[0].body, { confirm: true });
+});
+
+test("feedback outages and wrong methods return truthful errors without private exceptions", async () => {
+  const f = fixture(), jwt = await token();
+  assert.equal((await f.worker.fetch(request("/api/feedback", jwt), f.env)).status, 503);
+  const service = feedbackFixture();
+  service.env.PRIVATE_FEEDBACK.get = () => ({ fetch() { throw new Error("synthetic-private-failure"); } });
+  const response = await service.worker.fetch(request("/api/my-data", jwt), service.env);
+  assert.equal(response.status, 503); assert.doesNotMatch(await response.text(), /synthetic-private-failure/);
+  for (const path of ["/api/feedback", "/api/my-data", "/api/my-data/delete"]) {
+    assert.equal((await service.worker.fetch(request(path, jwt, { method: "DELETE" }), service.env)).status, 405);
+  }
 });

@@ -4,6 +4,12 @@ Decision record: 29 October 2026, product owner Hammad, **SatinLore frontend imp
 
 The workspace opens a story directly into one continuous reading canvas. A collapsible left library and optional right settings panel support reading; neither review nor a settings screen is a compulsory step. This local simulator milestone remains separate from deeper F3 device failures, remaining F4 services, F5/F6 evaluation and H1/H2 qualification. The marketing waitlist is a separate application.
 
+## NovelAI-style refinement — 1 November 2026
+
+The product owner's new direction keeps the approved colours and continuous reader while making the workspace denser: compact header with open-story tabs; title search/sort and backup controls in the left library; smaller story heading and wider canvas; optional Reader/Story tabs on the right; compact, persistent transport with actionable Start-readiness text and nearby access retry. Save/rename/delete and optional corrections live in the Story tab. Help/support open separately so a session-only story stays in its original reader tab.
+
+Presentation preferences (width, size, spacing and follow position) are allowlisted separately from appearance and stories. A preference change pauses and preserves place. Portable backups contain only deliberately selected story data; imported copies get fresh identities, remain session-only and cannot arm playback. Layout shortcuts avoid typing targets; there is no keyboard shortcut that starts output.
+
 ## Shared visual system
 
 Both themes use the same layout and components. Local serif fallbacks serve reading text; a system sans-serif serves controls. No remote font or image service is required. The reading surface has no decorative texture. Spacing and quiet borders provide structure without treating status colour as its only meaning.

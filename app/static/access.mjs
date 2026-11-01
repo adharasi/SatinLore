@@ -68,7 +68,7 @@ export class HostedAccessGuard {
     const current = () => generation === this.generation && this.active && this.visible;
     const task = (async () => {
       try {
-        const result = await this.request({method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", signal: abort.signal});
+        const result = await this.request({method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", headers: {"X-Requested-With": "XMLHttpRequest"}, signal: abort.signal});
         if (!current()) return false;
         if (!result.ok || result.redirected) throw new Error("access");
         const data = await result.json();
@@ -86,7 +86,9 @@ export class HostedAccessGuard {
         if (generation === this.generation) { this.abort = null; this.pending = null; }
       }
     })();
-    this.pending = task;
+    // A request function can fail synchronously (before its first await). Do not
+    // overwrite lose()'s cleared pending state with that already-failed task.
+    this.pending = current() ? task : null;
     return task;
   }
 }

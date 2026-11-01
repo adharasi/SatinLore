@@ -34,17 +34,21 @@ This brings the local-persistence part of F4 into the current workspace implemen
 
 ## F3 — deterministic device scenarios and transport contract
 
-**Next after workspace acceptance.** Add a development-only scenario surface for connection failure, unsupported capabilities, multiple available devices with explicit single selection, delayed connection/timeout, disconnect during playback, delayed/out-of-order acknowledgement, failed Stop/unknown output and stale completion after story/device changes. Keep scenario controls out of ordinary reading navigation. Reset fixtures deterministically and label every device value as simulated.
+**Implemented, 1 November 2026.** `/simulator-lab` exercises 11 named scenarios with a manually advanced virtual clock and explicitly selected fake devices. The separate `playback/async-controller.mjs` contract covers empty/unsupported/multiple devices, failed/delayed/timed-out connection, cancellation, disconnect, delayed/wrong/missing acknowledgements, failed Stop, stale work, bounded coalescing and recovery. Native dialog cancellation invalidates a pending Start, including while hosted authorisation is being checked.
 
-Existing synchronous simulator/controller tests cover bounded playback, interruption, stale local work and ownership; they do not implement an asynchronous device harness. Add async support deliberately with cancellation, generation invalidation, bounded requests and stale-result regression tests. Reconnect remains ready-paused and requires a new Start. Never substitute a reassuring local zero for unknown physical output.
+A command-settlement fence prevents an older pending command from being mistaken as stopped when its completion and a prior Stop acknowledgement arrive together. A fresh targeted Stop after settlement is required before reporting known zero. Unknown output and an error latch remain until explicit recovery; fixture output is labelled as simulation, not a physical measurement.
 
-## F4 — remaining software journeys and local services
+The ordinary reader intentionally retains its synchronous simulator adapter. The async lab is a testable contract for later integration, not permission to connect an unqualified real adapter. It has no story input, SDK, network transport or saved playback state. See [the simulator lab guide](../app/static/simulation/README.md). Fake-clock and actual UI-binding tests are separate from browser and physical-device evidence.
 
-Opt-in local story/progress persistence, paused restoration and delete one/all are now part of Workspace v2. Maintain their storage failure and privacy checks; do not treat local deletion as server account deletion. Session-only remains the default and appearance remains separate.
+## F4 — supporting software journeys
 
-Finish invitation/onboarding/session-expiry flow, help and build information, bounded private feedback with retry/idempotency, allowlisted coarse events and account-data deletion/revocation where a real backend exists. Distinguish local deletion from server deletion. Do not display successful saving, sending or deletion for an unimplemented operation. Minimum operational controls include a new-session kill switch, redacted logs, support details and a tested restore procedure.
+**Implemented for the private hosted preview, 1 November 2026.** The reader has explicit local persistence, search/sort and open-story tabs, private download/restore backups, independently remembered presentation settings, keyboard access, nearby playback-readiness explanations and a recoverable access-check flow. Backups restore fresh session-only copies without strength, ceiling or arming. Imports and restores are cancelled by Stop, story deletion or tab hiding.
 
-The authenticated device-check session exists today; the simulator reader is not an authenticated account experience. Do not infer reader-wide session/revocation handling from the separate check screen.
+`/help` explains controls, privacy, recovery and the deployed source build. `/support` uses a real SQLite-backed `PrivateFeedback` Durable Object selected only from the Worker's verified Access subject/audience. Feedback has bounded exact fields, same-origin writes, per-user limits, payload-aware idempotency, 30-day expiry and cleanup alarms. Server feedback export and confirmed live deletion report actual results. Message-free security counters expire within 24 hours and survive feedback deletion; provider recovery history may retain older records for up to 30 more days. Stories never enter this service automatically.
+
+The first `v1` SQLite class migration provisions the feedback namespace through the app's Git deployment, without marketing D1/SES resources or new runtime secrets. The existing dashboard-owned enable flag remains a kill switch. Errors are generic, logs contain no stories, and unavailable storage/authentication never fabricates a successful send or deletion. A real local Miniflare SQLite test exercises write, deduplication, export, deletion, rate preservation and separate object isolation.
+
+Access remains founder-only. Invited-reader access/roles and broader beta onboarding require an explicit release change; a Cloudflare identity is not an application account we can erase. The local Python invitation/device-check backend remains local and does not gain hosted vendor routes. Optional coarse telemetry is not implemented or silently enabled. Recovery exports and browser story backups are tested; a production Cloudflare PITR restoration has not been performed.
 
 ## F5 — measurable scoring evaluation
 
@@ -58,7 +62,7 @@ Preserve deliberate corrections during future reanalysis or obtain an explicit c
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
 
-Real-phone browser usability can be checked without a Lovense device, but the current server remains local-development-only. Do not bypass origin/security restrictions to call this phase a deployment.
+Real-phone browser usability can be checked without a Lovense device using the private hosted simulator. The Python vendor/device-check server remains local. Signed-in hosted acceptance, representative-reader usability and physical-device qualification remain separate evidence.
 
 ## H — later physical qualification and controlled release
 
@@ -70,9 +74,17 @@ Only then invite 5–10 matching hardware-beta users; ask for two attempted sess
 
 ## Scope boundaries
 
-Defer generated stories, subscriptions/checkout, token wallets, native apps, public publishing, marketplaces, creator payouts, multiple device brands and affiliate dashboards. EPUB is optional after the core gates and must preserve TXT support. The separately managed marketing waitlist is not this local reader application. No hosting purchase or public deployment is part of the workspace milestone.
+Defer generated stories, subscriptions/checkout, token wallets, native apps, public publishing, marketplaces, creator payouts, multiple device brands and affiliate dashboards. EPUB is optional after the core gates and must preserve TXT support. The separately managed marketing waitlist is not this local reader application. The private simulator deployment is authorised; paid hosting purchases, public beta access, generation and billing are not added by this software milestone.
 
 ## Evidence ledger
+
+1 November 2026, workspace/control and F3/F4 software iteration:
+
+- Local common checks passed: 22 Python and 160 JavaScript tests, plus syntax/configuration and Worker bundle/dry-run checks. This includes actual app-binding tests, 14 asynchronous controller tests, three lab UI-binding tests and 20 feedback tests including real local SQLite Durable Object execution. No credentials or physical device were used.
+- Normal Stop → Start worked in baseline reproduction. A concrete synchronous-access-request failure could leave the guard's completed failed promise cached; the retry path is fixed and tested. Readiness text now names connection, analysis, access, lock or error recovery requirements beside Start. Repeated start/stop, pending confirmation/lock/auth cancellation and periodic access loss have regression coverage.
+- Logged-out live checks reached Cloudflare Access on the app root, `/static/app.mjs` and `/api/access`. This establishes the visible boundary, not a readback of dashboard settings or signed-in end-to-end acceptance. Git deployment and final browser CI results are reported with the release commit.
+- Managed-browser checks use neutral text and an HTTP preview; Web Locks are unavailable there. CI's localhost browser suite checks actual simulator dispatch and browser saving. A real-phone/hardware run remains outstanding.
+
 
 1 November 2026, private reader preparation:
 

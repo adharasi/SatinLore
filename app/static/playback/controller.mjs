@@ -25,7 +25,7 @@ function strengthTenths(value) {
 }
 
 export class PlaybackController {
-  constructor({device, onChange = () => {}, now = () => performance.now(),
+  constructor({device, onChange = () => {}, onInterfaceError = () => {}, now = () => performance.now(),
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = timer => clearTimeout(timer), inactivityMs = 120_000, heartbeatMs = 1000}) {
     if (!device || !["connect", "disconnect", "command", "stop", "snapshot"].every(name => typeof device[name] === "function")) {
@@ -37,6 +37,7 @@ export class PlaybackController {
     }
     this.device = device;
     this.onChange = onChange;
+    this.onInterfaceError = onInterfaceError;
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -78,7 +79,12 @@ export class PlaybackController {
 
   _notify() {
     try { this.onChange(this.snapshot()); }
-    catch { this._halt("The interface could not update. Reconnect the simulator.", "ERROR_PAUSED", false); }
+    catch {
+      this._halt("The interface could not update. Reconnect the simulator.", "ERROR_PAUSED", false);
+      // A separate minimal recovery surface must not recursively call the broken
+      // renderer. Never expose the exception or any story text to that surface.
+      try { this.onInterfaceError(this.snapshot()); } catch { /* Output is already stopped. */ }
+    }
     return this.snapshot();
   }
 

@@ -1,6 +1,6 @@
 # Development specification
 
-Technical snapshot: 29 October 2026; approved frontend specification v1.2. Implemented code, verified evidence and planned features are distinct below.
+Technical snapshot: 1 November 2026; workspace specification v1.2 with the authorised NovelAI-style software iteration. Implemented code, verified evidence and planned features are distinct below.
 
 ## Goal and scope
 
@@ -8,7 +8,7 @@ Synchronise adults' English text with one physically tested Lush 3 or Lush 4, vi
 
 Required beta: individual invitations, approved light/dark frontend, TXT/paste, paragraph scoring with corrections, mobile reader, position tracking, explicit device selection, Start/Pause/Stop, intensity ceiling, opt-in local progress, private feedback and deletion controls. EPUB is optional after core checks. Generation, billing, public publishing, native apps and other brands are deferred.
 
-Implemented locally: the Satin Editorial/Midnight Ink saved-story workspace with Light/Dark/System, direct continuous reading, background local scoring, optional corrections, collapsible library/settings, reading widths and focus mode. Explicit local saving retains opted-in stories, corrections and progress; restores are paused. Session strength and Start/ceiling confirmations sit above the existing bounded simulator. Invitation sessions, server-side vendor-token issuance and the separate device-check flow remain. Suggestion usefulness and live SDK/hardware qualification are unproven. Real story playback, feedback and server account-data deletion remain unimplemented. A separate founder-only Cloudflare Worker packages the simulator reader; remote provisioning and live Access verification remain outstanding. Its Access team/audience and enable flag are configured at runtime in the Cloudflare dashboard and preserved across repository deployments; the Python backend remains local.
+Implemented locally: the Satin Editorial/Midnight Ink saved-story workspace with Light/Dark/System, direct continuous reading, background local scoring, optional corrections, collapsible library/settings, reading widths and focus mode. Explicit local saving retains opted-in stories, corrections and progress; restores are paused. Session strength and Start/ceiling confirmations sit above the existing bounded simulator. Invitation sessions, server-side vendor-token issuance and the separate device-check flow remain. Suggestion usefulness and live SDK/hardware qualification are unproven. Real story-to-device playback and algorithm qualification remain outstanding. Hosted private feedback, feedback export/deletion and help are implemented; these do not erase a Cloudflare identity or browser stories. A separate founder-only Cloudflare Worker packages the simulator reader; remote provisioning and live Access verification remain outstanding. Its Access team/audience and enable flag are configured at runtime in the Cloudflare dashboard and preserved across repository deployments; the Python backend remains local.
 
 The 29 October workspace revision replaces compulsory Add → Review → Read and brings opt-in story persistence into the current frontend milestone. The software-first approach continues with simulation. Hardware availability is not a prerequisite for frontend, application or algorithm work. The [roadmap](beta-roadmap.md) separates software gates S1/S2 from later hardware and release gates H1/H2. F1/F2 do not constitute a complete software beta.
 
@@ -23,6 +23,8 @@ The 29 October workspace revision replaces compulsory Add → Review → Read an
 | Sandboxed bridge | Vendor SDK, discovery and bounded targeted commands | No same-origin permission; connection/control messages only |
 | FastAPI | Invitation sessions and individual vendor-token issuance | Developer token stays server-side; UID comes from session |
 | SQLite | Invites, temporary beta identities, sessions and rate limits | Hashed bearer tokens; no names or story storage |
+| Hosted private services | Verified Access identity, private feedback, export and confirmed feedback deletion | SQLite Durable Object; no automatic story context, email or JWT storage |
+| Async transport lab | Explicit fake-device selection and deterministic failure/recovery scenarios | Separate experimental controller, no real transport or reader story input |
 | Simulator playback controller | State, ceiling, cadence, inactivity and interruption rules | Synchronous mock adapter only; real transport is not wired |
 
 The integration uses the official [Lovense Standard JS SDK](https://developer.lovense.com/docs/standard-solutions/standard-js-sdk) with Lovense Remote as the phone/Bluetooth bridge. Its per-user authentication credential is obtained through the [server token exchange](https://developer.lovense.com/docs/standard-solutions/socket-api). Check current provider contracts and applicable access before live use.
@@ -80,7 +82,7 @@ The current store uses local-storage key `satinlore.library.v1`, schema version 
 
 Expected revisions prevent stale autosaves from recreating deleted or overwriting changed stories. A library change in another tab pauses playback and requests reload; an outdated tab cannot silently overwrite a newer saved revision. Corrupt entries remain stored for explicit recovery; valid entries can remain readable, but writes and individual deletion are blocked until the user chooses Delete all to clear the corrupt store. Delete all can remove even an unreadable envelope. Do not silently discard unreadable data. Browser quota can be lower than the application cap, and private-browser settings can deny access. Saving/deleting and simulator ownership require Web Locks; without them, session-only reading remains available and persistence reports the unsupported operation.
 
-Existing authentication remains on the separate device-check page; the normal reader is not an authenticated account experience. This phase does not add hosted AI, feedback APIs, account deletion or a deeper asynchronous device simulator. Screenshots and responsive emulation establish layout evidence only for the tested browser/build.
+Existing authentication remains on the separate device-check page; the normal reader is not an authenticated account experience. This phase does not add hosted AI, local Python feedback/account endpoints. The separate hosted Worker implements private feedback/data operations, and the founder lab implements deterministic asynchronous scenarios. Screenshots and responsive emulation establish layout evidence only for the tested browser/build.
 
 ## API status
 
@@ -91,8 +93,9 @@ Existing authentication remains on the separate device-check page; the normal re
 | `GET /api/me` | Implemented session identity, CSRF token and expiry |
 | `POST /api/logout` | Implemented application-session revocation |
 | `POST /api/lovense/session` | Implemented authenticated exchange; unavailable in simulator mode |
-| `POST /api/feedback`, `POST /api/events` | Planned bounded feedback and allowlisted coarse events |
-| `DELETE /api/me` | Planned data removal and access revocation |
+| Hosted `GET/POST /api/feedback` | Implemented bounded, authenticated private feedback with idempotency; coarse events are not enabled |
+| Hosted `GET /api/my-data`, `POST /api/my-data/delete` | Own feedback export and confirmed live deletion; separate from identity/browser/waitlist data |
+| `DELETE /api/me` | Not a hosted account-deletion endpoint; Access identity and local invitation sessions remain separate |
 
 Implemented tables: `beta_users`, `invites`, `sessions`, `rate_limits`. Planned feedback/entitlement tables must use bounded records and idempotency. Expired session/invite rows, old rate buckets and users without sessions are pruned opportunistically during writes; idle databases are not purged by a scheduled job. Finish explicit retention/deletion before external beta operations.
 

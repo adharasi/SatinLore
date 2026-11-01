@@ -52,7 +52,7 @@ test("hosted access starts blocked and uses only the same-origin no-cache access
   assert.equal(calls[0].options.cache, "no-store");
   assert.equal(calls[0].options.redirect, "error");
   assert.equal(calls[0].options.body, undefined);
-  assert.equal(calls[0].options.headers, undefined);
+  assert.deepEqual(calls[0].options.headers, {"X-Requested-With": "XMLHttpRequest"});
 });
 
 test("access denial, redirects, invalid expiry and network failures block Start without leaking errors", async () => {
@@ -171,5 +171,19 @@ test("a fresh Start check cancels an older refresh and stale success cannot undo
   assert.equal(await older, false);
   assert.equal(f.guard.isAuthorized(), false);
   assert.equal(f.lost.length, 1);
+  f.guard.destroy();
+});
+
+test("a synchronous access failure does not leave retries stuck on a completed pending promise", async () => {
+  let requests = 0;
+  const f = harness((options, now) => {
+    if (++requests === 1) throw Error("Synthetic request failure");
+    return Promise.resolve(response(now + 120000));
+  });
+  assert.equal(await f.guard.start(), false);
+  assert.equal(f.guard.pending, null);
+  assert.equal(await f.guard.check(), true);
+  assert.equal(requests, 2);
+  assert.equal(f.guard.isAuthorized(), true);
   f.guard.destroy();
 });

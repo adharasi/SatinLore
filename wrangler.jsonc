@@ -17,6 +17,10 @@
     "not_found_handling": "none"
   },
   "observability": { "enabled": false },
+  "durable_objects": {
+    "bindings": [{ "name": "PRIVATE_FEEDBACK", "class_name": "PrivateFeedback" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PrivateFeedback"] }],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",
     "FOUNDER_EMAIL": "team@satinlore.com"

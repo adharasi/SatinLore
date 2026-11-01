@@ -73,6 +73,18 @@ def create_app(settings: Settings | None = None, *, store=None, lovense_tokens=N
     def index():
         return FileResponse(STATIC / "index.html")
 
+    @application.get("/help")
+    def help_page():
+        return FileResponse(STATIC / "help.html")
+
+    @application.get("/support")
+    def support_page():
+        return FileResponse(STATIC / "feedback.html")
+
+    @application.get("/simulator-lab")
+    def simulator_lab():
+        return FileResponse(STATIC / "simulation.html")
+
     @application.get("/device-check")
     def device_check():
         return FileResponse(STATIC / "device-check.html")

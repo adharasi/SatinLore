@@ -1,0 +1,29 @@
+html { scroll-padding: 24px; }
+.help-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px clamp(16px,4vw,48px); border-bottom:1px solid var(--separator); background:var(--surface); }
+.help-brand { font:1.6rem/1.2 var(--serif); color:var(--text); text-decoration:none; letter-spacing:-.05em; }
+.help-brand span { color:var(--action); }
+.help-header nav { display:flex; flex-wrap:wrap; gap:8px 24px; }
+.help-header nav a { display:inline-flex; align-items:center; min-height:44px; font-size:.875rem; }
+.help-main { max-width:1000px; margin:0 auto; padding:clamp(24px,6vw,64px) clamp(16px,4vw,36px); }
+.help-main > h1 { max-width:760px; }
+.help-intro { color:var(--secondary); max-width:690px; font-size:1.0625rem; line-height:1.8; margin-bottom:32px; }
+.help-card { padding:clamp(20px,4vw,32px); margin-bottom:20px; background:var(--surface); border:1px solid var(--separator); border-radius:12px; }
+.help-card h2 { margin-bottom:20px; }
+.help-card p, .help-card li, .help-card dd { line-height:1.75; }
+.help-card ol { padding-left:24px; }
+.help-card li { padding-left:4px; margin-bottom:12px; }
+.help-card dl { margin:0; }
+.help-card dt { font-weight:650; margin-top:20px; }
+.help-card dt:first-child { margin-top:0; }
+.help-card dd { margin:6px 0 0; color:var(--secondary); }
+.help-action { display:inline-flex; min-height:44px; align-items:center; gap:16px; font-weight:600; }
+.help-table-scroll { overflow-x:auto; }
+.help-card table { width:100%; border-collapse:collapse; text-align:left; font-size:.875rem; }
+.help-card th, .help-card td { padding:12px 8px; border-bottom:1px solid var(--separator); }
+.help-card kbd { font:.8125rem/1.4 var(--sans); border:1px solid var(--secondary); border-radius:4px; padding:2px 5px; white-space:nowrap; }
+.help-card table + .note { margin-top:16px; }
+.help-footer { padding:20px 0; color:var(--secondary); font-size:.8125rem; }
+.help-footer output { overflow-wrap:anywhere; }
+.help-footer a { display:inline-flex; align-items:center; min-height:44px; }
+.help-footer p { margin-bottom:4px; }
+@media(max-width:480px) { .help-header { gap:8px; flex-wrap:wrap; } .help-header nav { gap:16px; } .help-card td,.help-card th { padding-inline:4px; } }

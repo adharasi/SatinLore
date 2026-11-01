@@ -14,7 +14,26 @@ export const READER_ASSETS = Object.freeze([
   ["reader/position.mjs", "/static/reader/position.mjs"],
   ["reader/scoring.mjs", "/static/reader/scoring.mjs"],
   ["reader/storage.mjs", "/static/reader/storage.mjs"],
+  ["reader/library-view.mjs", "/static/reader/library-view.mjs"],
+  ["reader/backup.mjs", "/static/reader/backup.mjs"],
+  ["reader/preferences.mjs", "/static/reader/preferences.mjs"],
   ["playback/controller.mjs", "/static/playback/controller.mjs"],
+  ["help.html", "/help.html"],
+  ["help.mjs", "/static/help.mjs"],
+  ["help.css", "/static/help.css"],
+  ["feedback.html", "/feedback.html"],
+  ["feedback.mjs", "/static/feedback.mjs"],
+  ["feedback.css", "/static/feedback.css"],
+  ["simulation.html", "/simulation.html"],
+  ["simulation.mjs", "/static/simulation.mjs"],
+  ["simulation.css", "/static/simulation.css"],
+  ["simulation/clock.mjs", "/static/simulation/clock.mjs"],
+  ["simulation/transport.mjs", "/static/simulation/transport.mjs"],
+  ["simulation/scenarios.mjs", "/static/simulation/scenarios.mjs"],
+  ["playback/async-controller.mjs", "/static/playback/async-controller.mjs"],
 ].map(entry => Object.freeze(entry)));
 
 export const PRIVATE_ASSET_PATHS = Object.freeze(READER_ASSETS.map(([, path]) => path));
+export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
+  "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html",
+});

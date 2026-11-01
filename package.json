@@ -14,6 +14,7 @@
     "test:worker": "node --test tests/private-worker.test.mjs"
   },
   "devDependencies": {
+    "miniflare": "4.20260515.0",
     "playwright": "1.62.1",
     "wrangler": "4.92.0"
   },

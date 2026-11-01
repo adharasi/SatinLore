@@ -81,3 +81,12 @@ Critical failures include wrong-device control, output continuing outside the ve
 Capture build, configuration, expected/actual behaviour, reproduction steps and an optional redacted screenshot. Ask about connection difficulty, synchronisation mismatch, correction burden and return use without requesting story excerpts. Failed attempts count for private feedback eligibility.
 
 Activation is eligible users completing the agreed core session divided by eligible users starting onboarding. Report per-attempt connection results separately. Return-use metrics need a complete observation window and must distinguish participation rewards from later voluntary use.
+
+
+## Current software iteration evidence
+
+The expanded browser suite includes real UI Reader/Story tabs, repeated Start→Stop→Start, title search/sort/open tabs, JSON backup downloads and fresh session-only restores, rejected backups, and presentation preferences across reload. Existing ceilings/zero, interruptions, stale work, storage failures, literal text and responsive checks remain.
+
+Separate deterministic suites exercise the async lab contract (including same-turn late-command/Stop ordering and native dialog cancellation during delayed authorisation), actual app-module bindings, and private feedback. Feedback tests include a real local SQLite Durable Object and client/page acknowledgement, retry, cancellation and deletion behavior. These are software evidence, not physical hardware evidence.
+
+Live release checks must verify Access on the root/assets/probes, the deployed source revision in Help, private feedback service availability and actual signed-in browser behavior. A successful source push or Worker dry run alone does not establish those checks. The app remains founder-only until an explicit access-release change.

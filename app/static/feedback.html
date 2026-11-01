@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>SatinLore · feedback and your data</title>
+  <script src="/static/appearance.js"></script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="stylesheet" href="/static/feedback.css">
+  <script type="module" src="/static/feedback.mjs"></script>
+</head>
+<body class="feedback-page">
+  <a href="#feedback-main" class="skip-link">Skip to feedback</a>
+  <header class="feedback-header feedback-shell"><a class="feedback-brand" href="/">SatinLore<span>.</span></a><nav aria-label="Feedback navigation"><a href="/">Back to the reader</a><a href="/help">Help</a><a href="/cdn-cgi/access/logout">Sign out</a></nav></header>
+  <main class="feedback-shell" id="feedback-main">
+    <div class="feedback-intro"><div><p class="eyebrow">YOUR PRIVATE PREVIEW</p><h1>Help shape<br>the next chapter.</h1></div><p>Tell us what worked, what got in the way, or what you would change. These tools work on the private hosted app. Your stories stay on your browser.</p></div>
+    <div id="feedback-access" class="feedback-notice" role="status" aria-live="polite">Checking your private preview access…</div>
+    <div class="feedback-layout">
+      <section class="feedback-card" aria-labelledby="send-heading"><p class="eyebrow">SEND A NOTE</p><h2 id="send-heading">What could feel better?</h2><p class="note">Only send what you want SatinLore to keep for up to 30 days. Leave out story text, passwords and identifying details. Nothing is copied from the reader.</p>
+        <form id="feedback-form">
+          <div class="feedback-fields"><label for="feedback-category">About<select id="feedback-category" name="category"><option value="bug">Something did not work</option><option value="reading">The reading experience</option><option value="idea">An idea</option><option value="other">Something else</option></select></label><label for="feedback-rating">Your rating <span class="note">Optional</span><select id="feedback-rating" name="rating"><option value="">No rating</option><option value="1">1 / 5</option><option value="2">2 / 5</option><option value="3">3 / 5</option><option value="4">4 / 5</option><option value="5">5 / 5</option></select></label></div>
+          <label for="feedback-message">Your note</label><textarea id="feedback-message" name="message" rows="7" minlength="5" maxlength="2000" required placeholder="What would you like to tell us?" aria-describedby="feedback-message-help"></textarea>
+          <p id="feedback-message-help" class="note">5–2,000 characters, up to 2 KB. Your honest feedback is welcome.</p>
+          <p id="feedback-send-status" class="feedback-status" role="status" aria-live="polite"></p>
+          <button id="feedback-send" class="primary" type="submit" disabled>Send feedback <span aria-hidden="true">→</span></button>
+        </form>
+      </section>
+      <aside class="feedback-side">
+        <section class="feedback-card" aria-labelledby="data-heading"><p class="eyebrow">YOUR FEEDBACK DATA</p><h2 id="data-heading">Keep a copy.<br>Or clear it.</h2><p class="note">These actions cover feedback stored by this app for your sign-in. They do not delete browser stories, your Cloudflare account, or the separate waitlist.</p><div class="feedback-data-actions"><button id="feedback-download" disabled>Download my feedback</button><button id="feedback-delete-open" class="stop" disabled>Delete my feedback</button></div><p id="feedback-data-status" class="feedback-status" role="status" aria-live="polite"></p><p class="note">Feedback is removed from the app's active records after 30 days. Message-free abuse-prevention counts remain for up to 24 hours, including after you delete feedback. Cloudflare recovery history may retain earlier data for up to 30 more days after a live deletion.</p></section>
+        <section class="feedback-card feedback-appearance"><label for="appearance">Appearance</label><select id="appearance"><option value="system">System</option><option value="light">Satin Editorial</option><option value="dark">Midnight Ink</option></select><p class="note" id="appearance-note"></p></section>
+      </aside>
+    </div>
+    <section class="feedback-card feedback-history" aria-labelledby="history-heading"><div class="feedback-history-heading"><div><p class="eyebrow">SAVED BY THIS APP</p><h2 id="history-heading">Your recent notes</h2></div><button id="feedback-refresh" disabled>Refresh</button></div><p id="feedback-history-status" class="feedback-status" role="status" aria-live="polite">Waiting for access to be checked.</p><div id="feedback-list"></div></section>
+  </main>
+  <footer class="feedback-footer feedback-shell"><span>SatinLore · private simulator preview · Adults 18+</span><a href="/">Return to your reading space</a></footer>
+  <dialog id="feedback-delete-dialog" aria-labelledby="feedback-delete-heading"><p class="eyebrow">YOUR CHOICE</p><h2 id="feedback-delete-heading">Delete your saved feedback?</h2><p>This removes all feedback currently stored by this app for your sign-in. You can download a copy first. Your browser stories, waitlist entry and Cloudflare account are separate.</p><p class="note">Cloudflare recovery history may keep earlier data for up to 30 days after deletion.</p><label class="feedback-delete-check"><input type="checkbox" id="feedback-delete-confirm">I want to delete my saved feedback.</label><div class="feedback-dialog-actions"><button type="button" id="feedback-delete-cancel">Keep my feedback</button><button type="button" id="feedback-delete" class="stop" disabled>Delete my feedback</button></div></dialog>
+</body>
+</html>

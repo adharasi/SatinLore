@@ -238,6 +238,24 @@ test("UI update failure cancels output without recursively calling the broken ca
   assert.equal(clock.timers.size, 0);
 });
 
+test("a separate interface-error notification receives stopped state and can expose reconnect safely", () => {
+  let fail = false;
+  const recovery = [];
+  const {controller, device} = setup({onChange: () => { if (fail) throw Error("Synthetic private renderer details"); },
+    onInterfaceError: state => recovery.push(state)});
+  controller.connect(); controller.setStory([3]); fail = true;
+  assert.equal(controller.start(), false);
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].state, "ERROR_PAUSED");
+  assert.equal(recovery[0].output, 0);
+  assert.doesNotMatch(recovery[0].reason, /Synthetic private/);
+  assert.equal(device.snapshot().strength, 0);
+  fail = false;
+  assert.equal(controller.connect(), true);
+  assert.equal(controller.snapshot().running, false);
+  assert.equal(controller.start(), true);
+});
+
 test("Session strength scales the selected base without rewriting it and rounds down before the ceiling", () => {
   const {controller, clock, device} = setup();
   controller.connect(); controller.setStory([3, 4]);

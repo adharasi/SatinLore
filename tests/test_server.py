@@ -27,7 +27,7 @@ def test_starter_cannot_claim_real_device_readiness(app):
 
 
 def test_only_public_static_files_are_exposed(app):
-    for path in ["/", "/static/app.mjs", "/static/devices/mock.mjs", "/static/reader/import.mjs"]:
+    for path in ["/", "/help", "/support", "/simulator-lab", "/static/app.mjs", "/static/devices/mock.mjs", "/static/reader/import.mjs"]:
         assert request(app, "GET", path).status_code == 200
     for path in ["/.env", "/app/main.py", "/static/%2e%2e/%2e%2e/.env", "/data/satinlore.sqlite3"]:
         assert request(app, "GET", path).status_code == 404

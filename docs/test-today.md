@@ -138,3 +138,18 @@ For each issue, record build, browser/version, viewport, the neutral fixture use
 Continue with F3 simulation scenarios and F4 software journeys in the [roadmap](beta-roadmap.md) while hardware is unavailable. Scoring evaluation can run in parallel. There is no device deadline attached to frontend progress.
 
 For later hardware qualification, arrange developer access, note the exact Lovense Website Name, install Lovense Remote on your phone and read [hardware-check.md](hardware-check.md). Those account/phone steps must be completed on your own devices. Prepare a copy of [hardware-test-record.md](hardware-test-record.md). Pairing, selected-device response, actual expiry after connection loss and physical Stop require physical observations. Story-to-real-device playback remains disabled even if the simulator checks pass.
+
+
+## Software iteration: library, controls and private services
+
+On the private hosted app, first check the Help build identifier against the production commit. Use neutral sample text and keep physical devices disconnected for these checks.
+
+1. Open two stories; switch through tabs and the library. Search by title and try all sort choices. Current progress should return without starting playback.
+2. Connect the simulator, confirm Start, Stop, then Start again three times. Try cancelling a Start confirmation, stopping while a check is pending, disconnect/reconnect and returning after hiding the tab. Read the readiness message if Start is unavailable; do not disable the authentication or lock checks.
+3. In Settings, compare Reader and Story tabs. Save a story by explicit choice, reload and confirm a paused restore at strength 1.0×. Change width/type/spacing/follow preferences; they should survive reload independently of whether a story was saved.
+4. Download one story and a whole-workspace backup from Import & backup. Import it and confirm fresh session-only copies, preserved corrections/position and no playback arming. A malformed/oversized backup must leave the existing workspace intact. Keep downloaded text private.
+5. Open Help and Support from the footer; these open separately so the original session-only reader remains in its tab. Review the shortcuts and local-versus-feedback deletion scope.
+6. For hosted feedback, submit one clearly labelled synthetic note, refresh and export your own notes. A failure must preserve the draft and should not claim success. If you want to remove your test note, use the explicit deletion flow yourself; it removes all feedback for that sign-in and preserves short-lived security counters. No test data should be sent to the separate marketing contact form.
+7. Open `/simulator-lab`. Choose a scenario and eligible fake device, Connect, then advance virtual time until connection and initial Stop are acknowledged. Confirm Start, advance time, Stop and wait for acknowledgement. Try late-command, wrong-ack, missing-ack and failed-Stop scenarios; unknown must not become a reassuring zero without a valid later acknowledgement. Escape cancels a confirmation. No reconnect or reset automatically starts output.
+
+`python3 scripts/check.py` (Windows: `py scripts/check.py`) runs the local automated suite after setup. The real local feedback test uses Miniflare SQLite. CI browser tests exercise actual reader interactions on localhost, while the managed HTTP preview cannot use Web Locks. Physical output and live vendor compatibility are separate qualification work.

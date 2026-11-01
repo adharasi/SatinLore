@@ -6,11 +6,21 @@ import {StoryStore} from "./reader/storage.mjs";
 import {selectReadingParagraph} from "./reader/position.mjs";
 import {PlaybackController} from "./playback/controller.mjs";
 import {HostedAccessGuard} from "./access.mjs";
+import {selectLibraryStories, storyMetadata, renderStoryTabs} from "./reader/library-view.mjs";
+import {BackupImporter, serializeBackup, downloadBackup} from "./reader/backup.mjs";
+import {ReaderPreferences} from "./reader/preferences.mjs";
 
 const $ = id => document.getElementById(id);
 const importer = new TextImporter();
 const store = new StoryStore();
+const backupImporter = new BackupImporter();
+const preferences = new ReaderPreferences();
 const stories = [];
+let libraryQuery = "";
+let librarySort = "updated";
+let backupBusy = false;
+let settingsTab = "reader";
+let tabSignature = "";
 let activeId = null;
 let paragraphNodes = [];
 let activeNode = null;
@@ -64,10 +74,14 @@ function setImporting(value) {
   $("file").disabled = value;
 }
 function cancelImport() {
+  const cancelledBackup = backupBusy;
   ++importEpoch;
   importer.invalidate();
+  backupImporter.invalidate(); backupBusy = false;
   $("file").value = "";
+  if ($("import-backup")) $("import-backup").value = "";
   setImporting(false);
+  if (cancelledBackup) text("library-transfer-status", "Backup opening cancelled. Existing stories are unchanged.");
 }
 function formatStrength(value = latest.strength ?? 1) { return `${value.toFixed(1)}×`; }
 function saveState(story) {
@@ -81,7 +95,8 @@ function saveState(story) {
 
 function renderLibrary() {
   const fragment = document.createDocumentFragment();
-  for (const story of stories) {
+  const visible = selectLibraryStories(stories, {query: libraryQuery, sort: librarySort});
+  for (const story of visible) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "story-item";
@@ -99,6 +114,14 @@ function renderLibrary() {
     fragment.append(button);
   }
   $("story-list").replaceChildren(fragment);
+  text("library-results", libraryQuery && !visible.length ? "No story titles match your search." :
+    `${visible.length} of ${stories.length} ${stories.length === 1 ? "story" : "stories"}`);
+  const nextTabs = JSON.stringify(stories.map(story => [story.id, story.title, story.lastOpenedAt, story.deleting]).concat([[activeId, libraryMutation]]));
+  if (tabSignature !== nextTabs) {
+    tabSignature = nextTabs;
+    renderStoryTabs($("story-tabs"), stories, {activeId, disabled: libraryMutation,
+      onSelect: id => selectStory(id, {focusReader: true})});
+  }
   text("library-status", libraryLoading ? "Opening your local library…" : libraryError || (stories.length ?
     "Saved stories stay on this browser. Session-only stories clear on reload." : "No stories yet. Add one to start reading."));
   $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.length && !libraryError);
@@ -130,6 +153,7 @@ function display(state = latest) {
     story.position = state.position;
     story.furthest = Math.max(story.furthest, state.position);
     markDirty(story);
+    renderLibrary();
   }
   text("status", ({DISCONNECTED: "Disconnected", READY_PAUSED: "Connected · paused",
     PLAYING: "Playing simulation", ERROR_PAUSED: "Error · paused"})[state.state] || "Paused");
@@ -143,21 +167,48 @@ function display(state = latest) {
   $("strength-minus").disabled = libraryMutation || !story || story.deleting || state.strength <= 0;
   $("strength-plus").disabled = libraryMutation || !story || story.deleting || state.strength >= 2;
   $("strength-reset").disabled = libraryMutation || !story || story.deleting || state.strength === 1;
-  $("connect").disabled = state.connected && state.state !== "ERROR_PAUSED";
-  text("connect", state.state === "ERROR_PAUSED" ? "Reconnect simulator" : "Connect simulator");
+  const reconnect = state.state === "ERROR_PAUSED";
+  $("connect").disabled = state.connected && !reconnect;
+  $("connect").hidden = state.connected && !reconnect;
+  text("connect", reconnect ? "Reconnect" : "Connect");
+  $("connect").setAttribute("aria-label", reconnect ? "Reconnect simulator" : "Connect simulator");
+  $("connect").title = reconnect ? "Reconnect simulator" : "Connect simulator";
+  $("disconnect").hidden = !state.connected || reconnect;
   $("disconnect").disabled = !state.connected && !pendingStart;
-  $("start").disabled = !canStartHere() || !story?.model.analysisReady || importing || !state.connected || state.running ||
+  $("start").disabled = !navigator.locks || !canStartHere() || !story?.model.analysisReady || importing || !state.connected || state.running ||
     pendingStart || state.state === "ERROR_PAUSED" || story?.deleting;
+  let readiness;
+  if (pendingStart) readiness = "Preparing this Start. Stop cancels it immediately.";
+  else if (state.running) readiness = "Simulation is running. Pause or Stop before starting again.";
+  else if (state.state === "ERROR_PAUSED") readiness = "Reconnect the simulator, then confirm Start again.";
+  else if (!canStartHere()) readiness = hostedAccess?.snapshot().state === "checking" ? "Checking sign-in. Start will be available when the check passes." : "Check your sign-in before starting. Your story is still readable.";
+  else if (importing) readiness = "Opening your text. Start will be available after analysis and connection.";
+  else if (libraryMutation || story?.deleting) readiness = "Finishing the library change. Playback stays paused.";
+  else if (!story) readiness = "Add or open a story, then connect the simulator.";
+  else if (!story.model.analysisReady) readiness = story.model.analysisStatus === "error" ? "Analysis needs attention. Open Story settings and choose Analyse again." : "Preparing story suggestions. You can keep reading while you wait.";
+  else if (!state.connected) readiness = "Connect the simulator, then choose Start.";
+  else if (!navigator.locks) readiness = "Start needs browser Web Locks. Use a current browser over HTTPS or localhost; reading still works here.";
+  else readiness = `Ready. Start asks you to confirm maximum ${state.ceiling}/20. Stop keeps your story and connection ready.`;
+  text("start-help", readiness);
+  if ($("retry-access")) {
+    $("retry-access").hidden = !hostedMode || canStartHere();
+    $("retry-access").disabled = pendingStart || hostedAccess?.snapshot().state === "checking";
+  }
   $("pause").disabled = !state.running && !pendingStart;
   $("previous").disabled = libraryMutation || !story || story.deleting || state.position === 0;
   $("next").disabled = libraryMutation || !story || story.deleting || state.position >= story.model.paragraphs.length - 1;
   for (const id of ["save-story", "session-only", "rename-story", "delete-story", "reanalyze"]) {
     $(id).disabled = libraryMutation || !story || story.deleting || story.saving;
   }
+  for (const id of ["export-library", "import-backup-trigger", "import-backup"]) if ($(id)) $(id).disabled = libraryLoading || libraryMutation || backupBusy || !stories.length && id === "export-library";
+  if ($("export-story")) $("export-story").disabled = libraryMutation || !story || story.deleting || backupBusy;
   $("session-only").disabled ||= !story?.saved;
   text("story-title", story?.title ?? "Your reading space");
   text("header-story-title", story?.title ?? "Add a story to begin");
   text("position", story ? `Section ${state.position + 1} of ${story.model.paragraphs.length}` : "");
+  const metadata = storyMetadata(story);
+  text("story-word-count", story ? `${metadata.words.toLocaleString()} words` : "");
+  text("story-progress", story ? `${metadata.progressPercent}% · ${metadata.positionLabel}` : "");
   const analysis = story?.model.analysisStatus ?? "pending";
   $("analysis-status").dataset.state = analysis;
   text("analysis-status", !story ? "" : analysis === "ready" ? "Suggestions ready · review is optional" :
@@ -177,7 +228,16 @@ function display(state = latest) {
   updateCurrentCorrection(story);
 }
 
-const controller = new PlaybackController({device: new MockDevice(), onChange: state => {
+function controlRecovery(state) {
+  latest = state; cancelStart(); releasePlayback();
+  for (const id of ["start", "pause"]) if ($(id)) $(id).disabled = true;
+  if ($("connect")) { $("connect").disabled = false; $("connect").hidden = false; text("connect", "Reconnect"); }
+  if ($("stop")) $("stop").disabled = false;
+  text("status", "Controls need reconnecting"); text("output", "0 / 20");
+  text("start-help", "The controls could not update. Output is stopped. Reconnect the simulator to try again.");
+  show("The controls could not update. Reconnect the simulator; your story remains readable.");
+}
+const controller = new PlaybackController({device: new MockDevice(), onInterfaceError: controlRecovery, onChange: state => {
   const stopped = latest.running && !state.running;
   if (!state.running) releasePlayback();
   if (stopped) { cancelPosition(); cancelStart(); }
@@ -186,9 +246,9 @@ const controller = new PlaybackController({device: new MockDevice(), onChange: s
 }});
 function pause(reason) {
   cancelStart(); cancelPosition();
-  controller.pause(reason);
+  const state = controller.pause(reason);
   releasePlayback();
-  display();
+  try { display(state); } catch { controlRecovery(controller.snapshot()); }
 }
 
 function storyRecord(story) {
@@ -219,6 +279,7 @@ function persistStory(story, {explicit = false} = {}) {
       const saved = await store.saveStory(storyRecord(story), {expectedRevision: story.revision});
       story.saved = true;
       story.revision = saved.revision;
+      story.updatedAt = saved.updatedAt ?? Date.now();
       story.dirty = story.changeVersion !== version;
       if (explicit) show("Saved on this browser. There is no cloud backup or sync.");
       if (story.dirty && !story.deleting) markDirty(story);
@@ -238,14 +299,14 @@ function persistStory(story, {explicit = false} = {}) {
   return story.saveChain;
 }
 function makeStory({id = createStoryId(), title = "Untitled story", text: source, corrections = [],
-  position = 0, revision = null}) {
+  position = 0, revision = null, updatedAt = Date.now()}) {
   const model = new ReaderModel();
   model.load(source, {deferAnalysis: true, documentId: id});
   corrections.forEach((level, index) => { if (level !== null) model.setOverride(index, level); });
   const safePosition = Math.max(0, Math.min(model.paragraphs.length - 1, position));
   return {id, title, model, position: safePosition, furthest: safePosition, saved: revision !== null, revision,
     dirty: false, saving: false, saveError: "", changeVersion: 0, saveTimer: null, saveChain: Promise.resolve(),
-    deleting: false, analysisPromise: null};
+    deleting: false, analysisPromise: null, updatedAt, lastOpenedAt: 0};
 }
 
 function renderStory() {
@@ -350,14 +411,17 @@ async function analyse(story, {force = false} = {}) {
 function selectStory(id, {focusReader = isNarrow()} = {}) {
   const story = stories.find(value => value.id === id);
   if (!story || story.deleting || libraryMutation) return;
+  cancelImport();
+  story.lastOpenedAt = Date.now();
   if (story.id === activeId) {
     pause("Story remains open. Confirm Start when ready.");
     if (isNarrow()) setPanel("library", false, {restore: false});
     scrollToCurrent();
     if (focusReader) $("story-title").focus({preventScroll: true});
+    renderLibrary();
     return;
   }
-  cancelImport(); closeDialogs();
+  closeDialogs();
   pause("Story opened. Confirm Start when you want simulated playback.");
   const previous = currentStory();
   if (previous && previous !== story) previous.model.cancelAnalysis();
@@ -365,6 +429,7 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   activeId = id;
   revealUpcoming = false;
   $("review-settings").open = false;
+  selectSettingsTab("reader");
   renderStory();
   synchronizing = true;
   const position = story.position;
@@ -545,6 +610,7 @@ async function confirmStart() {
 }
 async function removeStory(story, {keepSession = false} = {}) {
   if (!story || story.deleting || libraryMutation) return;
+  cancelImport();
   pause("Paused while local data is removed.");
   story.deleting = true;
   clearTimeout(story.saveTimer); story.saveTimer = null;
@@ -572,10 +638,70 @@ async function removeStory(story, {keepSession = false} = {}) {
   } finally { story.deleting = false; display(); renderLibrary(); }
 }
 
-for (const id of ["new-story", "empty-new-story"]) $(id).addEventListener("click", () => {
+function openNewStory() {
   if (libraryMutation || libraryLoading) return;
   cancelImport(); text("import-status", ""); openDialog("new-story-dialog"); $("story-title-input").focus();
-});
+}
+function selectSettingsTab(name, {focus = false} = {}) {
+  settingsTab = name === "story" ? "story" : "reader";
+  for (const value of ["reader", "story"]) {
+    const tab = $(`settings-${value}-tab`), panel = $(`${value}-settings`);
+    if (tab) { tab.setAttribute("aria-selected", String(settingsTab === value)); tab.tabIndex = settingsTab === value ? 0 : -1; }
+    if (panel) panel.hidden = settingsTab !== value;
+  }
+  if (focus) $(`settings-${settingsTab}-tab`)?.focus({preventScroll: true});
+  if (settingsTab === "story") renderReview();
+}
+function savePreferences(patch) {
+  const result = preferences.update(patch);
+  text("reader-preferences-note", result.message);
+  if (!result.saved) show(result.message);
+}
+async function restoreBackup(file) {
+  if (libraryMutation || libraryLoading) return;
+  cancelImport(); pause("Opening a local backup. Playback stays paused.");
+  const operation = importEpoch;
+  backupBusy = true; setImporting(true); display();
+  text("library-transfer-status", "Opening and checking the backup on this browser…");
+  try {
+    const records = await backupImporter.read(file, {existingIds: stories.map(story => story.id)});
+    if (!records || operation !== importEpoch || document.hidden || libraryMutation) return;
+    // Validate the complete combined workspace before changing anything.
+    serializeBackup([...stories.map(storyRecord), ...records]);
+    const additions = records.map(record => makeStory(record));
+    if (operation !== importEpoch || document.hidden || libraryMutation) return;
+    stories.push(...additions);
+    selectStory(additions[0].id, {focusReader: true});
+    text("library-transfer-status", `${additions.length} ${additions.length === 1 ? "story restored" : "stories restored"} for this session. Save on this browser only if you want to keep each one here.`);
+    show("Backup opened locally. Restored stories are session-only and playback remains paused.");
+  } catch (error) {
+    if (operation === importEpoch) text("library-transfer-status", error.message || "Could not open this backup. Your existing stories are unchanged.");
+  } finally {
+    if (operation === importEpoch) { backupBusy = false; setImporting(false); if ($("import-backup")) $("import-backup").value = ""; display(); }
+  }
+}
+function exportStories(records, filename) {
+  pause("Paused while you export a local backup.");
+  try { text("library-transfer-status", downloadBackup(records, {filename}).message); }
+  catch (error) { text("library-transfer-status", error.message); }
+}
+for (const id of ["new-story", "empty-new-story"]) $(id).addEventListener("click", openNewStory);
+$("library-search")?.addEventListener("input", event => { libraryQuery = event.target.value; renderLibrary(); });
+$("library-sort")?.addEventListener("change", event => { librarySort = event.target.value; renderLibrary(); });
+$("import-backup-trigger")?.addEventListener("click", () => $("import-backup").click());
+$("import-backup")?.addEventListener("change", event => { const file = event.target.files?.[0]; if (file) void restoreBackup(file); });
+$("export-library")?.addEventListener("click", () => { if (stories.length) exportStories(stories.map(storyRecord), "satinlore-library-backup.json"); });
+$("export-story")?.addEventListener("click", () => { const story = currentStory(); if (story) exportStories([storyRecord(story)], "satinlore-story-backup.json"); });
+for (const name of ["reader", "story"]) {
+  $(`settings-${name}-tab`)?.addEventListener("click", () => { pause("Settings changed. Confirm Start to continue."); selectSettingsTab(name); });
+  $(`settings-${name}-tab`)?.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const target = event.key === "Home" ? "reader" : event.key === "End" ? "story" : name === "reader" ? "story" : "reader";
+    $(`settings-${target}-tab`)?.focus({preventScroll: true});
+  });
+}
+$("retry-access")?.addEventListener("click", () => { pause("Checking sign-in. Playback stays paused."); void hostedAccess?.check({fresh: true}); });
 $("load").addEventListener("click", () => {
   const source = $("source").value;
   if (!source.trim()) { text("import-status", "Paste some story text, or choose a TXT file below."); $("source").focus(); return; }
@@ -720,15 +846,18 @@ $("focus-mode").addEventListener("click", () => {
   $("focus-mode").setAttribute("aria-pressed", String(Boolean(focusArrangement)));
   text("focus-mode", focusArrangement ? "Exit focus" : "Focus"); scrollToCurrent();
 });
-$("follow-scroll").addEventListener("change", () => reflow("Reading mode changed. Confirm Start to continue."));
+$("follow-scroll").addEventListener("change", () => { reflow("Reading mode changed. Confirm Start to continue."); savePreferences({follow: $("follow-scroll").checked}); });
 $("font-size").addEventListener("change", () => {
   $("reader").className = `reader-size-${$("font-size").value}`; reflow("Reading size changed. Confirm Start to continue.");
+  savePreferences({fontSize: $("font-size").value});
 });
 $("reading-width").addEventListener("change", () => {
   document.body.dataset.readingWidth = $("reading-width").value; reflow("Reading width changed. Confirm Start to continue.");
+  savePreferences({width: $("reading-width").value});
 });
 $("reading-spacing").addEventListener("change", () => {
   $("reader").dataset.spacing = $("reading-spacing").value; reflow("Reading spacing changed. Confirm Start to continue.");
+  savePreferences({spacing: $("reading-spacing").value});
 });
 window.addEventListener("satinlore:appearance", () => reflow("Appearance changed. Confirm Start to continue."));
 window.addEventListener("resize", () => reflow("Reading layout changed. Confirm Start to continue."));
@@ -737,6 +866,13 @@ window.addEventListener("scroll", () => {
   programmaticScrollTop = null; settlePosition();
 }, {passive: true});
 document.addEventListener("keydown", event => {
+  const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+  if (event.altKey && event.shiftKey && key === "x") { event.preventDefault(); stopEverything(); return; }
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName) || event.target?.isContentEditable;
+  if (event.altKey && !event.shiftKey && !event.ctrlKey && !event.metaKey && !typing && !anyDialog()) {
+    const action = {n: openNewStory, l: () => togglePanel("library"), ",": () => togglePanel("settings"), f: () => $("focus-mode").click()}[key];
+    if (action) { event.preventDefault(); action(); return; }
+  }
   if (event.key !== "Escape" || anyDialog()) return;
   if (!$("settings-panel").hidden) { event.preventDefault(); pause("Settings closed."); setPanel("settings", false); scrollToCurrent(); }
   else if (!$("library-panel").hidden) { event.preventDefault(); pause("Library closed."); setPanel("library", false); scrollToCurrent(); }
@@ -801,9 +937,19 @@ if (hostedMode) {
   void hostedAccess.start({visible: !document.hidden});
 }
 
+const loadedPreferences = preferences.load();
+const initialPreferences = loadedPreferences.preferences;
+$("reading-width").value = initialPreferences.width;
+$("font-size").value = initialPreferences.fontSize;
+$("reading-spacing").value = initialPreferences.spacing;
+$("follow-scroll").checked = initialPreferences.follow;
+$("reader").className = `reader-size-${initialPreferences.fontSize}`;
+$("reader").dataset.spacing = initialPreferences.spacing;
+text("reader-preferences-note", loadedPreferences.message);
+selectSettingsTab("reader");
 setPanel("library", !isNarrow(), {restore: false});
 setPanel("settings", false, {restore: false});
-document.body.dataset.readingWidth = "wide";
+document.body.dataset.readingWidth = initialPreferences.width;
 reserveDockSpace();
 controller.setVisible(!document.hidden);
 display(controller.snapshot());
