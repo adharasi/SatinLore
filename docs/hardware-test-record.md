@@ -18,6 +18,8 @@ Copy this template for each device/browser configuration. All entries start **no
 | Network arrangement | Not recorded |
 | Developer demo outcome | Not tested |
 | Application origin / mode | Not recorded |
+| Selected action / capability source | Not recorded |
+| Hosted guided reader or separate local discrete check | Not recorded |
 
 ## Observed results
 
@@ -41,6 +43,9 @@ Use a low output with the device on a desk. The application requests a two-secon
 | 14 | Same-phone QR/app switching and screen lock | Record exact sequence | Not observed | Not tested | Separate from desktop qualification |
 | 15 | Two test identities | No unintended shared control | Not observed | Not tested | No tokens/IDs in notes |
 | 16 | Neutral-text network inspection | No story or developer-token transmission | Not observed | Not tested | Do not save sensitive payloads |
+| 17 | Each additional offered action | Level 1; 2 seconds; one action at a time | Not observed | Not tested | Missing live action is a capability result, not a pass |
+| 18 | Neutral practice Start / Pause / Stop / restart | Record chosen action, strength and maximum ≤5/20 | Not observed | Not tested | Start remains explicit; no personal story required |
+| 19 | Change action / mode / story while running | No automatic output or resume | Not observed | Not tested | Retest selection and short response check as required |
 
 ## Decision and follow-up
 
@@ -50,4 +55,4 @@ Use a low output with the device on a desk. The application requests a two-secon
 - Required fix and retest: not recorded.
 - Reviewer/date: not recorded.
 
-If output continues unexpectedly, the wrong device responds, another identity gains control or private data is exposed, stop the qualification session and record the failure. A local timer or server switch cannot guarantee an immediate stop after transport loss. Use [hardware-check.md](hardware-check.md) for setup and [qa.md](qa.md) for release gates. The current connection screen is a discrete test; it does not qualify continuous story playback.
+If output continues unexpectedly, the wrong device responds, another identity gains control or private data is exposed, stop the qualification session and record the failure. A local timer or server switch cannot guarantee an immediate stop after transport loss. Use [the hosted eight-model guide](lovense-beta-test.md) or [the separate local device check](hardware-check.md) for setup and [qa.md](qa.md) for release gates. A discrete pulse does not qualify continuous story playback; record the neutral reading and interruption trials separately.

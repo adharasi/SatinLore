@@ -132,3 +132,19 @@ test("storage failures never echo feedback text and never acknowledge a successf
   assert.equal(response.status, 503);
   assert.doesNotMatch(await response.text(), /synthetic-private-feedback-text|neutral synthetic/);
 });
+
+
+test("connection issuance counters persist independently and contain no feedback, credentials or identity", async t => {
+  const f = fixture(t);
+  for (let i=0;i<3;i++) assert.equal((await f.service.fetch(request("/internal/lovense-rate", {}))).status,200);
+  assert.equal(f.db.prepare("SELECT COUNT(*) count FROM feedback").get().count,0);
+  const restarted = new PrivateFeedback({storage:f.service.storage},{});
+  const blocked = await restarted.fetch(request("/internal/lovense-rate", {}));
+  assert.equal(blocked.status,429); assert.ok(Number(blocked.headers.get("Retry-After"))>0);
+  const counters=f.db.prepare("SELECT period,count FROM rate_windows").all();
+  assert.equal(counters.length,2); assert.ok(counters.every(row=>row.period.startsWith("lovense-")));
+  assert.ok(f.alarm()>Date.now());
+  const other=fixture(t); assert.equal((await other.service.fetch(request("/internal/lovense-rate", {}))).status,200);
+  assert.equal((await f.service.fetch(request("/internal/lovense-rate", {uid:"forged"}))).status,400);
+  assert.equal((await f.service.fetch(new Request("https://public.example.test/internal/lovense-rate",{method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json"},body:"{}"}))).status,404);
+});

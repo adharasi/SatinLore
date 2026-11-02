@@ -4,12 +4,12 @@
 
 - Read `README.md`, `docs/development-spec.md` and the relevant milestone in `docs/beta-roadmap.md`.
 - Inspect current code and applicable nested instructions. Implementation status requires code and evidence, not plans.
-- This local FastAPI/static-JavaScript build has a themed saved-story workspace with optional review and simulator playback and a separate authenticated device-check flow. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for frontend/application work. The founder-only Cloudflare simulator is deployed; live vendor/hardware qualification and wider beta release remain outstanding.
+- This local FastAPI/static-JavaScript build has a themed saved-story workspace with optional review and simulator playback and a separate authenticated device-check flow. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for frontend/application work. The private Cloudflare reader is deployed; the 2 November eight-model integration adds a configured Lovense route and simulator rehearsal. Live vendor/hardware qualification and wider beta release remain outstanding.
 - Complete the requested milestone without unrelated frameworks or placeholders.
 
 ## Setup and checks
 
-- Python 3.12+; Node.js 24 for JavaScript tests. No browser bundler is required.
+- Python 3.12+; Node.js 24 for JavaScript tests. The reader uses browser ES modules; the private Worker build bundles the isolated device bridge.
 - Windows: `py bootstrap.py`, then `py run.py`.
 - macOS/Linux: `python3 bootstrap.py`, then `python3 run.py`.
 - Full local checks: `py scripts/check.py` on Windows, `python3 scripts/check.py` elsewhere.
@@ -20,7 +20,7 @@
 
 ## Product and architecture
 
-- Browser-first, users' own typed/pasted/uploaded stories and deliberately requested imports from supported story URLs. The current reader controls only a simulator; one qualified Lovense model, vibration only, remains the first hardware target.
+- Browser-first, users' own typed/pasted/uploaded stories and deliberately requested imports from supported story URLs. The product owner's 2 November request expands the connection scope to Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush. Preserve independent simulator and physical modes, explicit device/action selection and current capability checks. Qualify each actual model/firmware/Remote/browser combination separately; no simulated result qualifies hardware.
 - Defer generation, payments, public publishing, marketplaces, native apps and additional brands.
 - Use FastAPI, browser ES modules and the existing SQLite invitation/session store. Expand persistence only when a requested feature needs it.
 - Follow the 2 November reader refinement over workspace v1.2: a collapsible story library, continuous reader, Wide default, optional settings/review and focus mode. Preserve Satin Editorial/Midnight Ink, System/Light/Dark and document scrolling. Do not reintroduce a compulsory review step.
@@ -37,14 +37,14 @@
 - Do not put story text in logs, analytics, URLs or error reports, or upload local story text in requests. The explicit URL-import service is the bounded exception for fetching/extracting a user-requested public source; it must validate hosts/paths/redirects, omit credentials, reject restricted pages and return plain text. Render every import as text, not HTML.
 - Keep vendor code inside the sandboxed device bridge, never in the reader DOM. Preserve exact-source/origin message checks and bounded command validation; validate isolation before making privacy claims.
 - Require explicit device selection and Start. Always target a single toy ID; never broadcast by omission.
-- Use short finite nonzero commands; initially two seconds, pending provider and physical verification.
+- Use short finite nonzero physical commands: two seconds and at most 5/20 in this beta, with the selected lower/zero maximum authoritative. Never infer undocumented actions, independent motors or heating from a product name. Provider and physical verification remain separate.
 - Stop dispatch on pause, hide, disconnect, logout or story change. Reconnection and tab return remain paused until explicit restart.
 - Timers and Stop packets cannot guarantee stopping after transport loss; record physical evidence separately.
 
 ## Code review rules
 
 - Flag client-controlled identity used to issue another user's vendor token.
-- Flag developer credentials or raw story content reaching vendor/client payloads, and QR/auth payloads reaching logs or unintended users. A per-user vendor authToken may be issued only to that authenticated session.
+- Flag developer credentials or raw story content reaching vendor/client payloads, and QR/auth payloads reaching logs or unintended users. A per-user vendor authToken may be issued only to that authenticated session. Hosted UID derivation must use the verified Access subject and server-held independent secret; client-supplied identity is forbidden. Optional beta-email configuration must not broaden access until the owner explicitly configures both the Worker allowlist and Cloudflare Access policy.
 - Preserve invitation replay prevention, hashed bearer-token storage, exact-origin/CSRF checks, bounded requests and session revalidation after vendor requests.
 - Flag omitted `toyId`, indefinite nonzero commands, stale queues, ceiling changes without a current deliberate user action, zero/ceiling bypasses, or automatic resume after interruption, restoration or story switching. Direct reader-simulator slider changes are authorised ceiling actions; they do not change the async-lab or hardware contracts.
 - Flag silent story persistence, saved playback arming, success before storage completes, and stale writes that restore deleted stories.

@@ -8,6 +8,7 @@ import {createStoryId} from "../../app/static/reader/identity.mjs";
 import {ReaderModel} from "../../app/static/reader/model.mjs";
 import {selectReadingParagraph} from "../../app/static/reader/position.mjs";
 import {PlaybackController} from "../../app/static/playback/controller.mjs";
+import {ReaderDeviceController} from "../../app/static/devices/reader-device.mjs";
 import {HostedAccessGuard} from "../../app/static/access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "../../app/static/reader/library-view.mjs";
 import {BackupImporter, serializeBackup} from "../../app/static/reader/backup.mjs";
@@ -111,7 +112,7 @@ export function workspace({hosted = false, locks = true} = {}) {
     try { return await callback({name}); } finally { lockHeld = false; }
   }} : undefined};
   class TestDevice extends MockDevice { constructor() { super(now); } }
-  class TestController extends PlaybackController {
+  class TestController extends ReaderDeviceController {
     constructor(options) {
       const onChange = options.onChange;
       super({...options, now, setTimer, clearTimer, onChange(state) {
@@ -133,7 +134,7 @@ export function workspace({hosted = false, locks = true} = {}) {
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     MockDevice: TestDevice, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore,
-    selectReadingParagraph, PlaybackController: TestController, HostedAccessGuard: TestGuard,
+    selectReadingParagraph, PlaybackController, ReaderDeviceController: TestController, HostedAccessGuard: TestGuard,
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,

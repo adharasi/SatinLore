@@ -1,14 +1,14 @@
-# Private simulator on Cloudflare
+# Private reader and Lovense pairing on Cloudflare
 
-This adapter hosts the existing browser reader at `https://app.satinlore.com` for the founder only. It does not deploy FastAPI, move SQLite, connect real devices, or use the marketing website's database, email credentials or routes. Hardware qualification is not required for this private simulator. The separate local `/device-check` and its invitation flow continue to run through Python on loopback.
+This adapter hosts the browser reader at `https://app.satinlore.com`, protected by signed Cloudflare Access assertions and an explicit Worker email allowlist. Simulator rehearsals need no hardware or Lovense credentials. The guided real-toy path uses a separately sandboxed Lovense Standard JS SDK and requires the server settings below. Hardware behaviour remains unqualified until recorded on physical devices. This does not deploy FastAPI, move local SQLite or use the marketing website database, email credentials or routes. The separate local `/device-check` invitation flow remains on Python/loopback.
 
 ## What is published
 
-`npm run build:worker` copies only the reader files listed in `assets.mjs` to the ignored `dist/private-app` directory. It adds a hosted-access marker to the copied HTML and removes the local device-check link. The source HTML remains unchanged. Neither device-check/bridge files nor Lovense modules, source instructions, databases, environment files or story content are bundled. The Worker refuses unknown paths and exposes no story-upload endpoint. The private `/support` page uses a separate SQLite Durable Object for feedback deliberately submitted by the signed-in user; feedback never includes automatic reader text or context.
+`npm run build:worker` copies only the reader files listed in `assets.mjs` to the ignored `dist/private-app` directory. It adds a hosted-access marker to the copied HTML and removes the local device-check link. The source HTML remains unchanged. The hosted bridge is compiled into its own authenticated HTML document: opaque-origin iframes cannot authenticate module subrequests with Access cookies. Its inline bundle is authorized by a SHA-256 CSP hash, not a public asset exception or `unsafe-inline`. It includes only connection/control code, with the SDK fetched exclusively inside the opaque sandbox. Local invitation/device-check files, server source, databases, environment files, developer credentials and story data are excluded. The Worker refuses unknown paths and exposes no story-upload endpoint. The private `/support` page uses a separate SQLite Durable Object for feedback deliberately submitted by the signed-in user; feedback never includes automatic reader text or context.
 
 The existing reader still processes text locally. New stories remain session-only until the explicit **Save on this browser** choice. Saved stories belong to this browser and this origin; localhost stories are not transferred to the hosted app. No story cloud backup is introduced.
 
-Every request, including HTML, JavaScript, CSS, health and access probes, passes through the Worker before assets are served. It validates an RS256 Cloudflare Access application assertion against the configured team signing keys, dedicated application audience, expiry and exact founder email. Missing/invalid configuration fails closed. Plain email headers are not authentication. The Worker accepts only the canonical HTTPS origin, rejects device/invitation/vendor routes, and marks all responses `no-store` with the reader's restrictive content policy.
+Every request, including HTML, JavaScript, CSS, health and access probes, passes through the Worker before assets are served. It validates an RS256 Cloudflare Access application assertion against the configured team signing keys, dedicated application audience, expiry and the founder email or an explicitly configured tester email. Missing/invalid configuration fails closed. Plain email headers are not authentication. The Worker accepts only the canonical HTTPS origin, rejects local invitation/private-file routes, and marks all responses `no-store`. The reader permits only its own isolated connection frame and approved QR image hosts; third-party scripts/network calls remain confined to the bridge.
 
 ## One-time setup in your own browser
 
@@ -64,7 +64,7 @@ The canonical hostname is **`app.satinlore.com`**. A `www.app.satinlore.com` ali
 
 17. Close existing incognito windows, then in a fresh private/incognito session, open `https://app.satinlore.com`. It should ask you to sign in through Cloudflare Access. Do the next check before entering the PIN.
 18. While still logged out, visit `https://app.satinlore.com/static/app.mjs` and `https://app.satinlore.com/api/access`. Both must require Access login or deny access; neither should reveal reader code or access data before login.
-19. Return to `https://app.satinlore.com`, sign in with `team@satinlore.com` and the emailed PIN, then paste neutral sample text. Connect the simulator, confirm Start, try strength −/+, Pause and Stop. Choose **Save on this browser**, reload and confirm the story returns **paused**. Check Light/Dark and phone layout. The hosted app remains simulator-only.
+19. Return to `https://app.satinlore.com`, sign in with `team@satinlore.com` and the emailed PIN, then paste neutral sample text. Connect the simulator, confirm Start, try strength −/+, Pause and Stop. Choose **Save on this browser**, reload and confirm the story returns **paused**. Check Light/Dark and phone layout. The simulator remains available without credentials; use the dedicated Lovense setup section below for physical pairing.
 20. Open `https://app.satinlore.com/api/health` while signed in. Expect `status: "ok"`, `device_mode: "simulator"`, `beta_ready: false`. This endpoint reports availability, not physical-device qualification.
 21. Report whether the Worker build, Access login and reader checks passed, plus the exact error text if anything failed. Do not share PINs, cookies, assertion tokens or private story text.
 
@@ -107,11 +107,56 @@ SQLite Durable Objects are supported on Workers Free. A Free-plan resource/quota
 - Authenticated `GET /api/access` returns only `{ "authenticated": true, "expiresAt": 1234567890000 }`; `expiresAt` is the verified JWT expiry in Unix **milliseconds**. No email, user ID, token or cookie is returned.
 - Missing, malformed, expired or disallowed assertions return 403 with a generic error. Missing/invalid/paused configuration returns 503. The reader must pause and block Start on a probe failure or expiry, and never resume automatically after reauthentication.
 - Authenticated `GET /api/health` returns `{ "status": "ok", "device_mode": "simulator", "beta_ready": false }`. Availability does not mean a hardware beta is ready.
-- Reader assets and health/access probes accept `GET`/`HEAD`. The deliberate feedback routes below accept their specified methods. Unknown and real-device routes remain unavailable; there is no hosted invitation or vendor-token API.
+- Reader assets and health/access probes accept `GET`/`HEAD`. The deliberate feedback routes below accept their specified methods. Unknown routes and local invitation routes remain unavailable. The deliberate Lovense endpoints below are the only hosted vendor credential path.
 - Authenticated `GET /api/feedback` lists that sign-in's live notes. `POST /api/feedback` accepts only `{idempotencyKey,category,message,rating?}` and returns a real saved acknowledgement. No automatic story context or client identity field is accepted.
 - Authenticated `GET /api/my-data` exports only app feedback. `POST /api/my-data/delete` requires exact JSON `{ "confirm": true }` and deletes the live feedback records. Writes require the exact app Origin and JSON content type; cookies, assertions, query values and identity are not forwarded into the store.
 - `/help`, `/support` and `/simulator-lab` plus their assets are covered by the same founder-only authentication gate. Help shows the public source revision inserted by the Cloudflare build; the lab contains simulated devices and no private story input.
 - Reauthenticating uses Cloudflare Access. Access revocation prevents subsequent requests; it does not remotely erase a document already loaded in the browser or saved locally. The reader's periodic, visibility and expiry checks pause its simulator. Local story deletion remains a separate explicit browser operation.
+
+## Enable real Lovense pairing for the beta
+
+The simulator path is usable immediately. The real path deliberately reports unavailable until all three runtime settings below are valid. Never put these values into GitHub, build variables, browser code, feedback or chat.
+
+1. In your own browser, open the [Lovense developer dashboard](https://www.lovense.com/user/developer/info). Create or open the application for the **Standard JS SDK / Standard Socket API** solution using **Lovense Remote**, not a cam-model account or a developer token in browser JavaScript. Record the exact **Website Name** shown there and obtain its Developer Token. Complete any account/application review that Lovense requires in that dashboard yourself.
+2. Generate a new independent 64-character hexadecimal secret for pseudonymous vendor identities. Store it privately in Bitwarden. It must not reuse the questionnaire webhook secret or developer token. For Windows PowerShell, this creates 32 cryptographic random bytes and copies their 64 hex characters to your clipboard without printing them:
+
+   ```powershell
+   $satinLoreBytes = New-Object byte[] 32
+   $satinLoreRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+   $satinLoreRng.GetBytes($satinLoreBytes)
+   ([BitConverter]::ToString($satinLoreBytes).Replace('-', '').ToLowerInvariant()) | Set-Clipboard
+   $satinLoreRng.Dispose()
+   ```
+
+3. Open **Cloudflare → Workers & Pages → satinlore-private-app → Settings → Variables & Secrets**. Add these as **runtime** settings, keeping the existing Access settings:
+
+   | Name | Type | Value |
+   | --- | --- | --- |
+   | `LOVENSE_DEVELOPER_TOKEN` | Secret | Developer Token from your Lovense application |
+   | `LOVENSE_UID_SECRET` | Secret | The newly generated independent 64 hex characters |
+   | `LOVENSE_PLATFORM` | Text | Exact Lovense **Website Name**, including its case/spaces |
+
+4. **Save and Deploy** those settings. The source sets `keep_vars: true` so dashboard-owned runtime values survive later GitHub deployments. Do not add a callback pointing at the reader or a public bypass route: this integration uses the SDK/socket solution, not an HTTP callback database.
+5. While signed in, open the reader setup and choose **Connect a real toy**. The availability check must now report ready. Pair the toy in **Lovense Remote** first, then scan the displayed QR code from Remote on the phone. Use a desktop/laptop for the web reader and the phone for Remote for this initial test; same-phone app launching from the opaque sandbox is not qualified.
+6. Select exactly one discovered toy. Merely choosing a model in the guide must not connect, select hardware automatically or start output. Begin with the explicitly requested two-second test, maximum **5/20**; verify its actual behaviour and stop/expiry before reading. Every nonzero packet remains targeted and finite. SDK submission is not proof of physical output or physical stopping. Record results in `docs/hardware-test-record.md` and follow `docs/lovense-beta-test.md`.
+
+The hosted API contract is:
+
+- Authenticated `GET /api/lovense/status` returns only `{available,message}`. It reveals no secret, UID or identity. Status is not a vendor contact or hardware test.
+- Authenticated exact-origin JSON `POST /api/lovense/session` accepts exactly `{}`. Client user IDs, story data, extra fields and query strings are rejected. The Worker derives a stable HMAC UID from the verified Access audience/subject and independent UID secret, then calls Lovense's fixed server token endpoint. Only `{uid,platform,authToken,expires_at}` returns to that sign-in. `authToken` is a per-user credential, never the Developer Token; it stays in memory and is sent only to the bridge.
+- Session responses expire at the earlier of the signed Access expiry or 15 minutes. The Worker verifies Access again after the vendor request; failure discards the credential response. Lovense does not provide a remote-token revocation guarantee here. Disconnect/expiry/hide teardown and finite commands remain essential.
+- Issuance is limited to three/minute and twenty/hour per derived identity using durable, message-free counters in a separate object namespace. No identity, QR or token is retained. This reuses the existing binding/migration without touching feedback records or marketing data.
+
+### Permit the named tester only
+
+A tester must be admitted by **both** Cloudflare Access and the Worker. Do not share the founder inbox/PIN or broaden to Everyone.
+
+1. Obtain the tester's intended sign-in email privately.
+2. In the **SatinLore private reader** Access application's Allow policy, add that exact email to **Include → Emails**, retaining `team@satinlore.com`. Keep the policy scoped to the entire `app.satinlore.com` hostname; do not change marketing admin policies.
+3. In the **satinlore-private-app** runtime variables, set `BETA_TESTER_EMAILS` to that email. Additional explicitly approved testers use a comma-separated list (maximum twenty; no wildcards). Save and deploy. This list is dashboard-owned, not committed to source.
+4. Test that account in a fresh browser session. Another email must still be denied. No policy or allowlist change is made automatically by this code release.
+
+Official Lovense contracts reviewed 2 November 2026: [Standard JS SDK](https://developer.lovense.com/docs/standard-solutions/standard-js-sdk) and [Standard Socket API token exchange](https://developer.lovense.com/docs/standard-solutions/socket-api).
 
 ## Verify the deployed boundary
 
@@ -120,7 +165,7 @@ Use neutral fixture text and an inbox you control. Check these separately from m
 1. A logged-out visit to `/`, `/static/app.mjs` and `/api/access` reaches the Access login or denial, with no reader/asset data.
 2. The approved founder can sign in and load the reader, both themes, imports, corrections and paused restoration. TXT import must not create a story-text network request.
 3. Another account is denied. A forged email header or missing assertion cannot obtain assets. Confirm there is no reachable `workers.dev`, version URL or other hostname bypass.
-4. `/device-check`, its `/static/` aliases, the bridge, Lovense module and `/api/lovense/session` are unavailable. No vendor request or real-device connection is made from the hosted reader.
+4. `/device-check`, local invitation endpoints, `/static/device-bridge.mjs` and `/static/devices/lovense.mjs` remain unavailable. `/device-bridge` requires the same signed Access gate and is sandboxed without `allow-same-origin`; its vendor code must never execute in the reader document. No vendor request is made during simulator-only rehearsals.
 5. Expiry, sign-out/revocation, failed probes, hidden-page return and offline errors block Start and leave output paused. Logging in again must not automatically start playback. Check that unsaved text is not silently persisted or uploaded.
 6. Inspect network requests while reading a neutral story. No text, title, excerpts, private tokens, third-party analytics or vendor scripts may leave the reader.
 
@@ -128,7 +173,7 @@ Use neutral fixture text and an inbox you control. Check these separately from m
 
 ## Why this adapter rather than a Python port
 
-Cloudflare currently supports FastAPI through its Python ASGI entrypoint and supports D1 from Python. That could host a future minimal session/feedback service, but the current SQLite store, local-origin restrictions, invitation transactions and device integration would need a separate, tested port. The reader itself needs none of the Python session/vendor services. This release keeps the Python local boundary intact, hosts the authenticated reader and adds the deliberately bounded private feedback store.
+Cloudflare currently supports FastAPI through its Python ASGI entrypoint and supports D1 from Python. That could host a future minimal session/feedback service, but the current SQLite store, local-origin restrictions, invitation transactions and device integration would need a separate, tested port. The reader uses a small separate hosted token exchange for deliberately requested Lovense pairing; it does not port the Python invitation database. The Python local boundary remains intact. Private feedback and independent message-free connection quotas use distinct object namespaces on the existing Durable Object binding.
 
 Official references:
 

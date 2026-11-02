@@ -1,6 +1,7 @@
-/** Deliberately small hosted reader bundle. Local device-check files are never published. */
+/** Explicit private reader bundle. The sandbox bridge is self-contained; local invitation/device-check pages remain unpublished. */
 export const READER_ASSETS = Object.freeze([
   ["index.html", "/index.html"],
+  ["device-bridge.html", "/device-bridge.html"],
   ["app.mjs", "/static/app.mjs"],
   ["access.mjs", "/static/access.mjs"],
   ["appearance.js", "/static/appearance.js"],
@@ -8,6 +9,10 @@ export const READER_ASSETS = Object.freeze([
   ["theme.css", "/static/theme.css"],
   ["reader.css", "/static/reader.css"],
   ["devices/mock.mjs", "/static/devices/mock.mjs"],
+  ["devices/reader-device.mjs", "/static/devices/reader-device.mjs"],
+  ["devices/bridge-transport.mjs", "/static/devices/bridge-transport.mjs"],
+  ["devices/profile-simulator.mjs", "/static/devices/profile-simulator.mjs"],
+  ["devices/toy-profiles.mjs", "/static/devices/toy-profiles.mjs"],
   ["reader/import.mjs", "/static/reader/import.mjs"],
   ["reader/web-import.mjs", "/static/reader/web-import.mjs"],
   ["reader/folders.mjs", "/static/reader/folders.mjs"],
@@ -41,5 +46,5 @@ export const READER_ASSETS = Object.freeze([
 
 export const PRIVATE_ASSET_PATHS = Object.freeze(READER_ASSETS.map(([, path]) => path));
 export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
-  "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html",
+  "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
 });

@@ -6,10 +6,11 @@ const level = value => {
 };
 
 export class AsyncPlaybackController {
-  constructor({ transport, now = () => performance.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), onChange = () => {}, onEvent = () => {}, connectTimeout = 3000, requestTimeout = 1800, inactivityMs = 120000 }) {
+  constructor({ transport, now = () => performance.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), onChange = () => {}, onEvent = () => {}, connectTimeout = 3000, requestTimeout = 1800, inactivityMs = 120000, heartbeatMs = 1000 }) {
     if (!transport || !["discover", "connect", "command", "stop", "disconnect"].every(key => typeof transport[key] === "function")) throw new TypeError("A targeted asynchronous transport is required.");
     if (![connectTimeout, requestTimeout, inactivityMs].every(value => Number.isFinite(value) && value > 0) || requestTimeout >= ASYNC_COMMAND_MS) throw new RangeError("Use positive timeouts; command acknowledgement must be bounded below two seconds.");
-    Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, connectTimeout, requestTimeout, inactivityMs });
+    if (!Number.isFinite(heartbeatMs) || heartbeatMs < 1000 || heartbeatMs > 1500) throw new RangeError("Use a 1000–1500 ms finite renewal cadence.");
+    Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, connectTimeout, requestTimeout, inactivityMs, heartbeatMs });
     this.state = "DISCONNECTED"; this.connected = false; this.selected = null; this.visible = true; this.authorized = true;
     this.levels = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;
     this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose a simulated device explicitly.";
@@ -224,13 +225,13 @@ export class AsyncPlaybackController {
     if (this.state !== "PLAYING") return;
     const generation = this.generation;
     const waiting = this.outstanding(this.selected) || this.stopTasks.has(this.selected) || this.desired() === 0;
-    this.tickTimer = this.setTimer(() => { if (generation === this.generation) this.tick(); }, waiting ? 1000 : Math.max(1, 1000 - (this.now() - this.lastDispatch)));
+    this.tickTimer = this.setTimer(() => { if (generation === this.generation) this.tick(); }, waiting ? this.heartbeatMs : Math.max(1, this.heartbeatMs - (this.now() - this.lastDispatch)));
   }
   tick() {
     if (this.state !== "PLAYING") return;
     if (!this.visible || !this.authorized || this.now() - this.lastActivity >= this.inactivityMs || this.now() - this.lastTick >= 2000) { void this.pause("Playback was interrupted or idle. Confirm a new Start."); return; }
     this.lastTick = this.now();
-    if (!this.outstanding(this.selected) && !this.stopTasks.has(this.selected) && !this.uncertain.size && this.now() - this.lastDispatch >= 1000 && this.desired() > 0) {
+    if (!this.outstanding(this.selected) && !this.stopTasks.has(this.selected) && !this.uncertain.size && this.now() - this.lastDispatch >= this.heartbeatMs && this.desired() > 0) {
       const generation = this.generation, deviceId = this.selected, target = this.desired();
       this.lastDispatch = this.now(); this.output = null;
       void this.request("command", deviceId, { level: target, durationMs: ASYNC_COMMAND_MS }).then(() => {

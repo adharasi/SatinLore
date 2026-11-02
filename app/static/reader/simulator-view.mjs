@@ -1,16 +1,32 @@
-// This view observes the simulator. It never dispatches a command or predicts a
-// device's physical behaviour. Motion and the trace use reported output only.
+// This view observes output; it never dispatches a command. Live hardware has no
+// measured feedback, so its requested levels never animate as physical motion.
 const SVG = "http://www.w3.org/2000/svg";
 const MAX_POINTS = 72;
+const MODELS = {lush: "Lush", flexer: "Flexer", nora: "Nora", domi: "Domi", velvo: "Velvo", spinel: "Spinel", dolce: "Dolce", hush: "Hush"};
+const CHANNELS = {vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting"};
+const SHAPES = {
+  lush: "M140 45C111 45 109 75 112 96C115 118 126 132 140 132C154 132 165 118 168 96C171 75 169 45 140 45ZM141 131C140 153 160 162 176 143L184 126L177 123C165 144 154 146 150 132Z",
+  flexer: "M133 39C112 37 105 56 108 80L114 121C117 144 132 155 148 149C161 145 170 133 174 117L183 82C186 69 179 58 169 59C157 60 154 71 154 82L153 116C152 124 148 128 144 126L150 71C153 51 147 40 133 39Z",
+  nora: "M131 28C114 28 111 42 112 62L117 136C118 153 129 162 142 159C158 157 164 146 161 129L156 96L169 86C178 79 177 66 166 63C157 62 153 69 151 75L150 51C149 35 144 28 131 28Z",
+  domi: "M140 23C114 23 96 43 100 67C103 85 115 97 132 100L120 151C118 161 125 168 134 168C143 168 146 162 148 153L156 98C177 91 184 76 181 57C178 36 162 23 140 23Z",
+  velvo: "M132 28C115 28 111 44 113 63L118 135C119 152 129 161 143 159C158 157 165 146 162 130L157 99L171 90C182 82 181 68 171 65C159 62 155 74 153 79L151 51C150 35 143 28 132 28Z",
+  spinel: "M139 24C122 24 114 36 114 53L117 132L107 143L108 153L169 153L170 143L159 132L163 53C163 35 154 24 139 24Z",
+  dolce: "M114 40C101 44 100 57 104 73L118 127C123 145 137 153 152 147C166 142 173 128 176 110L183 67C186 50 178 40 167 42C155 44 153 53 154 67L155 111C155 122 151 128 145 125C140 124 138 117 137 109L134 62C133 45 125 37 114 40Z",
+  hush: "M139 32C131 32 127 42 122 58L110 97C104 117 118 129 132 131L132 141L111 145C103 147 104 157 112 158L167 158C176 157 177 147 169 145L148 141L148 131C162 128 176 117 170 97L157 58C152 42 147 32 139 32Z",
+};
 
 export function simulatorReading(snapshot = {}) {
   const connected = snapshot.connected === true;
-  const running = connected && snapshot.running === true;
+  const running = connected && (snapshot.running === true || snapshot.testing === true);
   const valid = Number.isInteger(snapshot.output) && snapshot.output >= 0 && snapshot.output <= 20;
   const output = running && valid ? snapshot.output : 0;
-  return {connected, running, output,
+  const live = snapshot.mode === "lovense";
+  const unknown = live && snapshot.outputKnown === false;
+  const model = Object.hasOwn(MODELS, snapshot.model) ? snapshot.model : "lush";
+  const channel = Object.hasOwn(CHANNELS, snapshot.channel) ? snapshot.channel : "vibrate";
+  return {connected, running, output, live, unknown, model, channel,
     position: Number.isInteger(snapshot.position) && snapshot.position >= 0 ? snapshot.position : 0,
-    label: !connected ? "Not connected" : !running ? "Paused" : output ? "Playing" : "Playing · quiet section"};
+    label: unknown ? "Output unconfirmed" : !connected ? "Not connected" : !running ? "Paused" : snapshot.testing ? "Two-second test" : output ? live ? "Command requested" : "Playing" : "Playing · quiet section"};
 }
 
 export class SimulatorTrace {
@@ -56,7 +72,7 @@ export function createSimulatorView(mount, {document = mount?.ownerDocument ?? g
   const rings = [0, 1, 2].map(index => make("ellipse", {cx: 140, cy: 98, rx: 43 + index * 18, ry: 54 + index * 13,
     class: "simulator-ring", opacity: 0}));
   const moving = make("g", {class: "simulator-device-body"});
-  const body = make("rect", {x: 113, y: 42, width: 54, height: 104, rx: 27, class: "simulator-shell"});
+  const body = make("path", {d: SHAPES.lush, class: "simulator-shell"});
   const shine = make("path", {d: "M128 63 Q128 53 139 53", class: "simulator-shine", fill: "none", "stroke-linecap": "round"});
   const seam = make("path", {d: "M114 119 Q140 130 166 119", class: "simulator-seam", fill: "none"});
   const light = make("circle", {cx: 140, cy: 135, r: 3.5, class: "simulator-led"});
@@ -83,10 +99,12 @@ export function createSimulatorView(mount, {document = mount?.ownerDocument ?? g
   };
   const draw = at => {
     const amount = current.output / 20;
-    const active = current.running && amount > 0 && visible();
+    const active = !current.live && current.running && amount > 0 && visible();
     const animate = active && !motion?.matches;
     const shake = animate ? Math.sin(at * (.018 + amount * .04)) * amount * 2.8 : 0;
-    moving.setAttribute("transform", `translate(${shake.toFixed(2)} 0)`);
+    const thrust = animate && current.channel === "thrusting" ? Math.sin(at * .012) * amount * 20 : 0;
+    const rotate = animate && ["rotate", "fingering"].includes(current.channel) ? Math.sin(at * .009) * amount * 18 : 0;
+    moving.setAttribute("transform", current.channel === "vibrate" ? `translate(${shake.toFixed(2)} 0)` : `translate(0 ${thrust.toFixed(2)}) rotate(${rotate.toFixed(2)} 140 140)`);
     rings.forEach((ring, index) => {
       const phase = animate ? (at / (1800 - amount * 700) + index / 3) % 1 : index / 3;
       ring.setAttribute("opacity", active ? ((1 - phase) * amount * .46 + .04).toFixed(3) : "0");
@@ -105,10 +123,16 @@ export function createSimulatorView(mount, {document = mount?.ownerDocument ?? g
     update(snapshot) {
       if (disposed) return;
       current = simulatorReading(snapshot);
+      title.textContent = `${MODELS[current.model]} · ${current.live ? "live connection" : "simulator"}`;
+      body.setAttribute("d", SHAPES[current.model]);
+      frame.dataset.model = current.model;
+      frame.dataset.mode = current.live ? "lovense" : "simulator";
       frame.dataset.running = String(current.running && current.output > 0);
       frame.dataset.connected = String(current.connected);
-      state.textContent = current.label; level.textContent = `${current.output} / 20`;
-      badge.textContent = current.connected ? `Section ${current.position + 1}` : "No toy connected";
+      state.textContent = current.label; level.textContent = current.unknown ? "Unknown" : `${current.output} / 20`;
+      badge.textContent = current.connected ? CHANNELS[current.channel] : "Not connected";
+      graph.setAttribute("aria-label", current.live ? "Recent requested levels, not measured output" : "Recent simulated output");
+      note.textContent = current.live ? "Requested commands only; this graphic cannot measure your toy. Use its physical button if output does not stop." : `${CHANNELS[current.channel]} preview · no physical toy is connected. Illustrative movement, not a hardware measurement.`;
       graphic.setAttribute("data-output", String(current.output));
       refresh();
     },

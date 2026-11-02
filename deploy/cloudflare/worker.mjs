@@ -2,6 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES } from "./assets.mjs";
 import { feedbackJson, normalizeFeedback, FeedbackError } from "./feedback.mjs";
 import { storyImportJson, importPublicStory, StoryImportError } from "./story-import.mjs";
+import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseIdentity, LovenseServiceError } from "./lovense.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 
 const APP_ORIGIN = "https://app.satinlore.com";
@@ -11,7 +12,9 @@ const cachedKeys = new Map();
 const FEEDBACK_METHODS = new Map([
   ["/api/feedback", ["GET", "POST"]], ["/api/my-data", ["GET"]], ["/api/my-data/delete", ["POST"]],
 ]);
-const CONTENT_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-src 'none'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+const CONTENT_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://*.lovense-api.com https://*.lovense.com; font-src 'self'; frame-src https://app.satinlore.com/device-bridge https://app.satinlore.com/device-bridge.html; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+const BRIDGE_VENDOR_HTTPS = "https://*.lovense.com https://*.lovense-api.com https://*.lovense.club:*";
+const BRIDGE_VENDOR_WSS = "wss://*.lovense.com wss://*.lovense-api.com wss://*.lovense.club:*";
 
 /** No production defaults can turn a missing Access configuration into a public app. */
 export function privateAppConfiguration(env) {
@@ -22,18 +25,24 @@ export function privateAppConfiguration(env) {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/.test(team)) return null;
   if (!/^[a-f0-9]{64}$/.test(audience) || /^0+$/.test(audience)) return null;
   if (!EMAIL.test(email) || email.length > 254) return null;
-  return { origin: APP_ORIGIN, issuer: `https://${team}`, audience, email };
+  const testerValue = env.BETA_TESTER_EMAILS;
+  if (testerValue !== undefined && (typeof testerValue !== "string" || testerValue.length > 6000)) return null;
+  const testerEmails = (testerValue || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
+  if (testerEmails.length > 20 || testerEmails.some(value => value.length > 254 || !EMAIL.test(value))) return null;
+  return { origin: APP_ORIGIN, issuer: `https://${team}`, audience, email,
+    ...(testerEmails.length ? { testerEmails: [...new Set(testerEmails)] } : {}) };
 }
 
-function secure(response, { head = false } = {}) {
+function secure(response, { head = false, bridgeHash = null } = {}) {
   const result = new Response(head ? null : response.body, response);
   result.headers.set("Cache-Control", "no-store");
   result.headers.set("Referrer-Policy", "no-referrer");
   result.headers.set("X-Content-Type-Options", "nosniff");
-  result.headers.set("X-Frame-Options", "DENY");
+  result.headers.set("X-Frame-Options", bridgeHash ? "SAMEORIGIN" : "DENY");
   result.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   result.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  result.headers.set("Content-Security-Policy", CONTENT_POLICY);
+  result.headers.set("Content-Security-Policy", bridgeHash ?
+    `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${APP_ORIGIN}; base-uri 'none'; form-action 'none'` : CONTENT_POLICY);
   return result;
 }
 
@@ -61,7 +70,8 @@ export async function verifyFounder(request, config, keyResolver) {
     });
     const now = Math.floor(Date.now() / 1000);
     if (payload.type !== "app" || typeof payload.sub !== "string" || !payload.sub || payload.sub.length > 512) return null;
-    if (typeof payload.email !== "string" || !EMAIL.test(payload.email) || payload.email.toLowerCase() !== config.email) return null;
+    if (typeof payload.email !== "string" || !EMAIL.test(payload.email) ||
+        ![config.email, ...(config.testerEmails || [])].includes(payload.email.toLowerCase())) return null;
     if (!Number.isSafeInteger(payload.iat) || payload.iat > now + 30 || !Number.isSafeInteger(payload.exp) || !Number.isSafeInteger(payload.exp * 1000)) return null;
     return { expiresAt: payload.exp * 1000, subject: payload.sub };
   } catch {
@@ -70,7 +80,7 @@ export async function verifyFounder(request, config, keyResolver) {
   }
 }
 
-export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser } = {}) {
+export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher } = {}) {
   return {
     async fetch(request, env) {
       const head = request.method === "HEAD";
@@ -82,6 +92,51 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser 
       if (url.origin !== config.origin) return finish(json({ error: "Founder access required." }, 403));
       const session = await verifyFounder(request, config, keyResolver);
       if (!session) return finish(json({ error: "Founder access required." }, 403));
+      if (["/api/lovense/status", "/api/lovense/session"].includes(url.pathname)) {
+        const status = url.pathname.endsWith("/status");
+        const methods = status ? ["GET", "HEAD"] : ["POST"];
+        if (!methods.includes(request.method)) {
+          const response = json({ error: "Use the connection controls on SatinLore." }, 405);
+          response.headers.set("Allow", methods.join(", "));
+          return finish(response);
+        }
+        if (url.search) return finish(json({ error: "Use the connection controls on SatinLore." }, 400));
+        const vendorConfig = lovenseConfiguration(env);
+        const quotaAvailable = env.PRIVATE_FEEDBACK && typeof env.PRIVATE_FEEDBACK.idFromName === "function" && typeof env.PRIVATE_FEEDBACK.get === "function";
+        const available = Boolean(vendorConfig && quotaAvailable);
+        const unavailable = "Real-toy connections need the Lovense server settings. You can use every toy simulator now.";
+        if (status) return finish(json({ available, message: available ? "Ready to pair through Lovense Remote. Physical behaviour still needs testing." : unavailable }));
+        if (request.headers.get("Origin") !== config.origin ||
+            ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
+          return finish(json({ error: "Please use the connection controls on SatinLore." }, 403));
+        }
+        try {
+          await emptyLovenseRequest(request);
+          if (!available) return finish(json({ error: unavailable }, 503));
+          const uid = await lovenseIdentity(session.subject, config.audience, vendorConfig.uidSecret);
+          // Separate object namespace: quota state never joins feedback, email or stories.
+          const quota = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(`lovense-issue:v1:${uid}`));
+          const permission = await quota.fetch(new Request("https://feedback.internal/internal/lovense-rate", {
+            method: "POST", headers: { Origin: config.origin, "Content-Type": "application/json" }, body: "{}",
+          }));
+          if (permission.status !== 200) {
+            const limited = permission.status === 429;
+            const response = json({ error: limited ? "A few connection attempts were made recently. Wait a minute and try again." : "Connection setup is temporarily unavailable. Try again shortly." }, limited ? 429 : 503);
+            if (limited) response.headers.set("Retry-After", /^\d+$/.test(permission.headers.get("Retry-After") || "") ? permission.headers.get("Retry-After") : "60");
+            return finish(response);
+          }
+          if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+          const authToken = await issueLovenseToken(vendorConfig, uid, lovenseFetcher ? { fetcher: lovenseFetcher } : {});
+          // Authentication can expire/change while the vendor request is in flight.
+          const renewed = await verifyFounder(request, config, keyResolver);
+          if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+          return finish(json({ uid, platform: vendorConfig.platform, authToken,
+            expires_at: Math.floor(Math.min(renewed.expiresAt, Date.now() + 15 * 60_000) / 1000) }));
+        } catch (error) {
+          if (error instanceof LovenseServiceError) return finish(json({ error: error.message }, error.status));
+          return finish(json({ error: "Connection setup is temporarily unavailable. Try again shortly." }, 503));
+        }
+      }
       if (url.pathname === "/api/story-import") {
         if (request.method !== "POST") {
           const response = json({ error: "Use the story-link form to import a story." }, 405);
@@ -159,8 +214,17 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser 
       try {
         const assetUrl = new URL(path, config.origin);
         // No bearer assertion, cookies, user query values or reader content enter an asset request.
-        const asset = await env.ASSETS.fetch(new Request(assetUrl, { method: request.method }));
+        const bridge = path === "/device-bridge.html";
+        const asset = await env.ASSETS.fetch(new Request(assetUrl, { method: bridge ? "GET" : request.method }));
         if (asset.status !== 200) return finish(json({ error: "The preview asset is unavailable." }, 404));
+        if (bridge) {
+          const document = await asset.text();
+          const script = document.match(/<script id="lovense-isolated-bundle">([\s\S]*?)<\/script>/)?.[1];
+          if (!script || document.length > 500_000) return finish(json({ error: "The isolated connection bridge is unavailable." }, 503));
+          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(script));
+          const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
+          return secure(new Response(document, asset), { head, bridgeHash: hash });
+        }
         return finish(asset);
       } catch {
         return finish(json({ error: "The preview asset is unavailable." }, 503));

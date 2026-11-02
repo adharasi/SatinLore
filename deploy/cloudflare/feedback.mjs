@@ -125,6 +125,29 @@ export class PrivateFeedback {
   async handle(request) {
     const url = new URL(request.url);
     if (url.search || (request.headers.get("origin") && request.headers.get("origin") !== ORIGIN)) return result({ error: "Please use the form on the SatinLore app." }, 400);
+    if (url.pathname === "/internal/lovense-rate") {
+      // Invoked only by the authenticated Worker in an independent per-UID object.
+      // It retains bounded counters, never vendor tokens, identities or messages.
+      if (url.origin !== "https://feedback.internal" || request.method !== "POST" || request.headers.get("origin") !== ORIGIN) return result({ error: "Not found." }, 404);
+      const value = await feedbackJson(request);
+      if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length) return result({ error: "Invalid connection request." }, 400);
+      this.initialize();
+      const now = Date.now();
+      const outcome = this.storage.transactionSync(() => {
+        this.purge(now);
+        const windows = [{ name: "lovense-minute", duration: 60_000, limit: 3 }, { name: "lovense-hour", duration: 3_600_000, limit: 20 }].map(window => {
+          const startsAt = Math.floor(now / window.duration) * window.duration;
+          const prior = this.rows("SELECT starts_at,count FROM rate_windows WHERE period=?", window.name)[0];
+          return { ...window, startsAt, count: prior?.starts_at === startsAt ? prior.count : 0 };
+        });
+        const denied = windows.filter(window => window.count >= window.limit);
+        if (denied.length) return Math.max(...denied.map(window => window.startsAt + window.duration));
+        for (const window of windows) this.sql.exec("INSERT INTO rate_windows(period,starts_at,count,expires_at) VALUES(?,?,?,?) ON CONFLICT(period) DO UPDATE SET starts_at=excluded.starts_at,count=excluded.count,expires_at=excluded.expires_at", window.name, window.startsAt, window.count + 1, window.startsAt + window.duration);
+        return 0;
+      });
+      await this.scheduleCleanup();
+      return outcome ? result({ error: "Try again shortly." }, 429, { "Retry-After": String(Math.max(1, Math.ceil((outcome - now) / 1000))) }) : result({ ok: true });
+    }
     if (!["/api/feedback", "/api/my-data", "/api/my-data/delete"].includes(url.pathname)) return result({ error: "Not found." }, 404);
     const read = request.method === "GET" && ["/api/feedback", "/api/my-data"].includes(url.pathname);
     const write = request.method === "POST" && ["/api/feedback", "/api/my-data/delete"].includes(url.pathname);

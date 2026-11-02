@@ -1,6 +1,6 @@
 # Test today without a physical device
 
-Start here for the front end. The reader uses the simulator only: no toy, Lovense developer token or invitation is needed. The separate connection screen can also exercise invitations and logout today. Live pairing and physical output belong to the [hardware check](hardware-check.md).
+Start here for hardware-free checks: choose **Try a simulator**, so no toy, Lovense developer token or invitation is needed. The reader now has eight model profiles and a separate configured live route. Use [the eight-model rehearsal and beta guide](lovense-beta-test.md) for the complete model/device/action/test workflow and tomorrow's physical session. The separate local connection screen can still exercise invitations and logout today.
 
 ## 1. Start the current build
 
@@ -105,7 +105,7 @@ With two tabs on the same origin, update or delete a saved story in one. The oth
 
 Use neutral text or material you are entitled to import. Keep physical devices disconnected.
 
-1. Open the guided setup from the reader. Choose **Connect simulator** explicitly, then **Open practice story**. The real-toy route must say it is coming later; there must be no automatic connection or output.
+1. Open the guided setup from the reader. Choose a toy profile and **Try a simulator**, explicitly connect and select the discovered synthetic device, then run the short action test. Check the response and stopped output before opening the practice story. Repeat this for Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush using [the eight-model guide](lovense-beta-test.md). The real-toy route is separate and must accurately show missing server configuration; there must be no automatic device selection or output.
 2. Follow the practice coach: confirm Start, move through sections by scrolling or Previous/Next, use both strength buttons, change the maximum, Stop/Pause and restart. The six neutral practice sections have deliberate levels `0, 2, 4, 1, 3, 0`; these are test mappings, not claims about the scorer. The graphic/trace must follow actual output; Pause/Stop/disconnect returns it to zero. If the display stays at zero, check the current section, target, maximum, strength and playback state before assuming failure.
 3. Open the practice sidebar, try different scroll speeds, then skip/finish setup. Exit must cancel pending Start and leave playback paused. An incomplete checklist must not be presented as a completed hardware setup. No completion state or chosen strength/maximum is saved to an account.
 4. On a blank story page, type and paste directly. Open Reading controls and find separate upload and link-import actions. Upload a supported AO3 HTML download; source scripts/links/images must not execute or fetch resources. Plain text that looks like HTML remains literal when entered as plain text.
@@ -152,7 +152,7 @@ For each issue, record build, browser/version, viewport, the neutral fixture use
 
 Continue with F3 simulation scenarios and F4 software journeys in the [roadmap](beta-roadmap.md) while hardware is unavailable. Scoring evaluation can run in parallel. There is no device deadline attached to frontend progress.
 
-For later hardware qualification, arrange developer access, note the exact Lovense Website Name, install Lovense Remote on your phone and read [hardware-check.md](hardware-check.md). Those account/phone steps must be completed on your own devices. Prepare a copy of [hardware-test-record.md](hardware-test-record.md). Pairing, selected-device response, actual expiry after connection loss and physical Stop require physical observations. Story-to-real-device playback remains disabled even if the simulator checks pass.
+For later hardware qualification, arrange developer access, note the exact Lovense Website Name, install Lovense Remote on your phone and read [hardware-check.md](hardware-check.md). Those account/phone steps must be completed on your own devices. Prepare a copy of [hardware-test-record.md](hardware-test-record.md). Pairing, selected-device response, actual expiry after connection loss and physical Stop require physical observations. The optional configured real-device route must use its own bounded asynchronous transport. Passing the simulator checks does not qualify live SDK compatibility, physical output or any model; record those separately.
 
 
 ## Software iteration: library, controls and private services

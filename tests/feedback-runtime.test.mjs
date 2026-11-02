@@ -35,4 +35,9 @@ test("the feedback class runs with real SQLite Durable Object storage and isolat
   assert.equal(cleared.status, 200); assert.equal((await cleared.json()).deleted, true);
   assert.equal((await (await first.fetch("https://feedback.internal/api/feedback")).json()).feedback.length, 0);
   assert.equal((await write()).status, 429, "Feedback deletion preserves rate limits in actual SQLite Durable Object storage.");
+  const quota = client => client.fetch("https://app.satinlore.com/internal/lovense-rate", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  for (let count=0; count<3; count++) assert.equal((await quota(first)).status,200);
+  assert.equal((await quota(first)).status,429, "Connection quota commits in actual SQLite storage.");
+  assert.equal((await quota(other)).status,200, "Another object has its own connection quota.");
+  assert.equal((await (await first.fetch("https://feedback.internal/api/feedback")).json()).feedback.length,0);
 });

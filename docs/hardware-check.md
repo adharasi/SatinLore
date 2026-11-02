@@ -1,12 +1,14 @@
 # Local authenticated device check
 
+For the current hosted eight-model guide and 3 November tester session, start with [Lovense beta setup and rehearsal](lovense-beta-test.md). This page documents the separate local Python invitation screen and its process variables; these are not the hosted Worker settings.
+
 This screen exercises pairing and one short device command. It does not connect story reading to a real device and is not an external beta deployment. Until the device arrives, use [test-today.md](test-today.md). Prepare a copy of [hardware-test-record.md](hardware-test-record.md) to record observed results for each device/browser configuration.
 
 ## Prerequisites
 
 - Complete the README setup and run the checks.
 - Have a Lovense developer token and the exact Website Name from your developer dashboard. Confirm your integration access with Lovense.
-- Pair your Lush 3 or Lush 4 with Lovense Remote first. Reproduce the official vendor demo before diagnosing SatinLore.
+- Pair the selected supported toy with Lovense Remote first. Reproduce the official vendor demo before diagnosing SatinLore. The shared SDK adapter now recognises the eight requested profiles; this local screen remains a vibration-only discrete test.
 - Use a desktop browser for the initial QR flow and a phone with Lovense Remote. Same-phone app switching is a separate qualification task.
 - Use a browser with Web Locks support. The check permits one controlling tab per origin; unsupported browsers fail the connection step.
 

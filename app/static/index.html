@@ -21,6 +21,7 @@
     </div>
     <div class="header-story"><span id="header-story-title">A little space for your next story</span><div id="story-tabs" class="story-tabs" role="tablist" aria-label="Open stories"></div></div>
     <div class="header-actions">
+      <button id="choose-toy" type="button" class="quiet-control device-setup-shortcut" aria-label="Set up a toy" title="Choose a toy or rehearse with a simulator"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8V4m6 4V4M7 8h10v4a5 5 0 0 1-4 4.9V21h-2v-4.1A5 5 0 0 1 7 12z"/></svg><span>Toy setup</span></button>
       <button id="toggle-dark-mode" type="button" class="quiet-control theme-toggle" role="switch" aria-checked="false" aria-label="Dark mode" title="Dark mode"><span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span><span class="theme-toggle-label">Dark</span></button>
       <button id="focus-mode" class="quiet-control" aria-pressed="false" title="Hide side panels and keep reading controls">Focus</button>
       <button id="toggle-settings" class="quiet-control header-icon" aria-label="Reading controls" aria-controls="settings-panel" aria-expanded="false" title="Reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3M9 4v6m4 4v6"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg></button>
@@ -52,7 +53,7 @@
       <div class="draft-actions"><button id="open-draft" class="primary">Read story <span aria-hidden="true">→</span></button><button id="empty-link-import" class="quiet-control">Import from a link</button><button id="empty-new-story" class="quiet-control">Upload a story</button></div>
       <p id="draft-help" class="note draft-help">AO3, Literotica, or a story of your own. Your text stays private.</p>
       <p id="draft-status" class="note" role="status" aria-live="polite"></p>
-      <button id="empty-setup" class="quiet-control empty-setup-button">First time? Try a test read <span aria-hidden="true">→</span></button>
+      <button id="empty-setup" class="quiet-control empty-setup-button">Set up a toy or try a test read <span aria-hidden="true">→</span></button>
     </section>
     <section id="reading-workspace" class="reading-workspace" role="tabpanel" aria-labelledby="story-title" hidden>
       <div class="story-heading"><h1 id="story-title" tabindex="-1">Your story</h1><div class="story-meta"><span id="save-status" role="status" aria-live="polite">Session only</span><span class="meta-divider" aria-hidden="true">·</span><span id="analysis-status" role="status" aria-live="polite">Preparing suggestions</span></div></div>
@@ -61,16 +62,17 @@
       <p class="end-note">The end.</p>
     </section>
     <p id="access-status" class="session-message" role="status" aria-live="polite" hidden></p>
-    <p id="message" class="session-message" role="status" aria-live="polite">Read on your own, or try the simulator.</p>
+    <p id="message" class="session-message" role="status" aria-live="polite">Read on your own, connect a toy or try its simulator.</p>
   </main>
 
   <aside id="settings-panel" class="workspace-panel settings-panel" aria-label="Reading settings" hidden>
     <div class="panel-heading"><h2>Reading controls</h2><button id="close-settings" class="icon-button" aria-label="Close reading settings">×</button></div>
     <section class="sidebar-section simulator-section" aria-labelledby="simulator-preview-heading">
-      <div class="section-title-row"><h3 id="simulator-preview-heading">Live preview</h3><span class="simulation-label">SIMULATED</span></div>
+      <div class="section-title-row"><h3 id="simulator-preview-heading">Toy preview</h3><span id="connection-badge" class="simulation-label">SIMULATED</span></div>
       <div id="simulator-visual"></div>
       <div id="setup-coach-mount"></div>
-      <button id="open-setup" class="setup-button">Set up &amp; try a test read <span aria-hidden="true">→</span></button>
+      <button id="open-setup" class="setup-button">Choose a toy &amp; test the connection <span aria-hidden="true">→</span></button>
+      <p class="note">Lush · Flexer · Nora · Domi · Velvo · Spinel · Dolce · Hush. Rehearse without hardware, or pair through Lovense Remote.</p>
     </section>
     <section class="sidebar-section story-import" aria-labelledby="import-link-heading">
       <div class="section-title-row"><h3 id="import-link-heading">Import a story</h3><span class="sidebar-kicker">IMPORT</span></div>
@@ -81,7 +83,7 @@
     <section class="sidebar-section model-section" aria-labelledby="model-heading">
       <div class="section-title-row"><h3 id="model-heading">Story model</h3><span class="model-badge">LOCAL</span></div>
       <label class="visually-hidden" for="reading-model">Story model</label><select id="reading-model" aria-describedby="model-help"><option value="standard">SatinLore Standard · experimental</option><option value="custom" disabled>SatinLore Custom · coming later</option></select>
-      <p id="model-help" class="note">Standard runs on your device. Custom is a planned paid model for multi-toy and dual-action control; it is not available yet.</p>
+      <p id="model-help" class="note">Standard runs on your device and controls one selected movement. Custom is a planned paid model for coordinated movements and multiple toys; it is not available yet.</p>
     </section>
     <div class="settings-tabs" role="tablist" aria-label="Settings sections"><button id="settings-reader-tab" role="tab" aria-selected="true" aria-controls="reader-settings" tabindex="0">Reader</button><button id="settings-story-tab" role="tab" aria-selected="false" aria-controls="story-settings" tabindex="-1">Story</button></div>
     <section id="reader-settings" role="tabpanel" aria-labelledby="settings-reader-tab" tabindex="0">
@@ -108,7 +110,7 @@
   </aside>
 
   <aside id="transport" class="transport" aria-label="Simulator playback controls">
-    <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong>Simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line">Output <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Simulated intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
+    <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong id="device-label">Lush simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line"><span id="output-label">Output</span> <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Requested intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
     <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
     <div class="strength-control"><span id="strength-label" class="control-caption">Strength</span><div class="strength-buttons" role="group" aria-labelledby="strength-label"><button id="strength-minus" class="icon-button" aria-label="Decrease session strength">−</button><output id="strength-value" aria-live="polite">1.0×</output><button id="strength-plus" class="icon-button" aria-label="Increase session strength">+</button><button id="strength-reset" class="reset-button">Reset</button></div></div>
     <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
@@ -121,7 +123,7 @@
     <section class="app-settings-section"><h3>Account &amp; storage</h3><span class="account-badge">PRIVATE PREVIEW</span><p>You are using the private Cloudflare sign-in. Stories are stored on this browser only when you choose to save them.</p><p class="note">Personal accounts and a synced cloud library are planned. They are not available in this test build.</p></section>
     <div class="library-footer">
       <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit, in Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
-      <details class="about-preview"><summary>About SatinLore</summary><p class="note">This build uses a simulator. It does not control a physical toy.</p><a href="/device-check" target="_blank" rel="noopener">Device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
+      <details class="about-preview"><summary>About SatinLore</summary><p class="note">Try eight toy simulators or connect through Lovense Remote. Physical connections are a limited beta and still need model-by-model testing.</p><a href="/device-check" target="_blank" rel="noopener">Local device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
       <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Support <span aria-hidden="true">↗</span></a></nav>
       <button id="delete-all" class="quiet-button" disabled>Delete all stories</button>
     </div>

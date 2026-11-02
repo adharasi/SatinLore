@@ -76,8 +76,8 @@ test("invalid levels, wrong selections and unsupported models cannot dispatch", 
   assert.throws(() => controller.test(1, 6));
   controller.test(5, 0);
   assert.deepEqual(sdk.commands, []);
-  assert.deepEqual(supportedToys([toy(), toy(), toy("toy-b", "2"), {...toy("toy-c"), connected: false}, {...toy("toy-d"), toyType: "other"}]),
-    [{id: "toy-a", label: "Lush 3"}]);
+  assert.deepEqual(supportedToys([toy(), toy(), toy("toy-b", "2"), {...toy("toy-c"), connected: false}, {...toy("toy-d"), toyType: "other"}]).map(({id,label}) => ({id,label})),
+    [{id: "toy-a", label: "Lush 3"}, {id: "toy-b", label: "Lush 2"}]);
 });
 
 test("changing selection stops the previous toy and never broadcasts", () => {
@@ -184,4 +184,83 @@ test("rapid repeated clicks cannot extend a pulse into a queued command stream",
 test("pairing images are limited to HTTPS vendor domains", () => {
   assert.equal(safeQrUrl("https://apps.lovense-api.com/qr/test.jpg"), "https://apps.lovense-api.com/qr/test.jpg");
   for (const url of ["javascript:alert(1)", "data:image/png;base64,a", "http://apps.lovense-api.com/a", "https://lovense-api.com.evil.test/a", "https://evil.test/a", "https://user@api.lovense-api.com/a", "https://api.lovense-api.com:8443/a"]) assert.equal(safeQrUrl(url), null);
+});
+
+test("all requested models can be explicitly targeted without broadcasting", async () => {
+  for(const model of ["lush","flexer","nora","domi","velvo","spinel","dolce","hush"]) {
+    const {controller,connect}=harness();const sdk=connect();
+    sdk.toys=[{id:`only-${model}`,toyType:model,connected:true}];sdk.event("toyInfoChange");
+    controller.select(`only-${model}`);
+    assert.deepEqual(await controller.command(5,2),{status:"submitted",level:2,channel:"vibrate"});
+    assert.deepEqual(sdk.commands,[{vibrate:2,time:2,toyId:`only-${model}`}]);
+    assert.ok(sdk.commands.every(command=>command.toyId));
+  }
+});
+
+test("channel dispatch follows current manufacturer capabilities and never adds unknown commands", async () => {
+  for(const [model,channel] of [["nora","rotate"],["flexer","fingering"],["velvo","rotate"],["spinel","thrusting"]]) {
+    const {controller,connect}=harness();const sdk=connect();
+    sdk.toys=[{id:"selected",toyType:model,connected:true,fullFunctionNames:["Vibrate",channel]}];sdk.event("toyInfoChange");controller.select("selected");
+    await controller.command(3,5,{channel,seconds:2});
+    assert.deepEqual(sdk.commands,[{[channel]:3,time:2,toyId:"selected"}]);
+    sdk.toys[0].fullFunctionNames=["Vibrate"];sdk.event("toyInfoChange");
+    assert.equal(controller.selected,null);assert.equal(sdk.stops.at(-1),"selected");
+  }
+  const {controller,connect}=harness();const sdk=connect();controller.select("toy-a");
+  for(const channel of ["rotate","fingering","thrusting","vibrate1","heating","All"]) assert.throws(()=>controller.command(3,5,{channel}));
+  assert.deepEqual(sdk.commands,[]);
+});
+
+test("finite reader renewals cancel old expiry timers without queuing intermediate commands", async () => {
+  const {controller,connect,advance}=harness();const sdk=connect();controller.select("toy-a");
+  await controller.command(2,5);assert.throws(()=>controller.command(3,5),/one per second/);
+  advance(1000);await controller.command(3,5);advance(1000);
+  assert.equal(sdk.stops.length,0,"The previous command's expiry must not stop a newer renewal.");
+  advance(1000);assert.equal(sdk.stops.at(-1),"toy-a");
+  assert.deepEqual(sdk.commands.map(item=>item.vibrate),[2,3]);
+  for(const seconds of [0,1,2.1,3,Infinity,NaN]) assert.throws(()=>controller.command(2,5,{seconds}));
+});
+
+test("pending SDK requests cannot create a backlog or turn a failed result into submission", async () => {
+  const {controller,connect,advance}=harness();const sdk=connect();controller.select("toy-a");
+  let resolve;sdk.sendToyCommand=command=>{sdk.commands.push(command);return new Promise(done=>{resolve=done;});};
+  const pending=controller.command(2,5);advance(1000);
+  assert.throws(()=>controller.command(3,5),/current device request/);
+  resolve({code:402});await assert.rejects(pending,/could not be confirmed/);
+  assert.equal(sdk.destroyed,true);assert.equal(sdk.commands.length,1);assert.equal(controller.selected,null);
+});
+
+test("Stop, selection and disconnect fence late SDK completion with another Stop of the original ID", async () => {
+  for(const interruption of ["stop","select","disconnect"]) {
+    const {controller,connect}=harness();const sdk=connect();sdk.toys=[toy(),toy("toy-b","4")];sdk.event("toyInfoChange");controller.select("toy-a");
+    let resolve;sdk.sendToyCommand=()=>new Promise(done=>{resolve=done;});
+    const pending=controller.command(2,5);const rejection=assert.rejects(pending,/cancelled/);
+    if(interruption==="select")controller.select("toy-b");else controller[interruption]();
+    const oldStops=sdk.stops.filter(id=>id==="toy-a").length;
+    resolve({code:200});await rejection;
+    assert.equal(sdk.stops.filter(id=>id==="toy-a").length,oldStops+1);
+    assert.equal(sdk.stops.includes("toy-b"),false);
+    assert.equal(sdk.stops.includes(undefined),false);
+  }
+});
+
+test("timed-out SDK requests disconnect, and late settlement still targets the original toy", async () => {
+  const {controller,connect,advance}=harness();const sdk=connect();controller.select("toy-a");
+  let resolve;sdk.sendToyCommand=()=>new Promise(done=>{resolve=done;});
+  const pending=controller.command(2,5);const rejection=assert.rejects(pending,/could not be confirmed/);
+  controller.stop();advance(1500);await rejection;
+  assert.equal(sdk.destroyed,true);assert.equal(controller.connected,false);
+  const stopped=sdk.stops.length;resolve();await Promise.resolve();await Promise.resolve();
+  assert.equal(sdk.stops.length,stopped+1);assert.ok(sdk.stops.every(id=>id==="toy-a"));
+});
+
+test("stopTarget only addresses a previously discovered toy and reports explicit failure truthfully", async () => {
+  const {controller,connect}=harness();const sdk=connect();sdk.toys=[toy(),toy("toy-b","4")];sdk.event("toyInfoChange");controller.select("toy-b");
+  assert.deepEqual(await controller.stopTarget("unknown"),{status:"unconfirmed"});assert.deepEqual(sdk.stops,[]);
+  assert.deepEqual(await controller.stopTarget("toy-a"),{status:"submitted"});assert.equal(controller.selected,"toy-b");
+  sdk.stopToyAction=id=>{sdk.stops.push(id);return {code:500};};
+  assert.deepEqual(await controller.stop(),{status:"unconfirmed"});
+  assert.deepEqual(await controller.stopTarget("toy-a"),{status:"unconfirmed"});
+  sdk.stopToyAction=()=>false;
+  assert.deepEqual(await controller.stop(),{status:"unconfirmed"});
 });

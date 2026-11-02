@@ -1,10 +1,9 @@
-import {MockDevice} from "./devices/mock.mjs";
+import {ReaderDeviceController} from "./devices/reader-device.mjs";
 import {TextImporter} from "./reader/import.mjs";
 import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
 import {StoryStore} from "./reader/storage.mjs";
 import {selectReadingParagraph} from "./reader/position.mjs";
-import {PlaybackController} from "./playback/controller.mjs";
 import {HostedAccessGuard} from "./access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "./reader/library-view.mjs";
 import {BackupImporter, serializeBackup, downloadBackup} from "./reader/backup.mjs";
@@ -24,6 +23,7 @@ let folderFilter = "all";
 let folderSignature = "";
 let simulatorView = null;
 let setupFlow = null;
+let connection = {mode: "simulator", model: "lush", toys: [], selectedId: null};
 const backupImporter = new BackupImporter();
 const preferences = new ReaderPreferences();
 const stories = [];
@@ -229,12 +229,18 @@ function display(state = latest) {
     renderLibrary();
   }
   text("status", ({DISCONNECTED: "Disconnected", READY_PAUSED: "Connected · paused",
-    PLAYING: "Playing simulation", ERROR_PAUSED: "Error · paused"})[state.state] || "Paused");
-  text("output", `${state.output} / 20`);
+    PLAYING: state.mode === "lovense" ? "Sending commands" : "Playing simulation", CONNECTING: "Connecting…", STOPPING: "Stopping…", ERROR_PAUSED: "Error · paused"})[state.state] || "Paused");
+  text("device-label", state.deviceLabel ?? "Lush simulator");
+  text("connection-badge", state.mode === "lovense" ? "LIVE · BETA" : "SIMULATED");
+  text("output-label", state.mode === "lovense" ? "Requested" : "Output");
+  $("transport").setAttribute("aria-label", state.mode === "lovense" ? "Toy playback controls" : "Simulator playback controls");
+  text("output", state.outputKnown === false ? "Unconfirmed" : `${state.output ?? 0} / 20`);
   text("target-output", `${state.target ?? 0} / 20`);
-  $("meter").value = state.output;
+  $("meter").value = state.output ?? 0;
   text("capValue", state.ceiling);
   $("cap").value = state.ceiling;
+  $("cap").max = state.mode === "lovense" ? "5" : "20";
+  text("ceiling-help", state.mode === "lovense" ? "Physical beta maximum is 5 out of 20. Reductions apply immediately. A higher maximum pauses until you choose Start; there is no extra popup." : "Changes apply immediately within the simulator. Adjusting the maximum does not start playback.");
   $("cap").setAttribute("aria-valuetext", `${state.ceiling} out of 20 confirmed maximum`);
   text("strength-value", formatStrength());
   $("strength-minus").disabled = libraryMutation || story?.deleting || state.strength <= 0;
@@ -244,23 +250,26 @@ function display(state = latest) {
   $("connect").disabled = state.connected && !reconnect;
   $("connect").hidden = state.connected && !reconnect;
   text("connect", reconnect ? "Reconnect" : "Connect");
-  $("connect").setAttribute("aria-label", reconnect ? "Reconnect simulator" : "Connect simulator");
-  $("connect").title = reconnect ? "Reconnect simulator" : "Connect simulator";
+  $("connect").setAttribute("aria-label", state.mode === "lovense" ? "Reconnect toy" : reconnect ? "Reconnect simulator" : "Connect simulator");
+  $("connect").title = state.mode === "lovense" ? "Reconnect toy" : reconnect ? "Reconnect simulator" : "Connect simulator";
   $("disconnect").hidden = !state.connected || reconnect;
   $("disconnect").disabled = !state.connected && !pendingStart;
   $("start").disabled = !navigator.locks || !canStartHere() || !story?.model.analysisReady || importing || !state.connected || state.running ||
-    pendingStart || state.state === "ERROR_PAUSED" || story?.deleting;
+    pendingStart || state.state === "ERROR_PAUSED" || state.testing || state.mode === "lovense" && state.canStart === false || story?.deleting;
   let readiness;
   if (pendingStart) readiness = "Preparing this Start. Stop cancels it immediately.";
-  else if (state.running) readiness = "Simulation is running. Pause or Stop before starting again.";
-  else if (state.state === "ERROR_PAUSED") readiness = "Reconnect the simulator, then confirm Start again.";
+  else if (state.testing) readiness = "Wait for the two-second connection test to finish, then choose Start.";
+  else if (state.running) readiness = "Playback is running. Pause or Stop before starting again.";
+  else if (state.state === "ERROR_PAUSED") readiness = "Reconnect, then confirm Start again.";
+  else if (state.outputKnown === false) readiness = "Output is unconfirmed. Check your toy and reconnect before starting.";
   else if (!canStartHere()) readiness = hostedAccess?.snapshot().state === "checking" ? "Checking sign-in. Start will be available when the check passes." : "Check your sign-in before starting. Your story is still readable.";
   else if (importing) readiness = "Opening your text. Start will be available after analysis and connection.";
   else if (libraryMutation || story?.deleting) readiness = "Finishing the library change. Playback stays paused.";
-  else if (!story) readiness = "Add or open a story, then connect the simulator.";
+  else if (!story) readiness = "Add a story, or choose Set up a toy for a guided test read.";
   else if (!story.model.analysisReady) readiness = story.model.analysisStatus === "error" ? "Analysis needs attention. Open Story settings and choose Analyse again." : "Preparing story suggestions. You can keep reading while you wait.";
-  else if (!state.connected) readiness = "Connect the simulator, then choose Start.";
+  else if (!state.connected) readiness = "Connect the simulator or set up a toy, then choose Start.";
   else if (!navigator.locks) readiness = "Start needs browser Web Locks. Use a current browser over HTTPS or localhost; reading still works here.";
+  else if (state.mode === "lovense" && state.canStart === false) readiness = state.reason || "Complete Toy setup and confirm the short connection test before Start.";
   else readiness = `Ready. Start asks you to confirm maximum ${state.ceiling}/20. Stop keeps your story and connection ready.`;
   text("start-help", readiness);
   if ($("retry-access")) {
@@ -300,7 +309,7 @@ function display(state = latest) {
   }
   updateCurrentCorrection(story);
   simulatorView?.update(state);
-  setupFlow?.update({...state, canStart: !$("start").disabled, readiness: $("start-help").textContent});
+  setupFlow?.update({...connection, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent});
   renderFolders();
 }
 
@@ -309,11 +318,14 @@ function controlRecovery(state) {
   for (const id of ["start", "pause"]) if ($(id)) $(id).disabled = true;
   if ($("connect")) { $("connect").disabled = false; $("connect").hidden = false; text("connect", "Reconnect"); }
   if ($("stop")) $("stop").disabled = false;
-  text("status", "Controls need reconnecting"); text("output", "0 / 20");
-  text("start-help", "The controls could not update. Output is stopped. Reconnect the simulator to try again.");
-  show("The controls could not update. Reconnect the simulator; your story remains readable.");
+  text("status", "Controls need reconnecting"); text("output", state.mode === "lovense" ? "Unconfirmed" : "0 / 20");
+  text("start-help", "The controls could not update. Stop was requested. Check your toy and reconnect before continuing.");
+  show("The controls could not update. Reconnect; your story remains readable.");
 }
-const controller = new PlaybackController({device: new MockDevice(), onInterfaceError: controlRecovery, onChange: state => {
+const controller = new ReaderDeviceController({document, window, navigator,
+  authorize: async () => !hostedMode || Boolean(await hostedAccess?.check({fresh: true}) && canStartHere()),
+  onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
+  onInterfaceError: controlRecovery, onChange: state => {
   const stopped = latest.running && !state.running;
   if (!state.running) releasePlayback();
   if (stopped) { cancelPosition(); cancelStart(); }
@@ -322,9 +334,9 @@ const controller = new PlaybackController({device: new MockDevice(), onInterface
 }});
 function pause(reason) {
   cancelStart(); cancelPosition();
-  const state = controller.pause(reason);
+  controller.pause(reason);
   releasePlayback();
-  try { display(state); } catch { controlRecovery(controller.snapshot()); }
+  try { display(controller.snapshot()); } catch { controlRecovery(controller.snapshot()); }
 }
 
 function storyRecord(story) {
@@ -744,7 +756,7 @@ async function confirmStart() {
     if (!canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story || !story.model.analysisReady ||
         latest.ceiling !== intent.ceiling || latest.strength !== intent.strength) { release?.(); return; }
     if (!release) {
-      show(navigator.locks ? "Another tab is playing the simulator. Pause it first." :
+      show(navigator.locks ? "Another tab is playing. Pause it first." :
         "Playback needs a browser with Web Locks support. You can still read and correct levels.");
       return;
     }
@@ -754,7 +766,7 @@ async function confirmStart() {
     if (!controller.start()) { release(); if (playingLease === release) playingLease = null; }
   } catch {
     release?.();
-    if (operation === startEpoch) controller.pause("The simulator could not start. Reconnect and try again.");
+    if (operation === startEpoch) controller.pause("Playback could not start. Reconnect and try again.");
   } finally {
     if (operation === startEpoch) { pendingStart = false; display(); }
   }
@@ -848,7 +860,7 @@ $("import-url")?.addEventListener("click", () => void importStoryUrl());
 $("story-url")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void importStoryUrl(); } });
 $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings-dialog"));
 for (const id of ["close-app-settings", "app-settings-close"]) $(id)?.addEventListener("click", () => closeDialog("app-settings-dialog"));
-for (const id of ["open-setup", "empty-setup"]) $(id)?.addEventListener("click", () => setupFlow?.open());
+for (const id of ["open-setup", "empty-setup", "choose-toy"]) $(id)?.addEventListener("click", () => setupFlow?.open());
 $("folder-filter")?.addEventListener("change", event => { folderFilter = event.target.value; renderLibrary(); });
 $("create-folder")?.addEventListener("click", () => { pause("Choose a folder name."); const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
 $("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Rename this folder."); const name = prompt("Folder name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
@@ -887,14 +899,14 @@ $("start").addEventListener("click", () => {
   cancelPosition(); followPosition();
   openDialog("start-dialog");
   startIntent = {id: story.id, ceiling: latest.ceiling, strength: latest.strength};
-  text("start-summary", `Simulator · maximum ${latest.ceiling}/20 · session strength ${formatStrength()}. Your story stays on this browser.`);
+  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · maximum ${latest.ceiling}/20 · session strength ${formatStrength()}.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
   text("confirm-start", `Start with maximum ${latest.ceiling}/20`);
 });
 $("confirm-start").addEventListener("click", () => void confirmStart());
 $("cancel-start").addEventListener("click", () => { cancelStart(); closeDialog("start-dialog"); display(); });
 $("pause").addEventListener("click", () => pause("Paused. Confirm Start to continue."));
-$("connect").addEventListener("click", () => { pause("Preparing simulator."); controller.connect(); });
-$("disconnect").addEventListener("click", () => { pause("Disconnecting simulator."); controller.disconnect(); });
+$("connect").addEventListener("click", () => { pause("Preparing connection."); if (latest.mode === "lovense") setupFlow?.open(); else controller.connect(); });
+$("disconnect").addEventListener("click", () => { pause("Disconnecting."); controller.disconnect(); });
 $("cap").addEventListener("input", () => {
   const value = Number($("cap").value);
   if (!Number.isInteger(value) || value < 0 || value > 20) { display(); return; }
@@ -1076,6 +1088,7 @@ if (hostedMode) {
   hostedAccess = new HostedAccessGuard({
     onChange: state => {
       hostedAccessReady = state.allowed;
+      controller.setAuthorized?.(state.allowed);
       if (accessStatus && state.allowed) { accessStatus.hidden = true; accessStatus.replaceChildren(); }
       else if (accessStatus && state.state === "checking" && !state.allowed) {
         accessStatus.hidden = false; accessStatus.textContent = "Checking your private preview access…";
@@ -1113,7 +1126,13 @@ text("reader-preferences-note", loadedPreferences.message);
 if (document.createElementNS) {
   simulatorView = createSimulatorView($("simulator-visual"), {document, window});
   setupFlow = createSetupFlow({document, window, coachMount: $("setup-coach-mount"),
-    onConnect: () => { cancelImport(); pause("Connecting the simulator."); return controller.connect(); },
+    onConnect: options => { cancelImport(); pause("Preparing your connection."); return controller.beginConnection(options); },
+    onSelectDevice: id => controller.selectDevice(id),
+    onTest: options => controller.test(options),
+    onConfirmTest: () => controller.confirmTest(),
+    onRefresh: () => controller.refresh(),
+    onDisconnect: () => { pause("Disconnected from setup."); return controller.disconnect(); },
+    onSimulateFailure: kind => controller.simulateFailure(kind),
     onPractice: record => {
       try {
         addPreparedStory(record);
@@ -1126,6 +1145,7 @@ if (document.createElementNS) {
     onStop: () => { cancelImport(); pause("Setup paused. Start when you are ready."); },
     onFinish: () => { openDraft(); setPanel("settings", true, {restore: false}); selectSettingsTab("reader"); },
   });
+  connection = controller.setupSnapshot();
 }
 selectSettingsTab("reader");
 setPanel("library", !isNarrow(), {restore: false});

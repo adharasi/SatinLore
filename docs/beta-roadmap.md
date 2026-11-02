@@ -2,7 +2,7 @@
 
 Approved workspace revision: 29 October 2026 (frontend specification v1.2), refined by the 2 November editor/import/folder/setup request. Build the software experience with simulated devices first; hardware availability does not block frontend, application or scoring work. The former device-first 48–72-hour release target is superseded. Completion requires evidence, not a date or screenshot.
 
-There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The reader remains simulator-only. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
+There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The 2 November eight-model request adds simulated rehearsal and a configured bounded live path; no physical model is qualified by implementation alone. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
 ## Private hosting decision — 1 November 2026
 
@@ -12,7 +12,7 @@ The one-time owner-side dashboard setup is complete and automatic Git deployment
 
 ## Existing baseline
 
-The local FastAPI/static ES-module application includes TXT/paste import, stable paragraphs, experimental local suggestions, manual corrections, scroll tracking, finite/coalesced simulator playback, a ceiling, explicit Start and interruption/tab-ownership rules. SQLite-backed one-use invitations and expiring sessions support a separate sandboxed device-check screen. New stories stay session-only until an explicit local-save choice. Live SDK compatibility, continuous real-device reading, broader beta release and physical qualification remain outstanding; the founder-only simulator deployment is live.
+The local FastAPI/static ES-module application includes TXT/paste import, stable paragraphs, experimental local suggestions, manual corrections, scroll tracking, finite/coalesced simulator playback, a ceiling, explicit Start and interruption/tab-ownership rules. SQLite-backed one-use invitations and expiring sessions support a separate sandboxed device-check screen. New stories stay session-only until an explicit local-save choice. The eight-model revision adds a separate async reader bridge rather than attaching hardware to the synchronous simulator. Live SDK compatibility, physical behaviour, broader beta release and useful scoring remain outstanding until recorded; existing deployment evidence remains version-specific.
 
 ## F1 — approved themes and reader foundation
 
@@ -50,7 +50,7 @@ AO3 public work/chapter URLs use a bounded, authenticated hosted import service;
 
 A command-settlement fence prevents an older pending command from being mistaken as stopped when its completion and a prior Stop acknowledgement arrive together. A fresh targeted Stop after settlement is required before reporting known zero. Unknown output and an error latch remain until explicit recovery; fixture output is labelled as simulation, not a physical measurement.
 
-The ordinary reader intentionally retains its synchronous simulator adapter. The async lab is a testable contract for later integration, not permission to connect an unqualified real adapter. It has no story input, SDK, network transport or saved playback state. See [the simulator lab guide](../app/static/simulation/README.md). Fake-clock and actual UI-binding tests are separate from browser and physical-device evidence.
+The ordinary reader retains its synchronous adapter for simulation. The eight-model revision reuses the bounded async contract through a separate targeted bridge transport for configured live connections; the deterministic lab remains isolated from that transport. The lab has no story input, SDK, network transport or saved playback state and does not qualify physical behaviour. See [the simulator lab guide](../app/static/simulation/README.md). Fake-clock and actual UI-binding tests are separate from browser and physical-device evidence.
 
 ## F4 — supporting software journeys
 
@@ -60,7 +60,17 @@ The ordinary reader intentionally retains its synchronous simulator adapter. The
 
 The first `v1` SQLite class migration provisions the feedback namespace through the app's Git deployment, without marketing D1/SES resources or new runtime secrets. The existing dashboard-owned enable flag remains a kill switch. Errors are generic, logs contain no stories, and unavailable storage/authentication never fabricates a successful send or deletion. A real local Miniflare SQLite test exercises write, deduplication, export, deletion, rate preservation and separate object isolation.
 
-Access remains founder-only. Invited-reader access/roles and broader beta onboarding require an explicit release change; a Cloudflare identity is not an application account we can erase. The local Python invitation/device-check backend remains local and does not gain hosted vendor routes. Optional coarse telemetry is not implemented or silently enabled. Recovery exports and browser story backups are tested; a production Cloudflare PITR restoration has not been performed.
+Access defaults to the founder. The eight-model revision permits explicit tester emails only when configured in both the Worker allowlist and Cloudflare Access policy; no tester has been enrolled by source alone. A Cloudflare identity is not an application account we can erase. The local Python invitation/device-check backend remains local; the hosted Worker has its own bounded, authenticated Lovense token exchange. Optional coarse telemetry is not implemented or silently enabled. Recovery exports and browser story backups are tested; a production Cloudflare PITR restoration has not been performed.
+
+## Eight-model connection revision — 2 November 2026
+
+The product owner requested rehearsal and a guided connection route for Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush before the first tester session on 3 November. This explicitly expands the former Lush-only hardware scope; it does not remove per-model physical qualification.
+
+The software path includes model/mode selection, a synthetic discovered device for simulator rehearsal, an explicit device/action choice, a short test with user-observed stopped output, and a neutral practice read with a fresh Start. The optional live path uses Lovense Remote, a private pairing code and a protected opaque vendor frame. The Worker's token route derives user identity from Access, retains the developer token server-side and fails closed until its three runtime values are valid. Physical beta commands remain two seconds, at most 5/20, and targeted to one selected device. Only validated model/connection actions are offered; heating, arbitrary commands, simultaneous toys and independent Dolce motors are not implemented.
+
+**Acceptance:** run all eight simulated profiles, available actions, test expiry, Stop/restart, zero/lower maximum, hide/return, story/mode/action change, command errors and disconnect/reconnect. A resumed connection must stay paused. Verify protected endpoints, exact-origin writes, isolated vendor code, bounded per-user credential issuance, no client-controlled UID and no story/credential persistence or diagnostic leakage. Record local, browser and deployment evidence separately below; implementation text is not a check result.
+
+**Before tomorrow's physical session:** complete [Lovense beta setup](lovense-beta-test.md), configure private runtime credentials, and explicitly allow the tester's actual sign-in email in both Access layers. Begin with the tester's frequently used Lush, Flexer, Nora and Domi, then the remaining models. For each actual model/generation/firmware/Remote/browser configuration, observe selected-toy targeting, each offered action, finite expiry and interruption/Stop behaviour before personal story testing. Simulated extra motions are not proof of live capability. Record any absent live action as a missing capability rather than inventing a command.
 
 ## F5 — measurable scoring evaluation
 
@@ -78,7 +88,7 @@ Real-phone browser usability and the guided setup/practice flow can be checked w
 
 ## H — later physical qualification and controlled release
 
-**H1:** when hardware and developer access are available, follow [hardware setup](hardware-check.md) and the [test record](hardware-test-record.md). Qualify one model/configuration with model/firmware, phone OS, Remote version and browser recorded. Prove live connect/select/test, selected-device targeting, finite command expiry, Stop and interruption behaviour; successful API calls and UI timers do not establish physical results. Qualify the isolated real adapter before connecting story playback to it.
+**H1:** when hardware and developer access are available, follow [hardware setup](hardware-check.md) and the [test record](hardware-test-record.md). Qualify each requested model/configuration separately with model/firmware, phone OS, Remote version and browser recorded. Prove live connect/select/test, selected-device targeting, finite command expiry, Stop and interruption behaviour; successful API calls and UI timers do not establish physical results. Use the guided isolated low-level test before the controlled neutral practice read. Do not mark a model qualified or widen hardware beta access until its physical results are recorded.
 
 **H2:** after security and operational work, deploy versioned HTTPS staging with separate secrets/users, bounded requests, tested database restore and rollback. Verify isolation, text/network boundaries and actual phones for each advertised combination. Production mode remains disabled until the release checks pass.
 
@@ -86,9 +96,17 @@ Only then invite 5–10 matching hardware-beta users; ask for two attempted sess
 
 ## Scope boundaries
 
-Defer generated stories, subscriptions/checkout, token wallets, native apps, public publishing, marketplaces, creator payouts, multiple device brands and affiliate dashboards. EPUB is optional after the core gates and must preserve TXT support. The separately managed marketing waitlist is not this local reader application. The private simulator deployment is authorised; paid hosting purchases, public beta access, generation and billing are not added by this software milestone.
+Defer generated stories, subscriptions/checkout, token wallets, native apps, public publishing, marketplaces, creator payouts, multiple device brands and affiliate dashboards. EPUB is optional after the core gates and must preserve TXT support. The separately managed marketing waitlist is not this local reader application. The private reader deployment and eight-model integration are authorised; paid hosting purchases, unrestricted public beta access, generation and billing are not added by this milestone.
 
 ## Evidence ledger
+
+2 November 2026, eight-model connection revision:
+
+- Scope: eight profile simulators, explicit model/mode/device/action selection, short test and neutral practice; optional server-configured Lovense Remote bridge with targeted finite physical beta requests. Source implementation and the actual checks must be reported independently.
+- Local automated checks: `python3 scripts/check.py` passed on 2 November with 22 Python and 273 JavaScript tests, syntax/config checks; the protected Worker build and Wrangler deployment dry run passed. New tests exercise all model profiles, the actual parent bridge, setup, server token exchange, rate persistence, cancellation/Stop races, chosen maximum zero, physical confirmation and browser timer binding. These are software checks with neutral fixtures, no vendor/hardware calls.
+- Managed browser preview: Nora model selection, explicit synthetic-device selection, Rotation test at 1/20, finite return to zero, checked-response continuation and paused neutral practice passed. The preview's HTTP origin does not provide Web Locks, so reading playback requires the HTTPS deployment or the isolated localhost CI browser suite. Signed-in HTTPS acceptance, GitHub browser CI and Cloudflare deployment are recorded separately in the release report.
+- Live vendor pairing and all physical model/action/expiry/Stop observations: not tested in a hardware-free session. Use [the beta guide](lovense-beta-test.md) and [hardware record](hardware-test-record.md) on 3 November; no physical qualification is inferred from simulation.
+
 
 2 November 2026, appearance and settings dismissal polish:
 

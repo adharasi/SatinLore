@@ -57,6 +57,8 @@ button,input,textarea,select{border-radius:6px}
 .simulator-section:has(#setup-coach:not([hidden])) .simulator-trace{height:32px}
 .simulator-section:has(#setup-coach:not([hidden])) .simulator-view-heading{padding-top:10px;font-size:.75rem}
 .simulator-section:has(#setup-coach:not([hidden])) .simulator-view-note{margin-top:4px;margin-bottom:9px;font-size:.625rem}
+.device-setup-shortcut{display:inline-flex;align-items:center;gap:6px;min-height:44px;white-space:nowrap;font-size:.75rem}.device-setup-shortcut svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+@media(max-width:699px){.header-actions .device-setup-shortcut{width:44px;min-width:44px;padding:8px}.device-setup-shortcut span{display:none}}
 #setup-coach-mount .setup-coach{padding:12px;margin-bottom:0}
 #setup-coach-mount .setup-coach h3{font-size:1.125rem;margin:5px 0 8px}
 #setup-coach-mount .setup-coach p{font-size:.6875rem;line-height:1.5;margin-bottom:8px}

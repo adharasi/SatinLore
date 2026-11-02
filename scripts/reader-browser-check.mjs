@@ -96,7 +96,7 @@ async function selectStory(page, title) {
 async function start(page, confirm = true) {
   await page.locator("#start").click();
   await page.locator("#start-dialog").waitFor({state: "visible"});
-  assert.match(await page.locator("#start-summary").textContent(), /Simulator/);
+  assert.match(await page.locator("#start-summary").textContent(), /simulator/i);
   const cap = (await page.locator("#capValue").textContent()).trim();
   assert.match(await page.locator("#confirm-start").textContent(), new RegExp(`maximum ${cap}\\s*\\/\\s*20`, "i"));
   if (confirm) {
@@ -136,6 +136,144 @@ async function assertFits(page, label, stopSelector = "#stop") {
     return box.width >= 44 && box.height >= 44 && box.top >= 0 && box.bottom <= innerHeight + 1 &&
       box.left >= 0 && box.right <= innerWidth + 1;
   }), `${label}: Stop must be reachable with a 44px target.`);
+}
+
+const toyRehearsals = [
+  {id: "lush", label: "Lush", channels: ["vibrate"]},
+  {id: "flexer", label: "Flexer", channels: ["vibrate", "fingering"], testChannel: "fingering"},
+  {id: "nora", label: "Nora", channels: ["vibrate", "rotate"], testChannel: "rotate"},
+  {id: "domi", label: "Domi", channels: ["vibrate"]},
+  {id: "velvo", label: "Velvo", channels: ["vibrate", "rotate"], testChannel: "rotate"},
+  {id: "spinel", label: "Spinel", channels: ["vibrate", "thrusting"], testChannel: "thrusting"},
+  {id: "dolce", label: "Dolce", channels: ["vibrate"]},
+  {id: "hush", label: "Hush", channels: ["vibrate"]},
+];
+
+async function selectRehearsalDevice(page, profile) {
+  await page.locator("#setup-selection").waitFor({state: "visible"});
+  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "Discovery never automatically selects a toy.");
+  assert.equal(await page.locator("#setup-devices").inputValue(), "");
+  assert.deepEqual(await page.locator("#setup-devices option").evaluateAll(options => options.map(option => option.value)), ["", `sim-${profile.id}`]);
+  await page.locator("#setup-devices").selectOption(`sim-${profile.id}`);
+  await page.locator("#setup-primary").click();
+  await page.locator("#setup-test-panel").waitFor({state: "visible"});
+  assert.deepEqual(await page.locator("#setup-channel option").evaluateAll(options => options.map(option => option.value)), profile.channels,
+    `${profile.label} exposes its own simulated movements, without inventing other controls.`);
+  assert.equal(await page.locator("#setup-test-level").getAttribute("max"), "5");
+  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "A selected toy must pass a deliberate test and confirmation before practice.");
+}
+
+async function testRehearsalDevice(page, profile) {
+  await page.locator("#setup-channel").selectOption(profile.testChannel || "vibrate");
+  await setRange(page, "setup-test-level", 2);
+  await page.locator("#setup-test").click();
+  await page.waitForFunction(() => /Simulated output 2 \/ 20/.test(document.querySelector("#setup-live-output").textContent));
+  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "Positive output cannot be confirmed as stopped.");
+  assert.equal(await page.locator("#setup-response-checked").isDisabled(), true);
+  await page.clock.runFor(2100);
+  await page.waitForFunction(() => !document.querySelector("#setup-test").disabled && /Simulated output 0 \/ 20/.test(document.querySelector("#setup-live-output").textContent));
+  assert.equal(await page.locator("#setup-response-checked").isChecked(), false);
+  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "A timer alone cannot supply the user's response confirmation.");
+  await page.locator("#setup-response-checked").check();
+  await page.locator("#setup-primary").click();
+  await page.waitForFunction(() => document.querySelector("#setup-primary").textContent === "Open practice story");
+  await output(page, 0);
+}
+
+async function prepareToyRehearsal(page, profile) {
+  await openSettings(page);
+  await page.locator("#open-setup").click();
+  await page.locator("#setup-dialog").waitFor({state: "visible"});
+  assert.deepEqual(await page.locator("#setup-model option").evaluateAll(options => options.map(option => [option.value, option.textContent])),
+    toyRehearsals.map(profile => [profile.id, profile.label]), "All eight requested models are reachable in the real setup dialog.");
+  await page.locator("#setup-model").selectOption(profile.id);
+  await page.locator("#setup-mode-simulator").click();
+  await page.locator("#setup-primary").click();
+  await selectRehearsalDevice(page, profile);
+  await testRehearsalDevice(page, profile);
+}
+
+async function toyConnectionChecks(page) {
+  const vendorRequests = [], leakedText = [], liveRequests = [];
+  const monitor = request => {
+    const url = new URL(request.url()), body = request.postData() || "";
+    if (/(^|\.)lovense(?:-api)?\.(?:com|club)$/.test(url.hostname)) vendorRequests.push(url.hostname);
+    if (/TOY_SETUP_PRIVATE_CANARY/.test(request.url() + body)) leakedText.push(url.pathname);
+    if (/\/api\/lovense\//.test(url.pathname)) liveRequests.push({path: url.pathname, method: request.method(), body});
+  };
+  const unavailable = route => route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({available: false})});
+  page.on("request", monitor);
+  await page.route("**/api/lovense/status", unavailable);
+  try {
+    // Lush's full practice is covered immediately before this function. Repeat
+    // the actual select/test/practice journey for every other requested model.
+    for (const profile of toyRehearsals.slice(1)) {
+      await prepareToyRehearsal(page, profile);
+      await page.locator("#setup-primary").click();
+      await page.locator("#setup-coach").waitFor({state: "visible"});
+      await analysed(page); await output(page, 0);
+      assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
+      assert.equal(await page.locator(".simulator-view").getAttribute("data-model"), profile.id);
+      await start(page); await output(page, 0);
+      await page.locator("#next").click(); await current(page, 1);
+      await page.clock.runFor(1100); await output(page, 2);
+      assert.equal(await page.locator(".simulator-device").getAttribute("data-output"), "2");
+      assert.match(await page.locator(".simulator-view-note").textContent(), new RegExp(profile.testChannel === "rotate" ? "Rotation" : profile.testChannel === "fingering" ? "Flexing" : profile.testChannel === "thrusting" ? "Thrusting" : "Vibration"));
+      await page.locator("#stop").click(); await output(page, 0);
+      await page.locator("#setup-finish").click();
+      await page.locator("#empty-workspace").waitFor({state: "visible"});
+    }
+
+    // A lost link and a connection error both require a fresh device selection;
+    // reconnecting is neither a successful test nor permission to resume output.
+    const profile = toyRehearsals.find(toy => toy.id === "nora");
+    for (const failure of ["#setup-sim-failure", "#setup-sim-error"]) {
+      await prepareToyRehearsal(page, profile);
+      await page.locator("#setup-back").click();
+      await page.locator("#setup-primary").click();
+      await selectRehearsalDevice(page, profile);
+      await page.locator(failure).click();
+      await page.waitForFunction(() => /interrupted|lost|reconnect/i.test(document.querySelector("#setup-status").textContent));
+      await output(page, 0);
+      await page.locator("#setup-retry").click();
+      await selectRehearsalDevice(page, profile);
+      assert.equal(await page.locator("#setup-response-checked").isChecked(), false);
+      await testRehearsalDevice(page, profile);
+      await page.locator("#setup-close").click();
+      await page.locator("#setup-dialog").waitFor({state: "hidden"});
+      await output(page, 0);
+    }
+
+    await add(page, "TOY_SETUP_PRIVATE_CANARY\n\nA quiet paragraph stays on this device.", "Connection privacy fixture");
+    await openSettings(page); await page.locator("#open-setup").click();
+    await page.locator("#setup-model").selectOption("nora");
+    await page.locator("#setup-mode-lovense").click();
+    await page.locator("#setup-primary").click();
+    await page.locator("#setup-pairing").waitFor({state: "visible"});
+    await page.waitForFunction(() => /not configured/i.test(document.querySelector("#setup-qr-placeholder").textContent));
+    assert.equal(await page.locator("#setup-rehearsal-tools").isHidden(), true, "Physical setup never displays simulated failure controls.");
+    assert.equal(await page.locator("#setup-qr").isHidden(), true, "An unavailable integration cannot show a simulated pairing QR.");
+    assert.equal(await page.locator("#setup-primary").isDisabled(), true);
+    assert.equal(await page.locator("#start").isDisabled(), true);
+    assert.equal(await page.locator(".simulator-view").getAttribute("data-mode"), "lovense");
+    assert.equal(await page.locator(".simulator-view").getAttribute("data-connected"), "false");
+    assert.equal(await page.locator(".simulator-device").getAttribute("data-output"), "0");
+    assert.deepEqual(liveRequests.map(({path,method})=>({path,method})), [{path:"/api/lovense/status",method:"GET"}],
+      "Unavailable setup requests no vendor credential/session and transmits no story.");
+    assert.deepEqual(vendorRequests, [], "Rehearsals and unavailable setup must make no real vendor requests.");
+    assert.deepEqual(leakedText, [], "Local story text never enters connection requests.");
+    await page.locator("#setup-back").click();
+    await page.locator("#setup-mode-simulator").click();
+    await page.locator("#setup-model").selectOption("lush");
+    await page.locator("#setup-primary").click();
+    await selectRehearsalDevice(page, toyRehearsals[0]);
+    await page.locator("#setup-close").click();
+    await page.locator("#setup-dialog").waitFor({state:"hidden"});
+    await output(page,0);
+  } finally {
+    page.off("request", monitor);
+    await page.unroute("**/api/lovense/status", unavailable);
+  }
 }
 async function appearanceChecks(page) {
   await page.emulateMedia({colorScheme: "dark"});
@@ -438,13 +576,8 @@ async function refinementChecks(page, setPromptReply) {
   await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
   await closeAppSettings(page);
 
-  await openSettings(page);
-  await page.locator("#open-setup").click();
-  await page.locator("#setup-dialog").waitFor({state: "visible"});
+  await prepareToyRehearsal(page, toyRehearsals[0]);
   await assertFits(page, "Guided setup", "#setup-stop");
-  await page.locator("#setup-primary").click();
-  await page.waitForFunction(() => document.querySelector("#setup-primary").textContent === "Open practice story");
-  await output(page, 0);
   await page.locator("#setup-primary").click();
   await page.locator("#setup-coach").waitFor({state: "visible"});
   await analysed(page);
@@ -472,6 +605,8 @@ async function refinementChecks(page, setPromptReply) {
   await page.locator("#empty-workspace").waitFor({state: "visible"});
   await output(page, 0);
   await page.emulateMedia({reducedMotion: "no-preference"});
+
+  await toyConnectionChecks(page);
 
   const resourceRequests = [];
   const resourceMonitor = request => {
@@ -803,5 +938,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help, folders with paused saved membership, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help, folders with paused saved membership, all eight model rehearsals with explicit selection, finite tests, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

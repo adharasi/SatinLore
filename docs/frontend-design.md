@@ -16,6 +16,16 @@ The right-side simulator visual uses actual connected/running/output snapshots, 
 
 Presentation preferences (width, size, spacing and follow position) remain allowlisted separately from appearance and stories. Portable backups restore fresh, session-only copies to Unfiled without playback arming; local folder IDs are deliberately omitted. Folder creation/renaming/deletion is an explicit local metadata action; moving an unsaved story does not save its text. Layout shortcuts avoid typing targets, and no keyboard shortcut starts output. All current iteration evidence belongs in the roadmap ledger after execution; this design contract is not a test result.
 
+## Eight-model connection refinement — 2 November 2026
+
+The connection guide offers Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush, then a clear Simulate / Connect my toy choice. Simulation follows the same explicit discovery, device selection, action test and practice stages without loading the vendor SDK or making a vendor request. A rehearsal pairing illustration must be labelled simulated and must not be a usable auth code. Live pairing gives short Lovense Remote steps and a private QR code, waits for an eligible discovered device and never selects it automatically. A model illustration is a setup preference, not authority to send a command.
+
+The setup must show loading, unavailable configuration, waiting for Remote/toys, selected, testing, paused, error and retry states honestly. A two-second low test has a clear Stop and requires the reader to check the response/stopped output before practice. Mode, selected toy and available action remain visible in the reader's confirmation/status. Model-specific graphics distinguish simulated output from transport-requested output; neither is described as a physical measurement. Reduced motion retains the model label, action and numeric state. If output is unknown, show unknown rather than a reassuring zero.
+
+Physical beta output is capped at 5/20 through finite two-second requests to one selected toy. Runtime capabilities restrict motion choices; the Standard JS SDK does not establish independent Dolce motor control or Spinel heating. Live motion not exposed by a connection must remain unavailable even if its simulator can demonstrate it. Opening/closing setup, selecting another device/action, returning from a hidden tab or reconnecting leaves playback paused. Every reading Start is separately confirmed. A missing live configuration offers a clear simulator route instead of a fake connection success.
+
+The reader's model selector for analysis remains separate from the toy profile/action choice. A selected toy motion is not a stronger paid story-analysis model or simultaneous multi-toy control. See [the setup and beta-test guide](lovense-beta-test.md) for exact test boundaries and the owner-side Access/runtime prerequisites.
+
 ## Shared visual system
 
 Both themes use the same layout and components. Local serif fallbacks serve reading text; a system sans-serif serves controls. No remote font or image service is required. The reading surface has no decorative texture. Spacing and quiet borders provide structure without treating status colour as its only meaning.
@@ -44,7 +54,7 @@ The same-origin `appearance.js` runs before styles paint, sets the resolved them
 | Reading canvas | Direct typing/paste on a blank page; stories open into continuous document scrolling; Wide by default with Comfortable/Full choices |
 | Reading controls | Optional right panel, initially closed; import/upload, baseline model, text/width controls, current story actions and optional corrections |
 | Global gear menu | Appearance, account status, backup/restore, about, help and support; Stop remains accessible |
-| Setup and simulator | Repeatable neutral practice journey; actual-output graphic/trace; explicit connect/Start and honest unavailable hardware state |
+| Setup and device preview | Eight model profiles; separate simulator/Remote journeys; explicit device/action/test/Start; honest unavailable/error/unknown state and neutral practice |
 | Optional review | Current/already-read sections first; future passages require deliberate reveal; manual zero, reset and reanalysis preserve deliberate edits |
 | Persistent transport | Simulator/status, capped target/output, strength −/+/Reset, direct maximum slider and Start/Pause/Stop |
 | Start confirmation | Shows selected simulator, strength and maximum; explicit Start-with-maximum action; Stop remains available |
@@ -93,4 +103,4 @@ Automated runs capture neutral workspace screenshots in ignored `artifacts/front
 
 F3 has its separate asynchronous scenario harness, and F4 has private hosted feedback/export/deletion and help. Remaining work includes account-linked login/story sync, invited-reader access, the stronger custom model and any paid entitlements, rights-cleared F5 scoring evaluation, F6 wider reader/real-phone acceptance, and later physical qualification. A model dropdown is not an implemented inference model, subscription or multi-device transport.
 
-Requested/acknowledged hardware commands are not measured physical output. Live SDK compatibility, finite physical expiry, interrupted-network behaviour and every advertised device/browser combination remain qualification gates. This reader drives the simulator only.
+Requested/acknowledged hardware commands are not measured physical output. Live SDK compatibility, finite physical expiry, interrupted-network behaviour and every advertised device/browser combination remain qualification gates. The optional live reader route is a separate asynchronous targeted bridge, capped at two seconds and 5/20 for this beta; no model is physically qualified by the UI or simulator.

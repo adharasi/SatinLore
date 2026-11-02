@@ -30,7 +30,7 @@ function fixture() {
   const worker = createPrivateAppWorker({ keyResolver: async (...args) => { keyRequests.push(args[0]); return localKeys(...args); } });
   const env = { ...ENV, ASSETS: { async fetch(request) {
     reads.push(request);
-    return new Response("Synthetic reader asset", { headers: { "Content-Type": "text/html", "Cache-Control": "public, max-age=3600" } });
+    return new Response(new URL(request.url).pathname === "/device-bridge.html" ? '<!doctype html><script id="lovense-isolated-bundle">void 0;</script>' : "Synthetic reader asset", { headers: { "Content-Type": "text/html", "Cache-Control": "public, max-age=3600" } });
   } } };
   return { worker, env, reads, keyRequests };
 }
@@ -76,8 +76,19 @@ test("valid founder assertions grant only read-only allowlisted files and strip 
     assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
     assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
     assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
-    assert.match(response.headers.get("Content-Security-Policy"), /connect-src 'self'/);
-    assert.match(response.headers.get("Content-Security-Policy"), /frame-src 'none'/);
+    const policy = response.headers.get("Content-Security-Policy");
+    if (["/device-bridge", "/device-bridge.html"].includes(path)) {
+      assert.match(policy, /sandbox allow-scripts/);
+      assert.doesNotMatch(policy, /allow-same-origin|unsafe-inline|unsafe-eval/);
+      assert.match(policy, /script-src 'sha256-[A-Za-z0-9+/=]+'/);
+      assert.match(policy, /connect-src https:\/\/\*\.lovense/);
+      assert.equal(response.headers.get("X-Frame-Options"), "SAMEORIGIN");
+    } else {
+      assert.match(policy, /connect-src 'self'/);
+      assert.match(policy, /script-src 'self';/);
+      assert.match(policy, /frame-src https:\/\/app\.satinlore\.com\/device-bridge/);
+      assert.equal(response.headers.get("X-Frame-Options"), "DENY");
+    }
     assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
   }
   await f.worker.fetch(request("/?private-query=must-not-reach-assets", jwt, { headers: { Cookie: "private=synthetic" } }), f.env);
@@ -114,12 +125,12 @@ test("wrong audience, identity, issuer, key, time, token kind and malformed asse
   assert.equal(f.reads.length, 0);
 });
 
-test("a valid assertion cannot enable alternate hostnames, hardware, invitation or private-file routes", async () => {
+test("a valid assertion cannot enable alternate hostnames, local invitation or private-file routes", async () => {
   const f = fixture(), jwt = await token();
   for (const origin of ["https://satinlore-private-app.synthetic.workers.dev", "https://version.example.workers.dev", "https://www.app.satinlore.com", "https://satinlore.com", "http://app.satinlore.com", "https://app.satinlore.com:8443"]) {
     assert.equal((await f.worker.fetch(request("/", jwt, { origin }), f.env)).status, 403, origin);
   }
-  for (const path of ["/device-check", "/device-bridge", "/static/device-check.html", "/static/device-check.mjs", "/static/device-bridge.mjs", "/static/devices/lovense.mjs", "/api/me", "/api/invites/redeem", "/api/lovense/session", "/api/logout", "/.env", "/data/satinlore.sqlite3", "/AGENTS.md", "/static/AGENTS.md", "/static/playback/README.md", "/unknown", "/static%2fapp.mjs"]) {
+  for (const path of ["/device-check", "/static/device-check.html", "/static/device-check.mjs", "/static/device-bridge.mjs", "/static/devices/lovense.mjs", "/api/me", "/api/invites/redeem", "/api/logout", "/.env", "/data/satinlore.sqlite3", "/AGENTS.md", "/static/AGENTS.md", "/static/playback/README.md", "/unknown", "/static%2fapp.mjs"]) {
     assert.equal((await f.worker.fetch(request(path, jwt), f.env)).status, 404, path);
   }
   for (const method of ["POST", "PUT", "DELETE", "PATCH", "OPTIONS"]) {
@@ -180,7 +191,12 @@ test("deployment invokes authentication ahead of all assets and packages only th
     assert.match(page, /<meta name="satinlore-hosted-access" content="true">/);
     assert.match(page, /<meta name="satinlore-build" content="(?:[a-f0-9]{40}|local)">/);
   }
-  assert.doesNotMatch(hosted, /device-check|device-bridge|lovense\.mjs/);
+  assert.doesNotMatch(hosted, /<script[^>]+(?:lovense-api|device-bridge)/i);
+  const bridge = await readFile(resolve(output, "device-bridge.html"), "utf8");
+  assert.match(bridge, /<script id="lovense-isolated-bundle">/);
+  assert.doesNotMatch(bridge, /<script[^>]+src=|import\s+.*from\s+["']/i);
+  assert.match(bridge, /https:\/\/api\.lovense-api\.com\/basic-sdk\/core\.min\.js/);
+  assert.doesNotMatch(bridge, /LOVENSE_DEVELOPER_TOKEN|LOVENSE_UID_SECRET/);
   assert.equal(await readFile(resolve(ROOT, "app/static/index.html"), "utf8"), localIndex);
 });
 
