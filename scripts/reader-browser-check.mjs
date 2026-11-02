@@ -141,6 +141,7 @@ async function appearanceChecks(page) {
   await page.emulateMedia({colorScheme: "dark"});
   await page.reload();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  assert.equal(await page.getByRole("switch", {name: "Dark mode"}).getAttribute("aria-checked"), "true");
   assert.equal(await page.evaluate(() => localStorage.length), 0, "Default appearance and library do not write storage.");
   await openAppSettings(page);
   assert.equal(await page.locator("#reading-appearance").inputValue(), "system");
@@ -148,6 +149,16 @@ async function appearanceChecks(page) {
   await page.emulateMedia({colorScheme: "light"});
   await page.emulateMedia({colorScheme: "dark"});
   assert.equal(await page.locator("html").getAttribute("data-theme"), "light", "Explicit preference wins over OS.");
+  assert.equal(await page.locator("#toggle-dark-mode").getAttribute("aria-checked"), "false");
+  await page.getByRole("button", {name: "Close", exact: true}).click();
+  assert.equal(await page.locator("#app-settings-dialog").isVisible(), false);
+  await page.getByRole("switch", {name: "Dark mode"}).click();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await openAppSettings(page);
+  assert.equal(await page.locator("#reading-appearance").inputValue(), "dark");
+  await page.getByRole("button", {name: "Close settings", exact: true}).click();
+  assert.equal(await page.locator("#app-settings-dialog").isVisible(), false);
+  await page.getByRole("switch", {name: "Dark mode"}).click();
   await page.reload();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
   await openAppSettings(page);
@@ -183,6 +194,10 @@ async function captureLayouts(page) {
   await page.waitForTimeout(100);
   await page.clock.runFor(100);
   await assertFits(page, "320px reflow");
+  assert.ok(await page.locator("#toggle-dark-mode").evaluate(element => {
+    const box = element.getBoundingClientRect();
+    return box.width >= 44 && box.height >= 44 && box.left >= 0 && box.right <= innerWidth && box.top >= 0;
+  }), "The header Dark mode switch remains reachable at 320px.");
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const end = await page.locator(".story-paragraph").last().evaluate(element => ({
     bottom: element.getBoundingClientRect().bottom,
@@ -788,5 +803,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, gear appearance/backup/help, folders with paused saved membership, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help, folders with paused saved membership, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

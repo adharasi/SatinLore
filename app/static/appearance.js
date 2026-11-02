@@ -21,6 +21,11 @@
       const select = document.getElementById(id);
       if (select) select.value = preference;
     }
+    const toggle = document.getElementById("toggle-dark-mode");
+    if (toggle) {
+      toggle.setAttribute("aria-checked", String(theme === "dark"));
+      toggle.title = theme === "dark" ? "Use Satin Editorial light mode" : "Use Midnight Ink dark mode";
+    }
     const note = document.getElementById("appearance-note");
     if (note) note.textContent = storageAvailable ? "Appearance is saved separately from stories you choose to save." :
       "Appearance works for this visit. Browser storage is unavailable.";
@@ -40,6 +45,10 @@
   media.addEventListener("change", () => { if (preference === "system") apply(true); });
   document.addEventListener("DOMContentLoaded", () => {
     apply();
+    document.getElementById("toggle-dark-mode")?.addEventListener("click", () => {
+      const dark = preference === "dark" || (preference === "system" && media.matches);
+      setPreference(dark ? "light" : "dark");
+    });
     for (const id of SELECTS) {
       document.getElementById(id)?.addEventListener("change", event => setPreference(event.target.value));
     }

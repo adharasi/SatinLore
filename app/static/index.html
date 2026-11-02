@@ -21,6 +21,7 @@
     </div>
     <div class="header-story"><span id="header-story-title">A little space for your next story</span><div id="story-tabs" class="story-tabs" role="tablist" aria-label="Open stories"></div></div>
     <div class="header-actions">
+      <button id="toggle-dark-mode" type="button" class="quiet-control theme-toggle" role="switch" aria-checked="false" aria-label="Dark mode" title="Dark mode"><span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span><span class="theme-toggle-label">Dark</span></button>
       <button id="focus-mode" class="quiet-control" aria-pressed="false" title="Hide side panels and keep reading controls">Focus</button>
       <button id="toggle-settings" class="quiet-control header-icon" aria-label="Reading controls" aria-controls="settings-panel" aria-expanded="false" title="Reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3M9 4v6m4 4v6"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg></button>
       <button id="open-app-settings" class="quiet-control header-icon" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings-dialog" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.3 3-.6 2.4-2 .9-2.1-.7-2 3.4 1.7 1.7v2.6L2.6 15l2 3.4 2.1-.7 2 .9.6 2.4h4.1l.6-2.4 2-.9 2.1.7 2-3.4-1.7-1.7v-2.6l1.7-1.7-2-3.4-2.1.7-2-.9-.6-2.4z"/><circle cx="11.4" cy="12" r="3"/></svg></button>
@@ -124,7 +125,7 @@
       <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Support <span aria-hidden="true">↗</span></a></nav>
       <button id="delete-all" class="quiet-button" disabled>Delete all stories</button>
     </div>
-    <div class="dialog-actions"><button id="app-settings-stop" class="stop">Stop</button></div>
+    <div class="dialog-actions"><button id="app-settings-close" type="button" class="primary">Close</button></div>
   </dialog>
   <dialog id="new-story-dialog" class="story-dialog" aria-labelledby="new-story-heading">
     <div class="dialog-heading"><div><h2 id="new-story-heading">Import a story</h2></div><button id="cancel-import" class="icon-button" aria-label="Close new story">×</button></div>

@@ -265,15 +265,32 @@ test("desktop reading follows scroll while the simulator sidebar is visible", as
   assert.equal(app.read("latest.position"), 0, "A mobile drawer obscures the reading area.");
 });
 
-test("global Settings opens separately, exposes Stop and closes on cancellation", async t => {
+test("global Settings opens paused and both Close controls return to the reader", async t => {
   const app = await ready(t);
   await start(app); await app.click("open-app-settings");
   assert.equal(app.nodes.get("app-settings-dialog").open, true);
   assert.equal(app.read("latest.running"), false);
-  await app.click("app-settings-stop");
+  await app.click("app-settings-close");
   assert.equal(app.nodes.get("app-settings-dialog").open, false);
   assert.equal(app.read("latest.output"), 0);
   assert.equal(app.nodes.get("start").disabled, false);
+  await app.click("open-app-settings"); await app.click("close-app-settings");
+  assert.equal(app.nodes.get("app-settings-dialog").open, false);
+  assert.equal(app.document.activeElement, app.nodes.get("open-app-settings"));
+});
+
+test("the header theme switch pauses playback, preserves position and synchronises the gear choice", async t => {
+  const app = await ready(t); app.bootAppearance();
+  await app.click("next");
+  const position = app.read("latest.position");
+  await start(app); await app.click("toggle-dark-mode");
+  assert.equal(app.document.documentElement.dataset.theme, "dark");
+  assert.equal(app.nodes.get("reading-appearance").value, "dark");
+  assert.equal(app.nodes.get("toggle-dark-mode").getAttribute("aria-checked"), "true");
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.read("latest.output"), 0);
+  assert.equal(app.read("latest.position"), position);
+  assert.equal(app.preferenceValues.get("satinlore.appearance"), "dark");
 });
 
 

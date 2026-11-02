@@ -10,10 +10,12 @@ function boot({saved = null, dark = false, blocked = false} = {}) {
   const select = {value: "", addEventListener(_name, fn) { this.change = fn; }};
   const readerSelect = {value: "", addEventListener(_name, fn) { this.change = fn; }};
   const note = {textContent: ""};
+  const toggle = {attributes: new Map(), addEventListener(_name, fn) { this.click = fn; },
+    setAttribute(name, value) { this.attributes.set(name, value); }};
   const media = {matches: dark, addEventListener(_name, fn) { this.change = fn; }};
   let ready;
   const document = {documentElement: root,
-    getElementById: id => id === "appearance" ? select : id === "reading-appearance" ? readerSelect : note,
+    getElementById: id => id === "appearance" ? select : id === "reading-appearance" ? readerSelect : id === "toggle-dark-mode" ? toggle : id === "appearance-note" ? note : null,
     addEventListener(_name, fn) { ready = fn; }};
   const window = {matchMedia: () => media,
     localStorage: {getItem: () => { if (blocked) throw Error("unavailable"); return saved; },
@@ -22,7 +24,7 @@ function boot({saved = null, dark = false, blocked = false} = {}) {
   vm.runInNewContext(source, {window, document, CustomEvent: class { constructor(name, options) {
     this.type = name; this.detail = options.detail;
   }}});
-  return {root, select, readerSelect, note, writes, events, ready,
+  return {root, select, readerSelect, toggle, note, writes, events, ready,
     choose(value) { select.change({target: {value}}); },
     os(value) { media.matches = value; media.change(); }};
 }
@@ -61,6 +63,33 @@ test("invalid stored and chosen preferences never enter the DOM or storage", () 
 test("unavailable storage leaves theme usable and reports session-only choice", () => {
   const app = boot({blocked: true}); app.ready(); app.choose("dark");
   assert.equal(app.root.dataset.theme, "dark");
+  assert.match(app.note.textContent, /this visit/);
+  assert.deepEqual(app.writes, []);
+});
+
+test("the header switch follows resolved System appearance and selects an explicit opposite theme", () => {
+  const app = boot({dark: true}); app.ready();
+  assert.equal(app.toggle.attributes.get("aria-checked"), "true");
+  app.toggle.click();
+  assert.equal(app.root.dataset.theme, "light");
+  assert.equal(app.root.dataset.appearance, "light");
+  assert.equal(app.toggle.attributes.get("aria-checked"), "false");
+  assert.equal(app.readerSelect.value, "light");
+  app.os(true);
+  assert.equal(app.root.dataset.theme, "light");
+  app.toggle.click();
+  assert.equal(app.root.dataset.theme, "dark");
+  assert.equal(app.toggle.attributes.get("aria-checked"), "true");
+  app.readerSelect.change({target: {value: "system"}});
+  app.os(false);
+  assert.equal(app.toggle.attributes.get("aria-checked"), "false");
+  assert.equal(app.readerSelect.value, "system");
+});
+test("the header switch remains usable when preference storage is blocked", () => {
+  const app = boot({blocked: true}); app.ready();
+  app.toggle.click();
+  assert.equal(app.root.dataset.theme, "dark");
+  assert.equal(app.toggle.attributes.get("aria-checked"), "true");
   assert.match(app.note.textContent, /this visit/);
   assert.deepEqual(app.writes, []);
 });

@@ -847,7 +847,7 @@ $("paste-source-trigger")?.addEventListener("click", () => { openDraft(); if (is
 $("import-url")?.addEventListener("click", () => void importStoryUrl());
 $("story-url")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void importStoryUrl(); } });
 $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings-dialog"));
-$("close-app-settings")?.addEventListener("click", () => closeDialog("app-settings-dialog"));
+for (const id of ["close-app-settings", "app-settings-close"]) $(id)?.addEventListener("click", () => closeDialog("app-settings-dialog"));
 for (const id of ["open-setup", "empty-setup"]) $(id)?.addEventListener("click", () => setupFlow?.open());
 $("folder-filter")?.addEventListener("change", event => { folderFilter = event.target.value; renderLibrary(); });
 $("create-folder")?.addEventListener("click", () => { pause("Choose a folder name."); const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
@@ -877,7 +877,7 @@ $("load").addEventListener("click", () => {
 });
 $("file").addEventListener("change", event => { const file = event.target.files[0]; if (file) void prepareText(async () => { const record = await readStoryFile(file); if (record.title && !$("story-title-input").value.trim()) $("story-title-input").value = record.title; return record.text; }); });
 $("cancel-import").addEventListener("click", () => { cancelImport(); closeDialog("new-story-dialog"); });
-for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop", "app-settings-stop"]) $(id)?.addEventListener("click", stopEverything);
+for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop"]) $(id)?.addEventListener("click", stopEverything);
 for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog"]) $(id).addEventListener("cancel", event => {
   event.preventDefault(); cancelImport(); cancelStart(); ceilingIntent = saveIntent = null; closeDialog(id); display();
 });

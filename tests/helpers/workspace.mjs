@@ -96,9 +96,11 @@ export function workspace({hosted = false, locks = true} = {}) {
   };
   for (const node of [...nodes.values(), root, body]) node.ownerDocument = document;
   const window = {
-    matchMedia: () => ({matches: narrow}),
+    matchMedia: query => ({matches: query.includes("prefers-color-scheme") ? false : narrow, addEventListener() {}}),
     addEventListener(name, callback) { if (!windowListeners.has(name)) windowListeners.set(name, []); windowListeners.get(name).push(callback); },
     removeEventListener() {},
+    dispatchEvent(event) { for (const callback of windowListeners.get(event.type) || []) callback(event); },
+    localStorage: {getItem: key => preferenceValues.get(key) ?? null, setItem: (key,value) => preferenceValues.set(key,value)},
     scrollTo({top}) { context.scrollY = top; },
     visualViewport: null,
   };
@@ -129,6 +131,7 @@ export function workspace({hosted = false, locks = true} = {}) {
   }
   const source = readFileSync(new URL("../../app/static/app.mjs", import.meta.url), "utf8").replace(/^import .+;\s*$/gm, "");
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     MockDevice: TestDevice, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore,
     selectReadingParagraph, PlaybackController: TestController, HostedAccessGuard: TestGuard,
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
@@ -153,6 +156,10 @@ export function workspace({hosted = false, locks = true} = {}) {
   return {
     nodes, document, errors, settle, advance, now, preferenceValues, downloads, libraryValues,
     read: expression => vm.runInContext(expression, context),
+    bootAppearance() {
+      vm.runInContext(readFileSync(new URL("../../app/static/appearance.js", import.meta.url), "utf8"), context);
+      for (const callback of documentListeners.get("DOMContentLoaded") || []) callback();
+    },
     async add(source = "A tender kiss.\n\nA quiet second paragraph.") {
       await nodes.get("empty-new-story").click();
       nodes.get("source").value = source; nodes.get("story-title-input").value = "Synthetic story";

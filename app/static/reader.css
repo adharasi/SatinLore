@@ -65,3 +65,11 @@ button,input,textarea,select{border-radius:6px}
 #setup-coach-mount .setup-coach-actions{gap:6px}
 #setup-coach-mount .setup-coach-actions button{font-size:.6875rem;padding-inline:7px;min-height:44px}
 @media(max-width:699px){.empty-workspace .draft-story{height:220px;min-height:200px}}
+
+/* A direct appearance switch stays reachable beside the reader controls. */
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:44px;min-height:44px;white-space:nowrap}
+.theme-toggle-track{position:relative;display:block;width:32px;height:20px;flex:0 0 32px;border:1px solid var(--secondary);border-radius:12px;background:var(--page)}
+.theme-toggle-thumb{position:absolute;left:3px;top:3px;width:12px;height:12px;border-radius:50%;background:var(--secondary)}
+.theme-toggle[aria-checked="true"] .theme-toggle-track{background:var(--action);border-color:var(--action)}
+.theme-toggle[aria-checked="true"] .theme-toggle-thumb{left:15px;background:var(--on-action)}
+@media(max-width:699px){.header-actions .theme-toggle{width:44px;min-width:44px;padding:6px}.theme-toggle-label{display:none}}

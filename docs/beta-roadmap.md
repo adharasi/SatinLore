@@ -90,6 +90,11 @@ Defer generated stories, subscriptions/checkout, token wallets, native apps, pub
 
 ## Evidence ledger
 
+2 November 2026, appearance and settings dismissal polish:
+
+- Added a header Dark mode switch synchronised with the resolved System/Light/Dark preference. Appearance changes still preserve the selected section and pause playback. The global settings popup uses Close and a top-right ×; playback/setup Stop controls are unchanged.
+- Local common checks passed: 22 Python and 209 JavaScript tests, including new switch/System/storage-denial and actual reader pause/Close regressions. Worker packaging and deployment dry run passed. Browser CI includes header-switch, both dismissal controls and 320 px target checks; its execution and deployment results belong to the release report.
+
 2 November 2026, editor/import/folder/setup refinement:
 
 - Common checks pass: 22 Python and 206 JavaScript tests, including actual app bindings, folder consent and deletion/autosave revision handling, direct maximum gestures, pending link cancellation, real Worker HTMLRewriter extraction and setup/visual factories. Worker packaging and deployment dry run pass; these do not establish a remote deployment.
