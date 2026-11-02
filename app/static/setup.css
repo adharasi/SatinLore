@@ -1,0 +1,46 @@
+.simulator-view { overflow: hidden; border: 1px solid var(--separator); border-radius: 14px; background: var(--page); margin: 0 0 18px; }
+.simulator-view-heading { display: flex; justify-content: space-between; align-items: center; padding: 14px 14px 0; gap: 10px; font-size: .8125rem; }
+.simulator-view-badge { color: var(--secondary); font-size: .6875rem; white-space: nowrap; }
+.simulator-device { display: block; width: 100%; height: 175px; }
+.simulator-shadow { fill: var(--action); opacity: .09; }
+.simulator-ring { fill: none; stroke: var(--action); stroke-width: 1; }
+.simulator-shell { fill: var(--action); }
+.simulator-shine { stroke: var(--on-action); stroke-width: 4; opacity: .32; }
+.simulator-seam { stroke: var(--on-action); stroke-width: 1; opacity: .16; }
+.simulator-led { fill: var(--on-action); opacity: .3; }
+.simulator-view[data-running=true] .simulator-led { opacity: .9; }
+.simulator-readout { display: flex; justify-content: space-between; gap: 10px; padding: 0 16px; font-size: .8125rem; }
+.simulator-state { color: var(--secondary); }
+.simulator-level { color: var(--action); font-variant-numeric: tabular-nums; }
+.simulator-trace { display: block; width: calc(100% - 16px); margin: 8px auto 0; height: 60px; }
+.simulator-trace-grid { stroke: var(--separator); stroke-width: .7; }
+.simulator-trace-line { stroke: var(--action); stroke-width: 2; }
+.simulator-view-note { font-size: .6875rem; margin: 8px 16px 14px; line-height: 1.5; }
+.setup-dialog { width: min(560px, calc(100vw - 24px)); }
+.setup-dialog-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.setup-dialog-heading h2 { margin: 6px 0 20px; }
+.setup-step-label { color: var(--action); font-size: .6875rem; letter-spacing: .12em; font-weight: 650; text-transform: uppercase; }
+.setup-option { display: block; border: 1px solid var(--action); border-radius: 12px; padding: 16px; margin: 0 0 12px; background: var(--selection); }
+.setup-option strong { display: block; margin-bottom: 6px; }
+.setup-option p { margin: 0; }
+.setup-unavailable { border: 1px solid var(--separator); border-radius: 12px; padding: 16px; margin-bottom: 20px; color: var(--secondary); }
+.setup-unavailable strong { display: block; margin-bottom: 6px; }
+.setup-unavailable p { margin: 0; }
+.setup-dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+.setup-status { margin-top: 14px; margin-bottom: 0; min-height: 24px; }
+.setup-coach { border: 1px solid var(--action); border-radius: 14px; padding: 16px; margin: 0 0 18px; background: var(--surface); }
+.setup-coach h3 { font: 400 1.3rem/1.2 var(--serif); margin: 5px 0 12px; }
+.setup-coach p { font-size: .8125rem; margin-bottom: 12px; }
+.setup-checklist { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 10px; }
+.setup-checklist li { display: flex; align-items: flex-start; gap: 8px; font-size: .8125rem; color: var(--secondary); }
+.setup-checklist li::before { content: ''; width: 14px; height: 14px; flex: 0 0 14px; margin-top: 3px; border: 1px solid var(--secondary); border-radius: 50%; }
+.setup-checklist li[data-done=true] { color: var(--text); }
+.setup-checklist li[data-done=true]::before { content: '✓'; border-color: var(--action); background: var(--action); color: var(--on-action); font-size: 10px; line-height: 12px; text-align: center; }
+.setup-coach-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.setup-coach-actions button { flex: 1 1 80px; padding-inline: 10px; }
+.setup-coach-actions #setup-finish { flex-basis: 100%; }
+.setup-coach-status { color: var(--secondary); font-size: .75rem; margin-top: 12px; margin-bottom: 0; }
+.setup-coach-status:empty { display: none; }
+.setup-coach-floating { position: fixed; z-index: 7; right: 16px; top: 80px; width: min(280px, calc(100vw - 32px)); max-height: calc(100dvh - var(--dock-space) - 110px); overflow: auto; box-shadow: 0 12px 40px #00000020; }
+@media (prefers-reduced-motion: reduce) { .simulator-device-body, .simulator-ring { transform: none; } }
+@media (max-width: 699px) { .setup-dialog { padding: 20px; } .simulator-device { height: 150px; } }

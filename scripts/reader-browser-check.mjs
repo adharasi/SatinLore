@@ -27,13 +27,31 @@ async function analysed(page) {
   await page.waitForFunction(() => document.querySelector("#analysis-status").dataset.state === "ready");
 }
 async function openSettings(page, section = "reader") {
-  if (await page.locator("#settings-panel").isHidden()) await page.getByRole("button", {name: "Settings", exact: true}).click();
+  await closeAppSettings(page);
+  if (await page.locator("#settings-panel").isHidden()) await page.getByRole("button", {name: "Reading controls", exact: true}).click();
   const tab = page.locator(`#settings-${section}-tab`);
   if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
   await page.locator(`#${section}-settings`).waitFor({state: "visible"});
 }
 async function closeSettings(page) {
+  await closeAppSettings(page);
   if (await page.locator("#settings-panel").isVisible()) await page.locator("#close-settings").click();
+}
+async function openAppSettings(page) {
+  if (await page.locator("#app-settings-dialog").isHidden()) await page.getByRole("button", {name: "Settings", exact: true}).click();
+  await page.locator("#app-settings-dialog").waitFor({state: "visible"});
+}
+async function closeAppSettings(page) {
+  if (await page.locator("#app-settings-dialog").isVisible()) await page.locator("#close-app-settings").click();
+}
+async function chooseAppearance(page, theme) {
+  await openAppSettings(page);
+  await page.locator("#reading-appearance").selectOption(theme);
+  await closeAppSettings(page);
+}
+async function backupSettings(page) {
+  await openAppSettings(page);
+  if (!await page.locator(".library-tools").evaluate(element => element.open)) await page.locator(".library-tools > summary").click();
 }
 async function openReview(page) {
   await openSettings(page, "story");
@@ -46,16 +64,23 @@ async function openLibrary(page) {
   if (await page.locator("#library-panel").isHidden()) await page.locator("#toggle-library").click();
 }
 async function newDialog(page) {
+  await closeAppSettings(page);
   if (await page.locator("#empty-new-story").isVisible()) await page.locator("#empty-new-story").click();
-  else { await openLibrary(page); await page.locator("#new-story").click(); }
+  else {
+    await openSettings(page);
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator("#upload-story-trigger").click()]);
+    await chooser.setFiles([]);
+  }
   await page.locator("#new-story-dialog").waitFor({state: "visible"});
 }
 async function add(page, text, title = "A quiet afternoon", waitForAnalysis = true) {
-  await newDialog(page);
-  await page.locator("#story-title-input").fill(title);
-  await page.locator("#source").fill(text);
-  await page.locator("#load").click();
-  await page.locator("#new-story-dialog").waitFor({state: "hidden"});
+  await closeSettings(page);
+  await openLibrary(page);
+  await page.locator("#new-story").click();
+  await page.locator("#empty-workspace").waitFor({state: "visible"});
+  await page.locator("#draft-title").fill(title);
+  await page.locator("#draft-story").fill(text);
+  await page.locator("#open-draft").click();
   await page.locator("#reading-workspace").waitFor({state: "visible"});
   assert.equal(await page.locator("#story-title").textContent(), title);
   assert.equal(await page.locator("#settings-panel").isHidden(), true, "A new story opens directly into reading with settings closed.");
@@ -117,7 +142,7 @@ async function appearanceChecks(page) {
   await page.reload();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   assert.equal(await page.evaluate(() => localStorage.length), 0, "Default appearance and library do not write storage.");
-  await openSettings(page);
+  await openAppSettings(page);
   assert.equal(await page.locator("#reading-appearance").inputValue(), "system");
   await page.locator("#reading-appearance").selectOption("light");
   await page.emulateMedia({colorScheme: "light"});
@@ -125,7 +150,7 @@ async function appearanceChecks(page) {
   assert.equal(await page.locator("html").getAttribute("data-theme"), "light", "Explicit preference wins over OS.");
   await page.reload();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
-  await openSettings(page);
+  await openAppSettings(page);
   await page.locator("#reading-appearance").selectOption("system");
   await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   await page.emulateMedia({colorScheme: "light"});
@@ -146,9 +171,7 @@ async function captureLayouts(page) {
     await page.setViewportSize(size);
     await page.waitForTimeout(100);
     for (const theme of ["light", "dark"]) {
-      await openSettings(page);
-      await page.locator("#reading-appearance").selectOption(theme);
-      await closeSettings(page);
+      await chooseAppearance(page, theme);
       if (name === "desktop") await openLibrary(page);
       else if (await page.locator("#library-panel").isVisible()) await page.locator("#close-library").click();
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -180,8 +203,7 @@ async function captureLayouts(page) {
   }
   await page.setViewportSize({width: 1440, height: 1000});
   await page.waitForTimeout(100);
-  await openSettings(page);
-  await page.locator("#reading-appearance").selectOption("dark");
+  await chooseAppearance(page, "dark");
   await openReview(page);
   await page.screenshot({path: path.join(evidence, "settings-dark.png"), animations: "disabled"});
   await closeSettings(page);
@@ -234,6 +256,40 @@ async function analysisChecks(page) {
   await output(page, 0);
 }
 
+async function shortStoryStartChecks(page) {
+  const viewport = page.viewportSize();
+  await page.setViewportSize({width: 1440, height: 1000});
+  await add(page, "A quiet first paragraph.\n\nA quiet second paragraph.", "Short start regression");
+  await current(page, 0);
+  await openReview(page);
+  await setRange(page, "level", 3);
+  assert.equal(await page.locator("#level").inputValue(), "3");
+  await closeSettings(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.clock.runFor(300);
+  assert.ok(await page.evaluate(() => scrollY <= 1), "The short-story regression starts at the document top.");
+  await current(page, 0);
+  await page.locator("#connect").click();
+  await start(page);
+  await output(page, 3);
+  await current(page, 0);
+  await page.locator("#stop").click();
+  await output(page, 0);
+  assert.equal(await page.locator("#start").isDisabled(), false);
+  await page.clock.runFor(1100);
+  await start(page);
+  await page.clock.runFor(1100);
+  await output(page, 3);
+  await current(page, 0);
+  await openReview(page);
+  assert.equal(await page.locator("#level").inputValue(), "3", "Start/Stop/restart preserves the first section's manual correction.");
+  await page.locator("#delete-story").click();
+  await page.waitForFunction(() => document.querySelectorAll(".story-paragraph").length === 0);
+  await closeSettings(page);
+  await page.locator("#disconnect").click();
+  if (viewport) await page.setViewportSize(viewport);
+}
+
 async function storageFailureChecks(context, origin) {
   const restricted = await context.newPage();
   const errors = [];
@@ -247,7 +303,8 @@ async function storageFailureChecks(context, origin) {
   await restricted.locator("#confirm-save").click();
   await restricted.waitForFunction(() => document.querySelector("#save-status").dataset.state === "error");
   assert.equal(await restricted.locator(".story-paragraph").textContent(), "An ordinary walk.");
-  await openSettings(restricted);
+  await closeSettings(restricted);
+  await openAppSettings(restricted);
   await restricted.locator("#reading-appearance").selectOption("dark");
   assert.equal(await restricted.locator("html").getAttribute("data-theme"), "dark");
   assert.deepEqual(errors, [], "Storage denial must be handled without runtime errors.");
@@ -285,8 +342,7 @@ async function backupAndPreferenceChecks(page) {
   await add(page, "A neutral backup fixture.\n\nA quiet walk home.", "Backup fixture");
   await openReview(page); await setRange(page, "level", 0); await closeSettings(page);
   await save(page);
-  await openLibrary(page);
-  if (!await page.locator(".library-tools").evaluate(element => element.open)) await page.locator(".library-tools > summary").click();
+  await backupSettings(page);
   const [download] = await Promise.all([page.waitForEvent("download"), page.locator("#export-story").click()]);
   assert.equal(download.suggestedFilename(), "satinlore-story-backup.json", "A private title must not enter the downloaded filename.");
   const downloadedPath = await download.path();
@@ -306,7 +362,7 @@ async function backupAndPreferenceChecks(page) {
   assert.equal(await page.locator("#strength-value").textContent(), "1.0×");
   await openReview(page);
   assert.equal(await page.locator("#level").inputValue(), "0", "A restored manual zero survives fresh local analysis.");
-  await closeSettings(page); await openLibrary(page);
+  await closeSettings(page); await backupSettings(page);
   await page.locator("#import-backup").setInputFiles({name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("{}")});
   await page.waitForFunction(() => /could not|invalid/i.test(document.querySelector("#library-transfer-status").textContent));
   assert.equal(await page.locator("#story-list button[data-story-id]").count(), 2, "Rejected backups preserve existing stories.");
@@ -335,6 +391,115 @@ async function backupAndPreferenceChecks(page) {
   await closeSettings(page);
 }
 
+async function refinementChecks(page, setPromptReply) {
+  await page.setViewportSize({width: 1440, height: 1000});
+  await add(page, "A neutral folder fixture.\n\nAnother quiet paragraph.", "A story on a shelf");
+  await openLibrary(page);
+  setPromptReply("Practice shelf");
+  await page.locator("#create-folder").click();
+  await page.waitForFunction(key => JSON.parse(localStorage.getItem(key))?.folders?.length === 1, libraryKey);
+  const folderId = await page.locator("#folder-filter").inputValue();
+  assert.match(folderId, /^folder-/);
+  await openSettings(page, "story");
+  await page.locator("#story-folder").selectOption(folderId);
+  assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).stories.length, libraryKey), 0,
+    "Creating/moving a folder does not silently save an unsaved story.");
+  await save(page);
+  await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).stories[0].folderId?.startsWith("folder-"), libraryKey);
+  await page.reload(); await analysed(page); await output(page, 0);
+  await openSettings(page, "story");
+  assert.equal(await page.locator("#story-folder").inputValue(), folderId, "Saved membership returns paused after reload.");
+  await closeSettings(page); await openLibrary(page);
+  await page.locator("#folder-filter").selectOption(folderId);
+  if (!await page.locator(".folder-tools").evaluate(element => element.open)) await page.locator(".folder-tools > summary").click();
+  setPromptReply("Renamed practice shelf");
+  await page.locator("#rename-folder").click();
+  await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).folders[0].name === "Renamed practice shelf", libraryKey);
+  await page.locator("#delete-folder").click();
+  await page.waitForFunction(key => !JSON.parse(localStorage.getItem(key)).stories[0].folderId, libraryKey);
+  assert.equal(await page.locator("#story-title").textContent(), "A story on a shelf", "Removing a folder retains its story.");
+  assert.equal(await page.locator("#folder-filter").inputValue(), "unfiled");
+  await openAppSettings(page); await page.locator("#delete-all").click();
+  await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
+  await closeAppSettings(page);
+
+  await openSettings(page);
+  await page.locator("#open-setup").click();
+  await page.locator("#setup-dialog").waitFor({state: "visible"});
+  await assertFits(page, "Guided setup", "#setup-stop");
+  await page.locator("#setup-primary").click();
+  await page.waitForFunction(() => document.querySelector("#setup-primary").textContent === "Open practice story");
+  await output(page, 0);
+  await page.locator("#setup-primary").click();
+  await page.locator("#setup-coach").waitFor({state: "visible"});
+  await analysed(page);
+  assert.equal(await page.locator("#story-title").textContent(), "Find your rhythm");
+  assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
+  await start(page); await output(page, 0);
+  await page.locator("#next").click(); await current(page, 1);
+  await page.clock.runFor(1100); await output(page, 2);
+  assert.equal(await page.locator(".simulator-device").getAttribute("data-output"), "2",
+    "The side preview observes actual output while the reading sidebar stays open.");
+  await page.locator("#strength-plus").click();
+  await page.locator("#strength-minus").click();
+  await setRange(page, "cap", 6);
+  assert.equal(await page.locator("#ceiling-dialog").isVisible(), false);
+  assert.match(await page.locator("#status").textContent(), /Playing/);
+  await page.emulateMedia({reducedMotion: "reduce"});
+  await page.clock.runFor(150);
+  assert.equal(await page.locator(".simulator-device-body").getAttribute("transform"), "translate(0.00 0)",
+    "Reduced motion keeps a static device while retaining the actual output readout.");
+  await page.locator("#stop").click(); await output(page, 0);
+  assert.equal(await page.locator(".simulator-device").getAttribute("data-output"), "0");
+  await start(page); await page.clock.runFor(1100); await output(page, 2);
+  await page.waitForFunction(() => document.querySelector("#setup-coach-status").textContent.includes("All tried"));
+  await page.locator("#setup-finish").click();
+  await page.locator("#empty-workspace").waitFor({state: "visible"});
+  await output(page, 0);
+  await page.emulateMedia({reducedMotion: "no-preference"});
+
+  const resourceRequests = [];
+  const resourceMonitor = request => {
+    if (request.url().includes("example.invalid/satinlore-import-test")) resourceRequests.push(request.url());
+  };
+  page.on("request", resourceMonitor);
+  const html = '<!doctype html><html><head><style>@import "https://example.invalid/satinlore-import-test.css";</style></head><body>' +
+    '<h2 class="title">Download fixture</h2><div id="chapters"><div class="userstuff"><p>A quiet downloaded paragraph.</p>' +
+    '<script>globalThis.__downloadExecuted = true;</script><img src="https://example.invalid/satinlore-import-test.png" onerror="globalThis.__downloadExecuted=true">' +
+    '<p>A second neutral paragraph.</p></div></div></body></html>';
+  await newDialog(page);
+  await page.locator("#story-title-input").fill("");
+  await page.locator("#file").setInputFiles({name: "ao3-download.html", mimeType: "text/html", buffer: Buffer.from(html)});
+  await page.locator("#new-story-dialog").waitFor({state: "hidden"});
+  await analysed(page);
+  assert.equal(await page.locator("#story-title").textContent(), "Download fixture");
+  assert.equal(await page.locator(".story-paragraph").count(), 2);
+  assert.equal(await page.locator("#paragraph img, #paragraph script, #paragraph style").count(), 0);
+  assert.equal(await page.evaluate(() => globalThis.__downloadExecuted), undefined);
+  assert.deepEqual(resourceRequests, [], "Downloaded HTML stays inert and loads no remote resources.");
+  page.off("request", resourceMonitor);
+  await openSettings(page);
+  assert.equal(await page.locator('#reading-model option[value="custom"]').isDisabled(), true,
+    "The future custom model cannot enable unsupported capabilities.");
+  await page.locator("#story-url").fill("https://www.literotica.com/s/a-neutral-fixture?private=discarded#discarded");
+  const linkRequests = [];
+  const linkMonitor = request => { if (request.url().includes("/api/story-import")) linkRequests.push(request.url()); };
+  page.on("request", linkMonitor);
+  await page.locator("#import-url").click();
+  assert.match(await page.locator("#url-import-status").textContent(), /permission|unavailable|paste/i);
+  assert.equal(await page.locator("#open-source-link").getAttribute("href"), "https://www.literotica.com/s/a-neutral-fixture");
+  assert.deepEqual(linkRequests, [], "Literotica presents a source/copy fallback instead of scraping.");
+  page.off("request", linkMonitor);
+  await closeSettings(page);
+  await openAppSettings(page);
+  assert.equal(await page.locator('#app-settings-dialog a[href="/help"]').isVisible(), true);
+  assert.equal(await page.locator('#app-settings-dialog a[href="/support"]').isVisible(), true);
+  assert.match(await page.locator("#app-settings-dialog").textContent(), /Personal accounts.*planned/s);
+  await page.locator("#delete-all").click();
+  await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
+  await closeAppSettings(page);
+}
+
 export async function checkReader(page, context, origin) {
   await page.clock.install();
   let promptReply = "Renamed afternoon";
@@ -348,6 +513,7 @@ export async function checkReader(page, context, origin) {
   page.on("request", monitor);
   await page.goto(origin);
   await appearanceChecks(page);
+  await shortStoryStartChecks(page);
   assert.equal(await page.locator("body").getAttribute("data-reading-width"), "wide");
   assert.equal(await page.locator("#settings-panel").isHidden(), true);
   await analysisChecks(page);
@@ -408,14 +574,10 @@ export async function checkReader(page, context, origin) {
   await setRange(page, "cap", 0);
   await output(page, 0); await page.clock.runFor(1100); await output(page, 0);
   await setRange(page, "cap", 5);
-  await page.locator("#ceiling-dialog").waitFor({state: "visible"});
-  assert.equal(await page.locator("#capValue").textContent(), "0", "Proposed maximum is not active before confirmation.");
-  await page.locator("#cancel-ceiling").click();
-  assert.equal(await page.locator("#cap").inputValue(), "0");
-  await setRange(page, "cap", 5);
-  await page.locator("#confirm-ceiling").click();
-  await output(page, 0);
-  await start(page); await output(page, 3);
+  assert.equal(await page.locator("#ceiling-dialog").isVisible(), false, "A deliberate maximum change has no second popup.");
+  assert.equal(await page.locator("#capValue").textContent(), "5");
+  assert.match(await page.locator("#status").textContent(), /Playing/, "A direct maximum change does not interrupt a running simulation.");
+  await page.clock.runFor(1100); await output(page, 3);
   await page.locator("#pause").click(); await output(page, 0);
   await page.locator("#strength-plus").click();
   await page.clock.runFor(1100); await output(page, 0);
@@ -456,7 +618,7 @@ export async function checkReader(page, context, origin) {
   assert.equal(await page.locator("body").getAttribute("data-reading-width"), "full");
   await page.locator("#font-size").selectOption("large");
   await page.locator("#reading-spacing").selectOption("relaxed");
-  await page.locator("#reading-appearance").selectOption("dark");
+  await chooseAppearance(page, "dark");
   await current(page, 6); await output(page, 0);
   await closeSettings(page);
   await openLibrary(page);
@@ -548,7 +710,7 @@ export async function checkReader(page, context, origin) {
   await page.waitForFunction(key => !localStorage.getItem(key) || JSON.parse(localStorage.getItem(key)).stories.length === 0, libraryKey);
   assert.equal(await page.locator(".story-paragraph").count(), 8, "Session only removes the saved copy but keeps text readable.");
   await save(page);
-  await openLibrary(page); await page.locator("#delete-all").click();
+  await openAppSettings(page); await page.locator("#delete-all").click();
   await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
   await page.reload(); assert.equal(await page.locator(".story-paragraph").count(), 0);
 
@@ -556,7 +718,7 @@ export async function checkReader(page, context, origin) {
   await page.reload();
   assert.equal(await page.locator(".story-paragraph").count(), 0);
   await page.waitForFunction(() => /corrupt|unreadable|could not|cannot be read|invalid|damaged/i.test(document.querySelector("#library-status").textContent));
-  await openLibrary(page); await page.locator("#delete-all").click();
+  await openAppSettings(page); await page.locator("#delete-all").click();
   await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
   await page.evaluate(key => {
     const original = Storage.prototype.setItem;
@@ -587,7 +749,7 @@ export async function checkReader(page, context, origin) {
       });
     };
   });
-  await openLibrary(page); await page.locator("#delete-all").click();
+  await openAppSettings(page); await page.locator("#delete-all").click();
   await page.waitForFunction(() => typeof globalThis.__finishDelete === "function");
   assert.equal(await page.locator("#new-story").isDisabled(), true, "New stories are unavailable until Delete All completes.");
   assert.equal(await page.locator("#empty-new-story").isDisabled(), true);
@@ -621,9 +783,10 @@ export async function checkReader(page, context, origin) {
   assert.equal(await page.locator("#story-title").textContent(), "Literal text", "Closing import invalidates its delayed completion.");
   await storageFailureChecks(context, origin);
   await page.bringToFront();
+  await refinementChecks(page, value => { promptReply = value; });
   assert.deepEqual(await page.evaluate(() => ({local: Object.keys(localStorage).sort(), session: sessionStorage.length})),
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct workspace, Reader/Story settings, optional review, repeated Start/Stop/restart, confirmed ceiling, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, gear appearance/backup/help, folders with paused saved membership, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

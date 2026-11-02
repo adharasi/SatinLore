@@ -9,10 +9,21 @@ import {HostedAccessGuard} from "./access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "./reader/library-view.mjs";
 import {BackupImporter, serializeBackup, downloadBackup} from "./reader/backup.mjs";
 import {ReaderPreferences} from "./reader/preferences.mjs";
+import {FolderStore, selectFolderStories} from "./reader/folders.mjs";
+import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "./reader/web-import.mjs";
+import {createSimulatorView} from "./reader/simulator-view.mjs";
+import {createSetupFlow, PRACTICE_STORY} from "./reader/setup-flow.mjs";
 
 const $ = id => document.getElementById(id);
 const importer = new TextImporter();
 const store = new StoryStore();
+const folderStore = new FolderStore({store});
+const webImporter = new WebStoryImporter();
+let folders = [];
+let folderFilter = "all";
+let folderSignature = "";
+let simulatorView = null;
+let setupFlow = null;
 const backupImporter = new BackupImporter();
 const preferences = new ReaderPreferences();
 const stories = [];
@@ -27,6 +38,7 @@ let activeNode = null;
 let reviewNodes = new Map();
 let revealUpcoming = false;
 let importing = false;
+let linkBusy = false;
 let importEpoch = 0;
 let selectionEpoch = 0;
 let positionTimer = null;
@@ -72,15 +84,21 @@ function setImporting(value) {
   $("new-story-dialog").setAttribute("aria-busy", String(value));
   $("load").disabled = value;
   $("file").disabled = value;
+  for (const id of ["open-draft", "import-url"]) if ($(id)) $(id).disabled = value;
+  if ($("draft-story")) $("draft-story").readOnly = value;
+  if ($("draft-title")) $("draft-title").readOnly = value;
 }
 function cancelImport() {
   const cancelledBackup = backupBusy;
+  const cancelledLink = linkBusy; linkBusy = false;
   ++importEpoch;
   importer.invalidate();
+  webImporter.invalidate();
   backupImporter.invalidate(); backupBusy = false;
   $("file").value = "";
   if ($("import-backup")) $("import-backup").value = "";
   setImporting(false);
+  if (cancelledLink) text("url-import-status", "Link import cancelled. Your stories are unchanged.");
   if (cancelledBackup) text("library-transfer-status", "Backup opening cancelled. Existing stories are unchanged.");
 }
 function formatStrength(value = latest.strength ?? 1) { return `${value.toFixed(1)}×`; }
@@ -93,9 +111,64 @@ function saveState(story) {
   return {state: "saved", label: "Saved on this browser"};
 }
 
+function renderFolders() {
+  if (!$("folder-filter") || !$("story-folder")) return;
+  const story = currentStory();
+  const signature = JSON.stringify([folders, folderFilter, story?.id, story?.folderId, story?.deleting, libraryLoading, libraryMutation]);
+  if (signature === folderSignature) return;
+  folderSignature = signature;
+  const option = (value, label) => {
+    const node = document.createElement("option"); node.value = value; node.textContent = label; return node;
+  };
+  $("folder-filter").replaceChildren(option("all", "All stories"), option("unfiled", "Unfiled"),
+    ...folders.map(folder => option(folder.id, folder.name)));
+  $("folder-filter").value = folderFilter;
+  $("story-folder").replaceChildren(option("", "Unfiled"), ...folders.map(folder => option(folder.id, folder.name)));
+  $("story-folder").value = story?.folderId ?? "";
+  $("story-folder").disabled = !story || libraryMutation || story.deleting;
+  $("create-folder").disabled = libraryLoading || libraryMutation;
+  $("folder-filter").disabled = libraryLoading || libraryMutation;
+  for (const id of ["rename-folder", "delete-folder"]) $(id).disabled = libraryLoading || libraryMutation || !folders.some(folder => folder.id === folderFilter);
+}
+
+async function changeFolder(action, name) {
+  if (libraryLoading || libraryMutation) return;
+  const folder = folders.find(value => value.id === folderFilter);
+  if (action !== "create" && !folder) return;
+  pause("Updating your folders.");
+  libraryMutation = true;
+  stories.forEach(story => { clearTimeout(story.saveTimer); story.saveTimer = null; });
+  display(); renderLibrary();
+  try {
+    await Promise.all(stories.map(story => story.saveChain.catch(() => {})));
+    if (action === "create") {
+      const created = await folderStore.create(name); folders.push(created); folderFilter = created.id;
+    } else if (action === "rename") {
+      const renamed = await folderStore.rename(folder.id, name, {expectedRevision: folder.revision});
+      folders = folders.map(value => value.id === folder.id ? renamed : value);
+    } else {
+      const result = await folderStore.delete(folder.id, {expectedRevision: folder.revision});
+      folders = folders.filter(value => value.id !== folder.id);
+      for (const story of stories) {
+        if (story.folderId === folder.id) story.folderId = null;
+        const record = result.stories?.find(value => value.id === story.id);
+        if (record) { story.revision = record.revision; story.updatedAt = record.updatedAt; }
+      }
+      folderFilter = "unfiled";
+    }
+    text("folder-status", action === "delete" ? "Folder removed. Its stories are in Unfiled." : "Folder updated on this browser.");
+  } catch (error) { text("folder-status", error.message || "Could not update this folder. Your stories are unchanged."); }
+  finally {
+    libraryMutation = false; display(); renderLibrary();
+    // A pending autosave cleared above must not lose the user's latest changes.
+    for (const story of stories) if (story.saved && story.dirty && !story.saveError) void persistStory(story);
+  }
+}
+
 function renderLibrary() {
+  renderFolders();
   const fragment = document.createDocumentFragment();
-  const visible = selectLibraryStories(stories, {query: libraryQuery, sort: librarySort});
+  const visible = selectLibraryStories(selectFolderStories(stories, folderFilter), {query: libraryQuery, sort: librarySort});
   for (const story of visible) {
     const button = document.createElement("button");
     button.type = "button";
@@ -124,7 +197,7 @@ function renderLibrary() {
   }
   text("library-status", libraryLoading ? "Opening your local library…" : libraryError || (stories.length ?
     "Saved stories stay on this browser. Session-only stories clear on reload." : "No stories yet. Add one to start reading."));
-  $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.length && !libraryError);
+  $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.length && !folders.length && !libraryError);
 }
 
 function updateCurrentCorrection(story) {
@@ -164,9 +237,9 @@ function display(state = latest) {
   $("cap").value = state.ceiling;
   $("cap").setAttribute("aria-valuetext", `${state.ceiling} out of 20 confirmed maximum`);
   text("strength-value", formatStrength());
-  $("strength-minus").disabled = libraryMutation || !story || story.deleting || state.strength <= 0;
-  $("strength-plus").disabled = libraryMutation || !story || story.deleting || state.strength >= 2;
-  $("strength-reset").disabled = libraryMutation || !story || story.deleting || state.strength === 1;
+  $("strength-minus").disabled = libraryMutation || story?.deleting || state.strength <= 0;
+  $("strength-plus").disabled = libraryMutation || story?.deleting || state.strength >= 2;
+  $("strength-reset").disabled = libraryMutation || story?.deleting || state.strength === 1;
   const reconnect = state.state === "ERROR_PAUSED";
   $("connect").disabled = state.connected && !reconnect;
   $("connect").hidden = state.connected && !reconnect;
@@ -226,6 +299,9 @@ function display(state = latest) {
     if (activeNode) { activeNode.classList.add("active"); activeNode.setAttribute("aria-current", "true"); }
   }
   updateCurrentCorrection(story);
+  simulatorView?.update(state);
+  setupFlow?.update({...state, canStart: !$("start").disabled, readiness: $("start-help").textContent});
+  renderFolders();
 }
 
 function controlRecovery(state) {
@@ -254,7 +330,7 @@ function pause(reason) {
 function storyRecord(story) {
   return {id: story.id, title: story.title, text: story.model.paragraphs.map(paragraph => paragraph.text).join("\n\n"),
     corrections: story.model.paragraphs.map(paragraph => paragraph.override), position: story.position,
-    analysisVersion: story.model.analysisVersion};
+    analysisVersion: story.model.analysisVersion, ...(story.folderId ? {folderId: story.folderId} : {})};
 }
 function markDirty(story) {
   ++story.changeVersion;
@@ -299,12 +375,12 @@ function persistStory(story, {explicit = false} = {}) {
   return story.saveChain;
 }
 function makeStory({id = createStoryId(), title = "Untitled story", text: source, corrections = [],
-  position = 0, revision = null, updatedAt = Date.now()}) {
+  position = 0, revision = null, updatedAt = Date.now(), folderId = null}) {
   const model = new ReaderModel();
   model.load(source, {deferAnalysis: true, documentId: id});
   corrections.forEach((level, index) => { if (level !== null) model.setOverride(index, level); });
   const safePosition = Math.max(0, Math.min(model.paragraphs.length - 1, position));
-  return {id, title, model, position: safePosition, furthest: safePosition, saved: revision !== null, revision,
+  return {id, title, model, folderId, position: safePosition, furthest: safePosition, saved: revision !== null, revision,
     dirty: false, saving: false, saveError: "", changeVersion: 0, saveTimer: null, saveChain: Promise.resolve(),
     deleting: false, analysisPromise: null, updatedAt, lastOpenedAt: 0};
 }
@@ -460,8 +536,11 @@ function scrollToCurrent() {
 }
 function followPosition() {
   const story = currentStory();
-  if (!story || document.hidden || anyDialog() || !$("settings-panel").hidden ||
-      (isNarrow() && !$("library-panel").hidden) || !$("follow-scroll").checked) return;
+  if (!story || document.hidden || anyDialog() ||
+      (isNarrow() && (!$("settings-panel").hidden || !$("library-panel").hidden)) || !$("follow-scroll").checked) return;
+  // Short stories can fit entirely above the reading anchor. At the document
+  // top, a layout change or Start is not evidence that the reader moved on.
+  if (scrollY + (window.visualViewport?.offsetTop ?? 0) <= 1 && story.position === 0) return;
   const {top, bottom, anchor} = readingBounds();
   const rectangles = paragraphNodes.map(node => {
     const rect = node.getBoundingClientRect(); return {id: node.dataset.paragraphId, top: rect.top, bottom: rect.bottom};
@@ -515,6 +594,7 @@ function openDialog(id, opener = document.activeElement) {
 }
 function closeDialog(id, {restore = true} = {}) {
   const dialog = $(id);
+  if (!dialog) return;
   if (dialog.open) dialog.close();
   if (restore) {
     const opener = dialogOpeners.get(id);
@@ -523,10 +603,11 @@ function closeDialog(id, {restore = true} = {}) {
   dialogOpeners.delete(id);
 }
 function closeDialogs() {
-  for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog"]) closeDialog(id, {restore: false});
+  for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog"]) closeDialog(id, {restore: false});
   startIntent = ceilingIntent = saveIntent = null;
 }
 function stopEverything() {
+  if (setupFlow?.snapshot().active) setupFlow.cancel();
   cancelImport();
   pause("Stopped. Confirm Start to continue.");
   closeDialogs();
@@ -548,7 +629,7 @@ async function prepareText(read) {
     const title = $("story-title-input").value.trim() || "Untitled story";
     if (title.length > 120) throw new Error("Use a title up to 120 characters.");
     if (stories.length >= 20) throw new Error("Keep up to 20 stories in this workspace. Delete one before adding another.");
-    const story = makeStory({title, text: source});
+    const story = makeStory({title, text: source, folderId: folders.some(folder => folder.id === folderFilter) ? folderFilter : null});
     stories.push(story);
     closeDialog("new-story-dialog", {restore: false});
     $("source").value = ""; $("story-title-input").value = "";
@@ -560,6 +641,73 @@ async function prepareText(read) {
   } finally {
     if (operation === importEpoch) { setImporting(false); $("file").value = ""; display(); }
   }
+}
+
+function openDraft() {
+  if (libraryLoading || libraryMutation) return;
+  cancelImport(); closeDialogs(); pause("New story. Write or paste below.");
+  currentStory()?.model.cancelAnalysis(); ++selectionEpoch; activeId = null;
+  renderStory(); controller.setStory([]); display(); renderLibrary();
+  if (isNarrow()) setPanel("library", false, {restore: false});
+  $("draft-story")?.focus({preventScroll: true});
+  window.scrollTo({top: 0, behavior: "instant"});
+}
+
+function addPreparedStory(record, {folderId = null} = {}) {
+  if (stories.length >= 20) throw new Error("Your library holds up to 20 stories. Remove one before adding another.");
+  const title = record.title?.trim() || "Untitled story";
+  if (title.length > 120) throw new Error("Choose a title up to 120 characters.");
+  const story = makeStory({...record, title, folderId});
+  stories.push(story); selectStory(story.id, {focusReader: true});
+  return story;
+}
+
+async function openDraftText() {
+  if (libraryLoading || libraryMutation || importing) return;
+  const source = $("draft-story").value;
+  if (!source.trim()) { text("draft-status", "Write or paste your story first."); $("draft-story").focus(); return; }
+  cancelImport(); pause("Opening your story.");
+  try {
+    addPreparedStory({title: $("draft-title").value, text: source},
+      {folderId: folders.some(folder => folder.id === folderFilter) ? folderFilter : null});
+    $("draft-story").value = ""; $("draft-title").value = ""; text("draft-status", "");
+    show("Your story is ready. Saved only if you choose to keep it on this browser.");
+  } catch (error) { text("draft-status", error.message || "Could not open your story. Your writing is still here."); }
+}
+
+function showImportPanel() {
+  if (anyDialog()) closeDialogs();
+  setPanel("settings", true, {restore: false}); selectSettingsTab("reader");
+  $("story-url")?.focus({preventScroll: true});
+}
+
+async function importStoryUrl() {
+  if (libraryLoading || libraryMutation || importing) return;
+  for (const id of ["open-source-link", "paste-source-trigger"]) if ($(id)) $(id).hidden = true;
+  let plan;
+  try { plan = identifyStoryUrl($("story-url").value); }
+  catch (error) { text("url-import-status", error.message); return; }
+  const link = $("open-source-link");
+  if (link) { link.href = plan.url; link.textContent = `Open ${plan.name}`; link.hidden = false; }
+  if ($("paste-source-trigger")) $("paste-source-trigger").hidden = plan.automatic;
+  if (!plan.automatic) {
+    text("url-import-status", plan.guidance);
+    // Keep the source openable without automatically opening a new tab.
+    return;
+  }
+  cancelImport(); pause("Importing the story you selected.");
+  const operation = importEpoch;
+  linkBusy = true; setImporting(true); text("url-import-status", "Opening this public AO3 page…");
+  try {
+    const record = await webImporter.read(plan.url);
+    if (!record || operation !== importEpoch || document.hidden || libraryMutation) return;
+    addPreparedStory(record, {folderId: folders.some(folder => folder.id === folderFilter) ? folderFilter : null});
+    text("url-import-status", `${record.scope || "Story"} imported. You can read now.`);
+    $("story-url").value = "";
+    if (isNarrow()) setPanel("settings", false, {restore: false});
+  } catch (error) {
+    if (operation === importEpoch) text("url-import-status", error.message || "This page could not be imported. Open the source and paste text you have permission to use.");
+  } finally { if (operation === importEpoch) { linkBusy = false; setImporting(false); display(); } }
 }
 function acquirePlayback() {
   if (!navigator.locks) return Promise.resolve(null);
@@ -685,7 +833,23 @@ function exportStories(records, filename) {
   try { text("library-transfer-status", downloadBackup(records, {filename}).message); }
   catch (error) { text("library-transfer-status", error.message); }
 }
-for (const id of ["new-story", "empty-new-story"]) $(id).addEventListener("click", openNewStory);
+$("new-story").addEventListener("click", openDraft);
+$("empty-new-story").addEventListener("click", openNewStory);
+$("open-draft")?.addEventListener("click", () => void openDraftText());
+$("draft-story")?.addEventListener("keydown", event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void openDraftText(); } });
+$("empty-link-import")?.addEventListener("click", showImportPanel);
+$("upload-story-trigger")?.addEventListener("click", () => { openNewStory(); $("file").click(); });
+$("paste-source-trigger")?.addEventListener("click", () => { openDraft(); if (isNarrow()) setPanel("settings", false, {restore: false}); $("draft-story").focus(); });
+$("import-url")?.addEventListener("click", () => void importStoryUrl());
+$("story-url")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void importStoryUrl(); } });
+$("open-app-settings")?.addEventListener("click", () => openDialog("app-settings-dialog"));
+$("close-app-settings")?.addEventListener("click", () => closeDialog("app-settings-dialog"));
+for (const id of ["open-setup", "empty-setup"]) $(id)?.addEventListener("click", () => setupFlow?.open());
+$("folder-filter")?.addEventListener("change", event => { folderFilter = event.target.value; renderLibrary(); });
+$("create-folder")?.addEventListener("click", () => { const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
+$("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; const name = prompt("Folder name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
+$("delete-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (folder && confirm(`Remove the folder “${folder.name}”? Its stories will move to Unfiled.`)) void changeFolder("delete"); });
+$("story-folder")?.addEventListener("change", event => { const story = currentStory(); if (!story || libraryMutation || story.deleting) return; story.folderId = folders.some(folder => folder.id === event.target.value) ? event.target.value : null; markDirty(story); renderLibrary(); display(); });
 $("library-search")?.addEventListener("input", event => { libraryQuery = event.target.value; renderLibrary(); });
 $("library-sort")?.addEventListener("change", event => { librarySort = event.target.value; renderLibrary(); });
 $("import-backup-trigger")?.addEventListener("click", () => $("import-backup").click());
@@ -704,13 +868,13 @@ for (const name of ["reader", "story"]) {
 $("retry-access")?.addEventListener("click", () => { pause("Checking sign-in. Playback stays paused."); void hostedAccess?.check({fresh: true}); });
 $("load").addEventListener("click", () => {
   const source = $("source").value;
-  if (!source.trim()) { text("import-status", "Paste some story text, or choose a TXT file below."); $("source").focus(); return; }
+  if (!source.trim()) { text("import-status", "Paste your story or choose a file."); $("source").focus(); return; }
   void prepareText(() => source);
 });
-$("file").addEventListener("change", event => { const file = event.target.files[0]; if (file) void prepareText(() => importer.read(file)); });
+$("file").addEventListener("change", event => { const file = event.target.files[0]; if (file) void prepareText(async () => { const record = await readStoryFile(file); if (record.title && !$("story-title-input").value.trim()) $("story-title-input").value = record.title; return record.text; }); });
 $("cancel-import").addEventListener("click", () => { cancelImport(); closeDialog("new-story-dialog"); });
-for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop"]) $(id).addEventListener("click", stopEverything);
-for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog"]) $(id).addEventListener("cancel", event => {
+for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop", "app-settings-stop"]) $(id)?.addEventListener("click", stopEverything);
+for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog"]) $(id).addEventListener("cancel", event => {
   event.preventDefault(); cancelImport(); cancelStart(); ceilingIntent = saveIntent = null; closeDialog(id); display();
 });
 $("start").addEventListener("click", () => {
@@ -731,15 +895,7 @@ $("cap").addEventListener("input", () => {
   const value = Number($("cap").value);
   if (!Number.isInteger(value) || value < 0 || value > 20) { display(); return; }
   cancelStart();
-  if (value <= latest.ceiling) controller.setCeiling(value);
-  else {
-    const expectedCeiling = latest.ceiling;
-    openDialog("ceiling-dialog");
-    ceilingIntent = {value, expectedCeiling, storyId: activeId};
-    text("ceiling-summary", `Raise the confirmed maximum from ${expectedCeiling}/20 to ${value}/20? Session strength remains ${formatStrength()}. Playback stays paused.`);
-    text("confirm-ceiling", `Confirm maximum ${value}/20`);
-    display();
-  }
+  controller.setCeilingFromControl(value);
 });
 $("confirm-ceiling").addEventListener("click", () => {
   const intent = ceilingIntent; ceilingIntent = null; closeDialog("ceiling-dialog");
@@ -748,7 +904,7 @@ $("confirm-ceiling").addEventListener("click", () => {
 });
 $("cancel-ceiling").addEventListener("click", () => { ceilingIntent = null; closeDialog("ceiling-dialog"); display(); });
 for (const [id, delta] of [["strength-minus", -1], ["strength-plus", 1]]) $(id).addEventListener("click", () => {
-  if (!currentStory()) return;
+  if (libraryMutation || currentStory()?.deleting) return;
   cancelStart();
   controller.setStrength(Math.max(0, Math.min(20, Math.round(latest.strength * 10) + delta)) / 10);
 });
@@ -813,8 +969,10 @@ $("delete-all").addEventListener("click", async () => {
   await Promise.all(stories.map(story => story.saveChain.catch(() => {})));
   try {
     await store.deleteAll();
-    stories.length = 0; activeId = null; libraryError = "";
+    stories.length = 0; folders = []; folderFilter = "all"; activeId = null; libraryError = "";
     $("source").value = ""; $("story-title-input").value = ""; $("file").value = "";
+    if ($("draft-story")) $("draft-story").value = "";
+    if ($("draft-title")) $("draft-title").value = "";
     renderStory(); controller.setStory([]);
     show("All local stories, corrections and progress deleted. Appearance was kept.");
   } catch (error) {
@@ -870,7 +1028,7 @@ document.addEventListener("keydown", event => {
   if (event.altKey && event.shiftKey && key === "x") { event.preventDefault(); stopEverything(); return; }
   const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName) || event.target?.isContentEditable;
   if (event.altKey && !event.shiftKey && !event.ctrlKey && !event.metaKey && !typing && !anyDialog()) {
-    const action = {n: openNewStory, l: () => togglePanel("library"), ",": () => togglePanel("settings"), f: () => $("focus-mode").click()}[key];
+    const action = {n: openDraft, l: () => togglePanel("library"), ",": () => togglePanel("settings"), f: () => $("focus-mode").click()}[key];
     if (action) { event.preventDefault(); action(); return; }
   }
   if (event.key !== "Escape" || anyDialog()) return;
@@ -892,12 +1050,13 @@ for (const eventName of ["pointerdown", "keydown", "wheel", "touchstart"]) {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    if (setupFlow?.snapshot().active) setupFlow.cancel();
     cancelImport(); pause("Paused when this tab became hidden. Confirm Start to continue."); closeDialogs();
     hostedAccess?.suspend();
   } else if (hostedAccess) void hostedAccess.resume();
   controller.setVisible(!document.hidden);
 });
-window.addEventListener("pagehide", () => { cancelImport(); pause("Page closed."); closeDialogs(); hostedAccess?.suspend(); });
+window.addEventListener("pagehide", () => { if (setupFlow?.snapshot().active) setupFlow.cancel(); cancelImport(); pause("Page closed."); closeDialogs(); hostedAccess?.suspend(); });
 window.addEventListener("pageshow", () => { if (hostedAccess && !document.hidden) void hostedAccess.resume(); });
 window.addEventListener("storage", event => {
   if (event.key !== "satinlore.library.v1" && event.key !== null) return;
@@ -946,6 +1105,24 @@ $("follow-scroll").checked = initialPreferences.follow;
 $("reader").className = `reader-size-${initialPreferences.fontSize}`;
 $("reader").dataset.spacing = initialPreferences.spacing;
 text("reader-preferences-note", loadedPreferences.message);
+// These presentation modules consume snapshots; they never dispatch device commands.
+if (document.createElementNS) {
+  simulatorView = createSimulatorView($("simulator-visual"), {document, window});
+  setupFlow = createSetupFlow({document, window, coachMount: $("setup-coach-mount"),
+    onConnect: () => { cancelImport(); pause("Connecting the simulator."); return controller.connect(); },
+    onPractice: record => {
+      try {
+        addPreparedStory(record);
+        window.scrollTo({top: 0, behavior: "instant"});
+        setPanel("settings", true, {restore: false}); selectSettingsTab("reader");
+        return true;
+      } catch (error) { show(error.message || "The practice story could not open."); return false; }
+    },
+    onStart: () => $("start").click(),
+    onStop: () => { cancelImport(); pause("Setup paused. Start when you are ready."); },
+    onFinish: () => { openDraft(); setPanel("settings", true, {restore: false}); selectSettingsTab("reader"); },
+  });
+}
 selectSettingsTab("reader");
 setPanel("library", !isNarrow(), {restore: false});
 setPanel("settings", false, {restore: false});
@@ -956,6 +1133,9 @@ display(controller.snapshot());
 renderLibrary();
 void (async () => {
   try {
+    const folderResult = await folderStore.loadAll();
+    folders = folderResult.folders;
+    if (folderResult.errors?.length) text("folder-status", folderResult.errors.join(" "));
     const result = await store.loadAll();
     for (const record of result.stories) {
       try { stories.push(makeStory(record)); }

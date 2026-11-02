@@ -38,6 +38,37 @@ test("actual workspace connects, stops, starts again and reconnects without stal
   assert.deepEqual(app.errors, []);
 });
 
+test("starting a short story at the page top preserves its selected first section and manual correction", async t => {
+  const app = await ready(t);
+  app.nodes.get("level").value = "3";
+  await app.nodes.get("level").dispatch("input");
+  assert.equal(app.read("scrollY"), 0);
+  assert.equal(app.read("latest.position"), 0);
+  assert.equal(app.read("currentStory().model.paragraphs[0].override"), 3);
+  await app.click("toggle-settings");
+  app.nodes.get("font-size").value = "large";
+  await app.nodes.get("font-size").dispatch("change");
+  await app.click("close-settings");
+  await start(app);
+  assert.equal(app.read("latest.position"), 0, "The viewport anchor must not infer progress to the second short paragraph without scrolling.");
+  assert.equal(app.read("latest.output"), 3, "Playback must use the selected first section's deliberate correction.");
+});
+
+test("the short-story top guard preserves manual Next/Previous and normal scrolling", async t => {
+  const app = await ready(t);
+  await app.click("next");
+  assert.equal(app.read("latest.position"), 1);
+  await app.click("previous");
+  assert.equal(app.read("latest.position"), 0);
+  app.read("followPosition()");
+  assert.equal(app.read("latest.position"), 0);
+  app.read("scrollY = 80; followPosition()");
+  assert.equal(app.read("latest.position"), 1, "A scrolled reading view still uses the settled viewport anchor.");
+  await app.click("previous");
+  app.read("scrollY = 0; window.visualViewport = {offsetTop: 80, height: 920}; followPosition()");
+  assert.equal(app.read("latest.position"), 1, "A panned visual viewport is not mistaken for the document top.");
+});
+
 test("Stop during confirmation leaves a fresh Start available", async t => {
   const app = await ready(t);
   await app.click("start");
@@ -131,7 +162,7 @@ test("a periodic access denial stops active playback and successful recheck stay
 test("Stop cancels a pending import without damaging the existing ready story", async t => {
   const app = await ready(t);
   const original = app.read("activeId");
-  await app.click("new-story");
+  await app.click("empty-new-story");
   app.nodes.get("source").value = "A different synthetic story.";
   await app.click("load");
   await app.click("import-stop"); await app.advance(0);
@@ -176,10 +207,71 @@ test("layout shortcuts ignore typing and the Stop shortcut works inside a dialog
   await app.key({key: "f", altKey: true});
   assert.equal(app.read("Boolean(focusArrangement)"), true);
   await app.key({key: "n", altKey: true});
+  assert.equal(app.read("activeId"), null);
+  assert.equal(app.document.activeElement, app.nodes.get("draft-story"));
+  await app.click("empty-new-story");
   assert.equal(app.nodes.get("new-story-dialog").open, true);
   app.nodes.get("source").focus();
   await app.key({key: "X", altKey: true, shiftKey: true});
   assert.equal(app.nodes.get("new-story-dialog").open, false);
   assert.equal(app.read("latest.running"), false);
   assert.equal(app.read("pendingStart"), false);
+});
+
+
+test("direct typing opens a session-only story and keeps the existing library", async t => {
+  const app = await ready(t);
+  await app.click("new-story");
+  app.nodes.get("draft-title").value = "A new draft";
+  app.nodes.get("draft-story").value = "The clock moved slowly.\n\nThe train arrived.";
+  await app.click("open-draft"); await app.settle();
+  assert.equal(app.read("stories.length"), 2);
+  assert.equal(app.read("currentStory().title"), "A new draft");
+  assert.equal(app.read("currentStory().saved"), false);
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.nodes.get("draft-story").value, "");
+});
+
+test("strength works before and during playback and maximum gestures never open a popup", async t => {
+  const app = workspace(); t.after(() => app.destroy()); await app.settle();
+  assert.equal(app.nodes.get("strength-plus").disabled, false);
+  await app.click("strength-plus");
+  assert.equal(app.read("latest.strength"), 1.1);
+  await app.add(); await app.click("connect");
+  app.nodes.get("level").value = "4"; await app.nodes.get("level").dispatch("input");
+  await start(app);
+  await app.click("strength-plus");
+  assert.equal(app.read("latest.strength"), 1.1);
+  app.nodes.get("cap").value = "9"; await app.nodes.get("cap").dispatch("input");
+  assert.equal(app.read("latest.ceiling"), 9);
+  assert.equal(app.read("latest.running"), true);
+  assert.equal(app.nodes.get("ceiling-dialog").open, false);
+  assert.equal(app.nodes.get("start-dialog").open, false);
+  app.nodes.get("cap").value = "0"; await app.nodes.get("cap").dispatch("input");
+  assert.equal(app.read("latest.output"), 0);
+  await app.click("stop");
+  app.nodes.get("cap").value = "8"; await app.nodes.get("cap").dispatch("input");
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.nodes.get("start").disabled, false);
+});
+
+test("desktop reading follows scroll while the simulator sidebar is visible", async t => {
+  const app = await ready(t);
+  await app.click("toggle-settings");
+  app.read("scrollY = 80; followPosition()");
+  assert.equal(app.read("latest.position"), 1);
+  await app.resize(true);
+  app.read("controller.setPosition(0); scrollY = 80; followPosition()");
+  assert.equal(app.read("latest.position"), 0, "A mobile drawer obscures the reading area.");
+});
+
+test("global Settings opens separately, exposes Stop and closes on cancellation", async t => {
+  const app = await ready(t);
+  await start(app); await app.click("open-app-settings");
+  assert.equal(app.nodes.get("app-settings-dialog").open, true);
+  assert.equal(app.read("latest.running"), false);
+  await app.click("app-settings-stop");
+  assert.equal(app.nodes.get("app-settings-dialog").open, false);
+  assert.equal(app.read("latest.output"), 0);
+  assert.equal(app.nodes.get("start").disabled, false);
 });

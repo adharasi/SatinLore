@@ -198,6 +198,17 @@ export class PlaybackController {
     return this._desiredChanged();
   }
 
+  // The reader's synchronous simulator accepts a deliberate range-control change
+  // without opening another dialog. This never connects or starts a session;
+  // while playing, increases wait for the existing bounded dispatch cadence.
+  // Do not reuse this simulator-only policy in a physical transport adapter.
+  setCeilingFromControl(value) {
+    try { validLevel(value); }
+    catch (error) { this.pause("Invalid intensity ceiling."); throw error; }
+    this.ceiling = value;
+    return this._desiredChanged();
+  }
+
   // Called only by the owner's deliberate confirmation action. Requiring the
   // previously displayed ceiling prevents a stale dialog from undoing a reduction.
   confirmCeiling(value, expectedCeiling) {

@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES } from "./assets.mjs";
 import { feedbackJson, normalizeFeedback, FeedbackError } from "./feedback.mjs";
+import { storyImportJson, importPublicStory, StoryImportError } from "./story-import.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 
 const APP_ORIGIN = "https://app.satinlore.com";
@@ -69,7 +70,7 @@ export async function verifyFounder(request, config, keyResolver) {
   }
 }
 
-export function createPrivateAppWorker({ keyResolver } = {}) {
+export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser } = {}) {
   return {
     async fetch(request, env) {
       const head = request.method === "HEAD";
@@ -81,6 +82,29 @@ export function createPrivateAppWorker({ keyResolver } = {}) {
       if (url.origin !== config.origin) return finish(json({ error: "Founder access required." }, 403));
       const session = await verifyFounder(request, config, keyResolver);
       if (!session) return finish(json({ error: "Founder access required." }, 403));
+      if (url.pathname === "/api/story-import") {
+        if (request.method !== "POST") {
+          const response = json({ error: "Use the story-link form to import a story." }, 405);
+          response.headers.set("Allow", "POST");
+          return finish(response);
+        }
+        if (request.headers.get("Origin") !== config.origin ||
+            ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
+          return finish(json({ error: "Please use the story-link form on the SatinLore app." }, 403));
+        }
+        try {
+          const source = await storyImportJson(request);
+          if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+          // Deliberate link imports are the sole exception to local-only story processing.
+          // Only a canonical public AO3 URL enters this fetch; no cookies, assertions or local story data.
+          const story = await importPublicStory(source, { ...(storyFetcher ? { fetcher: storyFetcher } : {}), ...(storyParser ? { parse: storyParser } : {}) });
+          if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+          return finish(json(story));
+        } catch (error) {
+          if (error instanceof StoryImportError) return finish(json({ error: error.message }, error.status));
+          return finish(json({ error: "The story link could not be opened. Try an AO3 HTML download instead." }, 503));
+        }
+      }
       if (FEEDBACK_METHODS.has(url.pathname)) {
         const allowed = FEEDBACK_METHODS.get(url.pathname);
         if (!allowed.includes(request.method)) {

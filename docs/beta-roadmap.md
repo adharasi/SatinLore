@@ -1,6 +1,6 @@
 # Beta roadmap — frontend, simulation, hardware
 
-Approved workspace revision: 29 October 2026 (frontend specification v1.2). Build the software experience with simulated devices first; hardware availability does not block frontend, application or scoring work. The former device-first 48–72-hour release target is superseded. Completion requires evidence, not a date or screenshot.
+Approved workspace revision: 29 October 2026 (frontend specification v1.2), refined by the 2 November editor/import/folder/setup request. Build the software experience with simulated devices first; hardware availability does not block frontend, application or scoring work. The former device-first 48–72-hour release target is superseded. Completion requires evidence, not a date or screenshot.
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The reader remains simulator-only. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
@@ -8,11 +8,11 @@ There are separate gates: **S** for the software experience and **H** for physic
 
 The product owner has requested `app.satinlore.com` behind founder-only Cloudflare Access. A separate static-reader Worker provides this simulator preview without enabling the local Python invitation/vendor backend or weakening its local-origin restrictions. The adapter validates a dedicated Access token before every asset; failed or expired hosted access stops simulated playback and blocks Start. This request supersedes the earlier workspace milestone's no-deployment scope for this private preview only. It does not pass hardware qualification or the full software-beta gates.
 
-The repository is prepared for a one-time owner-side dashboard setup and automatic Git deployments. Access team/audience and the enable/pause flag remain dashboard-owned and survive later source deployments. Deployment configuration and operational verification are recorded in [the Cloudflare runbook](../deploy/cloudflare/README.md). A committed adapter is not evidence that DNS, Access or a live deployment has been provisioned.
+The one-time owner-side dashboard setup is complete and automatic Git deployment succeeded for release `376d3049c028`; the evidence ledger records its live checks. Access team/audience and the enable/pause flag remain dashboard-owned and survive later source deployments. Deployment configuration and operational verification are recorded in [the Cloudflare runbook](../deploy/cloudflare/README.md). A committed adapter is not evidence that DNS, Access or a live deployment has been provisioned.
 
 ## Existing baseline
 
-The local FastAPI/static ES-module application includes TXT/paste import, stable paragraphs, experimental local suggestions, manual corrections, scroll tracking, finite/coalesced simulator playback, a ceiling, explicit Start and interruption/tab-ownership rules. SQLite-backed one-use invitations and expiring sessions support a separate sandboxed device-check screen. New stories stay session-only until an explicit local-save choice. Live SDK compatibility, continuous real-device reading, production deployment and physical qualification remain outstanding.
+The local FastAPI/static ES-module application includes TXT/paste import, stable paragraphs, experimental local suggestions, manual corrections, scroll tracking, finite/coalesced simulator playback, a ceiling, explicit Start and interruption/tab-ownership rules. SQLite-backed one-use invitations and expiring sessions support a separate sandboxed device-check screen. New stories stay session-only until an explicit local-save choice. Live SDK compatibility, continuous real-device reading, broader beta release and physical qualification remain outstanding; the founder-only simulator deployment is live.
 
 ## F1 — approved themes and reader foundation
 
@@ -26,11 +26,23 @@ The 29 October decision moves the next frontend milestone ahead of the deeper F3
 
 Added stories open directly for reading while local analysis runs in the background. Valid analysis gates device Start, not silent reading or review. Keep generation cancellation, invalid/uncertain zero, manual-zero overrides and correction-preserving reanalysis. Explicit **Save on this browser** retains text/title, corrections, analysis version and progress; **Session only** remains the default. Rename, delete one/all and truthful storage-failure states are part of this milestone. Restoration stays paused and never retains an armed session.
 
-Persistent −/+ adjusts session strength from 0.0× to 2.0× in 0.1× steps, initially 1.0×. Apply it to the section base without rewriting corrections, round down to a whole level, then cap at the confirmed ceiling. Start explicitly confirms the selected simulator, strength and maximum. Lower ceilings apply immediately; increases require separate confirmation. Stop remains immediate and reachable in overlays.
+Persistent −/+ adjusts session strength from 0.0× to 2.0× in 0.1× steps, initially 1.0×. Apply it to the section base without rewriting corrections, round down to a whole level, then cap at the confirmed ceiling. Start explicitly confirms the selected simulator, strength and maximum. Lower/zero ceilings apply immediately. Under the 2 November user request, a direct maximum-slider gesture updates the ordinary reader simulator without a separate popup or automatic restart; Start still confirms the current maximum. The async lab/hardware-check contracts remain separate. Stop remains immediate and reachable in overlays.
 
-This brings the local-persistence part of F4 into the current workspace implementation. Feedback, server account operations and the deeper failure harness remain separate work. Exact implementation, storage boundaries and controls are described in the [specification](development-spec.md) and [frontend design](frontend-design.md).
+This brought the local-persistence part of F4 into the workspace implementation. The deeper F3 failure harness and private hosted feedback/support/data journeys were subsequently implemented on 1 November; durable reader accounts/cloud story storage remain future work. Exact implementation, storage boundaries and controls are described in the [specification](development-spec.md) and [frontend design](frontend-design.md).
 
-**Gate S1-v2:** use [test-today.md](test-today.md) for direct reading without compulsory review, cancelled/stale background work, two-story switching, opt-in save/paused restore, delete one/all and storage failures. Verify Start/raise confirmation cancellation, strength bounds/rounding, manual and automatic zero, lower/zero ceiling, Stop, hidden-tab return and no automatic resume. Inspect both themes at 390 × 844 and 1440 × 1000, 320 CSS px, landscape and 200% text. Record actual browser/build; an emulated mobile viewport is not a physical phone result. The evidence ledger owns pass/unverified status.
+**Gate S1-v2:** use [test-today.md](test-today.md) for direct reading without compulsory review, cancelled/stale background work, two-story switching, opt-in save/paused restore, delete one/all and storage failures. Verify Start confirmation cancellation, direct nonblocking maximum changes, strength bounds/rounding, manual and automatic zero, lower/zero ceiling, Stop, hidden-tab return and no automatic resume. Inspect both themes at 390 × 844 and 1440 × 1000, 320 CSS px, landscape and 200% text. Record actual browser/build; an emulated mobile viewport is not a physical phone result. The evidence ledger owns pass/unverified status.
+
+## Reader refinement — 2 November 2026
+
+The requested implementation adds a directly typable blank page, natural story/import copy, right-sidebar upload and deliberate AO3 link import, local folders, a separate global gear menu, favicon, an actual-output simulator graphic and a guided practice journey. The baseline model remains the current local scorer; the stronger custom/multi-toy/dual-area tier is shown as unavailable future development. No new inference model, hardware integration, billing or account cloud sync is implied by the selector.
+
+Folder names/catalogue persist only through explicit folder actions; moving an unsaved story does not save its text. Saved folder membership shares the existing revision-checked local store and Web Lock. Delete folder moves its stories to Unfiled. Portable backups deliberately restore to Unfiled, with fresh session-only identities and no playback arming.
+
+AO3 public work/chapter URLs use a bounded, authenticated hosted import service; local AO3 HTML is extracted inertly in the browser. Literotica and other platforms use open-source-page/copy/upload fallback rather than unqualified automatic scraping. Blocked/restricted sites must stay blocked. URL import is explicit, transient and separate from browser-local drafts or saved text.
+
+**Acceptance work:** test direct typing/paste, supported-link success/error/cancellation, inert HTML upload, folder creation/rename/delete and paused reload, gear-menu discoverability, both themes, strength interaction and popup-free maximum changes. The guided simulator journey must explicitly connect, open neutral practice, expose actual changing output while reading, track the practice actions honestly, and stay paused on exit/skip/story change. Reduced motion must retain clear feedback without vibration movement. Add actual browser/build results to the evidence ledger after execution; this scope description is not a release pass.
+
+**Backlog requested for later testing:** durable account login/recovery, per-account cloud story storage/sync, invitation roles, custom-model inference and paid entitlements. Implement account isolation, retention/deletion and migration before relying on account storage. Implement/evaluate the stronger model before advertising multi-toy or dual-area control as available. The current founder-only Access gate remains in place.
 
 ## F3 — deterministic device scenarios and transport contract
 
@@ -62,7 +74,7 @@ Preserve deliberate corrections during future reanalysis or obtain an explicit c
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
 
-Real-phone browser usability can be checked without a Lovense device using the private hosted simulator. The Python vendor/device-check server remains local. Signed-in hosted acceptance, representative-reader usability and physical-device qualification remain separate evidence.
+Real-phone browser usability and the guided setup/practice flow can be checked without a Lovense device using the private hosted simulator. The Python vendor/device-check server remains local. Signed-in hosted acceptance, representative-reader usability and physical-device qualification remain separate evidence.
 
 ## H — later physical qualification and controlled release
 
@@ -78,12 +90,20 @@ Defer generated stories, subscriptions/checkout, token wallets, native apps, pub
 
 ## Evidence ledger
 
+2 November 2026, editor/import/folder/setup refinement:
+
+- Common checks pass: 22 Python and 205 JavaScript tests, including actual app bindings, folder consent and deletion/autosave revision handling, direct maximum gestures, pending link cancellation, real Worker HTMLRewriter extraction and setup/visual factories. Worker packaging and deployment dry run pass; these do not establish a remote deployment.
+- Managed-browser checks inspected Midnight Ink, the global gear menu, connect → practice flow, live preview placement, strength/maximum controls and a 320 px frame without horizontal overflow; Stop remains reachable. The HTTP preview has no Web Locks, so actual playback and persistent-save journeys are reserved for localhost CI/live HTTPS checks. [Neutral paused-workspace evidence](images/reader-midnight-setup-20261102.jpg).
+- The expanded browser CI, automatic deployment and live AO3 upstream availability are reported with the release result. No physical-device, cloud-account, paid-model or algorithm-quality qualification is inferred.
+
 1 November 2026, workspace/control and F3/F4 software iteration:
 
 - Local common checks passed: 22 Python and 160 JavaScript tests, plus syntax/configuration and Worker bundle/dry-run checks. This includes actual app-binding tests, 14 asynchronous controller tests, three lab UI-binding tests and 20 feedback tests including real local SQLite Durable Object execution. No credentials or physical device were used.
 - Normal Stop → Start worked in baseline reproduction. A concrete synchronous-access-request failure could leave the guard's completed failed promise cached; the retry path is fixed and tested. Readiness text now names connection, analysis, access, lock or error recovery requirements beside Start. Repeated start/stop, pending confirmation/lock/auth cancellation and periodic access loss have regression coverage.
 - Logged-out live checks reached Cloudflare Access on the app root, `/static/app.mjs` and `/api/access`. This establishes the visible boundary, not a readback of dashboard settings or signed-in end-to-end acceptance. Git deployment and final browser CI results are reported with the release commit.
 - Managed-browser checks use neutral text and an HTTP preview; Web Locks are unavailable there. CI's localhost browser suite checks actual simulator dispatch and browser saving. A real-phone/hardware run remains outstanding.
+- Release `376d3049c028` passed GitHub browser CI (run `41360836488`) and Cloudflare's Worker build. Subsequent authenticated live checks passed three Start → Stop → Start cycles, reconnect, nonzero manual output, Help build identification, and the real feedback service's empty-history GET. No production feedback was submitted or deleted and no real device was connected.
+- That live check found a separate short-story issue: Start could infer the second section from the viewport anchor at the document top without a scroll. The follow-up preserves the first selection at the true document top, including visual-viewport offset handling. Both new actual-app regressions fail on the old code and pass after the fix; common checks now pass 22 Python and 162 JavaScript tests. An isolated real-browser Start → Stop → Start regression is included for CI; its final result is recorded with the follow-up release rather than inferred from the local suite.
 
 
 1 November 2026, private reader preparation:

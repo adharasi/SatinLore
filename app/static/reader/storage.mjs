@@ -1,5 +1,6 @@
 import {splitText} from "./import.mjs";
 import {MAX_PARAGRAPHS, ANALYSIS_VERSION} from "./model.mjs";
+import {validateFolderCatalog, isFolderId, FolderStorageError} from "./folders.mjs";
 
 export const LIBRARY_KEY = "satinlore.library.v1";
 export const LIBRARY_LOCK = "satinlore-local-library";
@@ -26,7 +27,9 @@ export function validateStoryRecord(value, {stored = true} = {}) {
       typeof value.analysisVersion !== "string" || !value.analysisVersion.length || value.analysisVersion.length > 40) throw invalid();
   if (stored && (!Number.isSafeInteger(value.revision) || value.revision < 1 ||
       !Number.isSafeInteger(value.updatedAt) || value.updatedAt < 0)) throw invalid();
+  if (value.folderId !== undefined && value.folderId !== null && !isFolderId(value.folderId)) throw invalid();
   return {id: value.id, title: value.title.trim(), text: value.text,
+    ...(value.folderId ? {folderId: value.folderId} : {}),
     corrections: [...value.corrections], position: value.position,
     analysisVersion: value.analysisVersion,
     ...(stored ? {updatedAt: value.updatedAt, revision: value.revision} : {})};
@@ -59,37 +62,40 @@ export class StoryStore {
     let raw;
     try { raw = storage.getItem(LIBRARY_KEY); }
     catch { throw new StoryStorageError("unavailable", "Browser storage could not be read. Your story remains available for this visit."); }
-    if (raw === null) return {stories: [], errors: []};
+    if (raw === null) return {stories: [], errors: [], folders: []};
     if (typeof raw !== "string" || raw.length > MAX_LIBRARY_BYTES || encoder.encode(raw).length > MAX_LIBRARY_BYTES) throw invalid();
     let envelope;
     try { envelope = JSON.parse(raw); } catch { throw invalid(); }
     if (!envelope || envelope.schemaVersion !== 1 || !Array.isArray(envelope.stories) || envelope.stories.length > MAX_SAVED_STORIES) throw invalid();
+    let folders;
+    try { folders = validateFolderCatalog(envelope.folders); } catch { throw invalid(); }
+    const folderIds = new Set(folders.map(folder => folder.id));
     const stories = [], errors = [], seen = new Set();
     for (const value of envelope.stories) {
       try {
         const record = validateStoryRecord(value);
-        if (seen.has(record.id)) throw invalid();
+        if (seen.has(record.id) || record.folderId && !folderIds.has(record.folderId)) throw invalid();
         seen.add(record.id); stories.push(record);
       } catch { errors.push(invalid().message); }
     }
-    return {stories, errors};
+    return {stories, errors, folders};
   }
 
   async loadAll() {
-    try { return {...this._read(), unavailable: false}; }
+    try { const {stories, errors} = this._read(); return {stories, errors, unavailable: false}; }
     catch (error) { return {stories: [], errors: [error.message], unavailable: error.code !== "corrupt"}; }
   }
 
   async _mutate(task) {
     try { return await this.withLock(task); }
     catch (error) {
-      if (error instanceof StoryStorageError) throw error;
+      if (error instanceof StoryStorageError || error instanceof FolderStorageError) throw error;
       throw new StoryStorageError("unavailable", "The browser could not update saved stories. Nothing is confirmed saved or deleted.");
     }
   }
 
-  _write(stories) {
-    const raw = JSON.stringify({schemaVersion: 1, stories});
+  _write(stories, folders = []) {
+    const raw = JSON.stringify({schemaVersion: 1, stories, ...(folders.length ? {folders} : {})});
     if (encoder.encode(raw).length > MAX_LIBRARY_BYTES) {
       throw new StoryStorageError("limit", "This local library has reached its 2 MB limit. Delete an older saved story or keep this story session only.");
     }
@@ -105,8 +111,11 @@ export class StoryStore {
     // Copy/validate at invocation: queued persistence must not capture later mutation.
     const record = validateStoryRecord({...value, analysisVersion: value.analysisVersion ?? ANALYSIS_VERSION}, {stored: false});
     return this._mutate(() => {
-      const {stories, errors} = this._read();
+      const {stories, errors, folders} = this._read();
       if (errors.length) throw invalid();
+      if (record.folderId && !folders.some(folder => folder.id === record.folderId)) {
+        throw new StoryStorageError("conflict", "This folder was deleted in another tab. Reload before saving the story in it.");
+      }
       const index = stories.findIndex(story => story.id === record.id);
       const existing = stories[index];
       if (existing ? expectedRevision !== existing.revision : expectedRevision !== null) {
@@ -118,7 +127,7 @@ export class StoryStore {
       const next = {...record, updatedAt: this.now(), revision: (existing?.revision ?? 0) + 1};
       validateStoryRecord(next);
       if (existing) stories[index] = next; else stories.push(next);
-      this._write(stories);
+      this._write(stories, folders);
       return next;
     });
   }
@@ -126,14 +135,14 @@ export class StoryStore {
   async deleteStory(id, {expectedRevision = null} = {}) {
     if (!isId(id)) throw invalid();
     return this._mutate(() => {
-      const {stories, errors} = this._read();
+      const {stories, errors, folders} = this._read();
       if (errors.length) throw invalid();
       const existing = stories.find(story => story.id === id);
       if (expectedRevision !== null && existing && existing.revision !== expectedRevision) {
         throw new StoryStorageError("conflict", "This story changed in another tab. Reopen it before deleting it.");
       }
       if (!existing) return {deleted: false};
-      this._write(stories.filter(story => story.id !== id));
+      this._write(stories.filter(story => story.id !== id), folders);
       return {deleted: true};
     });
   }

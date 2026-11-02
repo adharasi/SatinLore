@@ -12,6 +12,10 @@ import {HostedAccessGuard} from "../../app/static/access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "../../app/static/reader/library-view.mjs";
 import {BackupImporter, serializeBackup} from "../../app/static/reader/backup.mjs";
 import {ReaderPreferences} from "../../app/static/reader/preferences.mjs";
+import {StoryStore} from "../../app/static/reader/storage.mjs";
+import {FolderStore, selectFolderStories} from "../../app/static/reader/folders.mjs";
+import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "../../app/static/reader/web-import.mjs";
+import {PRACTICE_STORY} from "../../app/static/reader/setup-flow.mjs";
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
@@ -116,11 +120,9 @@ export function workspace({hosted = false, locks = true} = {}) {
   class TestGuard extends HostedAccessGuard {
     constructor(options) { super({...options, now, setTimer, clearTimer, request: opts => { accessCalls++; return accessRequest(opts); }}); }
   }
-  class MemoryStore {
-    async loadAll() { return {stories: [], errors: [], unavailable: false}; }
-    async saveStory(record) { return {...record, revision: 1}; }
-    async deleteStory() {}
-    async deleteAll() {}
+  const libraryValues = new Map();
+  class MemoryStore extends StoryStore {
+    constructor() { super({storage: {getItem: key => libraryValues.get(key) ?? null, setItem: (key,value) => libraryValues.set(key,value), removeItem: key => libraryValues.delete(key)}, withLock: task => task(), now}); }
   }
   class TestPreferences extends ReaderPreferences {
     constructor() { super({storage: {getItem: key => preferenceValues.get(key) ?? null, setItem: (key, value) => preferenceValues.set(key, value)}}); }
@@ -131,7 +133,9 @@ export function workspace({hosted = false, locks = true} = {}) {
     selectReadingParagraph, PlaybackController: TestController, HostedAccessGuard: TestGuard,
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
-    ReaderPreferences: TestPreferences,
+    ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
+    WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORY,
+    createSimulatorView: () => null, createSetupFlow: () => null,
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,
     innerHeight: 1000, scrollY: 0, console, confirm: () => true, prompt: () => null,
   });
@@ -147,7 +151,7 @@ export function workspace({hosted = false, locks = true} = {}) {
     time = target; await settle();
   }
   return {
-    nodes, document, errors, settle, advance, now, preferenceValues, downloads,
+    nodes, document, errors, settle, advance, now, preferenceValues, downloads, libraryValues,
     read: expression => vm.runInContext(expression, context),
     async add(source = "A tender kiss.\n\nA quiet second paragraph.") {
       await nodes.get("empty-new-story").click();

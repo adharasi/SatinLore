@@ -144,3 +144,38 @@ test("actual reading preference controls retain position, pause and store only p
   assert.equal(app.read("currentStory().saved"), false);
   assert.deepEqual(app.errors, []);
 });
+
+test("folder membership is retained only after saving and folder deletion permits the next autosave", async t => {
+  const app = workspace(); t.after(() => app.destroy()); await app.settle(); await app.add();
+  await app.read('changeFolder("create", "Evening reads")');
+  const folder = app.read('folders[0].id');
+  app.nodes.get("story-folder").value = folder;
+  await app.nodes.get("story-folder").dispatch("change");
+  assert.equal(app.read("currentStory().folderId"), folder);
+  assert.doesNotMatch([...app.libraryValues.values()].join(""), /Synthetic story|tender kiss/);
+  await app.click("save-story"); await app.click("confirm-save"); await app.settle();
+  assert.equal(app.read("currentStory().saved"), true);
+  assert.equal(app.read("store._read().stories[0].folderId"), folder);
+  await app.read('changeFolder("delete")');
+  assert.equal(app.read("currentStory().folderId"), null);
+  assert.equal(app.read("store._read().stories[0].folderId"), undefined);
+  app.nodes.get("level").value = "2"; await app.nodes.get("level").dispatch("input");
+  await app.advance(400);
+  assert.equal(app.read("currentStory().saveError"), "");
+  assert.equal(app.read("store._read().stories[0].corrections[0]"), 2);
+});
+
+test("Stop invalidates a delayed link import and preserves the current story", async t => {
+  const app = workspace(); t.after(() => app.destroy()); await app.settle(); await app.add();
+  const id = app.read("activeId");
+  app.read('webImporter.read = () => new Promise(resolve => { globalThis.finishSyntheticLink = resolve; })');
+  app.nodes.get("story-url").value = "https://archiveofourown.org/works/12345";
+  await app.click("import-url");
+  assert.equal(app.read("importing"), true);
+  await app.click("stop");
+  app.read('finishSyntheticLink({title:"Late story",text:"The train was late.",scope:"entire work"})');
+  await app.settle();
+  assert.equal(app.read("activeId"), id);
+  assert.equal(app.read("stories.length"), 1);
+  assert.equal(app.read("importing"), false);
+});

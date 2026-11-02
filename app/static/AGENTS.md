@@ -7,9 +7,9 @@ These supplement the repository-root `AGENTS.md` for this directory.
 - Follow `docs/frontend-design.md`: shared semantic themes, pre-paint theme resolution, native colour-scheme and continuous document scrolling. Preserve the selected paragraph and pause on appearance/reflow changes.
 - Open added/reopened text directly into the continuous reader. Analysis runs locally in the background; Start needs a valid mapping, but review is optional. Optional review defaults to current/already-read sections; future sections need deliberate reveal.
 - Story switching, deletion, hide and interruption cancel pending Start and stale work. Restoration is always paused, with strength reset. Preserve corrections during reanalysis and fail invalid/unanalysed sections to zero.
-- Start displays the chosen ceiling and requires confirmation. Lowering the ceiling applies immediately; a raise requires separate explicit confirmation. Keep Stop operable in every dialog/panel, without confirmation.
-- Render imported strings with `textContent`; do not use `innerHTML` for stories.
-- Never send story text, titles or excerpts to backend, vendor, analytics or error services.
+- Start displays the chosen ceiling and requires confirmation. In the ordinary synchronous reader simulator, direct maximum-slider input updates the chosen ceiling without a popup, pausing, or automatic restart; lower/zero values apply immediately. This user-requested change supersedes the older separate-raise popup for this reader only. Preserve the async lab and hardware-check contracts. Keep Stop operable in every dialog/panel, without confirmation.
+- Render imported strings with `textContent`; do not use `innerHTML` for stories. Local HTML imports must extract text without executing scripts or loading remote resources.
+- Never upload local drafts, story text, titles or excerpts to backend, vendor, analytics or error services. A deliberate supported-URL import may send its source URL to the authenticated import service for bounded public-page fetching/extraction, with no credentials or server retention; explain that boundary and leave blocked/unsupported sites on a copy/download fallback.
 - Keep third-party scripts off the reader page. Load the vendor SDK only in the dedicated sandboxed bridge without `allow-same-origin`.
 - Transfer only connection/control messages through the bridge port. Check the parent source/origin on setup; validate message shapes, device IDs, expiry and bounds inside the bridge.
 - Never persist invitation, CSRF or vendor tokens in browser storage or URLs. Revalidate the application session and tear down control on expiry/logout.
@@ -21,3 +21,7 @@ These supplement the repository-root `AGENTS.md` for this directory.
 - The hardware-check command is two seconds at most 5/20, explicitly targeted. Keep physical expiry separate from the UI timer; the simulator reading controller does not qualify continuous physical playback.
 - Mock expiry and UI state are not evidence that physical output stopped.
 - Add tests for meaningful controller failures and run the repository check command after changes.
+
+- Separate current-reader controls in the right sidebar from global gear-menu settings: appearance, account status, backup, about, help and support. Keep Midnight Ink available through System/Light/Dark.
+- Folder actions are explicit local-library metadata operations; moving an unsaved story must not silently save its text. Restore stays paused.
+- Simulator graphics must represent actual simulator output, including zero when paused/disconnected, and honour reduced motion. Guided setup/practice must not silently connect, start output or claim a real toy is configured.

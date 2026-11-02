@@ -338,6 +338,84 @@ test("Unconfirmed ceiling increases fail closed and stale confirmation cannot un
   assert.equal(device.commands.length, 2);
 });
 
+test("Direct simulator maximum changes keep reading active and coalesce on the existing finite cadence", () => {
+  const {controller, clock, device} = setup();
+  controller.connect(); controller.setStory([20]); controller.start();
+  clock.advance(100);
+  controller.setCeilingFromControl(8);
+  assert.equal(controller.snapshot().running, true, "An explicit range gesture does not pause for a second confirmation.");
+  assert.equal(controller.snapshot().ceiling, 8);
+  assert.equal(controller.snapshot().target, 8);
+  assert.equal(controller.snapshot().output, 5, "A raise does not dispatch faster than the normal cadence.");
+  clock.advance(100); controller.setCeilingFromControl(12);
+  clock.advance(100); controller.setCeilingFromControl(6);
+  assert.equal(device.commands.length, 1);
+  clock.advance(699);
+  assert.equal(device.commands.length, 1);
+  clock.advance(1);
+  assert.deepEqual(device.commands.at(-1), {strength: 6, seconds: 2, at: 1000});
+  assert.equal(device.commands.length, 2, "Intermediate slider values never become a queued command backlog.");
+  controller.setCeilingFromControl(2);
+  assert.equal(controller.snapshot().running, true);
+  assert.equal(device.snapshot().strength, 0, "A reduction stops the stronger output immediately.");
+  clock.advance(1000);
+  assert.deepEqual(device.commands.at(-1), {strength: 2, seconds: 2, at: 2000});
+});
+
+test("Direct maximum changes never connect or restart a paused, hidden or disconnected simulator", () => {
+  const {controller, clock, device} = setup();
+  controller.setStory([20]); controller.setCeilingFromControl(9);
+  assert.equal(controller.snapshot().connected, false);
+  assert.equal(controller.snapshot().running, false);
+  controller.connect(); controller.start(); controller.pause();
+  controller.setCeilingFromControl(15);
+  clock.advance(5000);
+  assert.equal(controller.snapshot().running, false);
+  assert.equal(device.snapshot().strength, 0);
+  assert.equal(device.commands.length, 1);
+  controller.setVisible(false); controller.setCeilingFromControl(20);
+  assert.equal(controller.start(), false);
+  controller.setVisible(true);
+  assert.equal(controller.snapshot().running, false);
+  controller.disconnect(); controller.setCeilingFromControl(10);
+  assert.equal(controller.snapshot().connected, false);
+  assert.equal(device.commands.length, 1);
+});
+
+test("A directly controlled zero maximum is immediate and cannot bypass a zero section or zero strength", () => {
+  const {controller, clock, device} = setup();
+  controller.connect(); controller.setStory([20, 0]); controller.start();
+  controller.setCeilingFromControl(0);
+  assert.equal(device.snapshot().strength, 0);
+  clock.advance(2000);
+  assert.equal(device.commands.length, 1);
+  controller.setCeilingFromControl(20);
+  controller.setPosition(1); controller.setStrength(2);
+  clock.advance(1000);
+  assert.equal(controller.snapshot().target, 0);
+  assert.equal(device.commands.length, 1, "Raising the maximum never turns a zero section into output.");
+  controller.setPosition(0); controller.setStrength(0);
+  clock.advance(1000);
+  assert.equal(controller.snapshot().target, 0);
+  assert.equal(device.commands.length, 1);
+});
+
+test("Invalid direct maximum changes pause without changing accepted limits", () => {
+  const {controller, clock, device} = setup();
+  controller.connect(); controller.setStory([20]);
+  for (const value of [-1, 21, 1.5, NaN, Infinity, "8", null]) {
+    controller.start();
+    assert.throws(() => controller.setCeilingFromControl(value), RangeError);
+    assert.equal(controller.snapshot().ceiling, 5);
+    assert.equal(controller.snapshot().running, false);
+    assert.equal(device.snapshot().strength, 0);
+    clock.advance(1000);
+  }
+  controller.setCeilingFromControl(8);
+  assert.equal(controller.confirmCeiling(12, 5), false, "An older confirmation cannot undo a newer direct choice.");
+  assert.equal(controller.snapshot().ceiling, 8);
+});
+
 test("Invalid strength and ceiling confirmations stop output without changing accepted limits", () => {
   const {controller, device} = setup();
   controller.connect(); controller.setStory([3]);

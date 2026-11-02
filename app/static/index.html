@@ -4,87 +4,140 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <title>SatinLore · your reading space</title>
+  <title>SatinLore · Read a little closer</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <script src="/static/appearance.js"></script>
   <link rel="stylesheet" href="/static/theme.css">
   <link rel="stylesheet" href="/static/reader.css">
+  <link rel="stylesheet" href="/static/setup.css">
   <script type="module" src="/static/app.mjs"></script>
 </head>
 <body data-library-open="true" data-settings-open="false" data-focus="false" data-reading-width="wide">
   <a class="skip-link" href="#main-content">Skip to your story</a>
   <header id="workspace-header" class="workspace-header">
-    <div class="header-library"><button id="toggle-library" class="icon-label" aria-controls="library-panel" aria-expanded="true" title="Open or close the library"><span aria-hidden="true">☷</span><span>Library</span></button><span class="wordmark">SatinLore<span class="wordmark-dot">.</span></span></div>
-    <div class="header-story"><span id="header-story-title">No story open</span><div id="story-tabs" class="story-tabs" role="tablist" aria-label="Open stories"></div></div>
-    <div class="header-actions"><button id="focus-mode" class="quiet-control" aria-pressed="false" title="Hide side panels and keep reading controls">Focus</button><button id="toggle-settings" class="quiet-control" aria-label="Settings" aria-controls="settings-panel" aria-expanded="false"><span aria-hidden="true">⚙</span><span class="settings-button-label">Settings</span></button></div>
+    <div class="header-library">
+      <button id="toggle-library" class="quiet-control header-icon" aria-label="Library" aria-controls="library-panel" aria-expanded="true" title="Open or close the library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h5v16H4zM12 4h3v16h-3zM18 5l3 14"/></svg></button>
+      <span class="wordmark">SatinLore<span class="wordmark-dot">.</span></span>
+    </div>
+    <div class="header-story"><span id="header-story-title">A little space for your next story</span><div id="story-tabs" class="story-tabs" role="tablist" aria-label="Open stories"></div></div>
+    <div class="header-actions">
+      <button id="focus-mode" class="quiet-control" aria-pressed="false" title="Hide side panels and keep reading controls">Focus</button>
+      <button id="toggle-settings" class="quiet-control header-icon" aria-label="Reading controls" aria-controls="settings-panel" aria-expanded="false" title="Reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3M9 4v6m4 4v6"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg></button>
+      <button id="open-app-settings" class="quiet-control header-icon" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings-dialog" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.3 3-.6 2.4-2 .9-2.1-.7-2 3.4 1.7 1.7v2.6L2.6 15l2 3.4 2.1-.7 2 .9.6 2.4h4.1l.6-2.4 2-.9 2.1.7 2-3.4-1.7-1.7v-2.6l1.7-1.7-2-3.4-2.1.7-2-.9-.6-2.4z"/><circle cx="11.4" cy="12" r="3"/></svg></button>
+    </div>
   </header>
+
   <aside id="library-panel" class="workspace-panel library-panel" aria-label="Your story library">
-    <div class="panel-heading"><div><p class="eyebrow">ON THIS BROWSER</p><h2>Story library</h2></div><button id="close-library" class="icon-button" aria-label="Close story library">×</button></div>
+    <div class="panel-heading"><h2>Library</h2><button id="close-library" class="icon-button" aria-label="Close story library">×</button></div>
     <button id="new-story" class="primary new-story-button"><span aria-hidden="true">+</span> New story</button>
-    <div class="library-filter"><label class="visually-hidden" for="library-search">Search story titles</label><input id="library-search" type="search" placeholder="Search titles" autocomplete="off" maxlength="120" aria-describedby="library-search-help"><span id="library-search-help" class="visually-hidden">Search only titles in this browser library.</span><div class="library-sort-row"><label for="library-sort">Sort</label><select id="library-sort"><option value="updated">Recently read</option><option value="title">Title A–Z</option><option value="progress">Reading progress</option></select></div></div>
+    <div class="library-filter">
+      <label class="visually-hidden" for="library-search">Search story titles</label><input id="library-search" type="search" placeholder="Search your stories" autocomplete="off" maxlength="120" aria-describedby="library-search-help"><span id="library-search-help" class="visually-hidden">Search only titles in this browser library.</span>
+      <div class="folder-heading"><label for="folder-filter">Folders</label><button id="create-folder" class="icon-button" aria-label="New folder" title="New folder">+</button></div>
+      <select id="folder-filter" aria-label="Show folder"><option value="all">All stories</option><option value="unfiled">Unfiled</option></select>
+      <details class="folder-tools"><summary>Manage folder</summary><div class="folder-tool-actions"><button id="rename-folder" disabled>Rename</button><button id="delete-folder" disabled>Remove folder</button></div></details>
+      <p id="folder-status" class="note" role="status" aria-live="polite"></p>
+      <div class="library-sort-row"><label for="library-sort">Sort</label><select id="library-sort"><option value="updated">Recently read</option><option value="title">Title A–Z</option><option value="progress">Reading progress</option></select></div>
+    </div>
     <p id="library-status" class="note" role="status" aria-live="polite">Your stories will appear here.</p><p id="library-results" class="note" role="status" aria-live="polite"></p>
     <div id="story-list" class="story-list" aria-label="Stories"></div>
-    <div class="library-footer"><details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds session-only copies without replacing your stories.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details><button id="delete-all" class="quiet-button" disabled>Delete all stories</button><details class="about-preview"><summary>About this workspace</summary><p class="note">Reading controls use a simulator, not a physical toy. Your text stays on this page unless you save it on this browser.</p><p class="note">There is no cloud sync. A backup download is a separate file you keep.</p><a href="/device-check" target="_blank" rel="noopener">Device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details><nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Support <span aria-hidden="true">↗</span></a></nav></div>
+    <p class="library-private-note"><span class="private-dot" aria-hidden="true"></span> Your library, on this browser.</p>
   </aside>
+
   <main id="main-content" class="reading-canvas" tabindex="-1">
     <section id="empty-workspace" class="empty-workspace" aria-labelledby="empty-heading">
-      <p class="eyebrow">YOUR READING WORKSPACE</p><h1 id="empty-heading">Open a story to begin.</h1><p class="empty-copy">Paste your text or upload a TXT file. Your story opens here, with suggestions prepared while you read.</p><button id="empty-new-story" class="primary">Paste or upload a story <span aria-hidden="true">→</span></button><p class="empty-simulator-note">Read on your own, or connect the simulator to try the controls.</p><p class="note empty-storage-note">Session only until you choose to save on this browser.</p>
+      <div class="draft-heading"><span class="draft-mark" aria-hidden="true">S.</span><p id="empty-heading">Your next story</p></div>
+      <label class="visually-hidden" for="draft-title">Story title</label><input id="draft-title" class="draft-title" type="text" maxlength="120" placeholder="Untitled story" autocomplete="off">
+      <label class="visually-hidden" for="draft-story">Write or paste your story</label><textarea id="draft-story" class="draft-story" maxlength="500000" rows="10" placeholder="Write or paste your story here…" aria-describedby="draft-help"></textarea>
+      <div class="draft-actions"><button id="open-draft" class="primary">Read story <span aria-hidden="true">→</span></button><button id="empty-link-import" class="quiet-control">Import from a link</button><button id="empty-new-story" class="quiet-control">Upload a story</button></div>
+      <p id="draft-help" class="note draft-help">AO3, Literotica, or a story of your own. Your text stays private.</p>
+      <p id="draft-status" class="note" role="status" aria-live="polite"></p>
+      <button id="empty-setup" class="quiet-control empty-setup-button">First time? Try a test read <span aria-hidden="true">→</span></button>
     </section>
     <section id="reading-workspace" class="reading-workspace" role="tabpanel" aria-labelledby="story-title" hidden>
-      <div class="story-heading"><p class="eyebrow story-kicker">READING</p><h1 id="story-title" tabindex="-1">Your story</h1><div class="story-meta"><span id="save-status" role="status" aria-live="polite">Session only</span><span class="meta-divider" aria-hidden="true">·</span><span id="analysis-status" role="status" aria-live="polite">Preparing suggestions</span></div></div>
-
-      <p id="reader-help" class="visually-hidden">One continuous story. Scroll at your own pace or use Previous and Next section. Optional settings and review are available without starting playback.</p>
+      <div class="story-heading"><h1 id="story-title" tabindex="-1">Your story</h1><div class="story-meta"><span id="save-status" role="status" aria-live="polite">Session only</span><span class="meta-divider" aria-hidden="true">·</span><span id="analysis-status" role="status" aria-live="polite">Preparing suggestions</span></div></div>
+      <p id="reader-help" class="visually-hidden">Scroll to read, or use Previous and Next section. Reading controls and optional corrections are on the right.</p>
       <div id="reader" class="reader-size-normal" data-spacing="normal" role="region" aria-label="Story reader" aria-describedby="reader-help" tabindex="0"><div id="paragraph"></div></div>
-      <p class="end-note">End of this story.</p>
+      <p class="end-note">The end.</p>
     </section>
     <p id="access-status" class="session-message" role="status" aria-live="polite" hidden></p>
-    <p id="message" class="session-message" role="status" aria-live="polite">Read at your own pace. Connect the simulator when you want to try playback.</p>
+    <p id="message" class="session-message" role="status" aria-live="polite">Read on your own, or try the simulator.</p>
   </main>
 
   <aside id="settings-panel" class="workspace-panel settings-panel" aria-label="Reading settings" hidden>
-    <div class="panel-heading"><h2>Workspace settings</h2><button id="close-settings" class="icon-button" aria-label="Close reading settings">×</button></div>
+    <div class="panel-heading"><h2>Reading controls</h2><button id="close-settings" class="icon-button" aria-label="Close reading settings">×</button></div>
+    <section class="sidebar-section simulator-section" aria-labelledby="simulator-preview-heading">
+      <div class="section-title-row"><h3 id="simulator-preview-heading">Live preview</h3><span class="simulation-label">SIMULATED</span></div>
+      <div id="simulator-visual"></div>
+      <div id="setup-coach-mount"></div>
+      <button id="open-setup" class="setup-button">Set up &amp; try a test read <span aria-hidden="true">→</span></button>
+    </section>
+    <section class="sidebar-section story-import" aria-labelledby="import-link-heading">
+      <div class="section-title-row"><h3 id="import-link-heading">Import a story</h3><span class="sidebar-kicker">IMPORT</span></div>
+      <label class="visually-hidden" for="story-url">Story link</label><input id="story-url" type="url" maxlength="2048" placeholder="AO3 or another story link" autocomplete="off" spellcheck="false" aria-describedby="url-import-help">
+      <div class="import-button-row"><button id="import-url" class="primary">Import link</button><button id="upload-story-trigger">Upload a story</button></div>
+      <p id="url-import-help" class="note">Import public AO3 stories where available. For other sites, open the source and paste a permitted copy. Link imports fetch public text through SatinLore; files and pasted text stay on your device.</p><p id="url-source-help" class="note" hidden></p><a id="open-source-link" class="source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open story source ↗</a><button id="paste-source-trigger" class="quiet-control" hidden>Paste permitted text</button><p id="url-import-status" class="note" role="status" aria-live="polite"></p>
+    </section>
+    <section class="sidebar-section model-section" aria-labelledby="model-heading">
+      <div class="section-title-row"><h3 id="model-heading">Story model</h3><span class="model-badge">LOCAL</span></div>
+      <label class="visually-hidden" for="reading-model">Story model</label><select id="reading-model" aria-describedby="model-help"><option value="standard">SatinLore Standard · experimental</option><option value="custom" disabled>SatinLore Custom · coming later</option></select>
+      <p id="model-help" class="note">Standard runs on your device. Custom is a planned paid model for multi-toy and dual-action control; it is not available yet.</p>
+    </section>
     <div class="settings-tabs" role="tablist" aria-label="Settings sections"><button id="settings-reader-tab" role="tab" aria-selected="true" aria-controls="reader-settings" tabindex="0">Reader</button><button id="settings-story-tab" role="tab" aria-selected="false" aria-controls="story-settings" tabindex="-1">Story</button></div>
     <section id="reader-settings" role="tabpanel" aria-labelledby="settings-reader-tab" tabindex="0">
-    <div class="settings-section"><p class="settings-intro">Choose how the page feels. Your place in the story stays with you.</p>
-      <label for="reading-appearance">Appearance</label><select id="reading-appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
-      <p id="appearance-note" class="note" role="status" aria-live="polite"></p>
-      <label for="reading-width">Reading width</label><select id="reading-width"><option value="comfortable">Comfortable</option><option value="wide" selected>Wide</option><option value="full">Full</option></select>
-      <label for="font-size">Text size</label><select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select>
-      <label for="reading-spacing">Line spacing</label><select id="reading-spacing"><option value="compact">Compact</option><option value="normal" selected>Normal</option><option value="relaxed">Relaxed</option></select>
-      <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow my reading position</label>
-      <p id="reader-preferences-note" class="note" role="status" aria-live="polite"></p>
-    </div>
+      <div class="settings-section">
+        <label for="reading-width">Reading width</label><select id="reading-width"><option value="comfortable">Comfortable</option><option value="wide" selected>Wide</option><option value="full">Full</option></select>
+        <label for="font-size">Text size</label><select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select>
+        <label for="reading-spacing">Line spacing</label><select id="reading-spacing"><option value="compact">Compact</option><option value="normal" selected>Normal</option><option value="relaxed">Relaxed</option></select>
+        <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow my reading position</label>
+        <p id="reader-preferences-note" class="note" role="status" aria-live="polite"></p>
+      </div>
     </section>
     <section id="story-settings" role="tabpanel" aria-labelledby="settings-story-tab" tabindex="0" hidden>
       <dl class="story-statistics"><div><dt>Words</dt><dd id="story-word-count">—</dd></div><div><dt>Progress</dt><dd id="story-progress">—</dd></div></dl>
-      <div id="story-actions" class="story-actions" hidden><p class="small-label">CURRENT STORY</p><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Rename</button><button id="delete-story" class="quiet-control">Delete story</button></div></div>
-    <details id="review-settings" class="review-settings">
-      <summary>Review intensities <span class="optional-tag">Optional</span></summary>
-      <div class="review-content"><p class="note">Suggestions can miss the mood. Change any section to suit you, or keep reading as it is.</p>
-        <div class="paragraph-controls"><p id="correction-position" class="small-label">Current section</p><p>Suggested <output id="suggested-level">0 / 20</output></p><p id="level-source" class="note">No section selected.</p><label for="level">Your correction <span class="numeric"><output id="levelValue">0</output> / 20</span></label><input id="level" type="range" min="0" max="20" value="0" disabled><button id="reset-level" disabled>Use suggestion</button><p class="note">After strength and ceiling <output id="effective-level">0 / 20</output></p></div>
-        <div id="review-list" class="review-list" aria-label="Read sections and corrections"></div>
-        <button id="show-upcoming" class="quiet-button" disabled>Show upcoming sections</button><p class="note">Future passages stay out of review until you choose to reveal them.</p><button id="reanalyze" disabled>Analyse again</button><p class="note">Your corrections are kept when you analyse again.</p>
-      </div>
-    </details>    </section>
+      <div id="story-actions" class="story-actions" hidden><label for="story-folder">Folder</label><select id="story-folder"><option value="">Unfiled</option></select><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Rename</button><button id="delete-story" class="quiet-control">Delete story</button></div></div>
+      <details id="review-settings" class="review-settings">
+        <summary>Adjust story sections <span class="optional-tag">Optional</span></summary>
+        <div class="review-content"><p class="note">Keep the suggestions, or change a section to suit you.</p>
+          <div class="paragraph-controls"><p id="correction-position" class="small-label">Current section</p><p>Suggested <output id="suggested-level">0 / 20</output></p><p id="level-source" class="note">No section selected.</p><label for="level">Your correction <span class="numeric"><output id="levelValue">0</output> / 20</span></label><input id="level" type="range" min="0" max="20" value="0" disabled><button id="reset-level" disabled>Use suggestion</button><p class="note">After strength and maximum <output id="effective-level">0 / 20</output></p></div>
+          <div id="review-list" class="review-list" aria-label="Read sections and corrections"></div>
+          <button id="show-upcoming" class="quiet-button" disabled>Show upcoming sections</button><p class="note">Future passages stay hidden until you choose to reveal them.</p><button id="reanalyze" disabled>Analyse again</button><p class="note">Your corrections are kept.</p>
+        </div>
+      </details>
+    </section>
   </aside>
+
   <aside id="transport" class="transport" aria-label="Simulator playback controls">
-    <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong>Simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line">Output <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Simulated intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Add a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
+    <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong>Simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line">Output <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Simulated intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
     <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
     <div class="strength-control"><span id="strength-label" class="control-caption">Strength</span><div class="strength-buttons" role="group" aria-labelledby="strength-label"><button id="strength-minus" class="icon-button" aria-label="Decrease session strength">−</button><output id="strength-value" aria-live="polite">1.0×</output><button id="strength-plus" class="icon-button" aria-label="Increase session strength">+</button><button id="strength-reset" class="reset-button">Reset</button></div></div>
-    <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Lower limits apply now. A higher limit requires confirmation.</span></div>
+    <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
     <div class="transport-navigation"><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div></div>
   </aside>
+
+  <dialog id="app-settings-dialog" class="app-settings-dialog" aria-labelledby="app-settings-heading">
+    <div class="dialog-heading"><div><p class="eyebrow">SATINLORE</p><h2 id="app-settings-heading">Settings</h2></div><button id="close-app-settings" class="icon-button" aria-label="Close settings">×</button></div>
+    <section class="app-settings-section"><h3>Appearance</h3><label for="reading-appearance">Colour theme</label><select id="reading-appearance"><option value="system">Use device setting</option><option value="light">Satin Editorial · light</option><option value="dark">Midnight Ink · dark</option></select><p id="appearance-note" class="note" role="status" aria-live="polite"></p></section>
+    <section class="app-settings-section"><h3>Account &amp; storage</h3><span class="account-badge">PRIVATE PREVIEW</span><p>You are using the private Cloudflare sign-in. Stories are stored on this browser only when you choose to save them.</p><p class="note">Personal accounts and a synced cloud library are planned. They are not available in this test build.</p></section>
+    <div class="library-footer">
+      <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit, in Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
+      <details class="about-preview"><summary>About SatinLore</summary><p class="note">This build uses a simulator. It does not control a physical toy.</p><a href="/device-check" target="_blank" rel="noopener">Device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
+      <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Support <span aria-hidden="true">↗</span></a></nav>
+      <button id="delete-all" class="quiet-button" disabled>Delete all stories</button>
+    </div>
+    <div class="dialog-actions"><button id="app-settings-stop" class="stop">Stop</button></div>
+  </dialog>
   <dialog id="new-story-dialog" class="story-dialog" aria-labelledby="new-story-heading">
-    <div class="dialog-heading"><div><p class="eyebrow">YOUR NEXT CHAPTER</p><h2 id="new-story-heading">Add your story.</h2></div><button id="cancel-import" class="icon-button" aria-label="Close new story">×</button></div>
-    <p class="note">Paste your text below or choose a TXT file. Your story opens straight into reading.</p>
+    <div class="dialog-heading"><div><h2 id="new-story-heading">Import a story</h2></div><button id="cancel-import" class="icon-button" aria-label="Close new story">×</button></div>
+    <p class="note">Choose a story file, or paste a copy below.</p>
     <label for="story-title-input">Story title</label><input id="story-title-input" type="text" maxlength="120" placeholder="Untitled story" autocomplete="off">
-    <label for="source">Paste your text</label><textarea id="source" rows="8" maxlength="500000" placeholder="Your story begins here…" aria-describedby="import-help"></textarea>
-    <p id="import-help" class="note">Up to 500 KB and 2,000 paragraphs. Leave a blank line between paragraphs.</p>
-    <div class="file-divider"><span>or upload a TXT file</span></div><label for="file" class="visually-hidden">Choose a TXT file</label><input id="file" type="file" accept=".txt,text/plain">
-    <p id="import-status" class="note" role="status" aria-live="polite"></p><p class="privacy-note">Session only to begin with. Nothing is saved until you choose “Save on this browser”.</p>
+    <label for="source">Story text</label><textarea id="source" rows="8" maxlength="500000" placeholder="Your story begins here…" aria-describedby="import-help"></textarea>
+    <p id="import-help" class="note">Up to 500 KB. A blank line starts a new paragraph.</p>
+    <div class="file-divider"><span>or choose a story file</span></div><label for="file" class="visually-hidden">Choose a story file</label><input id="file" type="file" accept=".txt,.html,.htm,text/plain,text/html">
+    <p id="import-status" class="note" role="status" aria-live="polite"></p><p class="privacy-note">Open for this visit. Save on this browser whenever you want to keep it.</p>
     <div class="dialog-actions"><button id="import-stop" class="stop">Stop</button><button id="load" class="primary">Open story <span aria-hidden="true">→</span></button></div>
   </dialog>
-  <dialog id="start-dialog" class="confirmation-dialog" aria-labelledby="start-heading"><p class="eyebrow">A MOMENT BEFORE YOU START</p><h2 id="start-heading">Ready to begin?</h2><p id="start-summary">Simulator · maximum 5/20 · session strength 1.0×</p><p class="note">The strength stays within your confirmed maximum. You can lower it or stop at any time.</p><div class="dialog-actions"><button id="start-stop" class="stop">Stop</button><button id="cancel-start">Keep reading</button><button id="confirm-start" class="primary">Start with maximum 5/20</button></div></dialog>
-  <dialog id="ceiling-dialog" class="confirmation-dialog" aria-labelledby="ceiling-heading"><p class="eyebrow">YOUR MAXIMUM, YOUR CHOICE</p><h2 id="ceiling-heading">Raise the maximum?</h2><p id="ceiling-summary">Confirm the new maximum before it can take effect.</p><p class="note">Session strength cannot go above this limit. Lowering the maximum never needs confirmation.</p><div class="dialog-actions"><button id="ceiling-stop" class="stop">Stop</button><button id="cancel-ceiling">Keep current maximum</button><button id="confirm-ceiling" class="primary">Confirm maximum</button></div></dialog>
-  <dialog id="save-dialog" class="confirmation-dialog" aria-labelledby="save-heading"><p class="eyebrow">KEEP IT CLOSE</p><h2 id="save-heading">Save on this browser?</h2><p>Your story, title, corrections and reading position will stay here after you close the page.</p><p class="note">Anyone using this browser profile may be able to see them. Clearing browser data can remove them. There is no cloud sync or account backup.</p><div class="dialog-actions"><button id="save-stop" class="stop">Stop</button><button id="cancel-save">Session only</button><button id="confirm-save" class="primary">Save on this browser</button></div></dialog>
+  <dialog id="start-dialog" class="confirmation-dialog" aria-labelledby="start-heading"><h2 id="start-heading">Ready to start?</h2><p id="start-summary">Simulator · maximum 5/20 · strength 1.0×</p><p class="note">You can adjust the controls or stop at any time.</p><div class="dialog-actions"><button id="start-stop" class="stop">Stop</button><button id="cancel-start">Keep reading</button><button id="confirm-start" class="primary">Start with maximum 5/20</button></div></dialog>
+  <dialog id="ceiling-dialog" class="confirmation-dialog" aria-labelledby="ceiling-heading"><h2 id="ceiling-heading">Raise the maximum?</h2><p id="ceiling-summary">Confirm the new maximum before it can take effect.</p><div class="dialog-actions"><button id="ceiling-stop" class="stop">Stop</button><button id="cancel-ceiling">Keep current maximum</button><button id="confirm-ceiling" class="primary">Confirm maximum</button></div></dialog>
+  <dialog id="save-dialog" class="confirmation-dialog" aria-labelledby="save-heading"><h2 id="save-heading">Save on this browser?</h2><p>Your story and reading position will be here when you return.</p><p class="note">Anyone using this browser profile may be able to see them. Clearing browser data can remove them. Cloud sync is not available yet.</p><div class="dialog-actions"><button id="save-stop" class="stop">Stop</button><button id="cancel-save">This visit only</button><button id="confirm-save" class="primary">Save on this browser</button></div></dialog>
 </body>
 </html>

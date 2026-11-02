@@ -35,13 +35,23 @@ Use the action/expected-result table in [test-today.md](test-today.md). Cover:
 - Import bounds (500,000 UTF-8 bytes; 2,000 paragraphs), empty/malformed input, literal HTML-looking strings and delayed-import cancellation.
 - Five-band local predictions, delayed analysis, distinct manual zero overrides, correction-preserving reanalysis and story/delete lifecycle. Record scoring quality separately from control failures. Never inspect future passages merely to begin reading.
 - Scroll settling and boundary hysteresis, rapid jumps, long paragraphs/gaps, manual navigation, font/window reflow and keyboard/mobile usability.
-- Start confirmation on every start/resume; separate confirmed ceiling raises; immediate lower/zero ceiling; bounded 0.0×–2.0× strength in 0.1× steps, floor rounding and unchanged stored corrections. Manual/automatic zero stays zero. Strength changes never Start or raise a ceiling.
+- Start confirmation on every start/resume; direct maximum-slider changes without a separate popup in the ordinary reader simulator; immediate lower/zero ceiling; bounded 0.0×–2.0× strength in 0.1× steps, floor rounding and unchanged stored corrections. Manual/automatic zero stays zero. Strength changes never Start or raise a ceiling.
 - Immediate Stop remains accessible in settings, review and confirmation dialogs. Reductions keep priority over the finite dispatch cadence and latest-value coalescing.
 - Stop while a selection is pending, hide/return, disconnect/reconnect, story switches/deletion, restoration, inactivity, delayed timers and adapter errors. None may automatically resume output.
 - Two visible same-origin windows in one browser profile: the second cannot take over active simulator playback. Ordinary hidden-tab interruption is a separate case.
-- No story text/titles in network requests, URLs or logs. Session-only content stays out of persistence. After explicit consent, allow only the documented versioned local story fields, with appearance separate. Use neutral fixtures and do not export sensitive request data.
+- No local story text/titles in network requests, URLs or logs; deliberate supported-URL import is the documented transient source-fetch exception, with no automatic local-text upload or retention. Session-only content stays out of persistence. After explicit consent, allow only the documented versioned local story fields, with appearance separate. Use neutral fixtures and do not export sensitive request data.
 
 Current continuous playback supports the synchronous simulator only. Passing these checks does not qualify a real asynchronous adapter or continuous physical output.
+
+## Editor, import, folder and setup acceptance
+
+- Blank-page typing/paste and separate upload/link actions are usable without a compulsory modal or intensity review. Current-reader controls live on the right; global appearance/account/backup/about/help/support live in the gear menu.
+- The hosted AO3 import endpoint is Access-protected and accepts exact-origin bounded JSON. Validate canonical allowed source hosts/paths, HTTPS, no credentials/ports, redirect restrictions, timeout/size limits, plain-text extraction and generic failures. Restricted/bot pages stay blocked; no local draft or saved story is attached. Literotica and unsupported sites must offer copy/upload fallback rather than fabricate automatic support.
+- Local AO3 HTML extraction is inert: scripts, event handlers, images, styles and remote resource loads do not execute. Import cancellation, malformed data and stale responses preserve the current library and cannot start output. Use neutral fixtures; do not log private source URLs or story bodies.
+- Folder operations share local-library locking/revisions. Test the 30-folder/60-character-name limits, normalised duplicates, denied/corrupt storage, stale revisions, saved membership round trips and session-only moves. Deleting a folder moves stories to Unfiled; Delete all clears the catalogue. Backups restore Unfiled with fresh session identities.
+- Guided setup requires explicit simulator selection/connect and a neutral practice story. Every Start uses the ordinary confirmation. Coach checks must reflect observed actions, not a fake completion; skip/close/finish stops and cancels pending work. There is no real-toy setup or saved account calibration in this milestone.
+- The simulator graphic/trace follows actual output, with zero on Pause/Stop/disconnect, bounded history and a reduced-motion alternative. It is a visualisation, not physical output measurement. Check strength/maximum/section changes while running and the no-popup maximum flow.
+- Dark/Midnight Ink applies to the editor, both sidebars, global settings and setup. Repeat keyboard/touch targets and Stop access at 320/390 CSS px, landscape and large text. Account sync, custom-model inference, paid entitlements and multi-toy/dual-area capabilities remain labelled future work.
 
 ## Authentication and bridge checks
 
@@ -85,7 +95,7 @@ Activation is eligible users completing the agreed core session divided by eligi
 
 ## Current software iteration evidence
 
-The expanded browser suite includes real UI Reader/Story tabs, repeated Start→Stop→Start, title search/sort/open tabs, JSON backup downloads and fresh session-only restores, rejected backups, and presentation preferences across reload. Existing ceilings/zero, interruptions, stale work, storage failures, literal text and responsive checks remain.
+The prior expanded browser suite includes real UI Reader/Story tabs, repeated Start→Stop→Start, title search/sort/open tabs, JSON backup downloads and fresh session-only restores, rejected backups, and presentation preferences across reload. The 2 November editor/import/folder/setup revision requires additional browser/build evidence recorded with its release; its design checklist is not itself a pass. Existing ceilings/zero, interruptions, stale work, storage failures, literal text and responsive checks remain.
 
 Separate deterministic suites exercise the async lab contract (including same-turn late-command/Stop ordering and native dialog cancellation during delayed authorisation), actual app-module bindings, and private feedback. Feedback tests include a real local SQLite Durable Object and client/page acknowledgement, retry, cancellation and deletion behavior. These are software evidence, not physical hardware evidence.
 
