@@ -275,3 +275,16 @@ test("global Settings opens separately, exposes Stop and closes on cancellation"
   assert.equal(app.read("latest.output"), 0);
   assert.equal(app.nodes.get("start").disabled, false);
 });
+
+
+test("global Stop keeps the test-read coach available for restart but cancels pending setup", async t => {
+  const app = await ready(t);
+  app.read('let setupCancelled = 0; let setupPhase = "reading"; setupFlow = {snapshot: () => ({active:true,phase:setupPhase}),cancel: () => {setupCancelled++;},update: () => {}}');
+  await start(app); await app.click("stop");
+  assert.equal(app.read("setupCancelled"), 0);
+  assert.equal(app.read("latest.output"), 0);
+  assert.equal(app.nodes.get("start").disabled, false);
+  app.read('setupPhase = "connect"');
+  await app.click("stop");
+  assert.equal(app.read("setupCancelled"), 1);
+});

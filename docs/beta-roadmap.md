@@ -92,7 +92,7 @@ Defer generated stories, subscriptions/checkout, token wallets, native apps, pub
 
 2 November 2026, editor/import/folder/setup refinement:
 
-- Common checks pass: 22 Python and 205 JavaScript tests, including actual app bindings, folder consent and deletion/autosave revision handling, direct maximum gestures, pending link cancellation, real Worker HTMLRewriter extraction and setup/visual factories. Worker packaging and deployment dry run pass; these do not establish a remote deployment.
+- Common checks pass: 22 Python and 206 JavaScript tests, including actual app bindings, folder consent and deletion/autosave revision handling, direct maximum gestures, pending link cancellation, real Worker HTMLRewriter extraction and setup/visual factories. Worker packaging and deployment dry run pass; these do not establish a remote deployment.
 - Managed-browser checks inspected Midnight Ink, the global gear menu, connect → practice flow, live preview placement, strength/maximum controls and a 320 px frame without horizontal overflow; Stop remains reachable. The HTTP preview has no Web Locks, so actual playback and persistent-save journeys are reserved for localhost CI/live HTTPS checks. [Neutral paused-workspace evidence](images/reader-midnight-setup-20261102.jpg).
 - The expanded browser CI, automatic deployment and live AO3 upstream availability are reported with the release result. No physical-device, cloud-account, paid-model or algorithm-quality qualification is inferred.
 

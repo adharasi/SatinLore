@@ -487,6 +487,7 @@ async function analyse(story, {force = false} = {}) {
 function selectStory(id, {focusReader = isNarrow()} = {}) {
   const story = stories.find(value => value.id === id);
   if (!story || story.deleting || libraryMutation) return;
+  if (setupFlow?.snapshot().phase === "reading") setupFlow.cancel();
   cancelImport();
   story.lastOpenedAt = Date.now();
   if (story.id === activeId) {
@@ -607,7 +608,8 @@ function closeDialogs() {
   startIntent = ceilingIntent = saveIntent = null;
 }
 function stopEverything() {
-  if (setupFlow?.snapshot().active) setupFlow.cancel();
+  const setup = setupFlow?.snapshot();
+  if (setup?.active && setup.phase !== "reading") setupFlow.cancel();
   cancelImport();
   pause("Stopped. Confirm Start to continue.");
   closeDialogs();
@@ -645,6 +647,7 @@ async function prepareText(read) {
 
 function openDraft() {
   if (libraryLoading || libraryMutation) return;
+  if (setupFlow?.snapshot().active) setupFlow.cancel();
   cancelImport(); closeDialogs(); pause("New story. Write or paste below.");
   currentStory()?.model.cancelAnalysis(); ++selectionEpoch; activeId = null;
   renderStory(); controller.setStory([]); display(); renderLibrary();
@@ -788,6 +791,7 @@ async function removeStory(story, {keepSession = false} = {}) {
 
 function openNewStory() {
   if (libraryMutation || libraryLoading) return;
+  if (setupFlow?.snapshot().active) setupFlow.cancel();
   cancelImport(); text("import-status", ""); openDialog("new-story-dialog"); $("story-title-input").focus();
 }
 function selectSettingsTab(name, {focus = false} = {}) {
@@ -846,9 +850,9 @@ $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings
 $("close-app-settings")?.addEventListener("click", () => closeDialog("app-settings-dialog"));
 for (const id of ["open-setup", "empty-setup"]) $(id)?.addEventListener("click", () => setupFlow?.open());
 $("folder-filter")?.addEventListener("change", event => { folderFilter = event.target.value; renderLibrary(); });
-$("create-folder")?.addEventListener("click", () => { const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
-$("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; const name = prompt("Folder name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
-$("delete-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (folder && confirm(`Remove the folder “${folder.name}”? Its stories will move to Unfiled.`)) void changeFolder("delete"); });
+$("create-folder")?.addEventListener("click", () => { pause("Choose a folder name."); const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
+$("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Rename this folder."); const name = prompt("Folder name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
+$("delete-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Choose whether to remove this folder."); if (confirm(`Remove the folder “${folder.name}”? Its stories will move to Unfiled.`)) void changeFolder("delete"); });
 $("story-folder")?.addEventListener("change", event => { const story = currentStory(); if (!story || libraryMutation || story.deleting) return; story.folderId = folders.some(folder => folder.id === event.target.value) ? event.target.value : null; markDirty(story); renderLibrary(); display(); });
 $("library-search")?.addEventListener("input", event => { libraryQuery = event.target.value; renderLibrary(); });
 $("library-sort")?.addEventListener("change", event => { librarySort = event.target.value; renderLibrary(); });
