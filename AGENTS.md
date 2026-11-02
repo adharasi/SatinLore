@@ -4,7 +4,7 @@
 
 - Read `README.md`, `docs/development-spec.md` and the relevant milestone in `docs/beta-roadmap.md`.
 - Inspect current code and applicable nested instructions. Implementation status requires code and evidence, not plans.
-- This local FastAPI/static-JavaScript build has a themed saved-story workspace with optional review and simulator playback and a separate authenticated device-check flow. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for frontend/application work. The private Cloudflare reader is deployed; the 2 November eight-model integration adds a configured Lovense route and simulator rehearsal. Live vendor/hardware qualification and wider beta release remain outstanding.
+- This local FastAPI/static-JavaScript build has a themed saved-story workspace with optional review and simulator playback and a separate authenticated device-check flow. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for frontend/application work. The private Cloudflare reader is deployed; the 2 November nine-model integration adds a configured Lovense route and simulator rehearsal. Live vendor/hardware qualification and wider beta release remain outstanding.
 - Complete the requested milestone without unrelated frameworks or placeholders.
 
 ## Setup and checks
@@ -20,7 +20,7 @@
 
 ## Product and architecture
 
-- Browser-first, users' own typed/pasted/uploaded stories and deliberately requested imports from supported story URLs. The product owner's 2 November request expands the connection scope to Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush. Preserve independent simulator and physical modes, explicit device/action selection and current capability checks. Qualify each actual model/firmware/Remote/browser combination separately; no simulated result qualifies hardware.
+- Browser-first, users' own typed/pasted/uploaded stories and deliberately requested imports from supported story URLs. The product owner's 2 November request expands the connection scope to Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3. Preserve independent simulator and physical modes, explicit device/action selection and current capability checks. Qualify each actual model/firmware/Remote/browser combination separately; no simulated result qualifies hardware.
 - Defer generation, payments, public publishing, marketplaces, native apps and additional brands.
 - Use FastAPI, browser ES modules and the existing SQLite invitation/session store. Expand persistence only when a requested feature needs it.
 - Follow the 2 November reader refinement over workspace v1.2: a collapsible story library, continuous reader, Wide default, optional settings/review and focus mode. Preserve Satin Editorial/Midnight Ink, System/Light/Dark and document scrolling. Do not reintroduce a compulsory review step.

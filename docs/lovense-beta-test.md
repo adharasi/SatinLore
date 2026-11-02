@@ -1,6 +1,6 @@
-# Lovense setup and eight-model beta rehearsal
+# Lovense setup and nine-model beta rehearsal
 
-Use this guide to rehearse without hardware on 2 November 2026, then record the first physical observations with the tester on 3 November. The eight profiles are **Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush**. A simulated pass is a software result; it does not qualify a physical toy, firmware, phone or browser.
+Use this guide to rehearse without hardware on 2 November 2026, then record the first physical observations with the tester on 3 November. The nine profiles are **Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3**. A simulated pass is a software result; it does not qualify a physical toy, firmware, phone or browser.
 
 ## What the integration does
 
@@ -34,7 +34,7 @@ Keep physical devices disconnected. No Lovense credentials or vendor script is n
 6. Move through the practice sections with scrolling and Previous/Next. Try strength minus/plus, a lower maximum and a zero maximum. Zero must remain zero. Pause/Stop and changes made while paused must never restart output.
 7. Stop, then explicitly Start again. Hide and return to the tab, disconnect and reconnect, switch stories and close/reopen setup. Each return must be paused and require a fresh Start.
 8. Under **Rehearsal tools**, use **Simulate disconnect**, **Simulate connection error** and **Reconnect**. A lost connection or command error must stop dispatch, show an accurate error/disconnected state and require explicit reconnection; reconnecting alone must not restart output. Use the separate `/simulator-lab` for delayed/wrong/missing acknowledgements and failed-Stop fixtures.
-9. Repeat for all eight profiles and each action offered by that simulated profile. Repeat the key selection/test/Stop/reconnect actions in Midnight Ink and Satin Editorial and at a phone-width viewport. A viewport simulation does not establish real-phone compatibility.
+9. Repeat for all nine profiles and each action offered by that simulated profile. Repeat the key selection/test/Stop/reconnect actions in Midnight Ink and Satin Editorial and at a phone-width viewport. A viewport simulation does not establish real-phone compatibility.
 
 Do not mark a hardware setup complete from a simulated checklist. The guide can be skipped or repeated and does not save an armed connection or calibration to an account. Unsaved stories clear on reload; save any text you need before refreshing.
 
@@ -50,6 +50,9 @@ Do not mark a hardware setup complete from a simulated checklist. The guide can 
 | Spinel | Vibration | Thrusting, only with an explicit compatible capability report | No heating, depth, stroke-length or undocumented command is implemented. |
 | Dolce | General vibration | None | Independent internal/external motor control is not claimed through this Standard JS SDK integration. |
 | Hush | Vibration | None | Record the actual generation and Remote version. |
+| Osci 3 | Vibration | Oscillation in the simulator only | The Standard JS SDK does not document an oscillator parameter. Native and Standard HTTP APIs expose oscillation, but this transport does not send it, heating or independent motor commands. |
+
+Osci 3 has its own ninth simulator profile, including a labelled **Oscillation · simulator only** rehearsal. Discovery accepts the explicit Osci 3 name/type or the Osci family with hardware version 3, and does not promote older Osci/Osci 2 devices. A reported Oscillate function does not by itself authorise an undocumented browser-SDK parameter. A future Standard HTTP adapter would need separate implementation and qualification before this motion can be enabled on hardware.
 
 If a motion is absent in the live action list, use the available vibration route and record the missing capability. Do not substitute an unknown action or assume that a simulator's action list proves vendor availability. A model's physical functions and the actions exposed by a particular SDK are separate facts.
 

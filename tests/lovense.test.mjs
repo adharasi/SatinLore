@@ -187,7 +187,7 @@ test("pairing images are limited to HTTPS vendor domains", () => {
 });
 
 test("all requested models can be explicitly targeted without broadcasting", async () => {
-  for(const model of ["lush","flexer","nora","domi","velvo","spinel","dolce","hush"]) {
+  for(const model of ["lush","flexer","nora","domi","velvo","spinel","dolce","hush","osci3"]) {
     const {controller,connect}=harness();const sdk=connect();
     sdk.toys=[{id:`only-${model}`,toyType:model,connected:true}];sdk.event("toyInfoChange");
     controller.select(`only-${model}`);
@@ -209,6 +209,17 @@ test("channel dispatch follows current manufacturer capabilities and never adds 
   const {controller,connect}=harness();const sdk=connect();controller.select("toy-a");
   for(const channel of ["rotate","fingering","thrusting","vibrate1","heating","All"]) assert.throws(()=>controller.command(3,5,{channel}));
   assert.deepEqual(sdk.commands,[]);
+});
+
+test("Osci 3 sends targeted finite vibration while oscillator and independent motor SDK guesses are rejected", async () => {
+  const {controller, connect} = harness(); const sdk = connect();
+  sdk.toys = [{id: "osci-selected", toyType: "osci3", connected: true,
+    fullFunctionNames: ["Vibrate", "Oscillate", "Vibrate1", "Vibrate2", "Heating"]}];
+  sdk.event("toyInfoChange"); controller.select("osci-selected");
+  for (const channel of ["oscillate", "vibrate1", "vibrate2", "heat"]) assert.throws(() => controller.command(2, 5, {channel}));
+  assert.deepEqual(sdk.commands, []);
+  await controller.command(3, 2);
+  assert.deepEqual(sdk.commands, [{vibrate: 2, time: 2, toyId: "osci-selected"}]);
 });
 
 test("finite reader renewals cancel old expiry timers without queuing intermediate commands", async () => {

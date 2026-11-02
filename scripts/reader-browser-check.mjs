@@ -147,6 +147,7 @@ const toyRehearsals = [
   {id: "spinel", label: "Spinel", channels: ["vibrate", "thrusting"], testChannel: "thrusting"},
   {id: "dolce", label: "Dolce", channels: ["vibrate"]},
   {id: "hush", label: "Hush", channels: ["vibrate"]},
+  {id: "osci3", label: "Osci 3", channels: ["vibrate", "oscillate"], testChannel: "oscillate"},
 ];
 
 async function selectRehearsalDevice(page, profile) {
@@ -185,7 +186,7 @@ async function prepareToyRehearsal(page, profile) {
   await page.locator("#open-setup").click();
   await page.locator("#setup-dialog").waitFor({state: "visible"});
   assert.deepEqual(await page.locator("#setup-model option").evaluateAll(options => options.map(option => [option.value, option.textContent])),
-    toyRehearsals.map(profile => [profile.id, profile.label]), "All eight requested models are reachable in the real setup dialog.");
+    toyRehearsals.map(profile => [profile.id, profile.label]), "All nine requested models are reachable in the real setup dialog.");
   await page.locator("#setup-model").selectOption(profile.id);
   await page.locator("#setup-mode-simulator").click();
   await page.locator("#setup-primary").click();
@@ -218,7 +219,7 @@ async function toyConnectionChecks(page) {
       await page.locator("#next").click(); await current(page, 1);
       await page.clock.runFor(1100); await output(page, 2);
       assert.equal(await page.locator(".simulator-device").getAttribute("data-output"), "2");
-      assert.match(await page.locator(".simulator-view-note").textContent(), new RegExp(profile.testChannel === "rotate" ? "Rotation" : profile.testChannel === "fingering" ? "Flexing" : profile.testChannel === "thrusting" ? "Thrusting" : "Vibration"));
+      assert.match(await page.locator(".simulator-view-note").textContent(), new RegExp(profile.testChannel === "rotate" ? "Rotation" : profile.testChannel === "fingering" ? "Flexing" : profile.testChannel === "thrusting" ? "Thrusting" : profile.testChannel === "oscillate" ? "Oscillation" : "Vibration"));
       await page.locator("#stop").click(); await output(page, 0);
       await page.locator("#setup-finish").click();
       await page.locator("#empty-workspace").waitFor({state: "visible"});
@@ -938,5 +939,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help, folders with paused saved membership, all eight model rehearsals with explicit selection, finite tests, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

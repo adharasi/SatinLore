@@ -18,7 +18,7 @@ These supplement the repository-root `AGENTS.md` for this directory.
 - Preserve explicit Start and selected-device targeting. Stop must remain easy to reach.
 - Coalesce changes to the newest desired level; never replay a backlog after scrolling or reconnecting.
 - Stop dispatch when hidden or disconnected; returning to the page must stay paused.
-- Every hardware-check and physical reader command is two seconds at most 5/20, explicitly targeted. Keep physical expiry separate from the UI timer and SDK acceptance. Use the asynchronous reader transport for real hardware, never the synchronous simulator controller. Simulate all eight requested profiles separately; derive live actions from validated discovered capabilities rather than the selected product illustration.
+- Every hardware-check and physical reader command is two seconds at most 5/20, explicitly targeted. Keep physical expiry separate from the UI timer and SDK acceptance. Use the asynchronous reader transport for real hardware, never the synchronous simulator controller. Simulate all nine requested profiles separately; derive live actions from validated discovered capabilities rather than the selected product illustration.
 - Mock expiry and UI state are not evidence that physical output stopped.
 - Add tests for meaningful controller failures and run the repository check command after changes.
 

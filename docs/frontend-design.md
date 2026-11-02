@@ -16,9 +16,9 @@ The right-side simulator visual uses actual connected/running/output snapshots, 
 
 Presentation preferences (width, size, spacing and follow position) remain allowlisted separately from appearance and stories. Portable backups restore fresh, session-only copies to Unfiled without playback arming; local folder IDs are deliberately omitted. Folder creation/renaming/deletion is an explicit local metadata action; moving an unsaved story does not save its text. Layout shortcuts avoid typing targets, and no keyboard shortcut starts output. All current iteration evidence belongs in the roadmap ledger after execution; this design contract is not a test result.
 
-## Eight-model connection refinement — 2 November 2026
+## Nine-model connection refinement — 2 November 2026
 
-The connection guide offers Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce and Hush, then a clear Simulate / Connect my toy choice. Simulation follows the same explicit discovery, device selection, action test and practice stages without loading the vendor SDK or making a vendor request. A rehearsal pairing illustration must be labelled simulated and must not be a usable auth code. Live pairing gives short Lovense Remote steps and a private QR code, waits for an eligible discovered device and never selects it automatically. A model illustration is a setup preference, not authority to send a command.
+The connection guide offers Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3, then a clear Simulate / Connect my toy choice. Simulation follows the same explicit discovery, device selection, action test and practice stages without loading the vendor SDK or making a vendor request. A rehearsal pairing illustration must be labelled simulated and must not be a usable auth code. Live pairing gives short Lovense Remote steps and a private QR code, waits for an eligible discovered device and never selects it automatically. A model illustration is a setup preference, not authority to send a command.
 
 The setup must show loading, unavailable configuration, waiting for Remote/toys, selected, testing, paused, error and retry states honestly. A two-second low test has a clear Stop and requires the reader to check the response/stopped output before practice. Mode, selected toy and available action remain visible in the reader's confirmation/status. Model-specific graphics distinguish simulated output from transport-requested output; neither is described as a physical measurement. Reduced motion retains the model label, action and numeric state. If output is unknown, show unknown rather than a reassuring zero.
 
@@ -54,7 +54,7 @@ The same-origin `appearance.js` runs before styles paint, sets the resolved them
 | Reading canvas | Direct typing/paste on a blank page; stories open into continuous document scrolling; Wide by default with Comfortable/Full choices |
 | Reading controls | Optional right panel, initially closed; import/upload, baseline model, text/width controls, current story actions and optional corrections |
 | Global gear menu | Appearance, account status, backup/restore, about, help and support; Stop remains accessible |
-| Setup and device preview | Eight model profiles; separate simulator/Remote journeys; explicit device/action/test/Start; honest unavailable/error/unknown state and neutral practice |
+| Setup and device preview | Nine model profiles; separate simulator/Remote journeys; explicit device/action/test/Start; honest unavailable/error/unknown state and neutral practice |
 | Optional review | Current/already-read sections first; future passages require deliberate reveal; manual zero, reset and reanalysis preserve deliberate edits |
 | Persistent transport | Simulator/status, capped target/output, strength −/+/Reset, direct maximum slider and Start/Pause/Stop |
 | Start confirmation | Shows selected simulator, strength and maximum; explicit Start-with-maximum action; Stop remains available |

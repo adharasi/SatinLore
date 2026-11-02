@@ -2,8 +2,8 @@
 // measured feedback, so its requested levels never animate as physical motion.
 const SVG = "http://www.w3.org/2000/svg";
 const MAX_POINTS = 72;
-const MODELS = {lush: "Lush", flexer: "Flexer", nora: "Nora", domi: "Domi", velvo: "Velvo", spinel: "Spinel", dolce: "Dolce", hush: "Hush"};
-const CHANNELS = {vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting"};
+const MODELS = {lush: "Lush", flexer: "Flexer", nora: "Nora", domi: "Domi", velvo: "Velvo", spinel: "Spinel", dolce: "Dolce", hush: "Hush", osci3: "Osci 3"};
+const CHANNELS = {vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation"};
 const SHAPES = {
   lush: "M140 45C111 45 109 75 112 96C115 118 126 132 140 132C154 132 165 118 168 96C171 75 169 45 140 45ZM141 131C140 153 160 162 176 143L184 126L177 123C165 144 154 146 150 132Z",
   flexer: "M133 39C112 37 105 56 108 80L114 121C117 144 132 155 148 149C161 145 170 133 174 117L183 82C186 69 179 58 169 59C157 60 154 71 154 82L153 116C152 124 148 128 144 126L150 71C153 51 147 40 133 39Z",
@@ -13,6 +13,7 @@ const SHAPES = {
   spinel: "M139 24C122 24 114 36 114 53L117 132L107 143L108 153L169 153L170 143L159 132L163 53C163 35 154 24 139 24Z",
   dolce: "M114 40C101 44 100 57 104 73L118 127C123 145 137 153 152 147C166 142 173 128 176 110L183 67C186 50 178 40 167 42C155 44 153 53 154 67L155 111C155 122 151 128 145 125C140 124 138 117 137 109L134 62C133 45 125 37 114 40Z",
   hush: "M139 32C131 32 127 42 122 58L110 97C104 117 118 129 132 131L132 141L111 145C103 147 104 157 112 158L167 158C176 157 177 147 169 145L148 141L148 131C162 128 176 117 170 97L157 58C152 42 147 32 139 32Z",
+  osci3: "M126 27C111 30 108 46 112 65L123 136C125 153 137 162 150 156C165 150 165 136 160 122L153 99L168 94C182 89 185 77 177 69C168 62 158 69 152 77L148 50C145 33 138 25 126 27Z",
 };
 
 export function simulatorReading(snapshot = {}) {
@@ -102,7 +103,8 @@ export function createSimulatorView(mount, {document = mount?.ownerDocument ?? g
     const active = !current.live && current.running && amount > 0 && visible();
     const animate = active && !motion?.matches;
     const shake = animate ? Math.sin(at * (.018 + amount * .04)) * amount * 2.8 : 0;
-    const thrust = animate && current.channel === "thrusting" ? Math.sin(at * .012) * amount * 20 : 0;
+    const thrust = animate && current.channel === "thrusting" ? Math.sin(at * .012) * amount * 20 :
+      animate && current.channel === "oscillate" ? Math.sin(at * .045) * amount * 7 : 0;
     const rotate = animate && ["rotate", "fingering"].includes(current.channel) ? Math.sin(at * .009) * amount * 18 : 0;
     moving.setAttribute("transform", current.channel === "vibrate" ? `translate(${shake.toFixed(2)} 0)` : `translate(0 ${thrust.toFixed(2)}) rotate(${rotate.toFixed(2)} 140 140)`);
     rings.forEach((ring, index) => {

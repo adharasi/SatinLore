@@ -2,13 +2,15 @@
 // Reviewed 2 November 2026 against the official Standard JS SDK, Standard API
 // and native toy-command matrix. In particular, JS does not document separate
 // Dolce motors or heating. Extra Velvo/Spinel motions require a runtime report.
-const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting"});
-const profile = (id, label, shape, physicalChannels, reportedChannels = [], physicalNotes = "") => Object.freeze({
+// Osci 3 oscillation is documented for native/HTTP APIs, not this browser SDK.
+const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation · simulator only"});
+const profile = (id, label, shape, physicalChannels, reportedChannels = [], physicalNotes = "", simulationOnlyChannels = []) => Object.freeze({
   id, model: id, label, shape,
   physicalChannels: Object.freeze(physicalChannels),
   reportedChannels: Object.freeze(reportedChannels),
-  simChannels: Object.freeze([...physicalChannels, ...reportedChannels]),
-  channels: Object.freeze([...physicalChannels, ...reportedChannels].map(id => Object.freeze({id, label: labels[id]}))),
+  simulationOnlyChannels: Object.freeze(simulationOnlyChannels),
+  simChannels: Object.freeze([...physicalChannels, ...reportedChannels, ...simulationOnlyChannels]),
+  channels: Object.freeze([...physicalChannels, ...reportedChannels, ...simulationOnlyChannels].map(id => Object.freeze({id, label: labels[id]}))),
   physicalNotes,
 });
 
@@ -21,6 +23,7 @@ export const TOY_PROFILES = Object.freeze([
   profile("spinel", "Spinel", "shaft", ["vibrate"], ["thrusting"], "Thrusting is offered only when your connection reports it. Heating is not controlled by SatinLore."),
   profile("dolce", "Dolce", "dual", ["vibrate"], [], "This connection uses general vibration, without separate controls for the two motors."),
   profile("hush", "Hush", "plug", ["vibrate"]),
+  profile("osci3", "Osci 3", "rabbit", ["vibrate"], [], "Live testing uses vibration. Oscillation can be rehearsed in the simulator; this connection does not yet control it, heating or separate motors.", ["oscillate"]),
 ]);
 
 export const getToyProfile = id => TOY_PROFILES.find(item => item.id === id) || null;
@@ -29,10 +32,12 @@ export const channelLabel = id => labels[id] || "Unavailable";
 const validId = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const functionNames = Object.freeze({v: "vibrate", vibrate: "vibrate", r: "rotate", rotate: "rotate", f: "fingering", fingering: "fingering", t: "thrusting", thrusting: "thrusting"});
 
-function modelId(value) {
+function modelId(value, hardwareVersion) {
   if (typeof value !== "string" || value.length > 64) return null;
   const text = value.toLowerCase().replace(/[ _-]/g, "");
-  return TOY_PROFILES.find(item => new RegExp(`^${item.id}(?:[1-9][0-9]?)?$`).test(text))?.id || null;
+  if (text === "osci3" || text === "osci" && String(hardwareVersion) === "3") return "osci3";
+  // Never promote Osci/Osci 2 or an unknown future model to the Osci 3 profile.
+  return TOY_PROFILES.find(item => item.id !== "osci3" && new RegExp(`^${item.id}(?:[1-9][0-9]?)?$`).test(text))?.id || null;
 }
 
 function report(toy) {
@@ -47,15 +52,15 @@ function report(toy) {
 export function normaliseToy(toy) {
   if (!toy || typeof toy !== "object" || Array.isArray(toy) || !validId(toy.id) || toy.connected !== true) return null;
   // toyType is authoritative when supplied; do not promote an arbitrary nickname.
-  const model = modelId(toy.toyType === undefined ? toy.name : toy.toyType);
+  const model = modelId(toy.toyType === undefined ? toy.name : toy.toyType, toy.hVersion);
   const current = getToyProfile(model);
   if (!current) return null;
   const reported = report(toy);
   const capabilities = reported === null ? [...current.physicalChannels] :
-    current.simChannels.filter(channel => reported.has(channel));
+    [...current.physicalChannels, ...current.reportedChannels].filter(channel => reported.has(channel));
   if (!capabilities.length) return null;
   const version = /^([1-9][0-9]?)$/.exec(String(toy.hVersion || ""))?.[1];
-  const label = `${current.label}${version ? ` ${version}` : ""}`;
+  const label = `${current.label}${version && model !== "osci3" ? ` ${version}` : ""}`;
   return {id: toy.id, label, model, capabilities,
     capabilitySource: reported === null ? "documented-model" : "reported",
     battery: Number.isInteger(toy.battery) && toy.battery >= 0 && toy.battery <= 100 ? toy.battery : null};

@@ -56,17 +56,17 @@ test("reduced motion, hidden documents and hidden mounts suspend motion without 
   view.destroy(); dom.hide(false); assert.equal(dom.frames.size, 0);
 });
 
-test("all eight toy profiles have distinct silhouettes and truthful simulated movement labels", () => {
+test("all nine toy profiles have distinct silhouettes and truthful simulated movement labels", () => {
   const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
   const silhouettes = new Set();
-  for (const model of ["lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush"]) {
+  for (const model of ["lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush", "osci3"]) {
     view.update({mode: "simulator", model, channel: model === "spinel" ? "thrusting" : "vibrate", connected: true, running: true, output: 3});
     const frame = mount.children[0], graphic = frame.children[1];
     assert.equal(frame.dataset.model, model);
     assert.match(frame.children[0].children[0].textContent, /simulator/);
     silhouettes.add(graphic.children.at(-1).children[0].getAttribute("d"));
   }
-  assert.equal(silhouettes.size, 8);
+  assert.equal(silhouettes.size, 9);
   view.destroy();
 });
 
@@ -81,5 +81,20 @@ test("live requested output never animates or masquerades as measured hardware f
   assert.equal(frame.children[2].children[1].textContent, "Unknown");
   assert.equal(frame.children[2].children[0].textContent, "Output unconfirmed");
   assert.equal(dom.frames.size, 0);
+  view.destroy();
+});
+
+test("Osci 3 oscillation animates only in simulation and respects reduced motion and Stop", () => {
+  const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
+  view.update({mode: "simulator", model: "osci3", channel: "oscillate", connected: true, running: true, output: 4});
+  const frame = mount.children[0], moving = frame.children[1].children.at(-1);
+  dom.advance(100);
+  assert.notEqual(moving.getAttribute("transform"), "translate(0 0.00) rotate(0.00 140 140)");
+  assert.match(frame.children.at(-1).textContent, /Oscillation preview · no physical toy/);
+  dom.reduced(true);
+  assert.equal(dom.frames.size, 0);
+  assert.equal(moving.getAttribute("transform"), "translate(0 0.00) rotate(0.00 140 140)");
+  view.update({mode: "simulator", model: "osci3", channel: "oscillate", connected: true, running: false, output: 4});
+  assert.equal(frame.children[2].children[1].textContent, "0 / 20");
   view.destroy();
 });

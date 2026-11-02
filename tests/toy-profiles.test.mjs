@@ -5,8 +5,8 @@ import {ProfileSimulator} from "../app/static/devices/profile-simulator.mjs";
 
 const raw = (model, extra = {}) => ({id: `toy-${model}`, toyType:model, connected:true, ...extra});
 
-test("the eight requested model profiles have distinct bounded simulator identities", () => {
-  assert.deepEqual(TOY_PROFILES.map(item=>item.id), ["lush","flexer","nora","domi","velvo","spinel","dolce","hush"]);
+test("the nine requested model profiles have distinct bounded simulator identities", () => {
+  assert.deepEqual(TOY_PROFILES.map(item=>item.id), ["lush","flexer","nora","domi","velvo","spinel","dolce","hush","osci3"]);
   for(const profile of TOY_PROFILES) {
     assert.equal(getToyProfile(profile.id),profile);
     assert.ok(Object.isFrozen(profile));
@@ -41,6 +41,26 @@ test("newer model motions need explicit reports and independent Dolce motors are
   assert.deepEqual(normaliseToy(raw("velvo",{shortFunctionNames:["v","r"]})).capabilities,["vibrate","rotate"]);
   assert.deepEqual(normaliseToy(raw("spinel",{fullFunctionNames:["Vibrate","Thrusting","Heating"]})).capabilities,["vibrate","thrusting"]);
   assert.deepEqual(normaliseToy(raw("dolce",{fullFunctionNames:["Vibrate","Vibrate1","Vibrate2"]})).capabilities,["vibrate"]);
+});
+
+test("Osci 3 is identified separately from older Osci models and keeps unsupported SDK motion simulation-only", () => {
+  for (const alias of ["osci3", "Osci 3", "Osci_3", "osci-3"]) {
+    const toy = normaliseToy(raw(alias, {id: "test-osci3"}));
+    assert.equal(toy.model, "osci3");
+    assert.equal(toy.label, "Osci 3");
+    assert.deepEqual(toy.capabilities, ["vibrate"]);
+  }
+  assert.equal(normaliseToy(raw("osci", {hVersion: "3"})).model, "osci3");
+  assert.equal(normaliseToy({id: "one", name: "Osci 3", connected: true}).model, "osci3");
+  assert.equal(normaliseToy(raw("osci3", {hVersion: "1"})).label, "Osci 3", "A hardware revision must not duplicate the model's generation number.");
+  for (const alias of ["osci", "osci2", "Osci 2", "osci4", "osci34", "osic3"]) assert.equal(normaliseToy(raw(alias)), null);
+  assert.equal(normaliseToy(raw("osci", {hVersion: "2"})), null);
+  const profile = getToyProfile("osci3");
+  assert.deepEqual(profile.simChannels, ["vibrate", "oscillate"]);
+  assert.deepEqual(profile.simulationOnlyChannels, ["oscillate"]);
+  assert.match(profile.channels.find(channel => channel.id === "oscillate").label, /simulator only/);
+  assert.deepEqual(normaliseToy(raw("osci3", {fullFunctionNames: ["Vibrate", "Oscillate", "Vibrate1", "Vibrate2", "Heating"]})).capabilities, ["vibrate"]);
+  assert.equal(normaliseToy(raw("osci3", {fullFunctionNames: ["Oscillate"]})), null, "An advertised physical function cannot authorise an undocumented browser-SDK command.");
 });
 
 test("discovery is deduplicated, bounded and contains only validated battery information", () => {

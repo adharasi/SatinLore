@@ -67,7 +67,7 @@ test("guided setup requires deliberate connection, device selection, test confir
 });
 
 test("every requested model can rehearse detection, explicit selection and bounded testing", async () => {
-  assert.deepEqual(SETUP_MODELS.map(model => model.id), ["lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush"]);
+  assert.deepEqual(SETUP_MODELS.map(model => model.id), ["lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush", "osci3"]);
   for (const model of SETUP_MODELS) {
     const app = harness(); app.flow.open({model: model.id}); await app.click("setup-primary");
     await app.selectDevice("sim-" + model.id); await app.checkedTest();
