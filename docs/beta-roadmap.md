@@ -94,7 +94,7 @@ Defer generated stories, subscriptions/checkout, token wallets, native apps, pub
 
 - Common checks pass: 22 Python and 206 JavaScript tests, including actual app bindings, folder consent and deletion/autosave revision handling, direct maximum gestures, pending link cancellation, real Worker HTMLRewriter extraction and setup/visual factories. Worker packaging and deployment dry run pass; these do not establish a remote deployment.
 - Managed-browser checks inspected Midnight Ink, the global gear menu, connect → practice flow, live preview placement, strength/maximum controls and a 320 px frame without horizontal overflow; Stop remains reachable. The HTTP preview has no Web Locks, so actual playback and persistent-save journeys are reserved for localhost CI/live HTTPS checks. [Neutral paused-workspace evidence](images/reader-midnight-setup-20261102.jpg).
-- The expanded browser CI, automatic deployment and live AO3 upstream availability are reported with the release result. No physical-device, cloud-account, paid-model or algorithm-quality qualification is inferred.
+- Release `ff9ba79fc19d` passed expanded Chromium 151 browser CI (runs `41366571346` and `41366748678`) and Cloudflare deployment. Authenticated live acceptance verified the source build/favicon, Midnight Ink, guided connection/practice, nonzero output matching the side preview, popup-free maximum changes, strength, Stop/restart and all guide checks, desktop scroll-follow with the sidebar open, and a paused return to the editor. Live AO3 upstream availability remains unverified without an eligible source work. No physical-device, cloud-account, paid-model or algorithm-quality qualification is inferred.
 
 1 November 2026, workspace/control and F3/F4 software iteration:
 
