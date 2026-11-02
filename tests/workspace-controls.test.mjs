@@ -80,6 +80,21 @@ test("Stop during confirmation leaves a fresh Start available", async t => {
   assert.equal(app.read("latest.running"), true);
 });
 
+test("Start names the chosen movement and a changed device invalidates the old confirmation", async t => {
+  const app = await ready(t);
+  await app.read('controller.beginConnection({mode:"simulator",model:"nora"})');
+  await app.read('controller.selectDevice("sim-nora")');
+  const pulse = app.read('controller.test({channel:"rotate",level:1})');
+  await app.settle(); await app.advance(2000); assert.equal(await pulse, true);
+  await app.click("start");
+  assert.match(app.nodes.get("start-summary").textContent, /Nora simulator · Rotation/);
+  await app.read('controller.beginConnection({mode:"simulator",model:"domi"})');
+  await app.read('controller.selectDevice("sim-domi")');
+  await app.click("confirm-start"); await app.settle();
+  assert.equal(app.read("latest.running"), false, "A confirmation for Nora must not authorise Domi.");
+  assert.equal(app.read("latest.output"), 0);
+});
+
 test("Stop while a Web Lock is pending releases a late lease and permits a fresh Start", async t => {
   const app = await ready(t);
   let release;

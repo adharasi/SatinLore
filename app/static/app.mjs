@@ -65,6 +65,7 @@ let latest = {state: "DISCONNECTED", connected: false, running: false, output: 0
   ceiling: 5, strength: 1, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
 
 const currentStory = () => stories.find(story => story.id === activeId) ?? null;
+const playbackIdentity = () => `${latest.mode || "simulator"}:${connection.selectedId || latest.selectedDeviceId || ""}:${latest.channel || "vibrate"}`;
 const isNarrow = () => window.matchMedia("(max-width: 1099px)").matches;
 function text(id, value) {
   const node = $(id);
@@ -742,7 +743,7 @@ async function confirmStart() {
   startIntent = null;
   const story = currentStory();
   if (!canStartHere() || !intent || story?.id !== intent.id || !story.model.analysisReady || document.hidden ||
-      latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || !latest.connected) return;
+      latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || playbackIdentity() !== intent.device || !latest.connected) return;
   const operation = ++startEpoch;
   pendingStart = true; display();
   let release = null;
@@ -750,11 +751,11 @@ async function confirmStart() {
     if (hostedMode) {
       const allowed = await hostedAccess.check({fresh: true});
       if (!allowed || !canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story ||
-          !story.model.analysisReady || latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || !latest.connected) return;
+          !story.model.analysisReady || latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || playbackIdentity() !== intent.device || !latest.connected) return;
     }
     release = await acquirePlayback();
     if (!canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story || !story.model.analysisReady ||
-        latest.ceiling !== intent.ceiling || latest.strength !== intent.strength) { release?.(); return; }
+        latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || playbackIdentity() !== intent.device) { release?.(); return; }
     if (!release) {
       show(navigator.locks ? "Another tab is playing. Pause it first." :
         "Playback needs a browser with Web Locks support. You can still read and correct levels.");
@@ -898,8 +899,9 @@ $("start").addEventListener("click", () => {
   if (!canStartHere() || !story?.model.analysisReady || !latest.connected || latest.running || pendingStart || document.hidden) return;
   cancelPosition(); followPosition();
   openDialog("start-dialog");
-  startIntent = {id: story.id, ceiling: latest.ceiling, strength: latest.strength};
-  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · maximum ${latest.ceiling}/20 · session strength ${formatStrength()}.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
+  startIntent = {id: story.id, ceiling: latest.ceiling, strength: latest.strength, device: playbackIdentity()};
+  const movement = latest.channels?.find(channel => channel.id === latest.channel)?.label || "Vibration";
+  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · session strength ${formatStrength()}.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
   text("confirm-start", `Start with maximum ${latest.ceiling}/20`);
 });
 $("confirm-start").addEventListener("click", () => void confirmStart());
