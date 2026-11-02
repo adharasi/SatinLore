@@ -24,6 +24,15 @@ class FakeBridge {
 }
 function fixture({bridge=new FakeBridge(),onChange=()=>{}}={}){const timing=clock();bridge.now=timing.now;const controller=new ReaderDeviceController({...timing,bridge,onChange});return{controller,bridge,...timing};}
 
+test("a successful sign-in check clears the temporary expiry message without starting output",()=>{
+  const app=fixture(),c=app.controller;
+  c.setAuthorized(false);assert.match(c.snapshot().reason,/Sign-in expired/);
+  c.setAuthorized(true);assert.doesNotMatch(c.snapshot().reason,/expired/);assert.equal(c.snapshot().connected,false);assert.equal(c.snapshot().running,false);
+  c.setStory([3]);c.connect();c.start();c.setAuthorized(false);assert.equal(c.snapshot().output,0);
+  c.setAuthorized(true);assert.match(c.snapshot().reason,/Sign-in checked/);assert.equal(c.snapshot().running,false);assert.equal(c.snapshot().output,0);
+  c.destroy();
+});
+
 test("all eight profiles require explicit rehearsal selection and keep chosen channel output finite",async()=>{
   for(const profile of TOY_PROFILES){
     const app=fixture();const c=app.controller;c.setStory([3,0,5]);

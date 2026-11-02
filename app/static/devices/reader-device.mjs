@@ -225,8 +225,12 @@ export class ReaderDeviceController {
     return this.snapshot();
   }
   setAuthorized(value){
+    const wasAuthorized=this.authorized;
     this.authorized=value===true;if(this.real)this.real.setAuthorized(this.authorized);
     if(!this.authorized){this.pause("Sign-in expired. Check sign-in before reconnecting.");this.bridge?.dispose();}
+    else if(!wasAuthorized && this.mode==="simulator" && this.sim.state!=="ERROR_PAUSED"){
+      this.sim.pause(this.sim.connected ? "Sign-in checked. Confirm Start when ready." : "Choose Toy setup to connect a toy or rehearse with a simulator.");
+    }
     return this.snapshot();
   }
   destroy(){this.disconnect();this.bridge?.destroy();this.real?.destroy();}
