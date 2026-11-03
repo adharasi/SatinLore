@@ -238,6 +238,8 @@ async function startStudy(recorded) {
   } finally {
     busy = false;
     updateWelcome();
+    renderDevice();
+    renderRecord();
   }
 }
 

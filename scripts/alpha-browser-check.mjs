@@ -19,12 +19,43 @@ const verifiers = Object.fromEntries(Object.entries(passwords).map(([name, passw
 const setupNote = "Synthetic check: both test buttons were easy to find.";
 const annotationNote = "Synthetic observation at the marked point.";
 const calls = [];
+const diagnosticPages = [], recentPageErrors = [];
 let browser, mf, phase = "preparing fixtures", pageErrors = 0, outsideRequests = 0, routeErrors = 0;
 
 const begin = label => { phase = label; console.log(`Alpha browser phase: ${label}.`); };
 const watchdog = setTimeout(() => { console.error(`Alpha browser check timed out during ${phase}.`); process.exit(1); }, 240_000);
 watchdog.unref();
 const mime = name => ({ ".mjs": "text/javascript", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" })[path.extname(name)] || "text/html";
+
+function scrub(value, limit = 400) {
+  let text = String(value ?? "");
+  for (const known of [...Object.values(passwords), ...Object.values(verifiers), setupNote, annotationNote]) {
+    text = text.replaceAll(known, "[fixture value]");
+  }
+  return text.replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, "[session]")
+    .replace(/\b[0-9a-f]{64}\b/gi, "[token]")
+    .replace(/([?&][a-z0-9_-]+=)[^&\s"']+/gi, "$1[redacted]")
+    .slice(0, limit);
+}
+
+async function pageState(page) {
+  try {
+    const snapshot = await page.evaluate(() => {
+      const selectors = {
+        stage: "#alpha-study-kicker", setup: "#alpha-device-status", connection: "#alpha-connection-badge",
+        record: "#alpha-record-label", playback: "#alpha-dock-state", feedback: "#alpha-feedback-status",
+        admin: "#alpha-review-status",
+      };
+      const labels = Object.fromEntries(Object.entries(selectors).map(([key, selector]) => [key,
+        document.querySelector(selector)?.textContent?.trim().slice(0, 240) || "",
+      ]));
+      const connect = document.querySelector("#alpha-device-connect");
+      return { pathname: location.pathname, labels, connectDisabled: connect?.disabled ?? null };
+    });
+    return { ...snapshot, pathname: scrub(snapshot.pathname),
+      labels: Object.fromEntries(Object.entries(snapshot.labels).map(([key, value]) => [key, scrub(value, 240)])) };
+  } catch { return { unavailable: true }; }
+}
 
 async function get(page, pathname) {
   return page.evaluate(async url => {
@@ -128,7 +159,12 @@ try {
     });
     const page = await context.newPage();
     page.setDefaultTimeout(12_000);
-    page.on("pageerror", () => { pageErrors++; });
+    diagnosticPages.push(page);
+    page.on("pageerror", error => {
+      pageErrors++;
+      if (recentPageErrors.length === 6) recentPageErrors.shift();
+      recentPageErrors.push({ name: scrub(error.name, 40), message: scrub(error.message) });
+    });
     return { context, page };
   }
 
@@ -256,10 +292,10 @@ try {
   await Promise.all([tester.close(), founder.close()]);
   console.log("Alpha browser checks passed: separate accounts, study consent, simulated Flexer setup, markers, feedback, annotations, role isolation and responsive founder review.");
 } catch (error) {
-  console.error("Alpha browser diagnostics:", JSON.stringify({ phase, calls: calls.slice(-24), pageErrors, outsideRequests, routeErrors }));
-  let message = String(error?.message || "Alpha acceptance failed.");
-  for (const value of [...Object.values(passwords), setupNote, annotationNote]) message = message.replaceAll(value, "[fixture value]");
-  throw new Error(message);
+  const pages = await Promise.all(diagnosticPages.filter(page => !page.isClosed()).slice(-2).map(pageState));
+  const recentCalls = calls.slice(-24).map(call => ({ ...call, path: scrub(call.path) }));
+  console.error("Alpha browser diagnostics:", JSON.stringify({ phase, calls: recentCalls, pages, pageErrors, recentPageErrors, outsideRequests, routeErrors }));
+  throw new Error(scrub(error?.message || "Alpha acceptance failed.", 1400));
 } finally {
   clearTimeout(watchdog);
   await browser?.close();
