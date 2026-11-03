@@ -202,9 +202,11 @@ try {
   await sidebar(page); await page.locator("#follow-scroll").uncheck();
   await page.locator("#feel-mode").selectOption("continuous");
   await disclosure(page, ".feel-adjustments details:has(#feel-minimum)"); await range(page, "feel-minimum", 1); await range(page, "feel-background", 1);
-  await range(page, "feel-recovery", 0); await closeSidebar(page);
+  await range(page, "feel-recovery", 0);
+  // Opening or closing the reading sidebar deliberately pauses playback.
+  // Keep its controls available before Start while checking live adjustments.
   await start(page); await output(page, 1);
-  await sidebar(page); await page.locator("#feel-hold").click(); await page.locator("#next").click(); await output(page, 1);
+  await page.locator("#feel-hold").click(); await page.locator("#next").click(); await output(page, 1);
   assert.match(await page.locator("#feel-status").textContent(), /hold/i);
   await page.locator("#feel-easeoff").click(); await output(page, 0);
   await page.locator("#next").click(); await output(page, 0);
@@ -219,7 +221,8 @@ try {
   await page.locator("#settings-story-tab").click(); await page.locator("#save-story").click();
   await page.locator("#confirm-save").click(); await page.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
   await page.reload(); await output(page, 0);
-  assert.equal(await page.locator("#account-welcome").isHidden(), true, "The account survives reload.");
+  await page.locator("#account-welcome").waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.querySelector("#story-title").textContent === "The evening train" && document.querySelector("#analysis-status").dataset.state === "ready");
   await chooseFlexer(page, { tested: false }); await page.locator("#setup-close").click();
   await sidebar(page); await page.locator("#account-preset-picker").selectOption(globalPreset.id);
   await page.getByRole("button", { name: "Apply preset", exact: true }).click(); await output(page, 0);
@@ -283,6 +286,7 @@ try {
   for(const page of diagnosticPages.filter(page=>!page.isClosed()).slice(-3)){
     try{pages.push(await page.evaluate(()=>({path:location.pathname,states:Object.fromEntries([
       ["account","#account-welcome [role=status]"],["setup","#setup-status"],["calibration","#calibration-status"],["recording","#beta-recording-status"],
+      ["message","#message"],["readiness","#start-help"],["output","#output"],["feel","#feel-status"],
     ].map(([name,selector])=>[name,document.querySelector(selector)?.textContent?.slice(0,240)??null]))})));}catch{/* A closed page needs no further diagnosis. */}
   }
   console.error("Beta browser bounded diagnostics:",JSON.stringify({phase,api:apiResponses.slice(-16),pages,pageErrors:errors.slice(-5).map(value=>value.slice(0,240))}));
