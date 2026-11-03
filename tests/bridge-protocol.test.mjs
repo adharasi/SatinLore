@@ -5,7 +5,7 @@ import {runInNewContext} from "node:vm";
 import {LovenseCheck} from "../app/static/devices/lovense.mjs";
 
 const source=(await readFile(new URL("../app/static/device-bridge.mjs",import.meta.url),"utf8")).replace(/^import[^\n]+\n/,"");
-function fixture({pendingCommand=false,pendingOpen=false,Check,sdk=function(){}}={}) {
+function fixture({pendingCommand=false,pendingOpen=false,Check,sdk=function(){},beforeSdkLoad=()=>{}}={}) {
   const calls=[],messages=[],windowEvents=new Map(),documentEvents=new Map();let controls,resolveCommand;
   class FakeCheck {
     constructor(options){controls=this;this.emit=options.emit;this.selected="toy-one";}
@@ -20,7 +20,7 @@ function fixture({pendingCommand=false,pendingOpen=false,Check,sdk=function(){}}
     disconnect(){calls.push(["disconnect"]);}
   }
   const parent={},window={addEventListener:(type,handler)=>windowEvents.set(type,handler),removeEventListener:type=>windowEvents.delete(type)};
-  const document={hidden:false,head:{append(script){calls.push(["loadSdk",script.src]);script.onload();}},createElement:()=>({}),addEventListener:(type,handler)=>documentEvents.set(type,handler)};
+  const document={hidden:false,head:{append(script){calls.push(["loadSdk",script.src]);beforeSdkLoad(globals.globalThis);script.onload();}},createElement:()=>({}),addEventListener:(type,handler)=>documentEvents.set(type,handler)};
   const port={start(){},postMessage:value=>messages.push(value)};
   const globals={LovenseCheck:Check||FakeCheck,parent,window,document,location:{href:"https://app.satinlore.com/device-bridge"},URL,globalThis:{LovenseBasicSdk:sdk},Promise};
   runInNewContext(source,globals);
@@ -37,6 +37,16 @@ test("opaque bridge requires exact parent origin/source and a dedicated one-use 
   assert.equal(f.messages.length,0);assert.equal(f.calls.length,0);
   f.handshake();assert.equal(f.messages[0].type,"bridge-ready");assert.equal(f.windowEvents.has("message"),false);
   await f.init();assert.equal(f.calls.filter(row=>row[0]==="loadSdk").length,1);assert.equal(f.calls.filter(row=>row[0]==="connect").length,1);
+});
+test("the SDK can read its debug preference without receiving real browser storage", async () => {
+  const f = fixture({beforeSdkLoad(scope) {
+    assert.equal(scope.localStorage.getItem("lvsCamDebug"), null);
+    assert.equal(scope.localStorage.getItem("private fixture key"), null);
+    assert.deepEqual(Object.keys(scope.localStorage), ["getItem"]);
+  }});
+  f.handshake();
+  await f.init();
+  assert.equal(f.calls.filter(row => row[0] === "connect").length, 1);
 });
 test("the real adapter keeps a fresh bridge open for pairing and discovers a Flexer after the scan", async () => {
   let sdk;

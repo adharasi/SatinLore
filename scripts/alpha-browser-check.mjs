@@ -121,6 +121,9 @@ try {
     PRIVATE_APP_ENABLED: "true", PUBLIC_APP_ORIGIN: APP,
     ACCESS_TEAM_DOMAIN: "synthetic.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64),
     FOUNDER_EMAIL: "synthetic-founder@example.test", ...verifiers,
+    LOVENSE_DEVELOPER_TOKEN: "synthetic-developer-token",
+    LOVENSE_UID_SECRET: "a".repeat(64), LOVENSE_PLATFORM: "Synthetic browser fixture",
+    PRIVATE_FEEDBACK: { idFromName: name => name, get: () => ({ fetch: () => Response.json({ ok: true }) }) },
     ALPHA_STUDY: {
       idFromName: name => name,
       get: key => ({ async fetch(request) {
@@ -140,7 +143,9 @@ try {
       } catch { return new Response("Missing fixture asset", { status: 404 }); }
     } },
   };
-  const worker = createPrivateAppWorker({ lovenseFetcher: async () => { throw Error("Simulator unexpectedly requested a live connection."); } });
+  const worker = createPrivateAppWorker({
+    lovenseFetcher: async () => Response.json({code: 0, data: {authToken: "synthetic-user-token"}}),
+  });
   browser = await chromium.launch({ headless: true });
 
   async function openContext() {
@@ -359,10 +364,72 @@ try {
   const reader = await tester.newPage();
   assert.equal((await reader.goto(`${APP}/`)).status(), 403, "An Alpha cookie cannot grant access to the ordinary reader.");
   assert.equal(outsideRequests, 0, "The simulator path requires no outside requests.");
+  assert.ok(!calls.some(call => call.path === "/alpha/api/lovense/session"), "The simulator never requests live credentials.");
+
+  begin("opening a vendor WebSocket and exercising the isolated SDK fallback");
+  const {context: pairingContext, page: pairingPage} = await openContext();
+  const qrUrl = "https://api.lovense-api.com/alpha-browser-fixture.svg";
+  let failSocket = false, socketAttempts = 0, fallbackLoads = 0;
+  await pairingContext.route("https://api.lovense-api.com/api/basicApi/getSocketUrl", async route => {
+    const headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "POST"};
+    if (route.request().method() === "OPTIONS") return route.fulfill({status: 204, headers});
+    await route.fulfill({headers, json: {code: 0, data: {socketIoUrl: "https://api.lovense-api.com", socketIoPath: "/fixture/socket.io"}}});
+  });
+  await pairingContext.route(qrUrl, route => route.fulfill({
+    contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
+  }));
+  await pairingContext.route("https://api.lovense-api.com/basic-sdk/core.min.js", route => {
+    fallbackLoads++;
+    return route.fulfill({contentType: "text/javascript", body: `
+      if (origin !== "null" || localStorage.getItem("lvsCamDebug") !== null || typeof localStorage.setItem !== "undefined") {
+        throw new Error("The fallback needs an isolated, empty storage interface.");
+      }
+      globalThis.LovenseBasicSdk = class {
+        on(name, callback) { if (name === "ready") queueMicrotask(callback); }
+        getAppStatus() { return false; }
+        getQrcode() { return Promise.resolve({qrcodeUrl: ${JSON.stringify(qrUrl)}}); }
+        destroy() {}
+      };
+    `});
+  });
+  await pairingContext.routeWebSocket(url => url.hostname === "api.lovense-api.com" && url.pathname === "/fixture/socket.io/", socket => {
+    socketAttempts++;
+    if (failSocket) { void socket.close({code: 1011, reason: "Synthetic socket failure"}); return; }
+    socket.onMessage(message => {
+      if (typeof message !== "string" || !message.startsWith("42")) return;
+      const [name, payload] = JSON.parse(message.slice(2));
+      if (name === "basicapi_get_qrcode_ts") socket.send("42" + JSON.stringify(["basicapi_get_qrcode_tc", {
+        code: 0, data: {ackId: payload.ackId, qrcodeUrl: qrUrl},
+      }]));
+    });
+    socket.send('0{"sid":"synthetic-socket","upgrades":[],"pingInterval":25000,"pingTimeout":5000}');
+    socket.send("40");
+  });
+  await pairingPage.goto(`${APP}/alpha`);
+  await login(pairingPage, "Dilan");
+  await pairingPage.locator("#alpha-adult").check();
+  await pairingPage.locator('input[name="alpha-mode"][value="live"]').check();
+  await pairingPage.locator("#alpha-unrecorded-start").click();
+  const connect = pairingPage.locator("#alpha-device-connect");
+  const qr = pairingPage.locator("#alpha-device-qr");
+  await connect.click();
+  await qr.waitFor({state: "visible"});
+  await pairingPage.waitForFunction(() => document.querySelector("#alpha-device-qr-image")?.naturalWidth > 0);
+  assert.equal(socketAttempts, 1, "The real opaque bridge can open a vendor WebSocket.");
+  assert.equal(fallbackLoads, 0);
+  failSocket = true;
+  const fallbackResponse = pairingPage.waitForResponse("https://api.lovense-api.com/basic-sdk/core.min.js");
+  await connect.click();
+  assert.equal((await fallbackResponse).status(), 200);
+  await qr.waitFor({state: "visible"});
+  await pairingPage.waitForFunction(() => document.querySelector("#alpha-device-qr-image")?.naturalWidth > 0);
+  assert.equal(socketAttempts, 2);
+  assert.equal(fallbackLoads, 1, "The fallback can start without access to browser storage.");
+  await pairingContext.close();
   assert.equal(routeErrors, 0, "Fixture requests completed without internal routing errors.");
   assert.equal(pageErrors, 0, "Alpha browser pages ran without unhandled errors.");
   await Promise.all([tester.close(), founder.close()]);
-  console.log("Alpha browser checks passed: separate accounts, study consent, simulated Flexer setup, limit clamping, markers, masked screen visits, required feedback, annotations and founder review.");
+  console.log("Alpha browser checks passed: separate accounts, simulated Flexer study, founder review, WebSocket pairing and isolated SDK fallback.");
 } catch (error) {
   const pages = await Promise.all(diagnosticPages.filter(page => !page.isClosed()).slice(-2).map(pageState));
   const recentCalls = calls.slice(-24).map(call => ({ ...call, path: scrub(call.path) }));

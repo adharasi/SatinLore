@@ -31,6 +31,12 @@ function close() {
 }
 function loadSdk() {
   return new Promise((resolve, reject) => {
+    // The vendor SDK reads a debug preference at import time. Give it a
+    // read-only empty result inside this frame without exposing browser storage.
+    Object.defineProperty(globalThis, "localStorage", {
+      value: Object.freeze({getItem: () => null}),
+      configurable: true,
+    });
     const script = document.createElement("script");
     script.src = "https://api.lovense-api.com/basic-sdk/core.min.js";
     script.referrerPolicy = "no-referrer";
