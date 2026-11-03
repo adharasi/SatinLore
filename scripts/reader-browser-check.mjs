@@ -660,7 +660,15 @@ async function refinementChecks(page, setPromptReply) {
   await openAppSettings(page);
   assert.equal(await page.locator('#app-settings-dialog a[href="/help"]').isVisible(), true);
   assert.equal(await page.locator('#app-settings-dialog a[href="/support"]').isVisible(), true);
-  assert.match(await page.locator("#app-settings-dialog").textContent(), /Personal accounts.*planned/s);
+  assert.match(await page.locator("#app-settings-dialog").textContent(), /Toy presets can be saved to your account; story text stays on this browser\./,
+    "The account section distinguishes durable toy presets from browser-local story text.");
+  assert.match(await page.locator("#account-settings-mount").textContent(), /Account presets are available in the signed-in hosted app\./,
+    "The local reader reports the real hosted-account requirement instead of a planned or simulated account.");
+  assert.equal(await page.locator("#account-welcome").isHidden(), true,
+    "The local simulator does not pretend to register a hosted account.");
+  assert.equal(await page.locator("#account-settings-mount").getByRole("button", {name: "Download my presets", exact: true}).isDisabled(), true);
+  assert.equal(await page.locator("#account-settings-mount").getByRole("button", {name: "Delete account data", exact: true}).isDisabled(), true,
+    "Account data operations stay unavailable without a real registered hosted account.");
   await page.locator("#delete-all").click();
   await page.waitForFunction(key => localStorage.getItem(key) === null, libraryKey);
   await closeAppSettings(page);
@@ -954,5 +962,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

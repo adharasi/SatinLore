@@ -13,7 +13,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const APP = "https://app.satinlore.com", BETA = "https://beta.satinlore.com";
 const privateCanary = "PRIVATE_READER_CANARY_20261102";
 const privateName = "PRIVATE_PRESET_CANARY_20261102";
-const apiRequests = [], unexpected = [], errors = [];
+const apiRequests = [], apiResponses = [], unexpected = [], errors = [], diagnosticPages = [];
 let browser, mf, phase = "initializing";
 const log = value => { phase = value; console.log(`Beta browser phase: ${value}.`); };
 const watchdog = setTimeout(() => { console.error(`Beta browser check exceeded five minutes during ${phase}.`); process.exit(1); }, 300000);
@@ -168,14 +168,18 @@ try {
     await ctx.route("**/*", async route => {
       const source = route.request(), url = new URL(source.url());
       if (![APP, BETA].includes(url.origin)) { unexpected.push(url.origin); return route.abort(); }
-      const headers = new Headers(source.headers()); headers.set("Cf-Access-Jwt-Assertion", signed);
+      // headers() is Playwright's provisional list and omits browser security
+      // headers. Forward the actual Origin/Fetch Metadata used by the Worker.
+      const headers = new Headers(await source.allHeaders()); headers.set("Cf-Access-Jwt-Assertion", signed);
       if (url.pathname.startsWith("/api/")) apiRequests.push({ path: url.pathname, origin: url.origin, method: source.method(), body: source.postData() || "" });
       const response = await worker.fetch(new Request(source.url(), { method: source.method(), headers,
         ...(["GET", "HEAD"].includes(source.method()) ? {} : { body: source.postDataBuffer() }),
       }), env);
+      if (url.pathname.startsWith("/api/")) apiResponses.push({path:url.pathname,method:source.method(),status:response.status,
+        origin:headers.get("Origin")===url.origin?"same-origin":headers.has("Origin")?"other":"missing",fetchSite:headers.get("Sec-Fetch-Site")});
       await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer()) });
     });
-    ctx.on("page", page => { page.setDefaultTimeout(12000); page.on("pageerror", error => errors.push(error.message)); });
+    ctx.on("page", page => { diagnosticPages.push(page); page.setDefaultTimeout(12000); page.on("pageerror", error => errors.push(error.message)); });
     return ctx;
   }
 
@@ -184,7 +188,12 @@ try {
   await page.locator("#account-adult").waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Create my private account", exact: true }).click();
   assert.equal((await requestInPage(page, "GET", "/api/account")).value.registered, false, "Registration needs the adult checkbox.");
-  await page.locator("#account-adult").check(); await page.getByRole("button", { name: "Create my private account", exact: true }).click();
+  await page.locator("#account-adult").check();
+  const accountCreated=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/account"&&response.request().method()==="POST");
+  await page.getByRole("button", { name: "Create my private account", exact: true }).click();
+  const accountResponse=await accountCreated, accountState=await accountResponse.json();
+  assert.equal(accountResponse.status(),201,`Account creation failed: ${JSON.stringify({status:accountResponse.status(),error:accountState.error??null})}`);
+  assert.equal(accountState.registered,true,"The durable account acknowledgement must confirm registration.");
   await page.locator("#account-welcome").waitFor({ state: "hidden" });
   assert.equal(await page.locator("#beta-recording").count(), 0, "Normal app never offers beta recording.");
   assert.equal((await requestInPage(page, "POST", "/api/beta/recordings", {})).status, 404);
@@ -267,6 +276,16 @@ try {
   assert.deepEqual(errors, [], "Reader/admin produced a browser runtime error.");
   await Promise.all([appContext.close(), betaContext.close(), adminContext.close()]);
   console.log("Beta browser checks passed: signed account registration, per-movement calibration, saved account/story presets, paused reload, continuity/Hold/Ease off/zero, beta-only consent, real durable timelines, masked private inputs, founder-only replay/filter/seek, withdrawal and phone admin layout. No real identity, vendor API, hardware or private story used.");
+} catch(error) {
+  // Deliberately omit tokens, headers, request bodies, stories and preset names.
+  const pages=[];
+  for(const page of diagnosticPages.filter(page=>!page.isClosed()).slice(-3)){
+    try{pages.push(await page.evaluate(()=>({path:location.pathname,states:Object.fromEntries([
+      ["account","#account-welcome [role=status]"],["setup","#setup-status"],["calibration","#calibration-status"],["recording","#beta-recording-status"],
+    ].map(([name,selector])=>[name,document.querySelector(selector)?.textContent?.slice(0,240)??null]))})));}catch{/* A closed page needs no further diagnosis. */}
+  }
+  console.error("Beta browser bounded diagnostics:",JSON.stringify({phase,api:apiResponses.slice(-16),pages,pageErrors:errors.slice(-5).map(value=>value.slice(0,240))}));
+  throw error;
 } finally {
   clearTimeout(watchdog); await browser?.close(); await mf?.dispose();
 }

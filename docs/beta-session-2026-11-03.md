@@ -2,6 +2,8 @@
 
 This runbook prepares the founder and invited tester for account setup, toy calibration, controlled reading and private session review. Rehearse the complete journey with a simulator first. A simulator pass verifies software behavior; the physical device checks below remain separate.
 
+The feature list describes the release build. Live availability still requires a successful production deployment, active custom domains and the Access/runtime configuration below; it does not establish that those external steps or physical qualification have already passed.
+
 ## What this release provides
 
 - The same reader on `https://app.satinlore.com` and `https://beta.satinlore.com`, behind Cloudflare email one-time PIN sign-in and the Worker's explicit tester allowlist.
@@ -12,6 +14,12 @@ This runbook prepares the founder and invited tester for account setup, toy cali
 - An explicitly consented beta-only structured timeline and founder-only `https://beta.satinlore.com/admin` review. The normal app host does not collect this beta timeline.
 
 Story text is not cloud-synced. New stories remain Session only until Save on this browser is chosen. App and beta browser storage are separate origins. A story-specific account preset uses an opaque local story ID, not a title or content fingerprint; reimporting identical text on another browser does not automatically attach its old story preset. Use an account-wide preset for the cross-host test.
+
+## Use one physical control host at a time
+
+The reader's Web Locks coordinate tabs only within the same origin and browser profile. `app.satinlore.com` and `beta.satinlore.com` have separate locks; another browser/profile also has separate locks. They do not provide a shared cross-host or cross-browser physical-device lease.
+
+Use one origin and one controlling browser/tab for a physical session. Choose the beta hostname for the complete recorded tester session. Before switching hosts or browsers, press **Stop**, observe that the toy has stopped, choose **Disconnect**, and close the previous reader tab. Then connect and complete fresh checks on the new host. Shared account presets do not share connection ownership or personal-range permissions.
 
 ## Founder setup in Cloudflare
 
@@ -75,9 +83,9 @@ The beta stores a structured control timeline, not DOM replay or screen video. E
 2. Have the tester charge the toy, install/update **Lovense Remote**, turn on Bluetooth and pair inside Remote. Confirm the toy responds there first. For this first pairing, use a computer/second screen to display SatinLore's private QR code.
 3. Choose the matching model and **Connect my toy**. Follow the guided QR/Remote steps, wait for discovery and select the actual device. If several toys are paired, verify the intended one is selected and the others remain still.
 4. Begin with an observable level-1, two-second test while the device is out of use. Check actual response, physical expiry and targeted Stop. Do not use an on-screen timer or SDK acknowledgement as physical proof. Keep Remote and the toy's own controls reachable.
-5. Check the response/stopped confirmation only after observing it. Repeat the gentle check for every additional action the connected route exposes. Flexer may offer fingering plus vibration; Nora rotation; Osci 3 oscillation through the qualified Socket route. Missing actions are a capability result, not permission to improvise a command.
+5. Check the response/stopped confirmation only after observing it. Repeat the gentle check for every additional action the connected route exposes. Flexer may offer fingering plus vibration; Nora rotation; Osci 3 oscillation through the documented extended Socket route when offered by the connection. Physical response still needs observation. Missing actions are a capability result, not permission to improvise a command.
 6. If the tester chooses to explore their personal range, use **Enable personal range** only after that movement's gentle response and Stop check. This session-only permission can allow up to 20/20; it does not raise their chosen maximum. Begin low, change the upper limit deliberately and Apply it while paused. Do not jump to 20 simply because the range is available. A saved preset alone cannot grant permission.
-7. Let the tester find background, preferred, minimum, maximum and recovery levels, with optional ratings and separate settings for the exposed movements. Use the sidebar's Explore, Hold, Ease off and Follow story controls to compare adjustments. Qualified combined controls require individual checks of every selected action first. Unsupported independent motors, heating, depth/stroke controls or full Lovense Remote parity are not promised.
+7. Let the tester find background, preferred, minimum, maximum and recovery levels, with optional ratings and separate settings for the exposed movements. Use the sidebar's Explore, Hold, Ease off and Follow story controls to compare adjustments. Combined controls offered by the live connection require individual checks of every selected action first. Unsupported independent motors, heating, depth/stroke controls or full Lovense Remote parity are not promised.
 8. Open the controlled fixtures before bringing personal text. Compare quiet passages versus an optional background minimum, one movement versus a supported combination, and Ease off/explicit return. Start, Pause, Stop and master maximum zero must remain reliable throughout. Personal reading/import is optional after these checks; its text stays private.
 9. Observe tab hide/return and a deliberate interruption. Output must remain paused on return/reconnection, and personal-range permission must reset. If a Stop cannot be confirmed, use the toy's own control and stop testing that configuration.
 10. Finish with device Stop and Disconnect, then stop the recording separately. Save a preset only if the tester chooses. Do not collect their password, PIN, pairing QR, device identifier or private story in a report.

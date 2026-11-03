@@ -102,7 +102,9 @@ function selectedSettings(state = latest,channel = feelEditingChannel || state.c
   const source=state.feel?.channels?.[channel] || (channel===state.channel ? state.feel : {}) || {};
   const keys=["minimum","background","preferred","recovery","gain","rhythm"];
   const feel=Object.fromEntries(keys.filter(key=>Object.hasOwn(source,key)).map(key=>[key,source[key]]));
-  const maximum=Math.min(stored.maximum,source.maximum??stored.maximum);
+  // Active policy is authoritative; an unapplied calibration draft cannot narrow
+  // the displayed limit while leaving the actual output policy unchanged.
+  const maximum=source.maximum??stored.maximum;
   const range=state.mode!=="lovense"?20:(state.personalRangeChannels || []).includes(channel)?20:5;
   return clampCalibration({...stored,...feel,maximum:20},Math.min(maximum,range));
 }

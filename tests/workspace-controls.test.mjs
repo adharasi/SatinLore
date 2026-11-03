@@ -354,3 +354,26 @@ test("actual reading feel controls preserve an opt-in background, recovery, expl
   assert.equal(app.nodes.get("start").disabled, false);
   assert.deepEqual(app.errors, []);
 });
+
+test("Start and manual exploration show active movement limits rather than an unapplied calibration draft", async t => {
+  const app = await ready(t);
+  app.nodes.get("level").value = "9";
+  await app.nodes.get("level").dispatch("input");
+  app.nodes.get("cap").value = "9";
+  await app.nodes.get("cap").dispatch("input");
+  const activeMaximum = app.read("latest.feel.maximum");
+  app.read('controller.setCalibration("vibrate", {minimum:0,background:1,preferred:3,maximum:5,recovery:0,gain:1,rhythm:"steady"})');
+  assert.equal(app.read("latest.feel.maximum"), activeMaximum, "An unapplied draft must not change the active movement policy.");
+  assert.equal(app.read("selectedSettings().maximum"), activeMaximum, "The sidebar must describe the active policy, not the draft's smaller maximum.");
+  await app.click("start");
+  assert.match(app.nodes.get("start-summary").textContent, /Vibration · up to 9\/20/);
+  await app.click("confirm-start"); await app.settle();
+  assert.equal(app.read("latest.output"), 9);
+  assert.equal(Number(app.nodes.get("manual-level").max), 9);
+  app.nodes.get("feel-maximum").value = "4";
+  await app.nodes.get("feel-maximum").dispatch("input"); await app.advance(1000);
+  assert.equal(app.read("latest.feel.maximum"), 4, "A deliberate movement edit still lowers the actual policy.");
+  assert.equal(app.read("selectedSettings().maximum"), 4);
+  assert.equal(app.read("latest.output"), 4);
+  assert.deepEqual(app.errors, []);
+});

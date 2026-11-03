@@ -121,6 +121,13 @@ Defer generated stories, subscriptions/checkout, token wallets, native apps, pub
 
 ## Evidence ledger
 
+3 November 2026, accounts, calibration and recorded beta release:
+
+- Local common checks passed: **22 Python and 379 JavaScript tests**, including real SQLite account/recording storage, account-registration acknowledgement, per-action calibration/vector controls, full-range permissions, recovery/zero handling, actual workspace bindings, recording privacy and founder authorization. Worker packaging passed with 52 allowlisted assets and the isolated vendor bridge.
+- Final review corrected a displayed-versus-active movement maximum mismatch and a delayed-analysis manual-zero mapping issue. New regressions cover both; requested reductions and explicit zero remain authoritative.
+- The CI browser suite now exercises the real hosted account API/SQLite storage with synthetic signed identities, presets across reload, guided Flexer setup, beta consent/output/ratings, founder timeline review and deletion. It preserves the browser's real Origin/Fetch Metadata headers. Its result and production deployment must be checked in the release run; local unit success alone does not establish either.
+- Live vendor QR issuance, physical response/expiry/Stop and real-phone qualification remain untested. Complete the [3 November runbook](beta-session-2026-11-03.md), including whole-host beta Access coverage and both tester allowlists, before the physical session. One host/browser controls a physical toy at a time.
+
 2 November 2026, eight-model connection revision:
 
 - Scope: eight profile simulators, explicit model/mode/device/action selection, short test and neutral practice; optional server-configured Lovense Remote bridge with targeted finite physical beta requests. Source implementation and the actual checks must be reported independently.
