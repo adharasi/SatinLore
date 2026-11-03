@@ -104,6 +104,22 @@ test("invalid bootstrap and destroyed pairing never establish a second hidden co
   active.incoming("basicapi_update_device_info_tc",{online:true,toyList:[active.raw("flexer")]});assert.deepEqual(active.sdk.getOnlineToys(),[]);
 });
 
+test("socket bootstrap distinguishes a rejected pairing token from a browser network failure", async () => {
+  for (const [authentication, expected] of [
+    [() => Response.json({code: 400, message: "private vendor error", data: {authToken: "private pairing token"}}),
+      {stage: "socket-response", status: 200, code: 400}],
+    [() => { throw new Error("private browser error"); }, {stage: "socket-request"}],
+  ]) {
+    const f = fixture({authentication});
+    await assert.rejects(f.sdk.prepared, error => {
+      assert.deepEqual(error.pairing, expected);
+      assert.doesNotMatch(error.message, /private/);
+      return true;
+    });
+    assert.equal(f.socket.connected, false);
+  }
+});
+
 test("socket output above five needs per-action session permission and connection loss clears it",async()=>{
   const f=fixture();await f.sdk.prepared;f.toys([f.raw("flexer")]);
   assert.throws(()=>f.sdk.sendToyCommand({vibrate:6,time:2,toyId:"flexer"}));

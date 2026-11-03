@@ -156,6 +156,20 @@ test("the reader shows the actual pairing failure rather than a second generic d
   }
 });
 
+test("a failed fallback preserves safe socket rejection details and discards raw vendor data", async () => {
+  const f = fixture({autoQr: false, autoToys: false});
+  try {
+    assert.equal(await f.bridge.begin(), true);
+    f.deliver({type: "pairing-diagnostic", stage: "socket-response", status: 200, code: 400,
+      message: "private upstream payload", authToken: "private pairing token"});
+    f.deliver({type: "error"});
+    const state = f.bridge.snapshot();
+    assert.equal(state.connectionState, "disconnected");
+    assert.match(state.connectionMessage, /Website Name or pairing token \(code 400\)/);
+    assert.doesNotMatch(JSON.stringify(state), /private upstream payload|private pairing token/);
+  } finally { await f.finish(); }
+});
+
 test("cancelled status and credential responses cannot reopen a frame or leak a hardware lease", async () => {
   for (const stage of ["status", "session"]) {
     const f = fixture(); let resolve;

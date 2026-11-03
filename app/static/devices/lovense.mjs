@@ -92,8 +92,16 @@ export class LovenseCheck {
           if (!this.active(generation)) return;
           const url = safeQrUrl(result?.qrcodeUrl);
           if (url) this.emit({type: "qr", url});
-          else this.fail("The pairing code could not be loaded. Disconnect and try again.");
-        }).catch(() => { if (this.active(generation)) this.fail(); });
+          else {
+            this.emit({type: "pairing-diagnostic", stage: "qr-code"});
+            this.fail("The pairing code could not be loaded. Disconnect and try again.");
+          }
+        }).catch(error => {
+          if (!this.active(generation)) return;
+          const code = error?.pairing?.code;
+          this.emit({type: "pairing-diagnostic", stage: "qr-code", code: Number.isSafeInteger(code) ? code : undefined});
+          this.fail();
+        });
       }));
       sdk.on("sdkError", guarded(() => this.fail()));
       sdk.on("appStatusChange", guarded(status => {

@@ -9,6 +9,7 @@ const ACTIONS = Object.freeze({vibrate:"Vibrate",rotate:"Rotate",fingering:"Fing
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const plain = value => value && typeof value === "object" && !Array.isArray(value);
 const level = value => Number.isInteger(value) && value >= 0 && value <= 20;
+const vendorCode = value => Number.isSafeInteger(value) && Math.abs(value) <= 999999 ? value : undefined;
 function envelope(raw) {
   if (typeof raw === "string") {
     if (raw.length > 65_536) throw Error();
@@ -69,15 +70,21 @@ export class LovenseSocket {
   }
   emit(name, ...args) { if (!this.destroyed) for (const callback of this.handlers.get(name) || []) callback(...args); }
   async prepare(options) {
+    const pairing = {stage: "socket-request"};
     try {
       if (!plain(options) || typeof options.platform !== "string" || !options.platform || options.platform.length > 128 ||
           typeof options.authToken !== "string" || !options.authToken || options.authToken.length > 8192) throw Error();
       const response = await this.fetcher(SOCKET_AUTH_URL,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},
         body:JSON.stringify({platform:options.platform,authToken:options.authToken}),credentials:"omit",redirect:"error",signal:AbortSignal.timeout(8000)});
+      pairing.stage = "socket-response";
+      pairing.status = response.status;
       const value = await boundedJson(response,16_384);
+      pairing.code = vendorCode(value?.code);
       if (this.destroyed || value?.code !== 0) throw Error();
+      pairing.stage = "socket-address";
       const address = socketAddress(value?.data?.socketIoUrl), path = value?.data?.socketIoPath;
       if (!address || typeof path !== "string" || !/^\/[A-Za-z0-9/_.-]{1,255}$/.test(path) || path.includes("..")) throw Error();
+      pairing.stage = "socket-connect";
       const socket = this.socketFactory(address,{path,transports:["websocket"],forceNew:true,reconnection:false,autoConnect:false,timeout:8000});
       this.socket = socket;
       socket.on("basicapi_update_device_info_tc",raw=>this.deviceInfo(raw));
@@ -95,7 +102,7 @@ export class LovenseSocket {
       return this;
     } catch {
       this.destroy();
-      throw Error("The extended Lovense connection could not be prepared.");
+      throw Object.assign(Error("The extended Lovense connection could not be prepared."), {pairing});
     }
   }
   getAppStatus() {return !this.destroyed && this.online && this.socket?.connected === true;}
@@ -117,7 +124,12 @@ export class LovenseSocket {
       const value=envelope(raw), result=data(raw), pending=this.pendingQr;
       if (result.ackId !== pending.ackId) return;
       this.clearTimer(pending.timer);this.pendingQr=null;
-      if (value.code !== 0 || typeof result.qrcodeUrl !== "string" || result.qrcodeUrl.length > 4096) {pending.reject(Error("The pairing code could not be loaded."));return;}
+      if (value.code !== 0 || typeof result.qrcodeUrl !== "string" || result.qrcodeUrl.length > 4096) {
+        pending.reject(Object.assign(Error("The pairing code could not be loaded."), {
+          pairing: {stage: "qr-code", code: vendorCode(value.code)},
+        }));
+        return;
+      }
       this.qr={qrcodeUrl:result.qrcodeUrl};pending.resolve({...this.qr});
     } catch {this.emit("sdkError");}
   }

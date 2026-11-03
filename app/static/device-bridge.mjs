@@ -56,7 +56,18 @@ async function onCommand(event) {
         extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken});
         preparingAdapter = extended;
         await extended.prepared;
-      } catch { extended?.destroy(); extended = null; if(closed||document.hidden){close();return;} await loadSdk(); }
+      } catch (error) {
+        extended?.destroy();
+        extended = null;
+        if (closed || document.hidden) { close(); return; }
+        if (error?.pairing) {
+          const {stage, status, code} = error.pairing;
+          connectedPort?.postMessage({type: "pairing-diagnostic", stage, status, code});
+          // The Basic SDK sends the same authorization request. A vendor rejection will repeat there.
+          if (stage === "socket-response" && Number.isSafeInteger(code) && code !== 0) throw error;
+        }
+        await loadSdk();
+      }
       preparingAdapter = null;
       if (closed || document.hidden) { extended?.destroy(); close(); return; }
       controller = new LovenseCheck({

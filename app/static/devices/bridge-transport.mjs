@@ -11,6 +11,21 @@ const CHANNELS = new Set(["vibrate", "rotate", "fingering", "thrusting", "oscill
 const validId = value => typeof value === "string" && ID.test(value);
 const validLevel = value => Number.isInteger(value) && value >= 0 && value <= 5;
 const personalLevel = value => Number.isInteger(value) && value >= 0 && value <= 20;
+const PAIRING_FAILED = "Lovense could not show a pairing code. Try connecting again.";
+function pairingMessage({stage, status, code}) {
+  const vendorCode = Number.isSafeInteger(code) && code !== 0 && Math.abs(code) <= 999999 ? ` (code ${code})` : "";
+  const httpStatus = Number.isInteger(status) && status >= 300 && status <= 599 ? ` (HTTP ${status})` : "";
+  switch (stage) {
+    case "socket-request": return "The browser could not reach Lovense’s connection service. Try connecting again.";
+    case "socket-response": return code === 400 ?
+      "Lovense rejected the Website Name or pairing token (code 400). Ask the study owner to check the Lovense setup." :
+      `Lovense did not authorise the socket connection${vendorCode || httpStatus}. Try connecting again.`;
+    case "socket-address": return "Lovense returned socket details that the app could not use. Try connecting again.";
+    case "socket-connect": return "Lovense authorised the session, but the browser could not open the socket. Try connecting again.";
+    case "qr-code": return `Lovense could not show a pairing code${vendorCode}. Try connecting again.`;
+    default: return "";
+  }
+}
 
 /** Owns an opaque sandbox and its private MessagePort; never receives story data. */
 export class BridgeTransport {
@@ -24,6 +39,7 @@ export class BridgeTransport {
     this.epoch = 0; this.serial = 0; this.frame = null; this.port = null; this.release = null;
     this.releasing = null;
     this.credentials = null; this.qrUrl = null; this.available = null; this.state = "disconnected";
+    this.pairingProblem = "";
     this.message = ""; this.channel = "vibrate"; this.ceiling = 5; this.ready = false; this.expiresAt = 0;
     this.configurationChecks = null;
     this.personalRangeChannels = new Set();
@@ -104,7 +120,9 @@ export class BridgeTransport {
       frame.setAttribute("sandbox", "allow-scripts"); frame.title = "Isolated Lovense connection";
       frame.src = this.framePath; frame.hidden = true; this.frame = frame;
       this.opening = {resolve, reject};
-      this.openTimer = this.setTimer(() => { if (operation === this.epoch) this.dispose("Pairing timed out. Try connecting again."); }, 30000);
+      this.openTimer = this.setTimer(() => {
+        if (operation === this.epoch) this.dispose(this.pairingProblem || "Pairing timed out. Try connecting again.");
+      }, 30000);
       this.expiryTimer = this.setTimer(() => { if (operation === this.epoch) this.dispose("The pairing session expired. Sign in and reconnect."); }, Math.min(this.expiresAt - this.now(), 2147483647));
       frame.addEventListener("load", () => {
         if (operation !== this.epoch || this.frame !== frame) return;
@@ -126,10 +144,12 @@ export class BridgeTransport {
       this.port.postMessage({type: "init", session: this.credentials}); this.credentials = null;
       this.message = "Getting a pairing code from Lovense…";
       this.opening?.resolve(true); this.opening = null; this.notify();
+    } else if (message.type === "pairing-diagnostic") {
+      if (this.state === "connecting") this.pairingProblem = pairingMessage(message) || this.pairingProblem;
     } else if (message.type === "qr") {
       const url = safeQrUrl(message.url);
       if (!url) { this.dispose("The pairing code was invalid. Reconnect."); return; }
-      this.qrUrl = url; this.clearTimer(this.openTimer);
+      this.qrUrl = url; this.pairingProblem = ""; this.clearTimer(this.openTimer);
       if (!this.toys.length) {this.state = "waiting"; this.message = "Scan this code in Lovense Remote.";}
       this.notify();
     } else if (message.type === "toys" && Array.isArray(message.toys)) {
@@ -161,14 +181,14 @@ export class BridgeTransport {
         const id = this.selected; this.selected = null; this.emit({type: "disconnect", deviceId: id});
       }
       if (message.state === "disconnected") {
-        this.dispose(this.state === "connecting" ? "Lovense could not show a pairing code. Try connecting again." : "The Lovense connection ended. Connect again.");
+        this.dispose(this.state === "connecting" ? this.pairingProblem || PAIRING_FAILED : "The Lovense connection ended. Connect again.");
         return;
       }
       if (message.state === "waiting" && this.qrUrl) this.state = "waiting";
       this.notify();
     } else if (message.type === "closed") this.dispose("The Lovense connection closed. Reconnect explicitly.");
     else if (message.type === "error") {
-      if (this.state === "connecting") {this.dispose("Lovense could not show a pairing code. Try connecting again."); return;}
+      if (this.state === "connecting") {this.dispose(this.pairingProblem || PAIRING_FAILED); return;}
       this.message = "The device request failed. Check Lovense Remote and reconnect.";
       if (validId(this.selected)) this.emit({type: "disconnect", deviceId: this.selected});
       this.notify();
@@ -237,7 +257,7 @@ export class BridgeTransport {
     const id = this.selected, frame = this.frame, port = this.port, release = this.release;
     this.frame = this.port = this.release = null; this.credentials = null; this.selected = null; this.toys = []; this.qrUrl = null;
     this.personalRangeChannels.clear();this.ceiling=Math.min(this.ceiling,5);
-    this.ready = false; this.expiresAt = 0; this.state = "disconnected"; this.message = message;
+    this.ready = false; this.expiresAt = 0; this.state = "disconnected"; this.message = message; this.pairingProblem = "";
     this.clearTimer(this.openTimer); this.clearTimer(this.expiryTimer);
     this.opening?.reject(new Error(message)); this.opening = null;
     for (const pending of this.pending.values()) {this.clearTimer(pending.timer);pending.reject(new Error(message));}
