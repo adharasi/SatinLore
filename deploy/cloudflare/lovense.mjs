@@ -4,7 +4,11 @@ const MAX_VENDOR_BYTES = 16_384;
 const ENCODER = new TextEncoder();
 
 export class LovenseServiceError extends Error {
-  constructor(message, status = 400) { super(message); this.status = status; }
+  constructor(message, status = 400, diagnostic) {
+    super(message);
+    this.status = status;
+    this.diagnostic = diagnostic;
+  }
 }
 /** Value-free diagnostics, available only after the Worker's signed Access gate. */
 export function lovenseReadiness(env, storageAvailable) {
@@ -67,21 +71,34 @@ export async function emptyLovenseRequest(request) {
   } finally { clearTimeout(timeout); }
 }
 export async function issueLovenseToken(config, uid, { fetcher = fetch } = {}) {
+  const signal = AbortSignal.timeout(8000);
+  const diagnostic = { stage: "upstream-request" };
   try {
     const response = await fetcher(LOVENSE_TOKEN_URL, {
       method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ token: config.developerToken, uid }), redirect: "error", credentials: "omit",
-      signal: AbortSignal.timeout(8000),
+      signal,
     });
-    if (response.status !== 200 || !response.body) throw new Error();
+    diagnostic.upstreamStatus = response.status;
+    if (response.status !== 200) {
+      diagnostic.stage = "upstream-http";
+      throw new Error();
+    }
+    diagnostic.stage = "upstream-body";
+    if (!response.body) throw new Error();
     const length = response.headers.get("Content-Length");
     if (length && (!/^\d+$/.test(length) || Number(length) > MAX_VENDOR_BYTES)) { await response.body.cancel(); throw new Error(); }
     const reader = response.body.getReader(), chunks = []; let size = 0;
-    const timeout = setTimeout(() => { void reader.cancel().catch(() => {}); }, 8000);
+    const timeout = setTimeout(() => {
+      diagnostic.stage = "upstream-timeout";
+      void reader.cancel().catch(() => {});
+    }, 8000);
     let bytes;
     try {
       for (;;) {
-        const { done, value } = await reader.read(); if (done) break;
+        const { done, value } = await reader.read();
+        if (diagnostic.stage === "upstream-timeout") throw new Error();
+        if (done) break;
         size += value.byteLength;
         if (size > MAX_VENDOR_BYTES) { await reader.cancel(); throw new Error(); }
         chunks.push(value);
@@ -89,13 +106,23 @@ export async function issueLovenseToken(config, uid, { fetcher = fetch } = {}) {
       bytes = new Uint8Array(size); let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     } finally { clearTimeout(timeout); }
+    diagnostic.stage = "upstream-json";
     const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (Number.isSafeInteger(value?.code) && Math.abs(value.code) <= 999999) {
+      diagnostic.lovenseCode = value.code;
+    }
+    if (value?.code !== 0) {
+      diagnostic.stage = diagnostic.lovenseCode ? "upstream-rejected" : "upstream-response";
+      throw new Error();
+    }
+    diagnostic.stage = "upstream-token";
     const token = value?.data?.authToken;
-    if (value?.code !== 0 || typeof token !== "string" || !token.trim() || token.length > 8192 ||
+    if (typeof token !== "string" || !token.trim() || token.length > 8192 ||
         /[\u0000-\u001f\u007f]/.test(token) || token === config.developerToken) throw new Error();
     return token;
   } catch {
-    // Vendor errors can contain credentials or private pairing data. Never expose them.
-    throw new LovenseServiceError("Lovense could not establish a connection session. Try again shortly.", 502);
+    if (signal.aborted && ["upstream-request", "upstream-body"].includes(diagnostic.stage)) diagnostic.stage = "upstream-timeout";
+    // Keep only a fixed stage and numeric statuses. Vendor messages and payloads can contain credentials.
+    throw new LovenseServiceError("Lovense could not establish a connection session. Try again shortly.", 502, diagnostic);
   }
 }

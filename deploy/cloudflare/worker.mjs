@@ -144,7 +144,12 @@ async function handleLovense(request, env, { config, session, reverify, lovenseF
     return finish(json({ uid, platform: vendorConfig.platform, authToken,
       expires_at: Math.floor(Math.min(renewed.expiresAt, Date.now() + 15 * 60_000) / 1000) }));
   } catch (error) {
-    if (error instanceof LovenseServiceError) return finish(json({ error: error.message }, error.status));
+    if (error instanceof LovenseServiceError) {
+      return finish(json({
+        error: error.message,
+        ...(session.isFounder && error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+      }, error.status));
+    }
     return finish(json({ error: "Connection setup is temporarily unavailable. Try again shortly." }, 503));
   }
 }

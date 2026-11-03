@@ -143,3 +143,37 @@ test("vendor failures, redirects, oversized/invalid response bodies and develope
     () => {throw new Error("secret credential leaked by transport");},
   ]) await assert.rejects(issueLovenseToken(config,"sl_fixture",{fetcher:vendor}), error=>error.status===502&&!/secret|credential leaked|synthetic-server/.test(error.message));
 });
+
+test("Alpha token failures expose only safe upstream diagnostics to the founder", async () => {
+  const founderToken = "a".repeat(64), testerToken = "b".repeat(64);
+  const error = "Lovense could not establish a connection session. Try again shortly.";
+  for (const [vendor, diagnostic] of [
+    [() => { throw new Error("private upstream exception"); }, { stage: "upstream-request" }],
+    [() => new Response("private upstream error", { status: 403 }), { stage: "upstream-http", upstreamStatus: 403 }],
+    [() => new Response("private invalid JSON"), { stage: "upstream-json", upstreamStatus: 200 }],
+    [() => Response.json({ code: 123, message: "private upstream rejection", data: { authToken: "private token" } }),
+      { stage: "upstream-rejected", upstreamStatus: 200, lovenseCode: 123 }],
+    [() => Response.json({ code: 0, data: { authToken: VENDOR.LOVENSE_DEVELOPER_TOKEN } }),
+      { stage: "upstream-token", upstreamStatus: 200, lovenseCode: 0 }],
+    [() => Response.json({ code: "private arbitrary value" }), { stage: "upstream-response", upstreamStatus: 200 }],
+  ]) {
+    const f = fixture({ vendor });
+    Object.assign(f.env, {
+      ALPHA_DILAN_VERIFIER: "c".repeat(64), ALPHA_SADIE_VERIFIER: "d".repeat(64),
+      ALPHA_STUDY: { idFromName: name => name, get: () => ({ fetch: input => {
+        const sessionToken = input.headers.get("X-Alpha-Session");
+        if (![founderToken, testerToken].includes(sessionToken)) return Response.json({ authenticated: false });
+        return Response.json({
+          authenticated: true, username: sessionToken === founderToken ? "Dilan" : "Sadie", expiresAt: Date.now() + 60000,
+        });
+      } }) },
+    });
+    for (const [sessionToken, expected] of [[founderToken, { error, diagnostic }], [testerToken, { error }]]) {
+      const response = await f.worker.fetch(request(undefined, {
+        path: "/alpha/api/lovense/session", headers: { Cookie: `__Host-satinlore_alpha=${sessionToken}` },
+      }), f.env);
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), expected);
+    }
+  }
+});
