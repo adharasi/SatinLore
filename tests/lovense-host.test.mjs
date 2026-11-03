@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
-import { LOVENSE_TOKEN_URL, emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseIdentity } from "../deploy/cloudflare/lovense.mjs";
+import { LOVENSE_TOKEN_URL, emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseReadiness, lovenseIdentity } from "../deploy/cloudflare/lovense.mjs";
 
 const ORIGIN = "https://app.satinlore.com";
 const CONFIG = { PUBLIC_APP_ORIGIN: ORIGIN, PRIVATE_APP_ENABLED: "true", ACCESS_TEAM_DOMAIN: "fixture.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64), FOUNDER_EMAIL: "founder@example.test" };
@@ -53,9 +53,41 @@ test("status reveals availability only and all Lovense endpoints require the exi
   for (const path of ["/api/lovense/status", "/api/lovense/session"]) assert.equal((await f.worker.fetch(request(undefined, {path,method:path.endsWith("status")?"GET":"POST"}), f.env)).status, 403);
   const status = await (await f.worker.fetch(request(jwt, {path:"/api/lovense/status",method:"GET"}), {...f.env, LOVENSE_DEVELOPER_TOKEN: undefined})).json();
   assert.equal(status.available, false); assert.equal(typeof status.message, "string");
-  assert.deepEqual(Object.keys(status).sort(), ["available", "message"]);
+  assert.deepEqual(Object.keys(status).sort(), ["available", "checks", "message"]);
+  assert.deepEqual(status.checks, {developerToken: "missing", platform: "ready", uidSecret: "ready", storage: "ready"});
+  assert.match(status.message, /LOVENSE_DEVELOPER_TOKEN runtime Secret/);
   assert.equal((await f.worker.fetch(request(jwt), {...f.env, LOVENSE_DEVELOPER_TOKEN: undefined})).status, 503);
   assert.equal(f.vendorCalls.length, 0); assert.equal(f.quotas.length, 0);
+});
+test("readiness identifies missing and malformed runtime settings without exposing a value or contacting Lovense", async () => {
+  const f = fixture(), jwt = await token();
+  const invalid = {...f.env, LOVENSE_PLATFORM:"private<invalid>name", LOVENSE_UID_SECRET:"private-user-id-is-not-a-secret", PRIVATE_FEEDBACK:undefined};
+  const response = await f.worker.fetch(request(jwt, {path:"/api/lovense/status",method:"GET"}), invalid);
+  const value = await response.json();
+  assert.equal(value.available, false);
+  assert.deepEqual(value.checks, {developerToken:"ready", platform:"invalid", uidSecret:"invalid", storage:"missing"});
+  assert.doesNotMatch(JSON.stringify(value), /private<invalid>|private-user-id|synthetic-server-only/);
+  assert.equal(f.vendorCalls.length,0);
+  assert.equal(lovenseReadiness(VENDOR,true).available,true);
+  assert.deepEqual(lovenseConfiguration({...VENDOR,LOVENSE_DEVELOPER_TOKEN:`  ${VENDOR.LOVENSE_DEVELOPER_TOKEN} \n`,LOVENSE_UID_SECRET:` ${VENDOR.LOVENSE_UID_SECRET} `}),lovenseConfiguration(VENDOR));
+});
+test("beta origin is signed and exact-host gated, with a separately scoped optional audience and private bridge policy", async () => {
+  const f=fixture(), jwt=await token(), beta="https://beta.satinlore.com";
+  const betaRequest=(jwt,{method="GET",path="/api/lovense/status",origin=beta,...options}={})=>new Request(beta+path,{method,headers:{...(jwt?{"Cf-Access-Jwt-Assertion":jwt}:{}),Origin:origin,"Content-Type":"application/json"},...(method==="POST"?{body:"{}"}:{}),...options});
+  assert.equal((await f.worker.fetch(betaRequest(),f.env)).status,403);
+  const ready=await f.worker.fetch(betaRequest(jwt),f.env);
+  assert.equal(ready.status,200);assert.equal((await ready.json()).available,true);
+  assert.match(ready.headers.get("Content-Security-Policy"),/frame-src https:\/\/beta\.satinlore\.com\/device-bridge/);
+  assert.equal((await f.worker.fetch(betaRequest(jwt,{method:"POST",path:"/api/lovense/session",origin:ORIGIN}),f.env)).status,403);
+  assert.equal(f.vendorCalls.length,0);
+  const paired=await f.worker.fetch(betaRequest(jwt,{method:"POST",path:"/api/lovense/session"}),f.env);
+  assert.equal(paired.status,200);assert.equal(f.quotas[0].input.headers.get("Origin"),ORIGIN);
+  const alternateAudience="b".repeat(64), alternateEnv={...f.env,BETA_ACCESS_AUD:alternateAudience};
+  assert.equal((await f.worker.fetch(betaRequest(jwt),alternateEnv)).status,403);
+  const betaJwt=await token({aud:alternateAudience});
+  assert.equal((await f.worker.fetch(betaRequest(betaJwt),alternateEnv)).status,200);
+  assert.equal((await f.worker.fetch(request(betaJwt,{path:"/api/lovense/status",method:"GET"}),alternateEnv)).status,403);
+  assert.equal((await f.worker.fetch(betaRequest(jwt),{...f.env,BETA_ACCESS_AUD:"invalid"})).status,503);
 });
 test("connection credentials accept no client identity or story fields and require exact-origin bounded JSON", async () => {
   const f = fixture(), jwt = await token();

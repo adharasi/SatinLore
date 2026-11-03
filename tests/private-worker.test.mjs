@@ -71,6 +71,9 @@ test("valid founder assertions grant only read-only allowlisted files and strip 
   const f = fixture(), jwt = await token();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const response = await f.worker.fetch(request(path, jwt), f.env);
+    if (["/admin","/admin/","/beta-admin.html","/static/beta-admin.mjs","/static/beta-admin.css"].includes(path)) {
+      assert.equal(response.status,403,path);continue;
+    }
     assert.equal(response.status, 200, path);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
     assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
@@ -162,10 +165,10 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.equal(config.assets.run_worker_first, true);
   assert.equal(config.assets.not_found_handling, "none");
   assert.equal(config.workers_dev, false); assert.equal(config.preview_urls, false);
-  assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }]);
+  assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }, {pattern:"beta.satinlore.com",custom_domain:true}]);
   assert.equal(config.d1_databases, undefined); assert.equal(config.r2_buckets, undefined);
-  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" }]);
-  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] }]);
+  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"}]);
+  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]}]);
   assert.equal(config.keep_vars, true);
   for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED"]) assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
   assert.equal(config.vars.PUBLIC_APP_ORIGIN, ORIGIN);
@@ -198,6 +201,17 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.match(bridge, /https:\/\/api\.lovense-api\.com\/basic-sdk\/core\.min\.js/);
   assert.doesNotMatch(bridge, /LOVENSE_DEVELOPER_TOKEN|LOVENSE_UID_SECRET/);
   assert.equal(await readFile(resolve(ROOT, "app/static/index.html"), "utf8"), localIndex);
+});
+
+test("beta review documents and assets require the founder on the beta host", async()=>{
+  const f=fixture(),founder=await token(),tester=await token({sub:"synthetic-tester",email:"tester@example.test"});
+  const env={...f.env,BETA_TESTER_EMAILS:"tester@example.test"};
+  for(const path of ["/admin","/admin/","/beta-admin.html","/static/beta-admin.mjs","/static/beta-admin.css"]){
+    assert.equal((await f.worker.fetch(request(path,founder,{origin:"https://beta.satinlore.com"}),env)).status,200);
+    assert.equal((await f.worker.fetch(request(path,tester,{origin:"https://beta.satinlore.com"}),env)).status,403);
+    assert.equal((await f.worker.fetch(request(path,founder),env)).status,403);
+  }
+  assert.equal((await f.worker.fetch(request('/api/admin/beta-recordings',tester,{origin:"https://beta.satinlore.com"}),env)).status,403);
 });
 
 test("a first deployment without dashboard Access settings is unavailable and the runtime pause remains fail closed", async () => {

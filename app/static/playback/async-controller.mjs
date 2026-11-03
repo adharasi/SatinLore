@@ -1,3 +1,4 @@
+import {ReadingFeel} from "../reader/calibration.mjs";
 /** Experimental async contract for the deterministic lab only; not a qualified hardware adapter. */
 export const ASYNC_COMMAND_MS = 2000;
 const level = value => {
@@ -12,7 +13,8 @@ export class AsyncPlaybackController {
     if (!Number.isFinite(heartbeatMs) || heartbeatMs < 1000 || heartbeatMs > 1500) throw new RangeError("Use a 1000–1500 ms finite renewal cadence.");
     Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, connectTimeout, requestTimeout, inactivityMs, heartbeatMs });
     this.state = "DISCONNECTED"; this.connected = false; this.selected = null; this.visible = true; this.authorized = true;
-    this.levels = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;
+    this.feel = new ReadingFeel(); this.manualZeros = new Set();
+    this.levels = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
     this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose a simulated device explicitly.";
     this.requests = new Map(); this.stopTasks = new Map(); this.uncertain = new Set(); this.errorLatch = false;
     this.commandSettlements = new Map(); this.needsFreshStop = new Set();
@@ -22,11 +24,46 @@ export class AsyncPlaybackController {
   snapshot() {
     return { state: this.state, running: this.state === "PLAYING", connected: this.connected, selectedDeviceId: this.selected,
       canStart: this.state === "READY_PAUSED" && this.connected && !!this.selected && this.visible && this.authorized && !!this.levels.length && !this.errorLatch && !this.uncertain.size,
-      output: this.output, outputKnown: this.output !== null, target: this.desired(), ceiling: this.ceiling, strength: this.strengthTenths / 10,
+      output: this.output,outputLevels:this.outputLevels?{...this.outputLevels}:null, outputKnown: this.output !== null, target: this.desired(), ceiling: this.ceiling, strength: this.strengthTenths / 10,
       position: this.position, generation: this.generation, staleReplies: this.staleReplies, uncertainTargets: [...this.uncertain],
+      feel: this.feel.snapshot(),
       pending: [...this.requests.values()].filter(value => !value.rawSettled).map(value => ({ ...value.frame })), reason: this.reason };
   }
-  desired() { return Math.min(this.ceiling, Math.floor((this.levels[this.position] ?? 0) * this.strengthTenths / 10)); }
+  intent() {
+    const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
+      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),now:this.now()};
+    const levels=this.feel.vector?.(context);
+    return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
+  }
+  desired() {return this.intent().level;}
+  vectorReduction(prior,next=this.intent().levels){return !!prior && !!next && Object.keys(prior).some(id=>prior[id]>(next[id]??0));}
+  setFeel(value) {
+    try {this.feel.configure(value);} catch(error) {void this.pause("Invalid reading controls.");throw error;}
+    return this.changed();
+  }
+  hold(value = this.output) {
+    if(this.state !== "PLAYING") return false;
+    if(value===null){void this.pause("Output is unknown. Stopped instead of holding an unconfirmed level.");return false;}
+    try{if(this.feel.holdLevels&&arguments.length===0)this.feel.holdLevels(this.outputLevels);else this.feel.hold(value);}catch(error){void this.pause("Invalid Hold level.");throw error;}this.changed();return true;
+  }
+  holdChannels(value) {
+    if(this.state!=="PLAYING" || !this.feel.holdLevels)return false;
+    try{this.feel.holdLevels(value);}catch(error){void this.pause("Invalid movement levels.");throw error;}
+    this.changed();return true;
+  }
+  easeOff(value = this.feel.settings.recovery) {
+    if(this.state !== "PLAYING") return false;
+    if(this.output===null){void this.pause("Output is unknown. Stopped instead of guessing a recovery level.");return false;}
+    try{if(this.feel.easeOffLevels)this.feel.easeOffLevels(this.outputLevels,arguments.length?value:undefined);else this.feel.easeOff(value,Math.min(this.output,this.desired()));}catch(error){void this.pause("Invalid recovery level.");throw error;}this.changed();return true;
+  }
+  followStory() {
+    if(this.state==="PLAYING"&&this.output===null){void this.pause("Output is unknown. Stopped before returning to the story.");return this.snapshot();}
+    this.feel.followStory(this.state==="PLAYING"?(this.feel.vector?this.outputLevels:this.output):undefined);return this.changed();
+  }
+  setManualZeros(indices) {
+    if(!Array.isArray(indices) || indices.some(index => !Number.isInteger(index) || index<0 || index>=this.levels.length)) {void this.pause("Invalid paragraph corrections.");throw new RangeError("Use existing paragraph indices.");}
+    this.manualZeros=new Set(indices);return this.changed();
+  }
   notify() {
     if (this.disposed) return this.snapshot();
     try { this.onChange(this.snapshot()); }
@@ -44,12 +81,16 @@ export class AsyncPlaybackController {
   request(kind, deviceId, extra = {}) {
     if (!["connect", "command", "stop", "disconnect"].includes(kind) || typeof deviceId !== "string" || !deviceId) return Promise.reject(new TypeError("Use a targeted transport operation."));
     if (kind === "command" && (!Number.isInteger(extra.level) || extra.level < 1 || extra.level > this.ceiling || extra.durationMs !== ASYNC_COMMAND_MS)) return Promise.reject(new RangeError("Use the confirmed ceiling and a finite two-second command."));
+    const vector=kind === "command" && extra.levels;
+    if(vector && (!this.transport.commandVector || !extra.ceilings || Array.isArray(vector) || Object.keys(vector).length<2 || Object.keys(vector).length>5 ||
+        Object.keys(vector).length!==Object.keys(extra.ceilings).length || Object.keys(vector).some(id=>!["vibrate","fingering","rotate","thrusting","oscillate"].includes(id)||!Number.isInteger(vector[id])||vector[id]<0||vector[id]>this.ceiling||!Number.isInteger(extra.ceilings[id])||extra.ceilings[id]<0||extra.ceilings[id]>this.ceiling||vector[id]>extra.ceilings[id]) ||
+        Math.max(...Object.values(vector))!==extra.level))return Promise.reject(new RangeError("Use individually bounded, supported movement controls."));
     const frame = { kind, deviceId, operationId: `request-${++this.sequence}`, generation: this.generation,
       ...(kind === "command" ? { level: extra.level, durationMs: ASYNC_COMMAND_MS } : {}) };
     const abort = new AbortController();
     let resolveBounded, rejectBounded;
     const promise = new Promise((resolve, reject) => { resolveBounded = resolve; rejectBounded = reject; });
-    const record = { frame, rawSettled: false, finished: false, cancel: null };
+    const record = { frame,...(vector?{levels:{...vector},ceilings:{...extra.ceilings}}:{}), rawSettled: false, finished: false, cancel: null };
     let timeout;
     const finish = (error, ack) => {
       if (record.finished) return;
@@ -74,10 +115,11 @@ export class AsyncPlaybackController {
         this.notify(); return;
       }
       if (!error && (!ack || ack.kind !== kind || ack.deviceId !== deviceId || ack.operationId !== frame.operationId || ack.generation !== frame.generation || (kind === "command" && ack.level !== frame.level) || (kind === "stop" && ack.level !== 0) || (kind === "connect" && ack.connected !== true))) error = new Error("Mismatched acknowledgement.");
-      this.event(error ? "request-failed" : "request-confirmed", frame);
+      if(!error && vector && (!ack.levels || Array.isArray(ack.levels) || Object.keys(ack.levels).length!==Object.keys(vector).length || Object.keys(vector).some(id=>ack.levels[id]!==vector[id])))error=new Error("Mismatched movement acknowledgement.");
+      this.event(error ? "request-failed" : "request-confirmed", {...frame,...(vector?{levels:{...vector}}:{})});
       finish(error, ack);
     };
-    try { Promise.resolve(this.transport[kind](frame, { signal: abort.signal })).then(ack => settle(null, ack), error => settle(error)); }
+    try { Promise.resolve(vector?this.transport.commandVector(frame,record.levels,record.ceilings,{signal:abort.signal}):this.transport[kind](frame, { signal: abort.signal })).then(ack => settle(null, ack), error => settle(error)); }
     catch (error) { settle(error); }
     return promise;
   }
@@ -94,7 +136,7 @@ export class AsyncPlaybackController {
       if (settledAtDispatch !== (this.commandSettlements.get(deviceId) || 0)) { this.needsFreshStop.add(deviceId); return false; }
       this.uncertain.delete(deviceId);
       this.needsFreshStop.delete(deviceId);
-      if (!this.uncertain.size) this.output = 0;
+      if (!this.uncertain.size) {this.output = 0;this.outputLevels=this.feel.vector?Object.fromEntries(Object.keys(this.feel.channels).map(id=>[id,0])):null;}
       return true;
     }, () => { this.errorLatch = true; return false; }).finally(() => {
       this.stopTasks.delete(deviceId); this.notify();
@@ -137,6 +179,7 @@ export class AsyncPlaybackController {
   }
   async pause(reason = "Paused. Confirm a new Start to continue.") {
     const generation = this.invalidate(), deviceId = this.selected;
+    this.feel.reset();
     this.state = deviceId && (this.connected || this.uncertain.has(deviceId) || this.outstanding(deviceId)) ? "STOPPING" : "DISCONNECTED";
     this.reason = reason; this.notify();
     const targets = new Set([...this.uncertain, ...(deviceId && (this.connected || this.outstanding(deviceId)) ? [deviceId] : [])]);
@@ -166,23 +209,25 @@ export class AsyncPlaybackController {
     try { if (!Array.isArray(values) || values.length > 2000) throw new RangeError("Use at most 2000 section levels."); checked = Array.from(values, level); }
     catch (error) { void this.pause("Invalid mapping. Playback is paused."); throw error; }
     void this.pause("Story changed. Confirm a new Start.");
-    this.levels = checked; this.position = 0; this.strengthTenths = 10; return this.notify();
+    this.levels = checked; this.manualZeros.clear(); this.position = 0; this.strengthTenths = 10; return this.notify();
   }
   changed() {
     ++this.revision; this.startIntent = null;
     const target = this.desired();
-    const excessivePending = [...this.requests.values()].some(value => !value.rawSettled && value.frame.kind === "command" && value.frame.level > target);
-    if (this.state === "PLAYING" && (excessivePending || (this.output !== null && this.output > target))) void this.reduce();
+    const excessivePending = [...this.requests.values()].some(value => !value.rawSettled && value.frame.kind === "command" && (value.frame.level > target || this.vectorReduction(value.levels)));
+    if (this.state === "PLAYING" && (excessivePending || this.vectorReduction(this.outputLevels) || (this.output !== null && this.output > target))) void this.reduce();
     return this.notify();
   }
   setPosition(index) {
     if (!Number.isInteger(index) || index < 0 || index >= this.levels.length) { void this.pause("Invalid position."); throw new RangeError("Choose an existing section."); }
     this.position = index; return this.changed();
   }
-  setLevel(index, value) {
+  setLevel(index, value, {manual = true} = {}) {
     try { level(value); if (!Number.isInteger(index) || index < 0 || index >= this.levels.length) throw new RangeError("Choose an existing section."); }
     catch (error) { void this.pause("Invalid section level."); throw error; }
-    this.levels[index] = value; return this.changed();
+    this.levels[index] = value;
+    if(manual && value === 0)this.manualZeros.add(index);else this.manualZeros.delete(index);
+    return this.changed();
   }
   setStrength(value) {
     if (!Number.isFinite(value) || value < 0 || value > 2 || Math.abs(Math.round(value * 10) - value * 10) > 1e-9) { void this.pause("Invalid session strength."); throw new RangeError("Use strength 0–2 in steps of 0.1."); }
@@ -193,6 +238,9 @@ export class AsyncPlaybackController {
     catch (error) { void this.pause("Review the ceiling before continuing."); throw error; }
     this.ceiling = value; return this.changed();
   }
+  // Only the reader's deliberate inline maximum gesture uses this method.
+  // The separate laboratory confirmation contract below is unchanged.
+  setCeilingFromControl(value) {level(value);this.ceiling=value;return this.changed();}
   prepareCeiling(value) {
     level(value); void this.pause("Confirm the higher ceiling. Playback stays paused.");
     const intent = { value, expected: this.ceiling, generation: this.generation };
@@ -209,7 +257,7 @@ export class AsyncPlaybackController {
   }
   start(intent) {
     if (!intent || intent !== this.startIntent || intent.generation !== this.generation || intent.revision !== this.revision || this.state !== "READY_PAUSED" || !this.connected || !this.visible || !this.authorized || this.errorLatch || this.uncertain.size) return false;
-    this.startIntent = null; this.state = "PLAYING"; this.lastActivity = this.lastTick = this.now(); this.reason = "Simulation is playing. Every nonzero request lasts two seconds.";
+    this.startIntent = null; this.feel.start(this.now()); this.state = "PLAYING"; this.lastActivity = this.lastTick = this.now(); this.reason = "Simulation is playing. Every nonzero request lasts two seconds.";
     this.armIdle(); this.tick(); return true;
   }
   async reduce() {
@@ -219,7 +267,9 @@ export class AsyncPlaybackController {
       return;
     }
     if (generation !== this.generation || this.state !== "PLAYING" || this.errorLatch || !this.visible || !this.authorized) return;
-    this.armIdle(); this.schedule(); this.notify();
+    // A confirmed Stop is a fresh zero-output boundary, not a stalled renewal.
+    // Preserve the inactivity deadline and finite dispatch cadence separately.
+    this.lastTick=this.now();this.armIdle(); this.schedule(); this.notify();
   }
   schedule() {
     if (this.state !== "PLAYING") return;
@@ -231,13 +281,17 @@ export class AsyncPlaybackController {
     if (this.state !== "PLAYING") return;
     if (!this.visible || !this.authorized || this.now() - this.lastActivity >= this.inactivityMs || this.now() - this.lastTick >= 2000) { void this.pause("Playback was interrupted or idle. Confirm a new Start."); return; }
     this.lastTick = this.now();
-    if (!this.outstanding(this.selected) && !this.stopTasks.has(this.selected) && !this.uncertain.size && this.now() - this.lastDispatch >= this.heartbeatMs && this.desired() > 0) {
-      const generation = this.generation, deviceId = this.selected, target = this.desired();
-      this.lastDispatch = this.now(); this.output = null;
-      void this.request("command", deviceId, { level: target, durationMs: ASYNC_COMMAND_MS }).then(() => {
+    const excessivePending=[...this.requests.values()].some(value=>!value.rawSettled && value.frame.kind==="command" && this.vectorReduction(value.levels));
+    if(excessivePending || this.vectorReduction(this.outputLevels) || this.output!==null && this.output>this.desired()){void this.reduce();return;}
+    if (!this.outstanding(this.selected) && !this.stopTasks.has(this.selected) && !this.uncertain.size && this.now() - this.lastDispatch >= this.heartbeatMs && (this.desired() > 0 || this.feel.ramping)) {
+      this.feel.advanceFollow?.(this.feel.vector?this.outputLevels:this.output,this.ceiling);
+      const generation = this.generation, deviceId = this.selected, intent=this.intent(),target = intent.level;
+      if(target===0){this.schedule();this.notify();return;}
+      this.lastDispatch = this.now(); this.output = null;this.outputLevels=null;
+      void this.request("command", deviceId, { level: target, durationMs: ASYNC_COMMAND_MS,...(intent.levels?{levels:intent.levels,ceilings:intent.ceilings}:{}) }).then(() => {
         if (generation !== this.generation || this.state !== "PLAYING") return;
-        if (target > this.desired()) { void this.reduce(); return; }
-        this.output = target; this.notify();
+        if (target > this.desired() || this.vectorReduction(intent.levels)) { void this.reduce(); return; }
+        this.output = target;this.outputLevels=intent.levels?{...intent.levels}:null; this.notify();
       }, () => { if (generation === this.generation) { this.errorLatch = true; void this.pause("The command failed or timed out. Reconnect explicitly."); } });
     }
     this.schedule(); this.notify();

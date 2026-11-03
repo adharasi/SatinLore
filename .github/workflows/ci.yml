@@ -10,7 +10,7 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -28,6 +28,7 @@ jobs:
       - run: npm exec wrangler deploy -- --dry-run
       - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run test:browser
+      - run: node scripts/beta-browser-check.mjs
       - name: Upload neutral frontend screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

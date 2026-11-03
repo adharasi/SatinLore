@@ -10,6 +10,7 @@ let connectedPort = null;
 let controller = null;
 let closed = false;
 let initialized = false;
+let preparingAdapter = null;
 
 function exactKeys(message, keys) {
   return message && typeof message === "object" && !Array.isArray(message) &&
@@ -24,6 +25,7 @@ function respond(command, ok, result = {}) {
 function close() {
   if (closed) return;
   closed = true;
+  preparingAdapter?.destroy(); preparingAdapter = null;
   controller?.disconnect();
   connectedPort?.postMessage({type: "closed"});
 }
@@ -45,17 +47,31 @@ async function onCommand(event) {
     if (command?.type === "init" && exactKeys(command, ["type", "session"]) && !initialized) {
       if (!exactKeys(command.session, ["uid", "platform", "authToken", "expires_at"])) throw new Error();
       initialized = true;
-      await loadSdk();
-      if (closed || document.hidden) { close(); return; }
+      let extended = null;
+      try {
+        // The private build bundles Socket.IO into this protected document.
+        // Build-free local development retains the documented Basic SDK route.
+        if(!document.querySelector('meta[name="satinlore-hosted-access"][content="true"]'))throw Error();
+        const {LovenseSocket}=await import("./devices/lovense-socket.mjs");
+        extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken});
+        preparingAdapter = extended;
+        await extended.prepared;
+      } catch { extended?.destroy(); extended = null; if(closed||document.hidden){close();return;} await loadSdk(); }
+      preparingAdapter = null;
+      if (closed || document.hidden) { extended?.destroy(); close(); return; }
       controller = new LovenseCheck({
-        sdkFactory: options => new globalThis.LovenseBasicSdk(options),
+        sdkFactory: options => extended || new globalThis.LovenseBasicSdk(options),
         emit: message => { if (!closed) connectedPort?.postMessage(message); },
       });
       controller.connect(command.session);
       return;
     }
     if (!controller) throw new Error();
-    if (command?.type === "select" && exactKeys(command, ["type", "id"])) controller.select(command.id);
+    if(command?.type==="enable-personal-range"&&exactKeys(command,["type","requestId","toyId","channels","confirmedStopped"])&&operation(command)){
+      if(document.hidden){close();return;}
+      if(command.toyId!==controller.selected)throw Error();
+      respond(command,true,controller.enablePersonalRange(command.channels,command.confirmedStopped));
+    } else if (command?.type === "select" && exactKeys(command, ["type", "id"])) controller.select(command.id);
     else if (command?.type === "refresh" && exactKeys(command, ["type"])) controller.refresh();
     else if (command?.type === "test" && (exactKeys(command, ["type", "level", "ceiling"]) || exactKeys(command, ["type", "level", "ceiling", "channel"]))) {
       if (document.hidden) { close(); return; }
@@ -65,6 +81,11 @@ async function onCommand(event) {
       if (typeof command.toyId !== "string" || !TOY_ID.test(command.toyId) || controller.selected !== command.toyId || command.seconds !== 2) throw new Error();
       const result = await controller.command(command.level, command.ceiling, {channel: command.channel, seconds: command.seconds});
       respond(command, true, result);
+    } else if (command?.type === "command-vector" && exactKeys(command,["type","requestId","toyId","levels","ceilings","seconds"]) && operation(command)) {
+      if(document.hidden){close();return;}
+      if(typeof command.toyId!=="string"||!TOY_ID.test(command.toyId)||controller.selected!==command.toyId||command.seconds!==2)throw Error();
+      const result=await controller.commandVector(command.levels,command.ceilings,{seconds:command.seconds});
+      respond(command,true,result);
     } else if (command?.type === "stop" && exactKeys(command, ["type"])) {
       await controller.stop();
     } else if (command?.type === "stop" && exactKeys(command, ["type", "requestId", "toyId"]) && operation(command)) {

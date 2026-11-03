@@ -24,6 +24,7 @@ for (const [source, target] of READER_ASSETS) {
     // Opaque iframes cannot authenticate module subrequests with Access cookies.
     // Bundle only trusted connection code into its authenticated document instead.
     const bundle = await build({ entryPoints: [resolve(SOURCE, "device-bridge.mjs")], bundle: true,
+      alias: {parseuri: resolve(SOURCE, "devices/safe-uri.cjs")},
       write: false, format: "iife", platform: "browser", target: "es2022", charset: "ascii", legalComments: "none" });
     const code = bundle.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
     content = content.replace(/<script type="module" src="\/static\/device-bridge\.mjs"><\/script>/,

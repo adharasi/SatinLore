@@ -58,7 +58,9 @@ test("Osci 3 is identified separately from older Osci models and keeps unsupport
   const profile = getToyProfile("osci3");
   assert.deepEqual(profile.simChannels, ["vibrate", "oscillate"]);
   assert.deepEqual(profile.simulationOnlyChannels, ["oscillate"]);
-  assert.match(profile.channels.find(channel => channel.id === "oscillate").label, /simulator only/);
+  assert.equal(profile.channels.find(channel => channel.id === "oscillate").label, "Oscillation");
+  assert.deepEqual(normaliseToy({id:"osci-socket",toyType:"osci3",connected:true},{transport:"standard-socket-v1"}).capabilities,["vibrate","oscillate"]);
+  assert.deepEqual(normaliseToy({id:"osci-basic",toyType:"osci3",connected:true,controlTransport:"standard-socket-v1"}).capabilities,["vibrate"],"A vendor field cannot authorize an extended transport.");
   assert.deepEqual(normaliseToy(raw("osci3", {fullFunctionNames: ["Vibrate", "Oscillate", "Vibrate1", "Vibrate2", "Heating"]})).capabilities, ["vibrate"]);
   assert.equal(normaliseToy(raw("osci3", {fullFunctionNames: ["Oscillate"]})), null, "An advertised physical function cannot authorise an undocumented browser-SDK command.");
 });

@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/static/theme.css">
   <link rel="stylesheet" href="/static/reader.css">
   <link rel="stylesheet" href="/static/setup.css">
+  <link rel="stylesheet" href="/static/reader/account-workspace.css">
+  <link rel="stylesheet" href="/static/reader/beta-recording.css">
   <script type="module" src="/static/app.mjs"></script>
 </head>
 <body data-library-open="true" data-settings-open="false" data-focus="false" data-reading-width="wide">
@@ -46,6 +48,8 @@
   </aside>
 
   <main id="main-content" class="reading-canvas" tabindex="-1">
+    <section id="beta-recording-mount" aria-label="Beta recording choices"></section>
+    <section id="account-welcome" class="account-welcome" aria-label="Your private account" hidden></section>
     <section id="empty-workspace" class="empty-workspace" aria-labelledby="empty-heading">
       <div class="draft-heading"><span class="draft-mark" aria-hidden="true">S.</span><p id="empty-heading">Your next story</p></div>
       <label class="visually-hidden" for="draft-title">Story title</label><input id="draft-title" class="draft-title" type="text" maxlength="120" placeholder="Untitled story" autocomplete="off">
@@ -72,8 +76,34 @@
       <div id="simulator-visual"></div>
       <div id="setup-coach-mount"></div>
       <button id="open-setup" class="setup-button">Choose a toy &amp; test the connection <span aria-hidden="true">→</span></button>
+      <button id="open-calibration" class="setup-button">Tune this toy <span aria-hidden="true">→</span></button>
+      <button id="control-playground" class="setup-button">Explore the controls <span aria-hidden="true">→</span></button>
       <p class="note">Lush · Flexer · Nora · Domi · Velvo · Spinel · Dolce · Hush · Osci 3. Rehearse without hardware, or pair through Lovense Remote.</p>
     </section>
+    <section class="sidebar-section feel-adjustments" aria-labelledby="feel-heading">
+      <h3 id="feel-heading">How it feels</h3>
+      <p id="available-features" class="note">Choose a toy to see its available movements.</p>
+      <label for="feel-channel">Movement</label><select id="feel-channel" aria-describedby="feel-channel-help"></select>
+      <p id="feel-channel-help" class="note">Changing movements pauses playback. Each live movement needs its own short test.</p>
+      <button id="enable-personal-range" class="quiet-control" hidden>Enable personal range for this movement</button>
+      <p id="personal-range-status" class="note" role="status"></p>
+      <details id="combination-controls" hidden><summary>Use movements together</summary><div id="combination-choices"></div><button id="apply-combined">Apply selected movements</button><p class="note">Test each movement first. Applying pauses output; Start still asks you to confirm. Use the movement menu to tune each one.</p></details>
+      <label for="feel-mode">Quiet passages</label><select id="feel-mode"><option value="story">Follow the story, including pauses</option><option value="continuous">Keep a background level</option></select>
+      <p id="feel-status" class="feel-status" role="status" aria-live="polite">Following the story</p>
+      <div class="feel-actions"><button id="feel-hold" disabled>Hold this level</button><button id="feel-easeoff" disabled>Ease off</button><button id="feel-follow" disabled>Follow story</button></div>
+      <label for="manual-level">Manual level <output id="manual-level-value">0</output></label><input id="manual-level" type="range" min="0" max="5" step="1" value="0" disabled><p class="note">While playing, move this slider to hold a level for the selected movement. Other active movements keep their own levels.</p>
+      <div id="beta-feedback-controls" hidden><p class="note">Optional beta feedback: mark a moment you would like us to review.</p><div class="feel-actions"><button id="mark-good" disabled>Good for me</button><button id="mark-uncomfortable" disabled>Uncomfortable</button></div><p id="beta-feedback-status" class="note" role="status"></p></div>
+      <details><summary>Tune this movement</summary>
+        <label for="feel-maximum">Movement maximum <output id="feel-maximum-value">5</output></label><input id="feel-maximum" type="range" min="0" max="20" step="1" value="5">
+        <label for="feel-minimum">Minimum <output id="feel-minimum-value">0</output></label><input id="feel-minimum" type="range" min="0" max="20" step="1" value="0">
+        <label for="feel-background">Background <output id="feel-background-value">1</output></label><input id="feel-background" type="range" min="0" max="20" step="1" value="1">
+        <label for="feel-preferred">Preferred level <output id="feel-preferred-value">3</output></label><input id="feel-preferred" type="range" min="0" max="20" step="1" value="3">
+        <label for="feel-recovery">Ease off level <output id="feel-recovery-value">0</output></label><input id="feel-recovery" type="range" min="0" max="20" step="1" value="0">
+        <label for="feel-rhythm">Variation</label><select id="feel-rhythm"><option value="steady">Steady</option><option value="gentle">Gentle variation</option><option value="dynamic">More variation</option></select>
+        <p class="note">Your maximum always applies. Stop, Pause and a maximum of zero always turn output off. These choices stay in this visit until you save a preset.</p>
+      </details>
+    </section>
+    <section id="preset-mount" class="sidebar-section preset-section" aria-label="Saved toy presets"></section>
     <section class="sidebar-section story-import" aria-labelledby="import-link-heading">
       <div class="section-title-row"><h3 id="import-link-heading">Import a story</h3><span class="sidebar-kicker">IMPORT</span></div>
       <label class="visually-hidden" for="story-url">Story link</label><input id="story-url" type="url" maxlength="2048" placeholder="AO3 or another story link" autocomplete="off" spellcheck="false" aria-describedby="url-import-help">
@@ -83,7 +113,7 @@
     <section class="sidebar-section model-section" aria-labelledby="model-heading">
       <div class="section-title-row"><h3 id="model-heading">Story model</h3><span class="model-badge">LOCAL</span></div>
       <label class="visually-hidden" for="reading-model">Story model</label><select id="reading-model" aria-describedby="model-help"><option value="standard">SatinLore Standard · experimental</option><option value="custom" disabled>SatinLore Custom · coming later</option></select>
-      <p id="model-help" class="note">Standard runs on your device and controls one selected movement. Custom is a planned paid model for coordinated movements and multiple toys; it is not available yet.</p>
+      <p id="model-help" class="note">Standard analyses locally. You can test qualified movements separately or together on one toy. Custom is a future model for richer story interpretation and multiple toys.</p>
     </section>
     <div class="settings-tabs" role="tablist" aria-label="Settings sections"><button id="settings-reader-tab" role="tab" aria-selected="true" aria-controls="reader-settings" tabindex="0">Reader</button><button id="settings-story-tab" role="tab" aria-selected="false" aria-controls="story-settings" tabindex="-1">Story</button></div>
     <section id="reader-settings" role="tabpanel" aria-labelledby="settings-reader-tab" tabindex="0">
@@ -120,7 +150,7 @@
   <dialog id="app-settings-dialog" class="app-settings-dialog" aria-labelledby="app-settings-heading">
     <div class="dialog-heading"><div><p class="eyebrow">SATINLORE</p><h2 id="app-settings-heading">Settings</h2></div><button id="close-app-settings" class="icon-button" aria-label="Close settings">×</button></div>
     <section class="app-settings-section"><h3>Appearance</h3><label for="reading-appearance">Colour theme</label><select id="reading-appearance"><option value="system">Use device setting</option><option value="light">Satin Editorial · light</option><option value="dark">Midnight Ink · dark</option></select><p id="appearance-note" class="note" role="status" aria-live="polite"></p></section>
-    <section class="app-settings-section"><h3>Account &amp; storage</h3><span class="account-badge">PRIVATE PREVIEW</span><p>You are using the private Cloudflare sign-in. Stories are stored on this browser only when you choose to save them.</p><p class="note">Personal accounts and a synced cloud library are planned. They are not available in this test build.</p></section>
+    <section class="app-settings-section"><h3>Account &amp; storage</h3><p>Your email sign-in protects your private account. Toy presets can be saved to your account; story text stays on this browser.</p><div id="account-settings-mount" class="account-data-controls"></div><button id="open-account-welcome" class="quiet-control">Open account setup</button></section>
     <div class="library-footer">
       <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit, in Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
       <details class="about-preview"><summary>About SatinLore</summary><p class="note">Try nine toy simulators or connect through Lovense Remote. Physical connections are a limited beta and still need model-by-model testing.</p><a href="/device-check" target="_blank" rel="noopener">Local device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>

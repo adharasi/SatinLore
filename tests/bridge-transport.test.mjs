@@ -106,6 +106,20 @@ test("parent transport is idle until requested and uses an opaque exact-frame po
   await f.finish(); assert.equal(f.held(), 0);
 });
 
+test("setup surfaces bounded value-free server diagnostics without treating invalid configuration as a live connection", async () => {
+  const f=fixture();
+  const message="Live pairing needs LOVENSE_UID_SECRET runtime Secret with 64 hexadecimal characters. Save these on the deployed private app, then refresh setup. Simulators remain available.";
+  f.statusGate(Promise.resolve(Response.json({available:false,message,checks:{developerToken:"ready",platform:"ready",uidSecret:"invalid",storage:"ready",untrusted:"ignored"}})));
+  assert.equal(await f.bridge.status(),false);
+  assert.equal(f.bridge.snapshot().connectionMessage,message);
+  assert.deepEqual(f.bridge.snapshot().configurationChecks,{developerToken:"ready",platform:"ready",uidSecret:"invalid",storage:"ready"});
+  assert.equal(f.frames.length,0);assert.equal(f.outgoing.length,0);
+  f.statusGate(Promise.resolve(Response.json({available:false,message:"x".repeat(601),checks:{uidSecret:"arbitrary value"}})));
+  assert.equal(await f.bridge.status(),false);assert.equal(f.bridge.snapshot().configurationChecks,null);
+  assert.match(f.bridge.snapshot().connectionMessage,/not configured/);
+  await f.finish();
+});
+
 test("cancelled status and credential responses cannot reopen a frame or leak a hardware lease", async () => {
   for (const stage of ["status", "session"]) {
     const f = fixture(); let resolve;
@@ -164,6 +178,34 @@ test("parent commands require explicit selection, the current ceiling and finite
   assert.throws(() => f.bridge.setChannel("heat")); assert.throws(() => f.bridge.setCeiling(6));
   assert.equal(f.outgoing.filter(value => value.type === "command").length, 1);
   await f.finish();
+});
+
+test("parent vector requests require an explicitly selected extended connection and retain exact acknowledgement data",async()=>{
+  const f=fixture();await f.bridge.begin();await settle();
+  f.deliver({type:"toys",toys:[{...toy(),model:"flexer",capabilities:["vibrate","fingering"],controlTransport:"standard-socket-v1",supportsCombined:true}]});
+  await f.bridge.connect(operation("connect"));
+  const levels={vibrate:2,fingering:3},ceilings={vibrate:2,fingering:4};
+  const pending=f.bridge.commandVector(operation("command",{level:3,durationMs:2000}),levels,ceilings);await settle();
+  // The fixture auto-ACK intentionally only knows legacy commands.
+  const message=f.outgoing.at(-1);assert.equal(message.type,"command-vector");assert.equal(message.toyId,"toy-one");assert.equal(message.seconds,2);
+  f.deliver({type:"result",requestId:message.requestId,ok:true,status:"submitted",level:3,levels});
+  assert.deepEqual((await pending).levels,levels);
+  for(const [values,limits]of [[{vibrate:6},{vibrate:5}],[{heat:1},{heat:1}],[{vibrate:2},{vibrate:1}]])await assert.rejects(f.bridge.commandVector(operation("command",{level:Math.max(...Object.values(values)),durationMs:2000}),values,limits));
+  f.deliver({type:"toys",toys:[toy()]});
+  await assert.rejects(f.bridge.commandVector(operation("command",{level:1,durationMs:2000}),{vibrate:1},{vibrate:2}),/extended/);
+  await f.finish();
+});
+
+test("personal-range permission is explicit, selected-action-only and cannot survive hidden teardown",async()=>{
+  const f=fixture();await f.bridge.begin();await settle();await f.bridge.connect(operation("connect"));
+  assert.throws(()=>f.bridge.setCeiling(20));
+  await assert.rejects(f.bridge.enablePersonalRange({deviceId:"toy-one",channels:["vibrate"],confirmedStopped:false}));
+  const granting=f.bridge.enablePersonalRange({deviceId:"toy-one",channels:["vibrate"],confirmedStopped:true});await settle();
+  const packet=f.outgoing.at(-1);assert.equal(packet.type,"enable-personal-range");assert.equal(packet.toyId,"toy-one");
+  f.deliver({type:"result",requestId:packet.requestId,ok:true,status:"submitted",channels:["vibrate"]});assert.equal(await granting,true);
+  f.bridge.setCeiling(20);await f.bridge.command(operation("command",{level:15,durationMs:2000}));
+  assert.equal(f.outgoing.at(-1).level,15);assert.equal(f.bridge.maximumFor("fingering"),5);
+  await f.hidden();assert.equal(f.bridge.maximumFor("vibrate"),5);assert.throws(()=>f.bridge.setCeiling(20));await f.finish();
 });
 
 test("targeted Stop bypasses a pending command and a timed-out request cannot be revived by a late result", async () => {

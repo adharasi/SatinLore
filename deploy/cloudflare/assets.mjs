@@ -28,6 +28,16 @@ export const READER_ASSETS = Object.freeze([
   ["reader/library-view.mjs", "/static/reader/library-view.mjs"],
   ["reader/backup.mjs", "/static/reader/backup.mjs"],
   ["reader/preferences.mjs", "/static/reader/preferences.mjs"],
+  ["reader/calibration.mjs", "/static/reader/calibration.mjs"],
+  ["reader/calibration-view.mjs", "/static/reader/calibration-view.mjs"],
+  ["reader/beta-stories.mjs", "/static/reader/beta-stories.mjs"],
+  ["reader/account-workspace.mjs", "/static/reader/account-workspace.mjs"],
+  ["reader/account-workspace.css", "/static/reader/account-workspace.css"],
+  ["reader/beta-recording.mjs", "/static/reader/beta-recording.mjs"],
+  ["reader/beta-recording.css", "/static/reader/beta-recording.css"],
+  ["beta-admin.html", "/beta-admin.html"],
+  ["beta-admin.mjs", "/static/beta-admin.mjs"],
+  ["beta-admin.css", "/static/beta-admin.css"],
   ["playback/controller.mjs", "/static/playback/controller.mjs"],
   ["help.html", "/help.html"],
   ["help.mjs", "/static/help.mjs"],
@@ -47,4 +57,5 @@ export const READER_ASSETS = Object.freeze([
 export const PRIVATE_ASSET_PATHS = Object.freeze(READER_ASSETS.map(([, path]) => path));
 export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
   "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
+  "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html",
 });

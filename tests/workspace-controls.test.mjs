@@ -320,3 +320,37 @@ test("global Stop keeps the test-read coach available for restart but cancels pe
   await app.click("stop");
   assert.equal(app.read("setupCancelled"), 1);
 });
+
+test("actual reading feel controls preserve an opt-in background, recovery, explicit zero and Stop", async t => {
+  const app = await ready(t);
+  assert.equal(app.nodes.get("feel-hold").disabled, true);
+  app.nodes.get("feel-mode").value = "continuous";
+  await app.nodes.get("feel-mode").dispatch("change");
+  for (const [key, value] of [["background", 2], ["recovery", 1]]) {
+    app.nodes.get(`feel-${key}`).value = String(value);
+    await app.nodes.get(`feel-${key}`).dispatch("input");
+  }
+  assert.equal(app.read("latest.running"), false, "Choosing a background must not start playback.");
+  await start(app);
+  await app.click("next"); await app.advance(1000);
+  assert.equal(app.read("latest.baseLevel"), 0);
+  assert.equal(app.read("latest.output"), 2, "An analysed quiet paragraph can use the opted-in background.");
+  app.nodes.get("manual-level").value = "4";
+  await app.nodes.get("manual-level").dispatch("input"); await app.advance(1000);
+  assert.equal(app.read("latest.output"), 4);
+  assert.equal(app.read("latest.feel.playbackMode"), "hold");
+  await app.click("feel-easeoff"); await app.advance(1000);
+  assert.equal(app.read("latest.output"), 1);
+  assert.equal(app.read("latest.feel.playbackMode"), "ease-off");
+  await app.click("feel-follow"); await app.advance(1000);
+  assert.equal(app.read("latest.output"), 2);
+  app.nodes.get("level").value = "0";
+  await app.nodes.get("level").dispatch("input"); await app.advance(1000);
+  assert.equal(app.read("latest.output"), 0, "A deliberate paragraph zero overrides the background.");
+  await app.click("stop"); await app.click("feel-follow"); await app.advance(1000);
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.read("latest.output"), 0);
+  assert.equal(app.nodes.get("feel-follow").disabled, true);
+  assert.equal(app.nodes.get("start").disabled, false);
+  assert.deepEqual(app.errors, []);
+});

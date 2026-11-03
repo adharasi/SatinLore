@@ -44,6 +44,9 @@ export class LovenseCheck {
     this.pendingCommand = null;
     this.knownIds = new Set();
     this.activeChannel = null;
+    this.activeChannels = [];
+    this.personalRangeChannels = new Set(); this.gentleTests = new Map();
+    this.runningGentleTest = null; this.lastStopSubmitted = null;
   }
 
   later(callback, delay) {
@@ -115,8 +118,8 @@ export class LovenseCheck {
     const connected = this.sdk.getAppStatus() === true;
     if (!connected) { this.connectionLost(); return; }
     this.connected = true;
-    const toys = supportedToys(this.sdk.getOnlineToys());
-    if (this.selected && !toys.some(toy => toy.id === this.selected && (!this.activeChannel || toy.capabilities.includes(this.activeChannel)))) this.stop(true);
+    const toys = supportedToys(this.sdk.getOnlineToys(), {transport:this.sdk.controlTransport});
+    if (this.selected && !toys.some(toy => toy.id === this.selected && this.activeChannels.every(channel=>toy.capabilities.includes(channel)))) this.stop(true);
     this.toys = toys;
     for (const toy of toys) if (this.knownIds.size < 50) this.knownIds.add(toy.id);
     this.emit({type: "toys", toys, selected: this.selected});
@@ -143,12 +146,13 @@ export class LovenseCheck {
     if (!this.active() || !this.ready || !this.connected || !this.selected) {
       throw new Error("Connect and select one device before testing.");
     }
-    if (!Number.isInteger(level) || !Number.isInteger(ceiling) || level < 0 || level > MAX_TEST_LEVEL ||
-        ceiling < 0 || ceiling > MAX_TEST_LEVEL || !Number.isFinite(seconds) || seconds <= 1 || seconds > TEST_SECONDS) {
-      throw new Error("Choose an output from 0 to 5 and a finite duration of at most two seconds.");
+    const maximum = this.personalRangeChannels.has(channel) ? 20 : MAX_TEST_LEVEL;
+    if (!Number.isInteger(level) || !Number.isInteger(ceiling) || level < 0 || level > maximum ||
+        ceiling < 0 || ceiling > maximum || !Number.isFinite(seconds) || seconds <= 1 || seconds > TEST_SECONDS) {
+      throw new Error("Use the movement's enabled range and a finite duration of at most two seconds.");
     }
     // Re-read current state: a stale list must never authorise a disconnected toy.
-    const toys = supportedToys(this.sdk.getOnlineToys());
+    const toys = supportedToys(this.sdk.getOnlineToys(), {transport:this.sdk.controlTransport});
     const toy = toys.find(toy => toy.id === this.selected);
     if (this.sdk.getAppStatus() !== true || !toy) {
       this.connectionLost();
@@ -162,22 +166,41 @@ export class LovenseCheck {
     this.validateOutput(level, ceiling, channel, seconds);
     const strength = Math.min(level, ceiling);
     if (strength === 0) return this.stop().then(result => ({...result, level: 0, channel}));
+    return this.dispatch({[channel]:strength},seconds,channel);
+  }
+
+  commandVector(levels, ceilings, {seconds = TEST_SECONDS} = {}) {
+    const plain=value=>value&&typeof value==="object"&&!Array.isArray(value);
+    if(this.sdk?.controlTransport!=="standard-socket-v1"||!plain(levels)||!plain(ceilings))throw Error("Independent actions need the extended connection.");
+    const keys=Object.keys(levels);
+    if(!keys.length||keys.length>5||Object.keys(ceilings).length!==keys.length||keys.some(key=>!Object.hasOwn(ceilings,key)))throw Error("Choose supported movement limits.");
+    const bounded={};
+    for(const channel of keys){this.validateOutput(levels[channel],ceilings[channel],channel,seconds);bounded[channel]=Math.min(levels[channel],ceilings[channel]);}
+    if(Object.values(bounded).every(value=>value===0))return this.stop().then(result=>({...result,level:0,levels:bounded}));
+    return this.dispatch(bounded,seconds,null);
+  }
+
+  dispatch(levels, seconds, channel) {
+    const strength=Math.max(...Object.values(levels));
     if (this.pendingCommand) throw new Error("Wait for the current device request or reconnect.");
     if (this.now() - this.lastCommandAt < 1000) throw new Error("Device requests are limited to one per second.");
     this.cancelCommandTimer();
     const epoch = ++this.commandEpoch, generation = this.generation, sdk = this.sdk, id = this.selected;
     this.lastCommandAt = this.now();
     this.activeChannel = channel;
+    this.activeChannels = Object.keys(levels);
+    this.lastStopSubmitted = null;
+    this.runningGentleTest = channel && strength <= MAX_TEST_LEVEL ? {id,channel,generation,endsAt:this.now()+seconds*1000} : null;
     const request = {epoch, reject: null};
     this.pendingCommand = request;
     let sdkResult;
-    try { sdkResult = sdk.sendToyCommand({[channel]: strength, time: seconds, toyId: id}); }
+    try { sdkResult = sdk.sendToyCommand({...levels, time: seconds, toyId: id}); }
     catch {
       this.pendingCommand = null; this.fail();
       throw new Error("The device request failed. Reconnect before starting again.");
     }
     const expire = () => {
-      this.emit({type: "state", state: "testing", level: strength, channel});
+      this.emit({type: "state", state: "testing", level: strength, ...(channel ? {channel} : {levels})});
       this.commandTimer = this.later(() => {
         this.commandTimer = null;
         if (this.selected === id && this.commandEpoch === epoch) this.stop();
@@ -191,7 +214,7 @@ export class LovenseCheck {
         this.fail(); throw new Error("The device request failed. Reconnect before starting again.");
       }
       expire();
-      return Promise.resolve({status: "submitted", level: strength, channel});
+      return Promise.resolve({status: "submitted", level: strength, ...(channel ? {channel} : {levels})});
     }
     const stale = () => !this.active(generation) || epoch !== this.commandEpoch || id !== this.selected;
     const stopOriginal = () => {
@@ -200,7 +223,7 @@ export class LovenseCheck {
     const submitted = Promise.resolve(sdkResult).then(result => {
       if (stale()) { stopOriginal(); throw new Error("The device request was cancelled."); }
       if (!submittedResult(result)) throw new Error();
-      return {status: "submitted", level: strength, channel};
+      return {status: "submitted", level: strength, ...(channel ? {channel} : {levels})};
     }, () => {
       if (stale()) stopOriginal();
       throw new Error("The device request could not be confirmed.");
@@ -248,10 +271,13 @@ export class LovenseCheck {
 
   stop(clearSelection = false) {
     const id = this.selected;
+    const gentle = this.runningGentleTest; this.runningGentleTest = null;
+    this.lastStopSubmitted = null;
     ++this.commandEpoch;
     this.cancelCommandTimer();
     this.activeChannel = null;
-    if (clearSelection) this.selected = null;
+    this.activeChannels = [];
+    if (clearSelection) {this.selected = null;this.resetPersonalRange();}
     let result = Promise.resolve({status: "unconfirmed"});
     if (this.sdk && id) {
       try {
@@ -259,7 +285,29 @@ export class LovenseCheck {
       } catch { /* The finite command is the fallback after transport failure. */ }
     }
     this.emit({type: "state", state: this.connected ? "paused" : "waiting"});
-    return result;
+    return result.then(outcome=>{
+      if(!clearSelection&&this.selected===id&&outcome.status==="submitted"&&this.active()&&this.commandTimer===null){
+        this.lastStopSubmitted={id,generation:this.generation};
+        if(gentle&&gentle.generation===this.generation&&gentle.id===id&&this.now()>=gentle.endsAt)this.gentleTests.set(gentle.channel,{id,generation:this.generation});
+      }
+      return outcome;
+    });
+  }
+
+  resetPersonalRange() {
+    this.personalRangeChannels.clear();this.gentleTests.clear();this.runningGentleTest=null;this.lastStopSubmitted=null;
+    this.sdk?.clearPersonalRange?.();
+  }
+  enablePersonalRange(channels, confirmedStopped) {
+    if(confirmedStopped!==true||!Array.isArray(channels)||!channels.length||channels.length>5||new Set(channels).size!==channels.length||
+      !this.active()||!this.ready||!this.connected||!this.selected||this.commandTimer!==null||this.pendingCommand||
+      this.lastStopSubmitted?.id!==this.selected||this.lastStopSubmitted?.generation!==this.generation)throw Error("Complete a gentle two-second check, observe Stop and confirm it before enabling your personal range.");
+    const toy=supportedToys(this.sdk.getOnlineToys(),{transport:this.sdk.controlTransport}).find(toy=>toy.id===this.selected);
+    if(!toy||channels.some(channel=>!toy.capabilities.includes(channel)||this.gentleTests.get(channel)?.id!==this.selected||this.gentleTests.get(channel)?.generation!==this.generation))throw Error("Check and confirm each selected movement first.");
+    const next=[...new Set([...this.personalRangeChannels,...channels])];
+    this.sdk.enablePersonalRange?.(this.selected,next);
+    this.personalRangeChannels=new Set(next);
+    return {status:"submitted",channels:next};
   }
 
   openApp() {

@@ -1,5 +1,8 @@
 # QA and release checklist
 
+
+Current hosted account/calibration/recording acceptance is specified in [the 3 November runbook](beta-session-2026-11-03.md). Record current-release automated/browser and deployment evidence separately from physical results; older check counts below are historical.
+
 For a practical front-end session without a device, start with **[test-today.md](test-today.md)** and its neutral sample. Use **[the nine-model beta guide](lovense-beta-test.md)** for simulator rehearsal and the controlled tester session. Use this document for the wider release checklist.
 
 Use software gates S1/S2 and separate hardware/release gates H1/H2 from the [roadmap](beta-roadmap.md). Hardware does not block the current software milestones. Track automated, browser and hardware evidence separately. Record each supported device, firmware, Remote version, phone, browser and build. A passing mock does not certify hardware.

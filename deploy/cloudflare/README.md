@@ -1,6 +1,20 @@
 # Private reader and Lovense pairing on Cloudflare
 
-This adapter hosts the browser reader at `https://app.satinlore.com`, protected by signed Cloudflare Access assertions and an explicit Worker email allowlist. Simulator rehearsals need no hardware or Lovense credentials. The guided real-toy path uses a separately sandboxed Lovense Standard JS SDK and requires the server settings below. Hardware behaviour remains unqualified until recorded on physical devices. This does not deploy FastAPI, move local SQLite or use the marketing website database, email credentials or routes. The separate local `/device-check` invitation flow remains on Python/loopback.
+This adapter hosts the browser reader at `https://app.satinlore.com`, protected by signed Cloudflare Access assertions and an explicit Worker email allowlist. Simulator rehearsals need no hardware or Lovense credentials. The guided real-toy path uses a separately sandboxed documented Standard Socket adapter with a Standard JS SDK fallback and requires the server settings below. Hardware behaviour remains unqualified until recorded on physical devices. This does not deploy FastAPI, move local SQLite or use the marketing website database, email credentials or routes. The separate local `/device-check` invitation flow remains on Python/loopback.
+
+## Current account and beta-host refinement
+
+For tomorrow's complete setup and testing, use [the 3 November runbook](../../docs/beta-session-2026-11-03.md). It supersedes the older account-backlog and blanket live-5/20 descriptions: durable account/preset storage and explicitly granted personal ranges are implemented in source, with current release results recorded separately.
+
+The same Worker serves the exact app and beta origins. The tracked Custom Domain routes include `beta.satinlore.com`; Workers deployment provisions that route and the append-only v2 migration creates `ReaderAccount` (`READER_ACCOUNTS`) and `BetaRecordings` (`BETA_RECORDINGS`) alongside the existing feedback class. There is no new manual D1/R2 setup or storage secret. A successful source push is not proof that a custom domain, Access policy or migration has completed; check the deployment result.
+
+The owner must extend the existing Access application to the whole beta hostname, including `/static`, `/api` and `/admin`, or create a separate whole-host beta application. With the same Access application, leave `BETA_ACCESS_AUD` absent and reuse `ACCESS_AUD`. With a separate application, save its exact audience as runtime text `BETA_ACCESS_AUD`; do not use an empty value. Keep the same team and preserve founder access. Testers need their email in both the relevant Access Allow policy and runtime `BETA_TESTER_EMAILS`. No Everyone/Bypass rule is needed.
+
+Cloudflare email OTP authenticates the identity; an explicit 18+ choice creates the app account. Presets are durable and identity-isolated, use revision guards, and include account/story scope, per-action settings, selected active channels and a master maximum. Applying pauses and clamps to available capabilities/current range. Story text/title stay local. A story-specific preset references a local UUID and does not make imported text cloud-synced or automatically recognizable on another origin.
+
+Only the exact beta host can start separately consented structured control recording. Founder-only `/admin` and `/api/admin/beta-recordings` provide review, while participants have only their own history/deletion. Normal app requests cannot enable beta capture. Limits are 60 minutes, 20,000 events and 4 MiB per recording, 30-day retention and a 128 MiB global budget. There is no DOM/screen video or story/preset-name/credential capture. Recording, account and browser-story data/deletion are separate.
+
+The isolated documented Standard Socket adapter supports qualified Oscillate and action combinations; the Basic SDK fallback remains narrower. All nonzero commands stay finite at two seconds. Gentle/default range is at most 5/20, with explicit per-action personal permission up to 20/20 only after a checked test/Stop. Permission never raises a maximum, starts output or comes from a preset; it resets after interruption. Missing/invalid runtime Lovense settings are reported by value-free `/api/lovense/status` diagnostics. No extra Lovense enable flag is required. Retain the exact runtime names below and keep secret values private.
 
 ## What is published
 
@@ -12,7 +26,7 @@ Every request, including HTML, JavaScript, CSS, health and access probes, passes
 
 ## One-time setup in your own browser
 
-Use your normal Windows browser and the Cloudflare account that already owns `satinlore.com`. This is a separate Worker connected to **`adharasi/SatinLore`**, not the marketing website project. Once connected, future pushes to `main` build and deploy automatically. No local terminal or Cloudflare credentials shared with a coding assistant are needed for this dashboard workflow. The app now provisions its `PrivateFeedback` SQLite Durable Object namespace through the tracked `v1` migration; it does not use marketing D1 or SES resources.
+Use your normal Windows browser and the Cloudflare account that already owns `satinlore.com`. This is a separate Worker connected to **`adharasi/SatinLore`**, not the marketing website project. Once connected, future pushes to `main` build and deploy automatically. No local terminal or Cloudflare credentials shared with a coding assistant are needed for this dashboard workflow. The app provisions its feedback and v2 account/recording Durable Object bindings through tracked migrations; it does not use marketing D1 or SES resources.
 
 ### 1. Protect the app hostname first
 
@@ -58,7 +72,7 @@ Use your normal Windows browser and the Cloudflare account that already owns `sa
 15. Choose **Save and Deploy** / **Deploy** for these settings. If the interface saves variables first and offers a separate deployment action, complete that action. The repository already supplies `PUBLIC_APP_ORIGIN=https://app.satinlore.com` and `FOUNDER_EMAIL=team@satinlore.com`.
 16. In **Settings → Domains & Routes**, confirm **`app.satinlore.com`** is attached as a **Custom Domain** and its certificate is active. The repository's custom-domain route asks Wrangler to create this automatically. If the build succeeded but the domain is missing, select **Add → Custom Domain**, enter `app.satinlore.com`, and complete the displayed DNS/certificate confirmation. Review only a conflicting `app` record if one is reported; do not change apex, `www`, Google mail, SES or marketing routes. Confirm **workers.dev** and **Preview URLs** are disabled.
 
-The canonical hostname is **`app.satinlore.com`**. A `www.app.satinlore.com` alias is not configured by this release.
+The ordinary reader hostname is **`app.satinlore.com`** and the separately recorded beta hostname is **`beta.satinlore.com`**. A `www.app.satinlore.com` alias is not configured.
 
 ### 4. Verify login and the reader
 
@@ -110,7 +124,7 @@ SQLite Durable Objects are supported on Workers Free. A Free-plan resource/quota
 - Reader assets and health/access probes accept `GET`/`HEAD`. The deliberate feedback routes below accept their specified methods. Unknown routes and local invitation routes remain unavailable. The deliberate Lovense endpoints below are the only hosted vendor credential path.
 - Authenticated `GET /api/feedback` lists that sign-in's live notes. `POST /api/feedback` accepts only `{idempotencyKey,category,message,rating?}` and returns a real saved acknowledgement. No automatic story context or client identity field is accepted.
 - Authenticated `GET /api/my-data` exports only app feedback. `POST /api/my-data/delete` requires exact JSON `{ "confirm": true }` and deletes the live feedback records. Writes require the exact app Origin and JSON content type; cookies, assertions, query values and identity are not forwarded into the store.
-- `/help`, `/support` and `/simulator-lab` plus their assets are covered by the same founder-only authentication gate. Help shows the public source revision inserted by the Cloudflare build; the lab contains simulated devices and no private story input.
+- `/help`, `/support` and `/simulator-lab` plus their assets are covered by the same signed Access and explicit email allowlist gate. The beta admin is additionally founder-only. Help shows the public source revision inserted by the Cloudflare build; the lab contains simulated devices and no private story input.
 - Reauthenticating uses Cloudflare Access. Access revocation prevents subsequent requests; it does not remotely erase a document already loaded in the browser or saved locally. The reader's periodic, visibility and expiry checks pause its simulator. Local story deletion remains a separate explicit browser operation.
 
 ## Enable real Lovense pairing for the beta
@@ -164,7 +178,7 @@ Use neutral fixture text and an inbox you control. Check these separately from m
 
 1. A logged-out visit to `/`, `/static/app.mjs` and `/api/access` reaches the Access login or denial, with no reader/asset data.
 2. The approved founder can sign in and load the reader, both themes, imports, corrections and paused restoration. TXT import must not create a story-text network request.
-3. Another account is denied. A forged email header or missing assertion cannot obtain assets. Confirm there is no reachable `workers.dev`, version URL or other hostname bypass.
+3. An account absent from either the relevant Access Allow policy or Worker allowlist is denied. A forged email header or missing assertion cannot obtain assets. Confirm there is no reachable `workers.dev`, version URL or other hostname bypass.
 4. `/device-check`, local invitation endpoints, `/static/device-bridge.mjs` and `/static/devices/lovense.mjs` remain unavailable. `/device-bridge` requires the same signed Access gate and is sandboxed without `allow-same-origin`; its vendor code must never execute in the reader document. No vendor request is made during simulator-only rehearsals.
 5. Expiry, sign-out/revocation, failed probes, hidden-page return and offline errors block Start and leave output paused. Logging in again must not automatically start playback. Check that unsaved text is not silently persisted or uploaded.
 6. Inspect network requests while reading a neutral story. No text, title, excerpts, private tokens, third-party analytics or vendor scripts may leave the reader.

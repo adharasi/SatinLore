@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {simulatorReading, SimulatorTrace, createSimulatorView} from "../app/static/reader/simulator-view.mjs";
+import {simulatorReading, simulatorChannelReadings, SimulatorTrace, createSimulatorView} from "../app/static/reader/simulator-view.mjs";
 import {setupDOM} from "./helpers/setup-dom.mjs";
 
 test("the visual never substitutes target output for actual reported output", () => {
@@ -96,5 +96,75 @@ test("Osci 3 oscillation animates only in simulation and respects reduced motion
   assert.equal(moving.getAttribute("transform"), "translate(0 0.00) rotate(0.00 140 140)");
   view.update({mode: "simulator", model: "osci3", channel: "oscillate", connected: true, running: false, output: 4});
   assert.equal(frame.children[2].children[1].textContent, "0 / 20");
+  view.destroy();
+});
+
+test("independent movement readings use each active qualified channel rather than the aggregate peak", () => {
+  const snapshot = {mode: "simulator", model: "flexer", channel: "vibrate", connected: true, running: true, output: 5,
+    activeChannels: ["vibrate", "fingering", "rotate", "untrusted"], channels: [{id: "vibrate"}, {id: "fingering"}],
+    channelOutputs: {vibrate: 3, fingering: 1, rotate: 20, untrusted: 20}};
+  assert.deepEqual(simulatorChannelReadings(snapshot), [
+    {id: "vibrate", label: "Vibration", output: 3, unknown: false},
+    {id: "fingering", label: "Flexing", output: 1, unknown: false},
+  ]);
+  assert.deepEqual(simulatorChannelReadings({...snapshot, running: false}).map(row => row.output), [0, 0]);
+  assert.deepEqual(simulatorChannelReadings({...snapshot, connected: false}).map(row => row.output), [0, 0]);
+  assert.deepEqual(simulatorChannelReadings({...snapshot, activeChannels: []}), []);
+  assert.equal(simulatorChannelReadings({...snapshot, mode: "lovense", channelOutputs: {vibrate: 3, fingering: null}})[1].unknown, true);
+});
+
+test("each simulated channel has its own truthful meter and movement freezes independently at zero", () => {
+  const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
+  const snapshot = {mode: "simulator", model: "flexer", channel: "vibrate", connected: true, running: true, output: 3,
+    activeChannels: ["vibrate", "fingering"], channels: ["vibrate", "fingering"], channelOutputs: {vibrate: 3, fingering: 1}};
+  view.update(snapshot);
+  const meters = mount.children[0].children[3], vibration = meters.children[0], fingering = meters.children[1];
+  assert.equal(vibration.children[0].children[0].textContent, "Vibration");
+  assert.equal(vibration.children[0].children[1].textContent, "3 / 20");
+  assert.equal(fingering.children[0].children[1].textContent, "1 / 20");
+  assert.equal(vibration.children[1].getAttribute("aria-valuenow"), "3");
+  assert.equal(fingering.children[1].getAttribute("aria-valuenow"), "1");
+  dom.advance(100);
+  assert.notEqual(vibration.children[1].children[1].style.left, fingering.children[1].children[1].style.left);
+  view.update({...snapshot, channelOutputs: {vibrate: 3, fingering: 0}});
+  assert.equal(vibration.dataset.moving, "true");
+  assert.equal(fingering.dataset.moving, "false");
+  assert.equal(fingering.children[1].children[0].style.width, "0%");
+  assert.equal(fingering.children[1].children[1].hidden, true);
+  view.update({...snapshot, output: 0, channelOutputs: {vibrate: 0, fingering: 0}});
+  assert.equal(dom.frames.size, 0);
+  assert.equal(vibration.dataset.moving, "false");
+  view.destroy();
+});
+
+test("live per-channel unknowns remain unknown and requested hardware levels never animate", () => {
+  const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
+  const snapshot = {mode: "lovense", model: "flexer", channel: "vibrate", connected: true, running: true, output: 3, outputKnown: true,
+    activeChannels: ["vibrate", "fingering"], channelOutputs: {vibrate: 3, fingering: null}};
+  view.update(snapshot);
+  const rows = mount.children[0].children[3].children;
+  assert.equal(rows[0].children[0].children[1].textContent, "3 / 20");
+  assert.equal(rows[1].children[0].children[1].textContent, "Unknown");
+  assert.equal(rows[1].children[1].getAttribute("role"), "img");
+  assert.match(rows[1].children[1].getAttribute("aria-valuetext"), /unconfirmed/);
+  assert.equal(rows[0].dataset.moving, "false"); assert.equal(rows[1].dataset.moving, "false");
+  assert.equal(dom.frames.size, 0);
+  view.update({...snapshot, running: false, outputKnown: false});
+  assert.equal(rows[0].children[0].children[1].textContent, "Unknown");
+  view.destroy();
+});
+
+test("reduced motion and hidden state suppress individual simulator movement while retaining levels", () => {
+  const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
+  const snapshot = {mode: "simulator", model: "nora", channel: "vibrate", connected: true, running: true, output: 4,
+    activeChannels: ["vibrate", "rotate"], channelOutputs: {vibrate: 4, rotate: 2}};
+  view.update(snapshot); dom.reduced(true);
+  const rows = mount.children[0].children[3].children;
+  assert.equal(dom.frames.size, 0);
+  assert.equal(rows[0].dataset.moving, "false"); assert.equal(rows[1].dataset.moving, "false");
+  assert.equal(rows[1].children[0].children[1].textContent, "2 / 20");
+  dom.reduced(false); assert.equal(dom.frames.size, 1);
+  dom.hide(true); assert.equal(dom.frames.size, 0);
+  assert.equal(rows[1].dataset.moving, "false");
   view.destroy();
 });

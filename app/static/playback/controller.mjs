@@ -1,3 +1,4 @@
+import {ReadingFeel} from "../reader/calibration.mjs";
 // Continuous reading playback for the synchronous simulator only.
 // A real asynchronous transport needs a separately qualified controller/adapter.
 export const COMMAND_SECONDS = 2;
@@ -43,13 +44,14 @@ export class PlaybackController {
     this.clearTimer = clearTimer;
     this.inactivityMs = inactivityMs;
     this.heartbeatMs = heartbeatMs;
+    this.feel = new ReadingFeel(); this.manualZeros = new Set();
     this.levels = [];
     this.position = 0;
     this.ceiling = 5;
     this.strengthTenths = 10;
     this.connected = false;
     this.visible = true;
-    this.output = 0;
+    this.output = 0; this.outputLevels = null;
     this.state = "DISCONNECTED";
     this.reason = "Connect the simulator to begin.";
     this.epoch = 0;
@@ -63,8 +65,8 @@ export class PlaybackController {
   snapshot() {
     return {state: this.state, connected: this.connected, running: this.state === "PLAYING",
       output: this.output, ceiling: this.ceiling, strength: this.strengthTenths / 10,
-      baseLevel: this.levels[this.position] ?? 0, target: this._desired(),
-      position: this.position, reason: this.reason};
+      baseLevel: this.levels[this.position] ?? 0, target: this._desired(), outputLevels:this.outputLevels?{...this.outputLevels}:null,
+      position: this.position, reason: this.reason, feel: this.feel.snapshot()};
   }
 
   _invoke(method, ...arguments_) {
@@ -96,13 +98,14 @@ export class PlaybackController {
   }
 
   _stopDevice() {
-    this.output = 0;
+    this.output = 0;this.outputLevels=this.feel.vector?Object.fromEntries(Object.keys(this.feel.channels).map(id=>[id,0])):null;
     try { this._invoke("stop"); return true; }
     catch { return false; }
   }
 
   _halt(reason, state = this.connected ? "READY_PAUSED" : "DISCONNECTED", notify = true) {
     this._clearTimers();
+    this.feel.reset();
     this.state = state;
     this.reason = reason;
     if (!this._stopDevice()) {
@@ -141,8 +144,9 @@ export class PlaybackController {
   setStory(levels) {
     this.pause("Story changed. Press Start to continue.");
     if (!Array.isArray(levels)) throw new TypeError("Paragraph levels must be an array.");
-    const checked = levels.map(validLevel);
+    const checked = Array.from(levels,validLevel);
     this.levels = checked;
+    this.manualZeros.clear();
     this.position = 0;
     this.strengthTenths = 10;
     if (!checked.length && this.state !== "ERROR_PAUSED") this.reason = "Load text to begin.";
@@ -162,11 +166,12 @@ export class PlaybackController {
     return this._desiredChanged();
   }
 
-  setLevel(index, value) {
+  setLevel(index, value, {manual = true} = {}) {
     this._position(index);
     try { validLevel(value); }
     catch (error) { this.pause("Invalid paragraph intensity."); throw error; }
     this.levels[index] = value;
+    if (manual && value === 0) this.manualZeros.add(index); else this.manualZeros.delete(index);
     return this._desiredChanged();
   }
 
@@ -233,15 +238,41 @@ export class PlaybackController {
 
   _desiredChanged() {
     // Reductions never wait behind the next dispatch. Resume only on its normal cadence.
-    if (this.state === "PLAYING" && this._desired() < this.output && !this._stopDevice()) return this._fail();
+    const intent=this._intent();
+    const reduced=this.outputLevels&&intent.levels&&Object.keys(this.outputLevels).some(id=>this.outputLevels[id]>(intent.levels[id]??0));
+    if (this.state === "PLAYING" && (intent.level < this.output || reduced) && !this._stopDevice()) return this._fail();
     return this._notify();
   }
 
-  _desired() {
-    // Integer tenths avoid hidden floating-point steps. Round down on the device
-    // scale so rounding never increases a chosen strength. Never rewrite the base.
-    const scaled = Math.floor((this.levels[this.position] ?? 0) * this.strengthTenths / 10);
-    return Math.min(scaled, this.ceiling);
+  _intent() {
+    const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
+      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),now:this.now()};
+    const levels=this.feel.vector?.(context);
+    return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
+  }
+  _desired() {return this._intent().level;}
+
+  setFeel(value) {
+    try {this.feel.configure(value);} catch(error) {this.pause("Invalid reading controls.");throw error;}
+    return this._desiredChanged();
+  }
+  hold(value = this.output) {
+    if(this.state !== "PLAYING") return false;
+    try{if(this.feel.holdLevels && arguments.length===0)this.feel.holdLevels(this.outputLevels);else this.feel.hold(value);}catch(error){this.pause("Invalid Hold level.");throw error;}this._desiredChanged();return true;
+  }
+  holdChannels(value) {
+    if(this.state!=="PLAYING" || !this.feel.holdLevels)return false;
+    try{this.feel.holdLevels(value);}catch(error){this.pause("Invalid movement levels.");throw error;}
+    this._desiredChanged();return true;
+  }
+  easeOff(value = this.feel.settings.recovery) {
+    if(this.state !== "PLAYING") return false;
+    try{if(this.feel.easeOffLevels)this.feel.easeOffLevels(this.outputLevels,arguments.length?value:undefined);else this.feel.easeOff(value,Math.min(this.output,this._desired()));}catch(error){this.pause("Invalid recovery level.");throw error;}this._desiredChanged();return true;
+  }
+  followStory() {this.feel.followStory(this.state==="PLAYING"?(this.feel.vector?this.outputLevels:this.output):undefined);return this._desiredChanged();}
+  setManualZeros(indices) {
+    if(!Array.isArray(indices) || indices.some(index => !Number.isInteger(index) || index<0 || index>=this.levels.length)) {this.pause("Invalid paragraph corrections.");throw new RangeError("Use existing paragraph indices.");}
+    this.manualZeros=new Set(indices);return this._desiredChanged();
   }
 
   start() {
@@ -254,6 +285,7 @@ export class PlaybackController {
     }
     this._clearTimers();
     this.state = "PLAYING";
+    this.feel.start(this.now());
     this.reason = "Simulation follows the current paragraph.";
     this.lastActivityAt = this.lastTickAt = this.now();
     this._armIdle();
@@ -301,11 +333,13 @@ export class PlaybackController {
         this._halt("Simulator disconnected. Reconnect explicitly.", "DISCONNECTED");
         return;
       }
-      const strength = this._desired();
+      if(now-this.lastDispatchAt>=this.heartbeatMs)this.feel.advanceFollow?.(this.feel.vector?this.outputLevels:this.output,this.ceiling);
+      const intent=this._intent(),strength = intent.level;
       if (strength === 0) {
         if (!this._stopDevice()) throw new Error();
       } else if (now - this.lastDispatchAt >= this.heartbeatMs) {
-        this._invoke("command", strength, COMMAND_SECONDS);
+        if(intent.levels)this._invoke("commandVector",intent.levels,COMMAND_SECONDS);else this._invoke("command", strength, COMMAND_SECONDS);
+        this.outputLevels=intent.levels?{...intent.levels}:null;
         this.lastDispatchAt = now;
         this.output = strength;
       }

@@ -275,3 +275,19 @@ test("stopTarget only addresses a previously discovered toy and reports explicit
   sdk.stopToyAction=()=>false;
   assert.deepEqual(await controller.stop(),{status:"unconfirmed"});
 });
+
+test("personal range requires a completed gentle action and stopped submission plus deliberate acknowledgement, and resets on selection",async()=>{
+  const f=harness(),sdk=f.connect();f.controller.select("toy-a");
+  assert.throws(()=>f.controller.command(6,6));
+  assert.throws(()=>f.controller.enablePersonalRange(["vibrate"],true),/gentle/);
+  f.controller.test(1,5);f.advance(1999);await f.controller.stop();
+  assert.throws(()=>f.controller.enablePersonalRange(["vibrate"],true),/Check and confirm/);
+  f.advance(1);f.controller.test(1,5);f.advance(2000);await Promise.resolve();await Promise.resolve();
+  assert.throws(()=>f.controller.enablePersonalRange(["vibrate"],false));
+  assert.deepEqual(f.controller.enablePersonalRange(["vibrate"],true),{status:"submitted",channels:["vibrate"]});
+  await f.controller.command(20,17);
+  assert.deepEqual(sdk.commands.at(-1),{vibrate:17,time:2,toyId:"toy-a"});
+  f.controller.select("toy-a");
+  assert.equal(f.controller.personalRangeChannels.size,0);assert.throws(()=>f.controller.command(6,6));
+  f.controller.disconnect();
+});

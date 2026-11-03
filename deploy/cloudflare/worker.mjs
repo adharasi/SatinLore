@@ -2,10 +2,15 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES } from "./assets.mjs";
 import { feedbackJson, normalizeFeedback, FeedbackError } from "./feedback.mjs";
 import { storyImportJson, importPublicStory, StoryImportError } from "./story-import.mjs";
-import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseIdentity, LovenseServiceError } from "./lovense.mjs";
+import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseReadiness, lovenseIdentity, LovenseServiceError } from "./lovense.mjs";
+import { handleAccount } from "./accounts.mjs";
+import { handleBetaRecordings } from "./beta-recordings.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
+export { ReaderAccount } from "./accounts.mjs";
+export { BetaRecordings } from "./beta-recordings.mjs";
 
 const APP_ORIGIN = "https://app.satinlore.com";
+export const BETA_ORIGIN = "https://beta.satinlore.com";
 const ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS);
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[a-zA-Z]{2,}$/;
 const cachedKeys = new Map();
@@ -17,10 +22,15 @@ const BRIDGE_VENDOR_HTTPS = "https://*.lovense.com https://*.lovense-api.com htt
 const BRIDGE_VENDOR_WSS = "wss://*.lovense.com wss://*.lovense-api.com wss://*.lovense.club:*";
 
 /** No production defaults can turn a missing Access configuration into a public app. */
-export function privateAppConfiguration(env) {
+export function privateAppConfiguration(env, origin = APP_ORIGIN) {
   if (env.PRIVATE_APP_ENABLED !== "true" || env.PUBLIC_APP_ORIGIN !== APP_ORIGIN) return null;
+  if (![APP_ORIGIN, BETA_ORIGIN].includes(origin)) return null;
   const team = typeof env.ACCESS_TEAM_DOMAIN === "string" ? env.ACCESS_TEAM_DOMAIN.trim().toLowerCase() : "";
-  const audience = typeof env.ACCESS_AUD === "string" ? env.ACCESS_AUD.trim() : "";
+  // The same Access application can cover both hostnames. A separate beta
+  // application may instead supply its own exact audience without accepting
+  // both audiences on either hostname.
+  const configuredAudience = origin === BETA_ORIGIN && env.BETA_ACCESS_AUD !== undefined ? env.BETA_ACCESS_AUD : env.ACCESS_AUD;
+  const audience = typeof configuredAudience === "string" ? configuredAudience.trim() : "";
   const email = typeof env.FOUNDER_EMAIL === "string" ? env.FOUNDER_EMAIL.trim().toLowerCase() : "";
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/.test(team)) return null;
   if (!/^[a-f0-9]{64}$/.test(audience) || /^0+$/.test(audience)) return null;
@@ -29,11 +39,12 @@ export function privateAppConfiguration(env) {
   if (testerValue !== undefined && (typeof testerValue !== "string" || testerValue.length > 6000)) return null;
   const testerEmails = (testerValue || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
   if (testerEmails.length > 20 || testerEmails.some(value => value.length > 254 || !EMAIL.test(value))) return null;
-  return { origin: APP_ORIGIN, issuer: `https://${team}`, audience, email,
+  return { origin, issuer: `https://${team}`, audience, email,
+    ...(origin === BETA_ORIGIN ? { beta: true } : {}),
     ...(testerEmails.length ? { testerEmails: [...new Set(testerEmails)] } : {}) };
 }
 
-function secure(response, { head = false, bridgeHash = null } = {}) {
+function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN } = {}) {
   const result = new Response(head ? null : response.body, response);
   result.headers.set("Cache-Control", "no-store");
   result.headers.set("Referrer-Policy", "no-referrer");
@@ -42,7 +53,7 @@ function secure(response, { head = false, bridgeHash = null } = {}) {
   result.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   result.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   result.headers.set("Content-Security-Policy", bridgeHash ?
-    `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${APP_ORIGIN}; base-uri 'none'; form-action 'none'` : CONTENT_POLICY);
+    `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${origin}; base-uri 'none'; form-action 'none'` : CONTENT_POLICY.replaceAll(APP_ORIGIN, origin));
   return result;
 }
 
@@ -73,7 +84,8 @@ export async function verifyFounder(request, config, keyResolver) {
     if (typeof payload.email !== "string" || !EMAIL.test(payload.email) ||
         ![config.email, ...(config.testerEmails || [])].includes(payload.email.toLowerCase())) return null;
     if (!Number.isSafeInteger(payload.iat) || payload.iat > now + 30 || !Number.isSafeInteger(payload.exp) || !Number.isSafeInteger(payload.exp * 1000)) return null;
-    return { expiresAt: payload.exp * 1000, subject: payload.sub };
+    return { expiresAt: payload.exp * 1000, subject: payload.sub,
+      email: payload.email.toLowerCase(), isFounder: payload.email.toLowerCase() === config.email };
   } catch {
     // Never echo tokens, claims, key URLs or verification exceptions.
     return null;
@@ -84,14 +96,25 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
   return {
     async fetch(request, env) {
       const head = request.method === "HEAD";
-      const finish = response => secure(response, { head });
-      const config = privateAppConfiguration(env);
-      if (!config) return finish(json({ error: "The private preview is not available." }, 503));
+      let responseOrigin = APP_ORIGIN;
+      const finish = response => secure(response, { head, origin: responseOrigin });
+      const baseConfig = privateAppConfiguration(env);
+      if (!baseConfig) return finish(json({ error: "The private preview is not available." }, 503));
       const url = new URL(request.url);
       // A valid token must not make workers.dev, version URLs or another hostname an origin bypass.
-      if (url.origin !== config.origin) return finish(json({ error: "Founder access required." }, 403));
+      if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
+      const config = url.origin === APP_ORIGIN ? baseConfig : privateAppConfiguration(env, url.origin);
+      if (!config) return finish(json({ error: "The private preview is not available." }, 503));
+      responseOrigin = config.origin;
       const session = await verifyFounder(request, config, keyResolver);
       if (!session) return finish(json({ error: "Founder access required." }, 403));
+      // These services select identity only from the verified Access context.
+      const accountResponse = await handleAccount(request, env, { config, session });
+      if (accountResponse) return finish(accountResponse);
+      const recordingResponse = await handleBetaRecordings(request, env, { config, session });
+      if (recordingResponse) return finish(recordingResponse);
+      if (["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"].includes(url.pathname) &&
+          (config.origin !== BETA_ORIGIN || !session.isFounder)) return finish(json({ error: "This page is restricted to the beta administrator." }, 403));
       if (["/api/lovense/status", "/api/lovense/session"].includes(url.pathname)) {
         const status = url.pathname.endsWith("/status");
         const methods = status ? ["GET", "HEAD"] : ["POST"];
@@ -103,9 +126,10 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         if (url.search) return finish(json({ error: "Use the connection controls on SatinLore." }, 400));
         const vendorConfig = lovenseConfiguration(env);
         const quotaAvailable = env.PRIVATE_FEEDBACK && typeof env.PRIVATE_FEEDBACK.idFromName === "function" && typeof env.PRIVATE_FEEDBACK.get === "function";
-        const available = Boolean(vendorConfig && quotaAvailable);
-        const unavailable = "Real-toy connections need the Lovense server settings. You can use every toy simulator now.";
-        if (status) return finish(json({ available, message: available ? "Ready to pair through Lovense Remote. Physical behaviour still needs testing." : unavailable }));
+        const readiness = lovenseReadiness(env, quotaAvailable);
+        const available = Boolean(vendorConfig && readiness.available);
+        const unavailable = readiness.message;
+        if (status) return finish(json(readiness));
         if (request.headers.get("Origin") !== config.origin ||
             ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
           return finish(json({ error: "Please use the connection controls on SatinLore." }, 403));
@@ -117,7 +141,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
           // Separate object namespace: quota state never joins feedback, email or stories.
           const quota = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(`lovense-issue:v1:${uid}`));
           const permission = await quota.fetch(new Request("https://feedback.internal/internal/lovense-rate", {
-            method: "POST", headers: { Origin: config.origin, "Content-Type": "application/json" }, body: "{}",
+            method: "POST", headers: { Origin: APP_ORIGIN, "Content-Type": "application/json" }, body: "{}",
           }));
           if (permission.status !== 200) {
             const limited = permission.status === 429;
@@ -148,7 +172,10 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
           return finish(json({ error: "Please use the story-link form on the SatinLore app." }, 403));
         }
         try {
-          const source = await storyImportJson(request);
+          // Exact public Origin was checked above; the parser keeps its existing
+          // canonical internal contract on both authenticated reader hosts.
+          const internalHeaders = new Headers(request.headers); internalHeaders.set("Origin", APP_ORIGIN);
+          const source = await storyImportJson(new Request(request, { headers: internalHeaders }));
           if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
           // Deliberate link imports are the sole exception to local-only story processing.
           // Only a canonical public AO3 URL enters this fetch; no cookies, assertions or local story data.
@@ -177,7 +204,10 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         try {
           let payload;
           if (request.method === "POST") {
-            const value = await feedbackJson(request);
+            // Outer request passed the selected host's exact-Origin check.
+            // Keep the existing internal feedback store's canonical protocol.
+            const internalHeaders = new Headers(request.headers); internalHeaders.set("Origin", APP_ORIGIN);
+            const value = await feedbackJson(new Request(request, { headers: internalHeaders }));
             if (url.pathname === "/api/feedback") payload = normalizeFeedback(value);
             else {
               if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || value.confirm !== true) {
@@ -191,7 +221,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
           const name = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
           const stub = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(name));
           // The durable store receives no identity, cookies, JWTs, query values or automatic story context.
-          const headers = new Headers({ Origin: config.origin });
+          const headers = new Headers({ Origin: APP_ORIGIN });
           if (payload !== undefined) headers.set("Content-Type", "application/json");
           return finish(await stub.fetch(new Request(`https://feedback.internal${url.pathname}`, {
             method: request.method, headers, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}),
@@ -223,7 +253,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
           if (!script || document.length > 500_000) return finish(json({ error: "The isolated connection bridge is unavailable." }, 503));
           const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(script));
           const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
-          return secure(new Response(document, asset), { head, bridgeHash: hash });
+          return secure(new Response(document, asset), { head, bridgeHash: hash, origin: config.origin });
         }
         return finish(asset);
       } catch {

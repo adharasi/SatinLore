@@ -177,6 +177,12 @@ async function testRehearsalDevice(page, profile) {
   assert.equal(await page.locator("#setup-primary").isDisabled(), true, "A timer alone cannot supply the user's response confirmation.");
   await page.locator("#setup-response-checked").check();
   await page.locator("#setup-primary").click();
+  // Calibration is deliberately optional. Legacy controller journeys retain
+  // their authored 0,2,4,1,3,0 fixture; the new beta suite explores every field.
+  if (await page.locator("#calibration-view").isVisible()) {
+    for (const _channel of profile.channels) await page.locator("#calibration-skip-movement").click();
+    await page.locator("#setup-practice-story").selectOption("control-check-v1");
+  }
   await page.waitForFunction(() => document.querySelector("#setup-primary").textContent === "Open practice story");
   await output(page, 0);
 }

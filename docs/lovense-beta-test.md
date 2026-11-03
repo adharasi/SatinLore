@@ -1,93 +1,65 @@
 # Lovense setup and nine-model beta rehearsal
 
-Use this guide to rehearse without hardware on 2 November 2026, then record the first physical observations with the tester on 3 November. The nine profiles are **Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3**. A simulated pass is a software result; it does not qualify a physical toy, firmware, phone or browser.
+Use [the 3 November founder and tester runbook](beta-session-2026-11-03.md) for the complete account → connection → calibration → controlled-story → optional personal-story journey, including recording and founder review. This guide summarizes device boundaries and replaces the older simulator-only Osci 3 and blanket 5/20 reader descriptions.
 
-## What the integration does
+## Current connection contract
 
-The guided setup separates **Try a simulator** from **Connect my toy**. Both journeys require an explicit device selection, a short test and a separate confirmed Start for the practice read. Selecting a model helps organise setup; a live connection's actual discovered device ID and capabilities determine what may be commanded. One toy and one available action are selected at a time. It does not start every toy paired to Lovense Remote.
+The nine profiles are **Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3**. Hardware-free simulation and physical connection remain separate. Choosing a model does not select a device or start output; choose the actual discovered toy explicitly.
 
-The real connection uses Lovense Remote as the Bluetooth bridge and the official Standard JS SDK in an isolated frame. SatinLore does not ask the browser to pair directly over Bluetooth. Local story text, titles and corrections stay in the reader; only connection/control information crosses into the vendor bridge. The hosted endpoint obtains a per-user authentication token using a server-held developer token.
+Lovense Remote is the phone/Bluetooth bridge. The isolated vendor frame uses a documented Standard Socket Function adapter, with a narrower Standard JS SDK fallback. It receives only connection/control information, never local story text/title or private preset names. Developer credentials remain server-side; the browser receives a short-lived per-user authToken for the authenticated session only.
 
-Physical beta commands are limited to **two seconds and at most 5/20**. The lower user-selected maximum still applies, including zero. The simulator permits the existing 0–20 software range. The meter and graphical movement represent simulation or requested/transport-reported output, as labelled; they are not a physical sensor measurement. Stop is best effort after connection loss, so record actual physical expiry separately.
+Initial gentle tests use one movement, two seconds, and a level no higher than 5/20 or the user's lower maximum. The tester checks the actual response and targeted Stop before confirming. After that check, **Enable personal range** may permit levels up to 20/20 for that movement in this connection. Enabling does not raise the chosen maximum, apply a preset or start output. Hide, expiry, logout, disconnect and device changes reset permission. A stored preset never grants it.
 
-## Owner setup before the tester signs in
+All nonzero live requests remain finite at two seconds, including personal-range and combined requests. The master maximum and each action's limits still apply; zero is authoritative. Stop after transport loss is best effort, so physical expiry and Stop must be observed independently of the timer or SDK acknowledgement.
 
-1. Follow the [Cloudflare runbook](../deploy/cloudflare/README.md) for the Lovense runtime settings. Do not paste any secret into chat, source files, screenshots or a test report.
-2. In the Lovense developer dashboard, obtain the application Developer Token and note its exact **Website Name**. A Developer Token and a per-user `authToken` are different credentials.
-3. Save `LOVENSE_DEVELOPER_TOKEN` as a Cloudflare runtime **Secret**, and `LOVENSE_PLATFORM` as the exact Website Name. The platform value is a normal runtime variable.
-4. Generate a new, independent 64-character hexadecimal random value in Bitwarden and save it as runtime **Secret** `LOVENSE_UID_SECRET`. It must not reuse the questionnaire webhook secret or another application's secret. Keep the same value across ordinary deployments; changing it changes the pseudonymous Lovense user IDs.
-5. Ask the tester which email they will use to sign in. Add that email to the existing app's Cloudflare Access allow policy and to the Worker's `BETA_TESTER_EMAILS` comma-separated runtime variable. Both gates must allow the person. Keep the founder policy and all existing Access audience/team settings. No tester address is pre-populated in source.
-6. Deploy the updated runtime settings using the runbook, open the app, and choose the real connection route. Its configuration status must report availability before a real pairing code can be requested. A missing configuration is an expected blocked state, not a successful connection. Do not repeatedly request new codes: token issuance is limited to three per minute and twenty per hour per signed-in subject.
-7. Verify the tester can sign in before the scheduled call. Cloudflare Access is currently the sign-in gate; it does not provide cloud story storage or a durable SatinLore reader account.
+## Model and movement boundaries
 
-The Python invitation/device-check service remains separate from the hosted app. Local invitation tokens do not grant hosted Access permission, and hosted secrets do not automatically configure the local Python server.
-
-## Rehearse every model without a toy
-
-Keep physical devices disconnected. No Lovense credentials or vendor script is needed for simulation.
-
-1. Open the reader and its setup/test-read guide.
-2. Choose the required toy profile, then **Try a simulator**. Read the simulated status before proceeding; a rehearsal pairing illustration is not a real QR code.
-3. Connect the simulated session. Select the discovered synthetic device explicitly. An available device must never be silently selected or started for you.
-4. Choose an available action under **Test one movement**, leave **Test level** at 1 and choose **Test for 2 seconds**. Observe the model's graphic and output readout, wait for it to return to zero, then select **I checked the response and the output is stopped.** A test request does not start reading playback.
-5. Choose **Continue to test read**, then **Open practice story**. Confirm Start with the shown toy, action, strength and maximum. The practice sections have deliberate levels `0, 2, 4, 1, 3, 0`; they test the controls independently of the experimental story scorer.
-6. Move through the practice sections with scrolling and Previous/Next. Try strength minus/plus, a lower maximum and a zero maximum. Zero must remain zero. Pause/Stop and changes made while paused must never restart output.
-7. Stop, then explicitly Start again. Hide and return to the tab, disconnect and reconnect, switch stories and close/reopen setup. Each return must be paused and require a fresh Start.
-8. Under **Rehearsal tools**, use **Simulate disconnect**, **Simulate connection error** and **Reconnect**. A lost connection or command error must stop dispatch, show an accurate error/disconnected state and require explicit reconnection; reconnecting alone must not restart output. Use the separate `/simulator-lab` for delayed/wrong/missing acknowledgements and failed-Stop fixtures.
-9. Repeat for all nine profiles and each action offered by that simulated profile. Repeat the key selection/test/Stop/reconnect actions in Midnight Ink and Satin Editorial and at a phone-width viewport. A viewport simulation does not establish real-phone compatibility.
-
-Do not mark a hardware setup complete from a simulated checklist. The guide can be skipped or repeated and does not save an armed connection or calibration to an account. Unsaved stories clear on reload; save any text you need before refreshing.
-
-## Model and action boundaries
-
-| Profile | Baseline live action | Additional action when exposed by this connection | Limits of this beta |
+| Profile | Available baseline | Additional action when this connection qualifies it | Boundary |
 | --- | --- | --- | --- |
-| Lush | Vibration | None | Discover the actual generation; record it in the test report. |
-| Flexer | Vibration | Fingering | Only offered where supported by the discovered device/SDK contract. |
-| Nora | Vibration | Rotation | Test the selected action separately; no automatic multi-action routine. |
-| Domi | Vibration | None | Record the actual generation and Remote version. |
-| Velvo | Vibration | Rotation, only with an explicit compatible capability report | Native model support is not proof that every Standard JS SDK/Remote combination exposes the motion. |
-| Spinel | Vibration | Thrusting, only with an explicit compatible capability report | No heating, depth, stroke-length or undocumented command is implemented. |
-| Dolce | General vibration | None | Independent internal/external motor control is not claimed through this Standard JS SDK integration. |
-| Hush | Vibration | None | Record the actual generation and Remote version. |
-| Osci 3 | Vibration | Oscillation in the simulator only | The Standard JS SDK does not document an oscillator parameter. Native and Standard HTTP APIs expose oscillation, but this transport does not send it, heating or independent motor commands. |
+| Lush | Vibration | None | Record the actual generation. |
+| Flexer | Vibration | Fingering / flexing | Test each separately; combine only through a qualified connection. |
+| Nora | Vibration | Rotation | Each chosen action needs its own check. |
+| Domi | Vibration | None | Record the actual generation. |
+| Velvo | Vibration | Rotation with an explicit compatible capability report | Native support alone does not establish every web transport's support. |
+| Spinel | Vibration | Thrusting with an explicit compatible capability report | No heating, guessed depth or stroke command. |
+| Dolce | General vibration | None | Independent internal/external vibration motors are not exposed here. |
+| Hush | Vibration | None | Record the actual generation. |
+| Osci 3 | Vibration | Oscillation through the qualified Standard Socket adapter | The Basic SDK fallback remains vibration-only; no heating or guessed separate motors. |
 
-Osci 3 has its own ninth simulator profile, including a labelled **Oscillation · simulator only** rehearsal. Discovery accepts the explicit Osci 3 name/type or the Osci family with hardware version 3, and does not promote older Osci/Osci 2 devices. A reported Oscillate function does not by itself authorise an undocumented browser-SDK parameter. A future Standard HTTP adapter would need separate implementation and qualification before this motion can be enabled on hardware.
+The extended adapter can combine qualified actions on **one** selected toy. Each active action has independent levels and must be individually checked before Start; each also needs its own range grant before higher output. Missing, malformed or unsupported capabilities stay unavailable. This is not full Lovense Remote parity or multiple-toy control.
 
-If a motion is absent in the live action list, use the available vibration route and record the missing capability. Do not substitute an unknown action or assume that a simulator's action list proves vendor availability. A model's physical functions and the actions exposed by a particular SDK are separate facts.
+Osci 3 matching accepts its explicit name/type or the Osci family with hardware version 3. It must not promote older Osci/Osci 2 devices. A capability string alone cannot authorize an undocumented Basic SDK parameter.
 
-## First physical connection with the tester
+## Guided preferences and controlled reading
 
-1. Use neutral practice material and begin with the device out of use where its response can be observed. Keep the device's own power/Stop control available.
-2. Have the tester install/update **Lovense Remote**, charge the toy, turn it on and pair it inside Remote. Confirm it responds in Remote first. SatinLore does not replace this Bluetooth-pairing step.
-3. Open SatinLore on a computer or second screen and sign in with the approved email. Choose the matching model and **Connect my toy**.
-4. Follow the displayed pairing instructions and scan the private QR code using Lovense Remote. Keep the code private. For the first test, use a second screen; a same-phone handoff/deep-link flow is not promised by this build.
-5. Wait for a connected device to appear. Choose that exact device explicitly. If multiple toys are connected, check the model and identifying suffix before selecting; selection must not broadcast to the others.
-6. Start with vibration at level 1 and request one two-second test. The tester should report whether the intended device responded, whether another toy remained still, and whether the selected toy physically stopped. Check the actual result rather than relying on the timer or a successful SDK return.
-7. Only after observing the result and stopped output, confirm that check and continue to the neutral practice read. Select an additional action only if the live connection actually offers it. Repeat the isolated level-1 test before using a different action.
-8. Confirm Start with a low maximum. Read through the deliberate quiet/nonzero practice sections, then test Pause, Stop, a zero maximum, strength reductions and Stop → Start. Keep each action controlled and stop the session if output is unexpected.
-9. After the basic test, check tab hide/return and a deliberate connection interruption while observing physical expiry. Returning or reconnecting must stay paused. If Stop cannot be confirmed, use the toy's own control, record the failure and do not continue that configuration.
-10. Finish with Stop and Disconnect. Personal story import is optional after the practice checks; neither the owner nor a test report needs the tester's story, account credentials, pairing code or private control link.
+The guide explains actual movements, then offers minimum, background, preferred, upper-limit and Ease off levels for each. Short tests and stopped checks are deliberate; optional ratings can be skipped. Visuals reflect actual simulated output or labelled requested physical output. Unknown output must remain unknown.
 
-## Record evidence without private material
+**Use these levels** and **Use these movements together** apply settings while paused. The right sidebar re-exposes movement controls and Explore after setup, plus Continuous background, Hold, Ease off and Follow story. Hold retains known chosen output; Ease off uses each action's recovery level; Follow story returns gradually. None starts a paused reader. Manual zero and maximum zero override any background minimum. The three authored test stories use known levels and quiet passages; they are not a scorer-quality result.
 
-Record build/commit, toy model/generation and firmware when available, Lovense Remote version, phone OS, browser/version and the tested action. For each check write **pass**, **fail** or **not tested**, with a short neutral reproduction. The [hardware record](hardware-test-record.md) can hold the detailed physical observations.
+Readers can explicitly save account-wide or story-specific presets after verified-email sign-in and 18+ account registration. Presets include active actions and master maximum but never credentials, arming or personal-range permission. Story text remains local, and account registration/preset saving does not consent to research recording.
 
-| Check | Software rehearsal | Physical observation |
-| --- | --- | --- |
-| Model choice, explicit device selection and test flow | Record after running | Record separately for each actual toy |
-| Requested action and selected toy only | A fake transport can verify message targeting | Tester observes intended and unselected toys |
-| Two-second expiry and Stop | Test finite payload/timer/error behaviour | Tester measures actual end of output |
-| Hide, disconnect, failed command and explicit restart | Deterministic fixtures plus reader checks | Tester observes transport-loss behaviour |
-| Story-to-output usefulness | Practice checks mapping/plumbing | Needs separate reading/scoring evaluation |
+## Founder readiness before the session
 
-No physical model is marked qualified by this document. Local tests, signed-in browser acceptance, deployment status, live vendor pairing and physical results belong in separate evidence entries. Do not include email addresses, QR/auth payloads, device IDs, stories, exported cookies or private HAR files in public issues or repository screenshots.
+1. Confirm the Worker deployment and v2 account/recording bindings succeeded.
+2. Configure whole-host Access for app and beta, plus the invited email in both the relevant Access Allow policy and runtime `BETA_TESTER_EMAILS`.
+3. Retain runtime Secrets `LOVENSE_DEVELOPER_TOKEN` and `LOVENSE_UID_SECRET` (independent 64 hex), plus exact Website Name in `LOVENSE_PLATFORM`. Do not paste values into a report or chat.
+4. After deploying settings, sign in and check `/api/lovense/status`. Its token/platform/UID/storage checks must be ready. This is configuration readiness, not vendor acceptance or physical qualification.
+5. Rehearse all nine profiles with simulation, including calibration, qualified combinations, presets, Stop/restart, maximum zero, hide/return and failure/reconnect. Keep physical devices disconnected during this rehearsal.
+6. On beta only, explicitly start a synthetic recording and confirm its control timeline/graphs are visible in founder `/admin`. The normal app host must not record the beta timeline.
 
-## Official contracts reviewed
+The full [session runbook](beta-session-2026-11-03.md) includes exact dashboard steps, expected results and the physical-session sequence. The local Python invitation/device-check service remains separate and keeps its discrete level-5 test ceiling; a local invitation is not a hosted account or Access permission.
+
+## Physical qualification evidence
+
+For each actual configuration record build, model/generation, firmware when available, Remote version, phone OS, browser and action. Use **pass**, **fail** or **not tested** in [the hardware record](hardware-test-record.md). Begin with the device where its response can be observed and keep its own controls available. Confirm selected-device-only output, finite expiry, Stop, permission reset and explicit restart after interruption before optional personal exploration.
+
+A simulator pass, a submitted command or a successful deployment is not a physical pass. Do not collect pairing QR/auth values, device IDs, email addresses or private stories in public evidence. The optional beta recorder keeps a bounded structured control timeline and selected ratings; it does not capture DOM/screen video or private story text.
+
+## Official contracts
 
 Reviewed 2 November 2026:
 
-- [Lovense Standard JS SDK](https://developer.lovense.com/docs/standard-solutions/standard-js-sdk): per-user SDK authentication, QR/discovery, action names and targeted finite commands.
-- [Lovense Standard Socket API](https://developer.lovense.com/docs/standard-solutions/socket-api): server-side developer-token exchange and Website Name.
-- [Lovense Standard API](https://developer.lovense.com/docs/standard-solutions/standard-api): capability names and command semantics.
-- [Lovense Android SDK](https://developer.lovense.com/docs/native-sdks/android-native-sdk): current model/action matrix; native support alone does not establish browser-SDK compatibility.
+- [Lovense Standard Socket API](https://developer.lovense.com/docs/standard-solutions/socket-api): authenticated socket discovery and Standard command relay.
+- [Lovense Standard API](https://developer.lovense.com/docs/standard-solutions/standard-api): Function actions, targeting, duration, replacement and Stop semantics.
+- [Lovense Standard JS SDK](https://developer.lovense.com/docs/standard-solutions/standard-js-sdk): fallback discovery, documented browser command keys and targeted Stop.
+- [Lovense Android SDK](https://developer.lovense.com/docs/native-sdks/android-native-sdk): native capability matrix, not proof of browser support.

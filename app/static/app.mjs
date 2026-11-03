@@ -12,6 +12,9 @@ import {FolderStore, selectFolderStories} from "./reader/folders.mjs";
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "./reader/web-import.mjs";
 import {createSimulatorView} from "./reader/simulator-view.mjs";
 import {createSetupFlow, PRACTICE_STORY} from "./reader/setup-flow.mjs";
+import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
+import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
+import {clampCalibration} from "./reader/calibration.mjs";
 
 const $ = id => document.getElementById(id);
 const importer = new TextImporter();
@@ -23,6 +26,8 @@ let folderFilter = "all";
 let folderSignature = "";
 let simulatorView = null;
 let setupFlow = null;
+let accountClient = null, accountWorkspace = null, betaRecorder = null;
+let recordedDevice = "", recordedStory = "", recordedStep = "", feelChannelSignature = "", feelEditingChannel = null, combinationSignature = "";
 let connection = {mode: "simulator", model: "lush", toys: [], selectedId: null};
 const backupImporter = new BackupImporter();
 const preferences = new ReaderPreferences();
@@ -65,13 +70,85 @@ let latest = {state: "DISCONNECTED", connected: false, running: false, output: 0
   ceiling: 5, strength: 1, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
 
 const currentStory = () => stories.find(story => story.id === activeId) ?? null;
-const playbackIdentity = () => `${latest.mode || "simulator"}:${connection.selectedId || latest.selectedDeviceId || ""}:${latest.channel || "vibrate"}`;
+const playbackIdentity = () => JSON.stringify([latest.mode || "simulator",connection.selectedId || latest.selectedDeviceId || "",latest.activeChannels || [latest.channel || "vibrate"],latest.calibration?.channels || {}]);
 const isNarrow = () => window.matchMedia("(max-width: 1099px)").matches;
 function text(id, value) {
   const node = $(id);
   if (node && node.textContent !== String(value)) node.textContent = String(value);
 }
 function show(message) { text("message", message); }
+function recordAllowedEvent(event) { try { betaRecorder?.record(event); } catch { /* Optional research never owns output. */ } }
+function recordCalibrationEvent(event) {
+  const channel = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"].includes(event.channel) ? event.channel : undefined;
+  const field = ["minimum", "background", "preferred", "maximum", "recovery"].includes(event.field) ? event.field : undefined;
+  if (event.type === "calibration_rating") {
+    recordAllowedEvent({type:"control",control:field || "test",channel,value:event.value});
+    recordAllowedEvent({type:"rating",question:"intensity",value:({light:1,good:3,strong:5})[event.rating],channel,...(field?{field}:{})});
+  } else if (event.type === "calibration_adjust") recordAllowedEvent({type:"control",control:field,channel,value:event.value});
+  else if (event.type === "calibration_test") recordAllowedEvent({type:"control",control:"test",channel,value:event.value});
+  else if (event.type === "calibration_mode") recordAllowedEvent({type:"control",control:"continuity",value:event.mode});
+  else if (event.type === "calibration_rhythm") recordAllowedEvent({type:"control",control:"rhythm",channel,value:event.rhythm});
+  else if (event.type === "calibration_gain") recordAllowedEvent({type:"control",control:"gain",channel,value:event.value});
+  else recordAllowedEvent({type:"step",step:"calibration"});
+}
+function syncManualZeros(story) {
+  if (!story || story !== currentStory()) return;
+  controller.setManualZeros(story.model.paragraphs.flatMap((p,index) => !p.analysed || p.override === 0 &&
+    (!story.controlled || story.explicitCorrections.has(index)) ? [index] : []));
+}
+function syncReaderMapping(story) { controller.updateLevels(story.model.effectiveLevels()); syncManualZeros(story); }
+function selectedSettings(state = latest,channel = feelEditingChannel || state.channel) {
+  const stored = state.calibration?.channels?.[channel] || {minimum:0,background:1,preferred:3,maximum:5,recovery:0,gain:1,rhythm:"steady"};
+  const source=state.feel?.channels?.[channel] || (channel===state.channel ? state.feel : {}) || {};
+  const keys=["minimum","background","preferred","recovery","gain","rhythm"];
+  const feel=Object.fromEntries(keys.filter(key=>Object.hasOwn(source,key)).map(key=>[key,source[key]]));
+  const maximum=Math.min(stored.maximum,source.maximum??stored.maximum);
+  const range=state.mode!=="lovense"?20:(state.personalRangeChannels || []).includes(channel)?20:5;
+  return clampCalibration({...stored,...feel,maximum:20},Math.min(maximum,range));
+}
+function updateFeelControls(state) {
+  if (!$("feel-mode")) return;
+  const channels = state.channels || [], signature=JSON.stringify(channels);
+  if(signature!==feelChannelSignature){feelChannelSignature=signature;$("feel-channel").replaceChildren(...channels.map(c=>{const option=document.createElement("option");option.value=c.id;option.textContent=c.label;return option;}));}
+  if(!channels.some(c=>c.id===feelEditingChannel))feelEditingChannel=state.channel || channels[0]?.id;
+  $("feel-channel").value=feelEditingChannel || "vibrate";
+  $("feel-channel").disabled=state.testing || !channels.length;
+  text("available-features", channels.length ? `Available for ${state.deviceLabel || "this toy"}: ${channels.map(c=>c.label).join(" · ")}.` : "Select a connected toy to see its available movements.");
+  const settings=selectedSettings(state), feel=state.feel || {mode:"story",playbackMode:"story"};
+  $("feel-mode").value=feel.mode;
+  const editRange=state.mode!=="lovense"?20:(state.personalRangeChannels || []).includes(feelEditingChannel)?20:5;
+  for(const key of ["minimum","background","preferred","recovery","maximum"]){$("feel-"+key).value=settings[key];$("feel-"+key).max=key==="maximum"?editRange:settings.maximum;text("feel-"+key+"-value",settings[key]);}
+  $("feel-rhythm").value=settings.rhythm;
+  const output=state.channelOutputs?.[feelEditingChannel]??state.output;
+  if($("manual-level")){$("manual-level").value=typeof output==="number"?output:0;$("manual-level").max=Math.min(settings.maximum,state.ceiling);$("manual-level").disabled=!state.running||typeof output!=="number";text("manual-level-value",typeof output==="number"?output:"Unknown");}
+  for(const id of ["feel-hold","feel-easeoff","feel-follow"])$(id).disabled=!state.running;
+  for(const id of ["mark-good","mark-uncomfortable"])if($(id))$(id).disabled=!state.running||betaRecorder?.snapshot().recording!==true;
+  text("feel-status",feel.playbackMode==="hold"?"Holding your chosen level":feel.playbackMode==="ease-off"?"Eased off · automatic increases are held":"Following the story"+(feel.mode==="continuous"?" · background enabled":""));
+  if($("enable-personal-range")){
+    const granted=(state.personalRangeChannels || []).includes(feelEditingChannel);
+    $("enable-personal-range").hidden=state.mode!=="lovense"||granted;
+    $("enable-personal-range").disabled=state.running||state.testing||state.outputKnown===false||!state.connected||!(state.verifiedChannels || []).includes(feelEditingChannel);
+    text("personal-range-status",state.mode!=="lovense"?"Simulator range: 0–20. Nothing moves outside this screen.":granted?"Personal range enabled for this movement in this connection. Your chosen maximum still applies.":"The gentle check stays within 5/20. After checking this movement and Stop, you can enable a personal range up to 20. It resets on interruption.");
+  }
+  if($("combination-controls")){
+    $("combination-controls").hidden=!state.supportsCombined||channels.length<2;
+    const active=state.activeChannels || [state.channel], sig=JSON.stringify([channels,active]);
+    if(sig!==combinationSignature){combinationSignature=sig;$("combination-choices").replaceChildren(...channels.map(channel=>{const label=document.createElement("label"),input=document.createElement("input");label.className="check-label";input.type="checkbox";input.value=channel.id;input.checked=active.includes(channel.id);label.append(input,document.createTextNode(channel.label));return label;}));}
+    $("apply-combined").disabled=state.testing||!state.connected;
+  }
+}
+function recordControlSnapshot(state) {
+  const channels=(state.channels || []).map(c=>c.id), mode=state.mode==="lovense"?"live":"simulator";
+  const device=JSON.stringify([state.model,mode,channels]);
+  if(device!==recordedDevice){recordedDevice=device;recordAllowedEvent({type:"device",toy:state.model || "none",mode,channels});}
+  const outputs=Object.fromEntries(Object.entries(state.channelOutputs || {[state.channel || "vibrate"]:state.output}).filter(([,value])=>typeof value==="number"&&Number.isFinite(value)&&value>=0&&value<=20));
+  recordAllowedEvent({type:"output",channels:outputs,state:state.testing?"testing":state.state==="ERROR_PAUSED"?"error":!state.connected?"disconnected":state.running?"playing":"paused"});
+  const story=currentStory(), fixture=story?.betaId==="evening-train-v1"?"harbour":story?.betaId==="rain-at-window-v1"?"garden":story?.controlled?"practice":"personal";
+  const location=story?`${fixture}:${state.position}`:"";
+  if(location && location!==recordedStory){recordedStory=location;recordAllowedEvent({type:"story",fixture,position:state.position});}
+  const phase=setupFlow?.snapshot().phase, step=({choose:"choose",connecting:"connect",select:"connect",test:"features",calibrate:"calibration",practice:"practice",reading:"story",complete:"complete"})[phase];
+  if(step&&step!==recordedStep){recordedStep=step;recordAllowedEvent({type:"step",step});}
+}
 function cancelPosition() { ++positionEpoch; clearTimeout(positionTimer); positionTimer = null; }
 function releasePlayback() { playingLease?.(); playingLease = null; }
 function cancelStart() {
@@ -220,6 +297,9 @@ function updateCurrentCorrection(story) {
 
 function display(state = latest) {
   latest = state;
+  updateFeelControls(state);
+  accountWorkspace?.update();
+  recordControlSnapshot(state);
   const story = currentStory();
   for (const id of ["new-story", "empty-new-story"]) $(id).disabled = libraryLoading || libraryMutation;
   if ($("story-actions")) $("story-actions").hidden = !story;
@@ -240,8 +320,8 @@ function display(state = latest) {
   $("meter").value = state.output ?? 0;
   text("capValue", state.ceiling);
   $("cap").value = state.ceiling;
-  $("cap").max = state.mode === "lovense" ? "5" : "20";
-  text("ceiling-help", state.mode === "lovense" ? "Physical beta maximum is 5 out of 20. Reductions apply immediately. A higher maximum pauses until you choose Start; there is no extra popup." : "Changes apply immediately within the simulator. Adjusting the maximum does not start playback.");
+  $("cap").max = String(state.maxCeiling??(state.mode === "lovense" ? 5 : 20));
+  text("ceiling-help", state.mode === "lovense" ? `This movement's available range is 0–${state.maxCeiling??5}. Reductions apply immediately. A higher maximum pauses until you choose Start; there is no extra popup.` : "Changes apply immediately within the simulator. Adjusting the maximum does not start playback.");
   $("cap").setAttribute("aria-valuetext", `${state.ceiling} out of 20 confirmed maximum`);
   text("strength-value", formatStrength());
   $("strength-minus").disabled = libraryMutation || story?.deleting || state.strength <= 0;
@@ -388,12 +468,12 @@ function persistStory(story, {explicit = false} = {}) {
   return story.saveChain;
 }
 function makeStory({id = createStoryId(), title = "Untitled story", text: source, corrections = [],
-  position = 0, revision = null, updatedAt = Date.now(), folderId = null}) {
+  position = 0, revision = null, updatedAt = Date.now(), folderId = null, betaId = null, controlled = false}) {
   const model = new ReaderModel();
   model.load(source, {deferAnalysis: true, documentId: id});
   corrections.forEach((level, index) => { if (level !== null) model.setOverride(index, level); });
   const safePosition = Math.max(0, Math.min(model.paragraphs.length - 1, position));
-  return {id, title, model, folderId, position: safePosition, furthest: safePosition, saved: revision !== null, revision,
+  return {id, title, model, folderId, betaId, controlled, explicitCorrections:new Set(), position: safePosition, furthest: safePosition, saved: revision !== null, revision,
     dirty: false, saving: false, saveError: "", changeVersion: 0, saveTimer: null, saveChain: Promise.resolve(),
     deleting: false, analysisPromise: null, updatedAt, lastOpenedAt: 0};
 }
@@ -456,7 +536,9 @@ function renderReview() {
 function changeLevel(index, value) {
   const story = currentStory(); if (!story || story.deleting || libraryMutation) return;
   story.model.setOverride(index, value);
+  story.explicitCorrections.add(index);
   controller.setLevel(index, story.model.effectiveLevels()[index]);
+  syncManualZeros(story);
   markDirty(story);
   const nodes = reviewNodes.get(index); if (nodes) updateReviewRow(story, index, nodes);
   display();
@@ -464,7 +546,9 @@ function changeLevel(index, value) {
 function resetLevel(index) {
   const story = currentStory(); if (!story || story.deleting || libraryMutation) return;
   story.model.resetOverride(index);
+  story.explicitCorrections.delete(index);
   controller.setLevel(index, story.model.effectiveLevels()[index]);
+  syncManualZeros(story);
   markDirty(story);
   const nodes = reviewNodes.get(index); if (nodes) updateReviewRow(story, index, nodes);
   display();
@@ -476,21 +560,21 @@ async function analyse(story, {force = false} = {}) {
     if (story === currentStory() && operation === selectionEpoch) display();
   }});
   story.analysisPromise = task;
-  if (story === currentStory()) controller.updateLevels(story.model.effectiveLevels());
+  if (story === currentStory()) syncReaderMapping(story);
   display();
   try {
     const complete = await task;
     if (story !== currentStory() || operation !== selectionEpoch || !stories.includes(story)) return;
     if (!complete) { display(); return; }
     // Analysis can populate a mapping, never arm or start playback.
-    controller.updateLevels(story.model.effectiveLevels());
+    syncReaderMapping(story);
     markDirty(story);
     renderReview();
     display();
   } catch {
     if (story !== currentStory() || operation !== selectionEpoch) return;
     pause("Suggestions need attention. You can keep reading and retry analysis.");
-    controller.updateLevels(story.model.effectiveLevels());
+    syncReaderMapping(story);
     display();
   } finally {
     if (story.analysisPromise === task) story.analysisPromise = null;
@@ -524,6 +608,7 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   synchronizing = true;
   const position = story.position;
   controller.setStory(story.model.effectiveLevels());
+  syncManualZeros(story);
   controller.setPosition(position);
   synchronizing = false;
   if (isNarrow()) setPanel("library", false, {restore: false});
@@ -584,6 +669,7 @@ function setPanel(name, open, {restore = true} = {}) {
   panel.hidden = !open;
   document.body.dataset[name === "library" ? "libraryOpen" : "settingsOpen"] = String(open);
   toggle.setAttribute("aria-expanded", String(open));
+  if(open)recordAllowedEvent({type:"view",panel:name === "settings" ? "sidebar" : "library"});
   if (open && isNarrow()) {
     const other = name === "library" ? "settings" : "library";
     $(`${other}-panel`).hidden = true;
@@ -861,7 +947,42 @@ $("import-url")?.addEventListener("click", () => void importStoryUrl());
 $("story-url")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void importStoryUrl(); } });
 $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings-dialog"));
 for (const id of ["close-app-settings", "app-settings-close"]) $(id)?.addEventListener("click", () => closeDialog("app-settings-dialog"));
-for (const id of ["open-setup", "empty-setup", "choose-toy"]) $(id)?.addEventListener("click", () => setupFlow?.open());
+for (const id of ["open-setup", "empty-setup", "choose-toy"]) $(id)?.addEventListener("click", () => {recordAllowedEvent({type:"step",step:"choose"});setupFlow?.open();});
+$("open-calibration")?.addEventListener("click",()=>{recordAllowedEvent({type:"step",step:"calibration"});setupFlow?.openCalibration();});
+$("open-account-welcome")?.addEventListener("click",()=>{closeDialog("app-settings-dialog");if(accountClient?.snapshot().registered){setPanel("settings",true);$("account-preset-picker")?.focus();}else accountWorkspace?.focus();});
+$("feel-channel")?.addEventListener("change",async()=>{
+  const channel=$("feel-channel").value, mode=latest.feel?.mode || "story";
+  feelEditingChannel=channel;
+  if((latest.activeChannels || []).length>1&&(latest.activeChannels || []).includes(channel)){updateFeelControls(latest);return;}
+  try{cancelStart();if(await controller.applyCalibration(channel))controller.setFeel({mode});recordAllowedEvent({type:"control",control:"action",value:channel});}
+  catch(error){show(error.message||"The movement could not be changed.");}display();
+});
+$("feel-mode")?.addEventListener("change",()=>{cancelStart();controller.setFeel({mode:$("feel-mode").value});recordAllowedEvent({type:"control",control:"continuity",value:$("feel-mode").value});});
+for(const key of ["minimum","background","preferred","recovery","maximum"])$("feel-"+key)?.addEventListener("input",()=>{
+  try{
+    cancelStart();const value=Number($("feel-"+key).value), settings={...selectedSettings(),[key]:value};
+    settings.minimum=Math.min(settings.minimum,settings.maximum);
+    settings.background=Math.max(settings.minimum,Math.min(settings.maximum,settings.background));
+    settings.preferred=Math.max(settings.minimum,Math.min(settings.maximum,settings.preferred));
+    settings.recovery=Math.min(settings.recovery,settings.maximum);
+    controller.setChannelFeel(feelEditingChannel || latest.channel,settings);
+    recordAllowedEvent({type:"control",control:key,channel:feelEditingChannel || latest.channel,value});
+  }catch(error){show(error.message||"Check the movement settings.");display();}
+});
+$("feel-rhythm")?.addEventListener("change",()=>{try{const settings={...selectedSettings(),rhythm:$("feel-rhythm").value};controller.setChannelFeel(feelEditingChannel || latest.channel,settings);recordAllowedEvent({type:"control",control:"rhythm",channel:feelEditingChannel || latest.channel,value:settings.rhythm});}catch(error){show(error.message);} });
+$("enable-personal-range")?.addEventListener("click",async()=>{try{pause("Paused while you choose this movement's personal range.");await controller.enablePersonalRange({channel:feelEditingChannel || latest.channel});display(controller.snapshot());}catch(error){show(error.message||"Complete the gentle movement and Stop check first.");}});
+$("manual-level")?.addEventListener("input",()=>{try{const channel=feelEditingChannel || latest.channel,value=Number($("manual-level").value);if((latest.activeChannels || []).length>1){const levels={...latest.channelOutputs,[channel]:value};controller.holdChannels(levels);}else controller.hold(value);recordAllowedEvent({type:"control",control:"hold",channel,value});display(controller.snapshot());}catch(error){show(error.message||"Check the current output before changing it.");}});
+for(const[id,value]of[["mark-good",5],["mark-uncomfortable",1]])$(id)?.addEventListener("click",()=>{
+  if(betaRecorder?.snapshot().recording!==true)return;
+  recordAllowedEvent({type:"rating",question:"comfort",value,channel:feelEditingChannel || latest.channel});
+  text("beta-feedback-status","Marked in this beta recording. Your controls are unchanged.");
+});
+$("apply-combined")?.addEventListener("click",async()=>{try{const channels=Array.from($("combination-choices").querySelectorAll('input:checked')).map(input=>input.value);if(!channels.length)throw Error("Choose at least one movement.");const mode=latest.feel?.mode||"story";pause("Applying movement choices.");if(channels.length===1){await controller.applyCalibration(channels[0]);controller.setFeel({mode});}else await controller.applyChannels(channels,{mode});display(controller.snapshot());}catch(error){show(error.message||"The movements could not be combined.");}});
+$("control-playground")?.addEventListener("click",()=>{setupFlow?.cancel();addPreparedStory({...PRACTICE_STORY,controlled:true,betaId:"control-check-v1"});setPanel("settings",true);show("Choose Start, then try Hold, Ease off and the movement settings. Everything opens paused.");});
+for(const[id,action]of[["feel-hold","hold"],["feel-easeoff","easeoff"],["feel-follow","follow"]])$(id)?.addEventListener("click",()=>{
+  cancelStart();if(action==="hold")controller.hold();else if(action==="easeoff")controller.easeOff();else controller.followStory();
+  recordAllowedEvent({type:"control",control:action,channel:latest.channel});display(controller.snapshot());
+});
 $("folder-filter")?.addEventListener("change", event => { folderFilter = event.target.value; renderLibrary(); });
 $("create-folder")?.addEventListener("click", () => { pause("Choose a folder name."); const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
 $("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Rename this folder."); const name = prompt("Folder name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
@@ -900,7 +1021,7 @@ $("start").addEventListener("click", () => {
   cancelPosition(); followPosition();
   openDialog("start-dialog");
   startIntent = {id: story.id, ceiling: latest.ceiling, strength: latest.strength, device: playbackIdentity()};
-  const movement = latest.channels?.find(channel => channel.id === latest.channel)?.label || "Vibration";
+  const movement = (latest.activeChannels || [latest.channel || "vibrate"]).map(channel=>`${latest.channels?.find(item=>item.id===channel)?.label || channel} · up to ${Math.min(latest.ceiling,selectedSettings(latest,channel).maximum)}/20`).join(" + ");
   text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · session strength ${formatStrength()}.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
   text("confirm-start", `Start with maximum ${latest.ceiling}/20`);
 });
@@ -914,6 +1035,8 @@ $("cap").addEventListener("input", () => {
   if (!Number.isInteger(value) || value < 0 || value > 20) { display(); return; }
   cancelStart();
   controller.setCeilingFromControl(value);
+  if((latest.activeChannels||[latest.channel]).length===1&&value>selectedSettings(latest,latest.channel).maximum)controller.setChannelFeel(latest.channel,{maximum:value});
+  recordAllowedEvent({type:"control",control:"maximum",channel:latest.channel,value});
 });
 $("confirm-ceiling").addEventListener("click", () => {
   const intent = ceilingIntent; ceilingIntent = null; closeDialog("ceiling-dialog");
@@ -925,6 +1048,7 @@ for (const [id, delta] of [["strength-minus", -1], ["strength-plus", 1]]) $(id).
   if (libraryMutation || currentStory()?.deleting) return;
   cancelStart();
   controller.setStrength(Math.max(0, Math.min(20, Math.round(latest.strength * 10) + delta)) / 10);
+  recordAllowedEvent({type:"control",control:"strength",value:latest.strength});
 });
 $("strength-reset").addEventListener("click", () => { cancelStart(); controller.setStrength(1); });
 for (const [id, delta] of [["previous", -1], ["next", 1]]) $(id).addEventListener("click", () => {
@@ -944,7 +1068,7 @@ $("reanalyze").addEventListener("click", () => {
   story.model.cancelAnalysis();
   story.analysisPromise = null;
   ++selectionEpoch;
-  controller.updateLevels(story.model.effectiveLevels());
+  syncReaderMapping(story);
   void analyse(story, {force: true});
 });
 $("save-story").addEventListener("click", () => {
@@ -1128,9 +1252,19 @@ text("reader-preferences-note", loadedPreferences.message);
 if (document.createElementNS) {
   simulatorView = createSimulatorView($("simulator-visual"), {document, window});
   setupFlow = createSetupFlow({document, window, coachMount: $("setup-coach-mount"),
+    enableCalibration: true,
+    onCalibrationChange: ({channel,settings}) => controller.setCalibration(channel,settings),
+    onApplyCalibration: ({channel,settings}) => controller.applyCalibration(channel,settings),
+    onCalibrationModeChange: mode => controller.setFeel({mode}),
+    onEnablePersonalRange: options => controller.enablePersonalRange(options),
+    onApplyChannels: async ({channels,settings,mode}) => {
+      for(const channel of channels)controller.setCalibration(channel,settings[channel]);
+      return controller.applyChannels(channels,{mode});
+    },
+    onResearchEvent: recordCalibrationEvent,
     onConnect: options => { cancelImport(); pause("Preparing your connection."); return controller.beginConnection(options); },
     onSelectDevice: id => controller.selectDevice(id),
-    onTest: options => controller.test(options),
+    onTest: options => {recordAllowedEvent({type:"control",control:"test",channel:options.channel,value:options.level});return controller.test(options);},
     onConfirmTest: () => controller.confirmTest(),
     onRefresh: () => controller.refresh(),
     onDisconnect: () => { pause("Disconnected from setup."); return controller.disconnect(); },
@@ -1148,6 +1282,41 @@ if (document.createElementNS) {
     onFinish: () => { openDraft(); setPanel("settings", true, {restore: false}); selectSettingsTab("reader"); },
   });
   connection = controller.setupSnapshot();
+  accountClient = new ReaderAccountClient({hosted:hostedMode});
+  accountWorkspace = mountAccountWorkspace({client:accountClient,document,welcomeMount:$("account-welcome"),settingsMount:$("account-settings-mount"),presetMount:$("preset-mount"),
+    getContext:()=>{
+      const state=controller.snapshot(),channels={...state.calibration.channels};
+      for(const channel of state.activeChannels || [state.channel])if(channels[channel])channels[channel]=selectedSettings(state,channel);
+      return {model:state.model,mode:state.feel?.mode||"story",channels,activeChannels:state.activeChannels||[state.channel],ceiling:state.ceiling,storyId:currentStory()?.id||null};
+    },
+    onStop:()=>pause("Account settings changed. Start when ready."),
+    onRegistered:()=>{closeDialog("app-settings-dialog");recordAllowedEvent({type:"step",step:"account"});setupFlow.open();},
+    onApply:async preset=>{
+      if(preset.toy!==latest.model)throw Error("Choose this preset's toy before applying it.");
+      const available=new Set(controller.channels().map(c=>c.id));
+      const channels=Object.keys(preset.channels).filter(channel=>available.has(channel));
+      if(!channels.length)throw Error("This connection does not expose a movement saved in this preset.");
+      for(const channel of channels)controller.setCalibration(channel,preset.channels[channel]);
+      const selected=channels.includes(latest.channel)?latest.channel:channels[0];
+      const wanted=(preset.activeChannels || [selected]).filter(channel=>available.has(channel));
+      const applied=wanted.length>1&&latest.supportsCombined?await controller.applyChannels(wanted,{mode:preset.mode}):await controller.applyCalibration(selected);
+      if(!applied)throw Error("The movement could not be applied. Reconnect and test it first.");
+      controller.setFeel({mode:preset.mode});display(controller.snapshot());
+      if(Number.isInteger(preset.ceiling))controller.setCeilingFromControl(Math.min(preset.ceiling,controller.snapshot().maxCeiling??5));
+      if(channels.length!==Object.keys(preset.channels).length)show("Applied available movements only. Unavailable saved movements remain disabled.");
+    },onResearchEvent:recordAllowedEvent,
+  });
+  void accountClient.load();
+  betaRecorder=createBetaRecorder({hostname:window.location?.hostname});
+  $("beta-feedback-controls").hidden=!betaRecorder.snapshot().enabled;
+  mountBetaRecording({mount:$("beta-recording-mount"),recorder:betaRecorder,document,
+    context:()=>({mode:latest.mode==="lovense"?"live":"simulator",toy:latest.model||"none"})});
+  let wasRecording=false;
+  betaRecorder.subscribe(state=>{const began=state.recording&&!wasRecording;wasRecording=state.recording;for(const id of ["mark-good","mark-uncomfortable"])$(id).disabled=!latest.running||!state.recording;if(began){recordedDevice=recordedStory=recordedStep="";recordControlSnapshot(latest);}});
+  const setupDialog=$("setup-dialog"),recordingNode=$("beta-recording");
+  if(setupDialog&&recordingNode&&typeof MutationObserver!=="undefined")new MutationObserver(()=>{
+    if(setupDialog.open)setupDialog.prepend(recordingNode);else $("beta-recording-mount").append(recordingNode);
+  }).observe(setupDialog,{attributes:true,attributeFilter:["open"]});
 }
 selectSettingsTab("reader");
 setPanel("library", !isNarrow(), {restore: false});

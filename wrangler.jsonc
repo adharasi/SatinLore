@@ -8,7 +8,8 @@
   "preview_urls": false,
   "keep_vars": true,
   "routes": [
-    { "pattern": "app.satinlore.com", "custom_domain": true }
+    { "pattern": "app.satinlore.com", "custom_domain": true },
+    { "pattern": "beta.satinlore.com", "custom_domain": true }
   ],
   "assets": {
     "directory": "./dist/private-app",
@@ -18,9 +19,16 @@
   },
   "observability": { "enabled": false },
   "durable_objects": {
-    "bindings": [{ "name": "PRIVATE_FEEDBACK", "class_name": "PrivateFeedback" }]
+    "bindings": [
+      { "name": "PRIVATE_FEEDBACK", "class_name": "PrivateFeedback" },
+      { "name": "READER_ACCOUNTS", "class_name": "ReaderAccount" },
+      { "name": "BETA_RECORDINGS", "class_name": "BetaRecordings" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PrivateFeedback"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["PrivateFeedback"] },
+    { "tag": "v2", "new_sqlite_classes": ["ReaderAccount", "BetaRecordings"] }
+  ],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",
     "FOUNDER_EMAIL": "team@satinlore.com"

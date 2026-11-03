@@ -89,3 +89,49 @@
   .setup-dialog-actions #setup-stop { margin-inline-end: 0; }
   .setup-dialog { padding: 20px; }
 }
+
+/* Capability-led calibration uses one movement and one decision at a time. */
+.calibration-view { border-top: 1px solid var(--separator); padding-top: 18px; }
+.calibration-view h3 { font: 400 clamp(1.45rem, 4vw, 1.8rem)/1.2 var(--serif); margin: 8px 0 14px; }
+.calibration-view h4 { font-size: 1.1rem; margin: 20px 0 8px; }
+.calibration-view p { line-height: 1.55; font-size: .875rem; }
+.calibration-capabilities { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,210px),1fr)); gap: 12px; margin: 18px 0; }
+.calibration-capability { border: 1px solid var(--secondary); border-radius: 12px; padding: 16px; min-width: 0; }
+.calibration-capability > span { display: block; font-size: 1.75rem; color: var(--action); line-height: 1.2; margin-bottom: 10px; }
+.calibration-capability > strong { display: block; font-size: .875rem; }
+.calibration-capability > p { color: var(--secondary); font-size: .8125rem; margin: 8px 0 0; }
+.calibration-feature { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 12px; background: var(--selection); margin: 12px 0 18px; }
+.calibration-feature-glyph { flex: 0 0 38px; font-size: 2rem; line-height: 1.2; text-align: center; color: var(--action); }
+.calibration-feature strong { font-size: .875rem; }
+.calibration-feature p { margin: 5px 0 0; font-size: .8125rem; }
+.calibration-live-output { display: block; margin: 10px 0 8px; font-size: .8125rem; font-variant-numeric: tabular-nums; color: var(--action); }
+.calibration-live-meter { height: 8px; border-radius: 4px; overflow: hidden; background: var(--separator); margin-bottom: 18px; }
+.calibration-live-meter span { display: block; height: 100%; background: var(--action); }
+.calibration-live-meter[data-unknown=true] { background: repeating-linear-gradient(90deg,var(--separator) 0 8px,var(--surface) 8px 12px); }
+.calibration-feature-glyph[data-running=true] { animation: calibration-wave .22s linear infinite alternate; }
+.calibration-feature-glyph[data-running=true][data-movement=fingering],.calibration-feature-glyph[data-running=true][data-movement=rotate] { animation-duration: .6s; }
+@keyframes calibration-wave { from { transform: rotate(-7deg) scale(.95); } to { transform: rotate(7deg) scale(1.05); } }
+@media (prefers-reduced-motion: reduce) { .calibration-feature-glyph[data-running=true] { animation: none; } }
+.calibration-levels input[type=range], .calibration-summary input[type=range] { width: 100%; accent-color: var(--action); min-height: 36px; }
+.calibration-levels output, .calibration-summary output { display: block; color: var(--action); font-size: .875rem; font-variant-numeric: tabular-nums; margin: 8px 0; }
+.calibration-level-preview { display: flex; align-items: flex-end; gap: 4px; margin: 18px 0; height: 38px; }
+.calibration-level-preview span { display: block; flex: 1 1 0; min-width: 0; height: 18px; background: var(--separator); border-radius: 3px; }
+.calibration-level-preview span[data-on=true] { background: var(--action); height: 32px; }
+.calibration-levels > button, .calibration-summary > button { width: 100%; min-height: 44px; }
+.calibration-ratings { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 14px 0 10px; }
+.calibration-ratings button { min-height: 44px; padding: 8px; font-size: .8125rem; }
+.calibration-summary-list { display: grid; grid-template-columns: minmax(0,1fr) auto; margin: 18px 0; padding: 0; border-top: 1px solid var(--separator); }
+.calibration-summary-list dt,.calibration-summary-list dd { padding: 10px 0; border-bottom: 1px solid var(--separator); margin: 0; font-size: .875rem; }
+.calibration-summary-list dd { padding-left: 16px; font-variant-numeric: tabular-nums; color: var(--action); }
+.calibration-together { margin: 18px 0; }
+.calibration-together-choices { border: 1px solid var(--separator); border-radius: 12px; padding: 0 14px 12px; }
+.calibration-together > button { min-height: 44px; width: 100%; }
+.calibration-personal-range { border: 1px solid var(--separator); border-radius: 12px; padding: 14px; margin: 16px 0; }
+.calibration-personal-range > strong { display: block; font-size: .875rem; }
+.calibration-personal-range > p { margin: 8px 0 12px; }
+.calibration-personal-range > button { width: 100%; min-height: 44px; }
+.calibration-navigation { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.calibration-navigation button { min-height: 44px; flex: 1 1 120px; font-size: .8125rem; padding-inline: 10px; }
+.calibration-navigation .primary { flex-basis: 100%; }
+.setup-practice-picker { margin: 18px 0; border: 1px solid var(--separator); border-radius: 12px; padding: 0 16px 12px; }
+@media (max-width: 479px) { .calibration-ratings { grid-template-columns: 1fr; } .calibration-navigation button { flex-basis: 100%; } }

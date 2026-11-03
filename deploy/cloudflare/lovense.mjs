@@ -6,10 +6,31 @@ const ENCODER = new TextEncoder();
 export class LovenseServiceError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
 }
-export function lovenseConfiguration(env) {
-  const developerToken = typeof env.LOVENSE_DEVELOPER_TOKEN === "string" ? env.LOVENSE_DEVELOPER_TOKEN : "";
+/** Value-free diagnostics, available only after the Worker's signed Access gate. */
+export function lovenseReadiness(env, storageAvailable) {
+  const token = typeof env.LOVENSE_DEVELOPER_TOKEN === "string" ? env.LOVENSE_DEVELOPER_TOKEN.trim() : "";
   const platform = typeof env.LOVENSE_PLATFORM === "string" ? env.LOVENSE_PLATFORM.trim() : "";
-  const uidSecret = typeof env.LOVENSE_UID_SECRET === "string" ? env.LOVENSE_UID_SECRET : "";
+  const secret = typeof env.LOVENSE_UID_SECRET === "string" ? env.LOVENSE_UID_SECRET.trim() : "";
+  const checks = {
+    developerToken: !token ? "missing" : token.length >= 16 && token.length <= 8192 && !/[\u0000-\u001f\u007f]/.test(token) ? "ready" : "invalid",
+    platform: !platform ? "missing" : platform.length <= 128 && !/[\u0000-\u001f\u007f<>]/.test(platform) ? "ready" : "invalid",
+    uidSecret: !secret ? "missing" : /^[a-f0-9]{64}$/i.test(secret) ? "ready" : "invalid",
+    storage: storageAvailable ? "ready" : "missing",
+  };
+  const available = Object.values(checks).every(value => value === "ready");
+  const needs = [];
+  if (checks.developerToken !== "ready") needs.push("LOVENSE_DEVELOPER_TOKEN runtime Secret");
+  if (checks.platform !== "ready") needs.push("LOVENSE_PLATFORM runtime Website Name");
+  if (checks.uidSecret !== "ready") needs.push("LOVENSE_UID_SECRET runtime Secret with 64 hexadecimal characters");
+  if (checks.storage !== "ready") needs.push("private connection storage binding");
+  return { available, checks, message: available ?
+    "Ready to pair through Lovense Remote. Physical behaviour still needs testing." :
+    `Live pairing needs ${needs.join(", ")}. Save these on the deployed private app, then refresh setup. Simulators remain available.` };
+}
+export function lovenseConfiguration(env) {
+  const developerToken = typeof env.LOVENSE_DEVELOPER_TOKEN === "string" ? env.LOVENSE_DEVELOPER_TOKEN.trim() : "";
+  const platform = typeof env.LOVENSE_PLATFORM === "string" ? env.LOVENSE_PLATFORM.trim() : "";
+  const uidSecret = typeof env.LOVENSE_UID_SECRET === "string" ? env.LOVENSE_UID_SECRET.trim() : "";
   if (developerToken.length < 16 || developerToken.length > 8192 || /[\u0000-\u001f\u007f]/.test(developerToken) ||
       platform.length < 1 || platform.length > 128 || /[\u0000-\u001f\u007f<>]/.test(platform) ||
       !/^[a-f0-9]{64}$/i.test(uidSecret)) return null;

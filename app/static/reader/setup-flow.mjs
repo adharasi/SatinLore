@@ -1,4 +1,6 @@
 import {TOY_PROFILES, getToyProfile} from "../devices/toy-profiles.mjs";
+import {createCalibrationView} from "./calibration-view.mjs";
+import {CONTROLLED_BETA_STORIES} from "./beta-stories.mjs";
 
 // Software setup only. Device transport remains disconnected from the reader.
 // Practice opens a session-only story through the application's normal loader;
@@ -19,6 +21,9 @@ export const PRACTICE_STORY = Object.freeze({
 // All connection callbacks stay in the application adapter. This view receives
 // status snapshots; model choice alone never authorises a command or a toy ID.
 export const SETUP_MODELS = Object.freeze(TOY_PROFILES.map(({id, label}) => Object.freeze({id, label})));
+export const SETUP_STORIES = Object.freeze([Object.freeze({...PRACTICE_STORY, betaId: "control-check-v1", controlled: true,
+  description: "Check scrolling, strength, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
+  .map(story => Object.freeze({...story, authoredLevels: true, quietZeros: true})));
 const CHANNEL_LABELS = Object.freeze(Object.fromEntries(TOY_PROFILES.flatMap(profile => profile.channels.map(channel => [channel.id, channel.label]))));
 function qrSource(value) {
   if (typeof value !== "string" || value.length > 4096) return null;
@@ -32,7 +37,9 @@ function qrSource(value) {
 export function createSetupFlow({document = globalThis.document, window = globalThis.window,
   coachMount = null, onConnect = () => false, onSelectDevice = () => false,
   onRefresh = () => {}, onTest = () => false, onConfirmTest = () => true, onDisconnect = () => {}, onSimulateFailure = () => {},
-  onPractice = () => false, onStart = () => {}, onStop = () => {}, onFinish = () => {}} = {}) {
+  onPractice = () => false, onStart = () => {}, onStop = () => {}, onFinish = () => {},
+  enableCalibration = false, onCalibrationChange = () => {}, onApplyCalibration = () => false,
+  onApplyChannels = null, onEnablePersonalRange = null, onCalibrationModeChange = () => {}, onResearchEvent = () => {}} = {}) {
   if (!document?.body || !document.createElement) return {open() {}, update() {}, finish() {}, cancel() {}, destroy() {}, snapshot: () => ({active: false, checks: {}})};
   const make = (tag, {id, className, value, attrs = {}} = {}) => {
     const node = document.createElement(tag);
@@ -102,6 +109,14 @@ export function createSetupFlow({document = globalThis.document, window = global
   const simError = button("setup-sim-error", "Simulate connection error");
   const retry = button("setup-retry", "Reconnect");
   rehearsal.append(simFailure, simError, retry);
+  const calibrationMount = make("div", {id: "setup-calibration-mount"}); calibrationMount.hidden = true;
+  const practicePicker = make("section", {id: "setup-practice-picker", className: "setup-practice-picker"});
+  const practiceStory = make("select", {id: "setup-practice-story"});
+  for (const story of SETUP_STORIES) practiceStory.append(option(story.betaId, story.title));
+  practiceStory.value = SETUP_STORIES[0].betaId;
+  const practiceDescription = make("p", {id: "setup-practice-description", className: "note"});
+  practicePicker.append(field("Choose a controlled test story", practiceStory), practiceDescription,
+    make("p", {className: "note", value: "These original, non-explicit stories use known levels so you can compare controls before trying your own text. Every story opens paused."}));
   const status = make("p", {id: "setup-status", className: "note setup-status", attrs: {role: "status", "aria-live": "polite"}});
   const actions = make("div", {className: "setup-dialog-actions"});
   const stop = button("setup-stop", "Stop", "stop");
@@ -109,7 +124,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const skip = button("setup-skip", "Skip for now");
   const primary = button("setup-primary", "Connect simulator", "primary");
   actions.append(stop, back, skip, primary);
-  dialog.append(header, intro, chooser, connection, selection, testPanel, rehearsal, status, actions);
+  dialog.append(header, intro, chooser, connection, selection, testPanel, calibrationMount, practicePicker, rehearsal, status, actions);
   document.body.append(dialog);
 
   const coach = make("section", {id: "setup-coach", className: "setup-coach" + (coachMount ? "" : " setup-coach-floating"),
@@ -142,12 +157,30 @@ export function createSetupFlow({document = globalThis.document, window = global
   const selected = () => onlineToys().find(toy => toy.id === current.selectedId);
   const channels = () => {
     const value = selected()?.capabilities || current.channels || ["vibrate"];
-    return Array.isArray(value) ? value.filter(name => Object.hasOwn(CHANNEL_LABELS, name)) : [];
+    return Array.isArray(value) ? value.map(item => typeof item === "string" ? item : item?.id).filter(name => Object.hasOwn(CHANNEL_LABELS, name)) : [];
   };
   const effectiveConnected = () => current.connected === true;
   const needsReconnect = () => ["error", "disconnected", "expired"].includes(current.connectionState);
   const discovered = () => !needsReconnect() && onlineToys().length > 0;
   const testMaximum = () => Number.isInteger(current.ceiling) && current.ceiling >= 0 && current.ceiling <= 20 ? Math.min(5, current.ceiling) : 0;
+  const calibration = createCalibrationView({document, mount: calibrationMount, onTest, onConfirmTest,
+    onStop: stopped, onChange: onCalibrationChange, onApply: onApplyCalibration, onApplyChannels, onEnablePersonalRange,
+    onModeChange: onCalibrationModeChange, onEvent: onResearchEvent,
+    onComplete(result) {
+      if (disposed || phase !== "calibrate") return;
+      stopped(); current.calibration = result.settings; phase = "practice";
+      status.textContent = "Choose a controlled story. It will open paused."; render();
+    }});
+  const calibrationContext = () => ({...current, mode, model: selected()?.model || preferredModel, channels: channels(),
+    settings: current.calibration?.channels || current.calibration || {}, readingMode: current.feel?.mode});
+  const openCalibration = () => {
+    if (disposed) return false;
+    ++epoch; stopped(); busy = false; coach.hidden = true;
+    if (!effectiveConnected() || !selected()) { phase = "connect"; render(); if (!dialog.open) dialog.showModal(); return false; }
+    phase = "calibrate"; status.textContent = "";
+    if (!dialog.open) dialog.showModal();
+    calibration.open(calibrationContext()); render(); return true;
+  };
   const refreshCoachReadiness = () => {
     const running = effectiveConnected() && current.running === true;
     start.disabled = running || !effectiveConnected() || current.canStart === false;
@@ -167,6 +200,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const leave = ({completed = false, openStory = false} = {}) => {
     if (disposed) return;
     ++epoch; phase = "closed"; setBusy(false); stopped(); closeDialog(); coach.hidden = true;
+    calibration.close();
     // QR credentials are never retained by a closed dialog.
     current.qrUrl = null; qr.removeAttribute?.("src");
     if (openStory) { try { onFinish({completed}); } catch { /* Caller owns navigation. */ } } else focusBack();
@@ -186,6 +220,9 @@ export function createSetupFlow({document = globalThis.document, window = global
   function render() {
     chooser.hidden = phase !== "connect"; connection.hidden = phase !== "pair"; selection.hidden = phase !== "select";
     testPanel.hidden = phase !== "test"; rehearsal.hidden = mode !== "simulator" || !["pair", "select", "test"].includes(phase);
+    calibrationMount.hidden = phase !== "calibrate";
+    practicePicker.hidden = phase !== "practice" || !enableCalibration;
+    primary.hidden = phase === "calibrate";
     back.hidden = ["connect", "closed", "reading"].includes(phase);
     model.disabled = busy; simMode.disabled = busy; liveMode.disabled = busy;
     simMode.setAttribute("aria-pressed", String(mode === "simulator")); liveMode.setAttribute("aria-pressed", String(mode === "lovense"));
@@ -233,9 +270,14 @@ export function createSetupFlow({document = globalThis.document, window = global
       capabilityNote.hidden = !capabilityNote.textContent;
       primary.textContent = "Continue to test read";
     } else if (phase === "practice") {
-      step.textContent = "05 / A short practice read"; heading.textContent = "Make it feel like you.";
+      step.textContent = enableCalibration ? "06 / Controlled story tests" : "05 / A short practice read"; heading.textContent = "Make it feel like you.";
       intro.textContent = "Try scrolling, strength, maximum and Stop with a short neutral story before importing your own.";
       primary.textContent = "Open practice story";
+      const choice = SETUP_STORIES.find(story => story.betaId === practiceStory.value) || SETUP_STORIES[0];
+      practiceDescription.textContent = choice.description;
+    } else if (phase === "calibrate") {
+      step.textContent = "05 / Your movement settings"; heading.textContent = "Explore. Compare. Make it yours.";
+      intro.textContent = "Tune each available movement, then compare it in a controlled story.";
     }
     const output = Number.isInteger(current.output) ? Math.min(20, Math.max(0, current.output)) : 0;
     liveLevel.textContent = (simulator ? "Simulated output " : "Requested output ") + output + " / 20";
@@ -297,12 +339,15 @@ export function createSetupFlow({document = globalThis.document, window = global
         tested = false; confirmation.checked = false;
         status.textContent = "The test confirmation is no longer current. Select the toy and repeat its test before continuing."; render(); return;
       }
-      stopped(); phase = "practice"; status.textContent = "The test read opens paused. Start only when ready."; render(); return;
+      stopped();
+      if (enableCalibration) { openCalibration(); return; }
+      phase = "practice"; status.textContent = "The test read opens paused. Start only when ready."; render(); return;
     }
     if (phase !== "practice") return;
     const activeEpoch = ++epoch; setBusy(true); status.textContent = "Opening practice story…";
     try {
-      const result = await onPractice(PRACTICE_STORY);
+      const story = enableCalibration ? SETUP_STORIES.find(story => story.betaId === practiceStory.value) || SETUP_STORIES[0] : PRACTICE_STORY;
+      const result = await onPractice(story);
       if (activeEpoch !== epoch || disposed || !dialog.open) return;
       if (result === false) throw new Error();
       resetChecks(); phase = "reading"; initial = {position: current.position, strength: current.strength, ceiling: current.ceiling};
@@ -339,7 +384,8 @@ export function createSetupFlow({document = globalThis.document, window = global
     stopped(); preferredModel = model.value; resetTest(); render();
   });
   simMode.addEventListener("click", () => chooseMode("simulator")); liveMode.addEventListener("click", () => chooseMode("lovense"));
-  back.addEventListener("click", () => { ++epoch; stopped(); resetTest(); phase = "connect"; setBusy(false); status.textContent = ""; });
+  back.addEventListener("click", () => { ++epoch; phase = "connect"; calibration.close(); stopped(); resetTest(); setBusy(false); status.textContent = ""; });
+  practiceStory.addEventListener("change", () => { if (!busy) render(); });
   retry.addEventListener("click", connect);
   const simulate = async kind => {
     if (busy || mode !== "simulator") return;
@@ -354,7 +400,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   simFailure.addEventListener("click", () => simulate("disconnect"));
   simError.addEventListener("click", () => simulate("error"));
   close.addEventListener("click", () => leave()); skip.addEventListener("click", () => leave());
-  stop.addEventListener("click", () => { ++epoch; setBusy(false); stopped(); status.textContent = "Stopped. You can continue setup when ready."; });
+  stop.addEventListener("click", () => { ++epoch; setBusy(false); stopped(); if (phase === "calibrate") calibration.interrupt(); status.textContent = "Stopped. You can continue setup when ready."; });
   coachStop.addEventListener("click", () => { stopped(); coachStatus.textContent = "Stopped. Start again when you are ready."; });
   start.addEventListener("click", () => {
     if (phase !== "reading" || disposed) return;
@@ -368,6 +414,7 @@ export function createSetupFlow({document = globalThis.document, window = global
     open(options = {}) {
       if (disposed) return;
       ++epoch; stopped(); coach.hidden = true; opener = document.activeElement;
+      calibration.close();
       if (options.mode === "simulator" || options.mode === "lovense") mode = options.mode;
       if (SETUP_MODELS.some(toy => toy.id === options.model)) preferredModel = options.model;
       model.value = preferredModel; resetChecks(); resetTest(); phase = "connect"; setBusy(false); status.textContent = "";
@@ -380,15 +427,17 @@ export function createSetupFlow({document = globalThis.document, window = global
       if (["pair", "select"].includes(phase) && discovered()) {
         if (phase === "pair") phase = "select"; prepareDeviceList();
       }
-      if (["select", "test", "practice"].includes(phase) && (previousConnected && !effectiveConnected() || needsReconnect())) {
-        ++epoch; busy = false; phase = "pair"; device.value = ""; stopped(); resetTest(); status.textContent = "Connection lost. Reconnect and select your toy again. Playback stays paused.";
+      if (["select", "test", "calibrate", "practice"].includes(phase) && (previousConnected && !effectiveConnected() || needsReconnect())) {
+        ++epoch; busy = false; phase = "pair"; calibration.close(); device.value = ""; stopped(); resetTest(); status.textContent = "Connection lost. Reconnect and select your toy again. Playback stays paused.";
       }
-      if (["test", "practice"].includes(phase) && previousSelectedId && (current.selectedId !== previousSelectedId || !selected())) {
+      if (["test", "calibrate", "practice"].includes(phase) && previousSelectedId && (current.selectedId !== previousSelectedId || !selected())) {
         ++epoch; busy = false; phase = discovered() ? "select" : "pair";
+        calibration.close();
         device.value = ""; stopped(); resetTest(); if (phase === "select") prepareDeviceList();
         status.textContent = "The selected toy changed. Choose a connected toy and repeat its test before continuing.";
       }
       render();
+      if (phase === "calibrate") calibration.update(calibrationContext());
       if (phase !== "reading") return;
       if (!initial) initial = {position: current.position, strength: current.strength, ceiling: current.ceiling};
       const running = effectiveConnected() && current.running === true;
@@ -402,8 +451,10 @@ export function createSetupFlow({document = globalThis.document, window = global
       refreshCoachReadiness();
     },
     finish() { leave({completed: Object.values(checks).every(Boolean), openStory: true}); },
+    openCalibration,
+    calibrationSnapshot() { return calibration.snapshot(); },
     cancel() { leave(); },
     snapshot() { return {active: phase !== "closed", phase, busy, mode, model: preferredModel, selectedId: current.selectedId || null, tested, checks: {...checks}}; },
-    destroy() { if (disposed) return; leave(); disposed = true; dialog.remove?.(); coach.remove?.(); },
+    destroy() { if (disposed) return; leave(); disposed = true; calibration.destroy(); dialog.remove?.(); coach.remove?.(); },
   };
 }

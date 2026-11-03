@@ -7,9 +7,10 @@ function safeQrUrl(value) {
 }
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const CHANNELS = new Set(["vibrate", "rotate", "fingering", "thrusting"]);
+const CHANNELS = new Set(["vibrate", "rotate", "fingering", "thrusting", "oscillate"]);
 const validId = value => typeof value === "string" && ID.test(value);
 const validLevel = value => Number.isInteger(value) && value >= 0 && value <= 5;
+const personalLevel = value => Number.isInteger(value) && value >= 0 && value <= 20;
 
 /** Owns an opaque sandbox and its private MessagePort; never receives story data. */
 export class BridgeTransport {
@@ -22,13 +23,17 @@ export class BridgeTransport {
     this.epoch = 0; this.serial = 0; this.frame = null; this.port = null; this.release = null;
     this.credentials = null; this.qrUrl = null; this.available = null; this.state = "disconnected";
     this.message = ""; this.channel = "vibrate"; this.ceiling = 5; this.ready = false; this.expiresAt = 0;
+    this.configurationChecks = null;
+    this.personalRangeChannels = new Set();
     this.visibility = () => { if (this.document.hidden) this.dispose("Connection closed when the tab became hidden. Reconnect explicitly."); };
     this.leaving = () => this.dispose("Connection closed.");
     this.document?.addEventListener("visibilitychange", this.visibility);
     this.window?.addEventListener("pagehide", this.leaving);
   }
   snapshot() { return {liveConfigured: this.available, connectionState: this.state, toys: this.discover(),
-    selectedId: this.selected, qrUrl: this.qrUrl, connectionMessage: this.message}; }
+    selectedId: this.selected, qrUrl: this.qrUrl, connectionMessage: this.message,
+    configurationChecks: this.configurationChecks ? {...this.configurationChecks} : null,
+    personalRangeChannels:[...this.personalRangeChannels]}; }
   notify() { if (this.notifierFailed) return; try { this.onChange(this.snapshot()); } catch { this.notifierFailed = true; this.dispose("The connection display failed."); } }
   subscribe(callback) { this.listeners.add(callback); return () => this.listeners.delete(callback); }
   emit(event) { for (const callback of this.listeners) { try { callback(event); } catch {} } }
@@ -41,8 +46,12 @@ export class BridgeTransport {
       const value = await response.json();
       if (operation !== this.epoch) return false;
       this.available = value?.available === true;
-      this.message = this.available ? "Lovense connection is available." : "Lovense setup is not configured on this server. You can rehearse with the simulator.";
-    } catch { if (operation !== this.epoch) return false; this.available = false; this.message = "Lovense setup could not be checked. You can rehearse with the simulator."; }
+      const fields = ["developerToken", "platform", "uidSecret", "storage"];
+      this.configurationChecks = value?.checks && typeof value.checks === "object" && fields.every(key => ["ready", "missing", "invalid"].includes(value.checks[key])) ?
+        Object.fromEntries(fields.map(key => [key, value.checks[key]])) : null;
+      this.message = typeof value?.message === "string" && value.message.trim() && value.message.length <= 600 && !/[\u0000-\u001f\u007f]/.test(value.message) ? value.message :
+        this.available ? "Lovense connection is available." : "Lovense setup is not configured on this server. You can rehearse with the simulator.";
+    } catch { if (operation !== this.epoch) return false; this.available = false; this.configurationChecks = null; this.message = "Lovense setup could not be checked. You can rehearse with the simulator."; }
     this.notify(); return this.available;
   }
   async acquire() {
@@ -115,14 +124,15 @@ export class BridgeTransport {
       this.qrUrl = url; this.clearTimer(this.openTimer); this.notify();
     } else if (message.type === "toys" && Array.isArray(message.toys)) {
       const seen = new Set();
-      const toys = message.toys.slice(0,50).filter(toy => toy && validId(toy.id) && typeof toy.label === "string" && toy.label.length <= 100 && Array.isArray(toy.capabilities) && toy.capabilities.includes("vibrate") && !seen.has(toy.id) && seen.add(toy.id)).map(toy => ({
+      const toys = message.toys.slice(0,50).filter(toy => toy && validId(toy.id) && typeof toy.label === "string" && toy.label.length <= 100 && Array.isArray(toy.capabilities) && toy.capabilities.length<=5 && toy.capabilities.some(value=>CHANNELS.has(value)&&(value!=="oscillate"||toy.controlTransport==="standard-socket-v1")) && !seen.has(toy.id) && seen.add(toy.id)).map(toy => ({
         id: toy.id, label: toy.label, model: typeof toy.model === "string" ? toy.model.slice(0,32) : "",
-        capabilities: toy.capabilities.filter(value => CHANNELS.has(value)),
+        capabilities: [...new Set(toy.capabilities.filter(value => CHANNELS.has(value) && (value!=="oscillate"||toy.controlTransport==="standard-socket-v1")))],
+        ...(toy.controlTransport==="standard-socket-v1" ? {controlTransport:"standard-socket-v1",supportsCombined:toy.supportsCombined===true} : {}),
         ...(Number.isFinite(toy.battery) ? {battery: Math.max(0,Math.min(100,toy.battery))} : {}),
       }));
       const previous = this.selected;
       this.toys = toys;
-      if (previous && (!toys.some(toy => toy.id === previous) || Object.hasOwn(message,"selected") && message.selected === null)) { this.selected = null; this.emit({type: "disconnect", deviceId: previous}); }
+      if (previous && (!toys.some(toy => toy.id === previous) || Object.hasOwn(message,"selected") && message.selected === null)) { this.selected = null; this.personalRangeChannels.clear();this.ceiling=Math.min(5,this.ceiling);this.emit({type: "disconnect", deviceId: previous}); }
       this.state = toys.length ? "discovered" : "waiting";
       this.notify();
     } else if (message.type === "selected" && validId(message.id) && this.toys.some(toy => toy.id === message.id)) {
@@ -158,6 +168,7 @@ export class BridgeTransport {
   async connect(frame, {signal} = {}) {
     if (!validId(frame?.deviceId) || !this.toys.some(toy => toy.id === frame.deviceId) || signal?.aborted) throw new Error("Select one discovered toy.");
     // Selection is deliberately requested by the user; never choose the first toy.
+    this.personalRangeChannels.clear();this.ceiling=Math.min(this.ceiling,5);
     await new Promise((resolve,reject) => {
       const key = `select-${++this.serial}`, timer = this.setTimer(() => {this.pending.delete(key); reject(new Error("Device selection timed out."));},1700);
       this.pending.set(key,{resolve,reject,kind:"select",toyId:frame.deviceId,timer});
@@ -168,9 +179,22 @@ export class BridgeTransport {
   }
   async command(frame, {signal} = {}) {
     const toy = this.toys.find(value => value.id === frame?.deviceId);
-    if (!toy || frame.deviceId !== this.selected || signal?.aborted || !validLevel(frame.level) || frame.level < 1 || frame.level > this.ceiling || frame.durationMs !== 2000 || !toy.capabilities.includes(this.channel)) throw new Error("Use the selected toy, supported channel and a finite low-level command.");
+    if (!toy || frame.deviceId !== this.selected || signal?.aborted || !personalLevel(frame.level) || frame.level > this.maximumFor(this.channel) || frame.level < 1 || frame.level > this.ceiling || frame.durationMs !== 2000 || !toy.capabilities.includes(this.channel)) throw new Error("Use the selected toy, supported channel and a finite enabled-range command.");
     await this.send("command",{toyId:frame.deviceId,level:frame.level,ceiling:this.ceiling,channel:this.channel,seconds:2});
     return {...frame};
+  }
+  async commandVector(frame, levels, ceilings, {signal} = {}) {
+    const toy=this.toys.find(value=>value.id===frame?.deviceId);
+    const plain=value=>value&&typeof value==="object"&&!Array.isArray(value);
+    if(!toy||toy.id!==this.selected||toy.controlTransport!=="standard-socket-v1"||toy.supportsCombined!==true||signal?.aborted||frame.durationMs!==2000||!plain(levels)||!plain(ceilings))throw Error("Independent movements need the selected extended connection.");
+    const keys=Object.keys(levels);
+    if(!keys.length||keys.length>5||Object.keys(ceilings).length!==keys.length||keys.some(key=>!Object.hasOwn(ceilings,key)||!toy.capabilities.includes(key)||!CHANNELS.has(key)||!personalLevel(levels[key])||!personalLevel(ceilings[key])||ceilings[key]>this.maximumFor(key)||levels[key]>ceilings[key]||levels[key]>this.ceiling)||frame.level!==Math.max(...Object.values(levels)))throw Error("Use each movement's current enabled limit.");
+    if(keys.every(key=>levels[key]===0))await this.send("stop",{toyId:toy.id});
+    else {
+      const result=await this.send("command-vector",{toyId:toy.id,levels:{...levels},ceilings:{...ceilings},seconds:2});
+      if(result.level!==frame.level||!plain(result.levels)||Object.keys(result.levels).length!==keys.length||keys.some(key=>result.levels[key]!==levels[key]))throw Error("The independent movement submission did not match the request.");
+    }
+    return {...frame,levels:{...levels}};
   }
   async stop(frame) {
     if (!validId(frame?.deviceId)) throw new Error("A targeted Stop is required.");
@@ -178,12 +202,21 @@ export class BridgeTransport {
   }
   async disconnect(frame) { return {...frame}; }
   refresh() { if (this.port && this.ready) this.port.postMessage({type:"refresh"}); return this.snapshot(); }
-  setCeiling(value) { if (!validLevel(value)) throw new Error("Use a physical maximum from 0 to 5."); this.ceiling = value; }
+  maximumFor(channel){return this.personalRangeChannels.has(channel)?20:5;}
+  async enablePersonalRange({deviceId=this.selected,channels=[this.channel],confirmedStopped=false}={}){
+    const toy=this.toys.find(value=>value.id===deviceId);
+    if(!toy||deviceId!==this.selected||confirmedStopped!==true||!Array.isArray(channels)||!channels.length||channels.length>5||new Set(channels).size!==channels.length||channels.some(channel=>!toy.capabilities.includes(channel))||this.pending.size)throw Error("Complete and confirm a stopped gentle check first.");
+    const result=await this.send("enable-personal-range",{toyId:deviceId,channels:[...channels],confirmedStopped:true});
+    if(deviceId!==this.selected||!Array.isArray(result.channels)||result.channels.length>5||result.channels.some(channel=>!toy.capabilities.includes(channel))||channels.some(channel=>!result.channels.includes(channel)))throw Error("The personal-range permission could not be confirmed.");
+    this.personalRangeChannels=new Set(result.channels);this.notify();return true;
+  }
+  setCeiling(value) { if (!personalLevel(value)||value>5&&!this.personalRangeChannels.size) throw new Error("Enable your personal range before choosing a maximum above 5."); this.ceiling = value; }
   setChannel(channel) { if (!CHANNELS.has(channel)) throw new Error("Choose a supported channel."); this.channel = channel; }
   dispose(message = "Disconnected. Reconnect explicitly.") {
     ++this.epoch;
     const id = this.selected, frame = this.frame, port = this.port, release = this.release;
     this.frame = this.port = this.release = null; this.credentials = null; this.selected = null; this.toys = []; this.qrUrl = null;
+    this.personalRangeChannels.clear();this.ceiling=Math.min(this.ceiling,5);
     this.ready = false; this.expiresAt = 0; this.state = "disconnected"; this.message = message;
     this.clearTimer(this.openTimer); this.clearTimer(this.expiryTimer);
     this.opening?.reject(new Error(message)); this.opening = null;

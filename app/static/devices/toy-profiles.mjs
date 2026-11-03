@@ -2,8 +2,9 @@
 // Reviewed 2 November 2026 against the official Standard JS SDK, Standard API
 // and native toy-command matrix. In particular, JS does not document separate
 // Dolce motors or heating. Extra Velvo/Spinel motions require a runtime report.
-// Osci 3 oscillation is documented for native/HTTP APIs, not this browser SDK.
-const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation · simulator only"});
+// Osci 3 oscillation requires our documented Standard Socket Function route;
+// a Basic SDK capability string alone cannot enable an undocumented argument.
+const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation"});
 const profile = (id, label, shape, physicalChannels, reportedChannels = [], physicalNotes = "", simulationOnlyChannels = []) => Object.freeze({
   id, model: id, label, shape,
   physicalChannels: Object.freeze(physicalChannels),
@@ -23,14 +24,14 @@ export const TOY_PROFILES = Object.freeze([
   profile("spinel", "Spinel", "shaft", ["vibrate"], ["thrusting"], "Thrusting is offered only when your connection reports it. Heating is not controlled by SatinLore."),
   profile("dolce", "Dolce", "dual", ["vibrate"], [], "This connection uses general vibration, without separate controls for the two motors."),
   profile("hush", "Hush", "plug", ["vibrate"]),
-  profile("osci3", "Osci 3", "rabbit", ["vibrate"], [], "Live testing uses vibration. Oscillation can be rehearsed in the simulator; this connection does not yet control it, heating or separate motors.", ["oscillate"]),
+  profile("osci3", "Osci 3", "rabbit", ["vibrate"], [], "The extended Standard Socket connection offers vibration and oscillation. The Basic SDK fallback offers vibration only. Heating and separate vibration motors are unavailable here.", ["oscillate"]),
 ]);
 
 export const getToyProfile = id => TOY_PROFILES.find(item => item.id === id) || null;
 export const channelLabel = id => labels[id] || "Unavailable";
 
 const validId = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
-const functionNames = Object.freeze({v: "vibrate", vibrate: "vibrate", r: "rotate", rotate: "rotate", f: "fingering", fingering: "fingering", t: "thrusting", thrusting: "thrusting"});
+const functionNames = Object.freeze({v: "vibrate", vibrate: "vibrate", r: "rotate", rotate: "rotate", f: "fingering", fingering: "fingering", t: "thrusting", thrusting: "thrusting", o:"oscillate",oscillate:"oscillate"});
 
 function modelId(value, hardwareVersion) {
   if (typeof value !== "string" || value.length > 64) return null;
@@ -49,29 +50,32 @@ function report(toy) {
     .map(value => functionNames[value.toLowerCase()]).filter(Boolean));
 }
 
-export function normaliseToy(toy) {
+export function normaliseToy(toy, {transport = "basic-sdk"} = {}) {
   if (!toy || typeof toy !== "object" || Array.isArray(toy) || !validId(toy.id) || toy.connected !== true) return null;
   // toyType is authoritative when supplied; do not promote an arbitrary nickname.
   const model = modelId(toy.toyType === undefined ? toy.name : toy.toyType, toy.hVersion);
   const current = getToyProfile(model);
   if (!current) return null;
   const reported = report(toy);
-  const capabilities = reported === null ? [...current.physicalChannels] :
-    [...current.physicalChannels, ...current.reportedChannels].filter(channel => reported.has(channel));
+  const extended = transport === "standard-socket-v1";
+  const documented = [...current.physicalChannels,...(extended && model === "osci3" ? ["oscillate"] : [])];
+  const capabilities = reported === null ? documented :
+    [...documented, ...current.reportedChannels].filter(channel => reported.has(channel));
   if (!capabilities.length) return null;
   const version = /^([1-9][0-9]?)$/.exec(String(toy.hVersion || ""))?.[1];
   const label = `${current.label}${version && model !== "osci3" ? ` ${version}` : ""}`;
   return {id: toy.id, label, model, capabilities,
+    ...(extended ? {controlTransport:"standard-socket-v1",supportsCombined:true} : {}),
     capabilitySource: reported === null ? "documented-model" : "reported",
     battery: Number.isInteger(toy.battery) && toy.battery >= 0 && toy.battery <= 100 ? toy.battery : null};
 }
 
 export const normalizeToy = normaliseToy;
 
-export function supportedToys(value) {
+export function supportedToys(value, options) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
-  return value.slice(0, 50).map(normaliseToy).filter(toy => {
+  return value.slice(0, 50).map(toy=>normaliseToy(toy,options)).filter(toy => {
     if (!toy || seen.has(toy.id)) return false;
     seen.add(toy.id); return true;
   });

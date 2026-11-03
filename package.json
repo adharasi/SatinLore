@@ -14,12 +14,13 @@
     "test:worker": "node --test tests/private-worker.test.mjs"
   },
   "devDependencies": {
+    "esbuild": "0.27.3",
     "miniflare": "4.20260515.0",
     "playwright": "1.62.1",
-    "wrangler": "4.92.0",
-    "esbuild": "0.27.3"
+    "wrangler": "4.92.0"
   },
   "dependencies": {
-    "jose": "6.1.3"
+    "jose": "6.1.3",
+    "socket.io-client": "2.5.0"
   }
 }

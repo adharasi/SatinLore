@@ -44,8 +44,20 @@ Use a low output with the device on a desk. The application requests a two-secon
 | 15 | Two test identities | No unintended shared control | Not observed | Not tested | No tokens/IDs in notes |
 | 16 | Neutral-text network inspection | No story or developer-token transmission | Not observed | Not tested | Do not save sensitive payloads |
 | 17 | Each additional offered action | Level 1; 2 seconds; one action at a time | Not observed | Not tested | Missing live action is a capability result, not a pass |
-| 18 | Neutral practice Start / Pause / Stop / restart | Record chosen action, strength and maximum ≤5/20 | Not observed | Not tested | Start remains explicit; no personal story required |
+| 18 | Neutral practice Start / Pause / Stop / restart | Record chosen actions, strength, maximum and current range permission | Not observed | Not tested | Start remains explicit; no personal story required |
 | 19 | Change action / mode / story while running | No automatic output or resume | Not observed | Not tested | Retest selection and short response check as required |
+
+## Personal range and combined-control observations
+
+| Check | Requested behavior | Physical observation | Result |
+| --- | --- | --- | --- |
+| Gentle check before range grant | Level 1, two seconds, selected action only; targeted Stop and human check | Not observed | Not tested |
+| Explicit Enable personal range | Permission for checked action only; maximum unchanged; output remains paused | Not observed | Not tested |
+| Deliberately chosen personal maximum | Finite requests remain within the user's lower maximum, up to the granted 20/20 range | Not observed | Not tested |
+| Saved preset before grant | Clamped to current permission; no automatic range grant or Start | Not observed | Not tested |
+| Qualified combined actions | Each action separately checked, independent levels, one selected toy | Not observed | Not tested |
+| Hold, Ease off, Follow story | Only active playback changes; reductions/zero take priority; gradual return | Not observed | Not tested |
+| Hide/expiry/disconnect/device change | Output pauses and personal-range permission resets; no automatic return | Not observed | Not tested |
 
 ## Decision and follow-up
 
