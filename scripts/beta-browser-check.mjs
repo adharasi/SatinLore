@@ -83,7 +83,13 @@ async function exploreCalibration(page) {
     await output(page, 0);
     await page.locator("#calibration-next").click();
   }
+  // Flexer offers an optional combination after its two individual movements.
+  // These checks compare one action at a time; explicitly keep that selection.
+  await page.locator("#calibration-together").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#calibration-skip-movement").textContent(), "Keep one movement");
+  await page.locator("#calibration-skip-movement").click();
   await page.locator("#setup-practice-picker").waitFor({ state: "visible" });
+  await page.locator("#calibration-view").waitFor({ state: "hidden" });
   await page.locator("#setup-practice-story").selectOption("evening-train-v1");
   await page.locator("#setup-primary").click();
   await page.locator("#setup-coach").waitFor({ state: "visible" });

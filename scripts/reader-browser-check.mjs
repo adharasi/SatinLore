@@ -179,10 +179,19 @@ async function testRehearsalDevice(page, profile) {
   await page.locator("#setup-primary").click();
   // Calibration is deliberately optional. Legacy controller journeys retain
   // their authored 0,2,4,1,3,0 fixture; the new beta suite explores every field.
-  if (await page.locator("#calibration-view").isVisible()) {
-    for (const _channel of profile.channels) await page.locator("#calibration-skip-movement").click();
-    await page.locator("#setup-practice-story").selectOption("control-check-v1");
+  await page.locator("#calibration-view").waitFor({state: "visible"});
+  for (const channel of profile.channels) {
+    await page.waitForFunction(value => document.querySelector("#calibration-channel").value === value, channel);
+    await page.locator("#calibration-skip-movement").click();
   }
+  if (profile.channels.length > 1) {
+    await page.locator("#calibration-together").waitFor({state: "visible"});
+    assert.equal(await page.locator("#calibration-skip-movement").textContent(), "Keep one movement");
+    await page.locator("#calibration-skip-movement").click();
+  }
+  await page.locator("#setup-practice-picker").waitFor({state: "visible"});
+  await page.locator("#calibration-view").waitFor({state: "hidden"});
+  await page.locator("#setup-practice-story").selectOption("control-check-v1");
   await page.waitForFunction(() => document.querySelector("#setup-primary").textContent === "Open practice story");
   await output(page, 0);
 }

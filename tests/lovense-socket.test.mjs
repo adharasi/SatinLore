@@ -4,14 +4,14 @@ import {LovenseSocket,SOCKET_AUTH_URL,socketAddress,remoteCommandAddress} from "
 import {LovenseCheck} from "../app/static/devices/lovense.mjs";
 
 const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
-function fixture({authentication,metadata}={}){
+function fixture({authentication,metadata,socketPath="/fixture/socket"}={}){
   const outgoing=[],requests=[],listeners=new Map();let time=0;
   const socket={connected:false,on(name,callback){if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(callback);},
     emit(name,value){outgoing.push({name,value});},connect(){queueMicrotask(()=>{this.connected=true;incoming("connect");});},
     disconnect(){this.connected=false;},removeAllListeners(){listeners.clear();}};
   const incoming=(name,value)=>{for(const callback of listeners.get(name)||[])callback(value);};
-  const fetcher=async(url,options)=>{requests.push({url,options});return url===SOCKET_AUTH_URL?authentication?authentication():Response.json({code:0,data:{socketIoUrl:"https://apps.lovense-api.com",socketIoPath:"/fixture/socket"}}):metadata?metadata():Response.json({code:200,data:{toys:"{}"}});};
-  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
+  const fetcher=async(url,options)=>{requests.push({url,options});return url===SOCKET_AUTH_URL?authentication?authentication():Response.json({code:0,data:{socketIoUrl:"https://apps.lovense-api.com",socketIoPath:socketPath}}):metadata?metadata():Response.json({code:200,data:{toys:"{}"}});};
+  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
   const toys=(list,extras={})=>incoming("basicapi_update_device_info_tc",JSON.stringify({online:true,toyList:list,...extras}));
   const raw=(model,id=model)=>({id,toyType:model,connected:true,battery:71});
   return{sdk,socket,incoming,outgoing,requests,toys,raw,advance(ms){time+=ms;}};
@@ -26,6 +26,14 @@ test("socket authorization sends only the per-user credential and pins secure ve
   assert.equal(remoteCommandAddress("192-168-1-5.lovense.club",30010),"https://192-168-1-5.lovense.club:30010/command");
   for(const [host,port]of [["evil.test",30010],["8-8-8-8.lovense.club",30010],["192-168-1-5.lovense.club",443],["192-168-1-999.lovense.club",30010]])assert.equal(remoteCommandAddress(host,port),null);
   f.sdk.destroy();
+});
+test("Socket.IO dot paths are accepted while encoded paths traversal and query or fragment suffixes are rejected",async()=>{
+  for(const socketPath of ["/socket.io","/lovense/socket.io"]){
+    const f=fixture({socketPath});await f.sdk.prepared;assert.equal(f.socket.connected,true);f.sdk.destroy();
+  }
+  for(const socketPath of ["/../socket.io","/socket%2eio","/socket.io?token=x","/socket.io#fragment"]){
+    const f=fixture({socketPath});await assert.rejects(f.sdk.prepared,/could not be prepared/);assert.equal(f.socket.connected,false);
+  }
 });
 test("QR responses are correlated and discovery strips unrelated fields before reaching the controller",async()=>{
   const f=fixture();await f.sdk.prepared;const qr=f.sdk.getQrcode();
@@ -89,4 +97,16 @@ test("socket output above five needs per-action session permission and connectio
   f.advance(1000);assert.throws(()=>f.sdk.sendToyCommand({fingering:6,time:2,toyId:"flexer"}));
   f.incoming("basicapi_update_app_status_tc",false);f.toys([f.raw("flexer")]);
   assert.throws(()=>f.sdk.sendToyCommand({vibrate:6,time:2,toyId:"flexer"}));f.sdk.destroy();
+});
+
+test("wrapped Boolean status is explicit and unknown status clears connection capabilities and personal permission",async()=>{
+  for(const raw of [{data:false},{data:{status:"online"}},{unrecognized:true},"unsupported-status"]){
+    const f=fixture();await f.sdk.prepared;f.toys([f.raw("flexer")]);f.sdk.enablePersonalRange("flexer",["vibrate"]);
+    assert.equal(f.sdk.getAppStatus(),true);assert.equal(f.sdk.personalRanges.size,1);
+    f.incoming("basicapi_update_app_status_tc",raw);
+    assert.equal(f.sdk.getAppStatus(),false);assert.deepEqual(f.sdk.getOnlineToys(),[]);assert.equal(f.sdk.personalRanges.size,0);
+    f.toys([f.raw("flexer")]);assert.throws(()=>f.sdk.sendToyCommand({vibrate:6,time:2,toyId:"flexer"}));f.sdk.destroy();
+  }
+  const f=fixture();await f.sdk.prepared;f.incoming("basicapi_update_app_online_tc",{data:true});
+  assert.equal(f.sdk.getAppStatus(),true);assert.deepEqual(f.sdk.getOnlineToys(),[],"An online Boolean cannot fabricate device discovery.");f.sdk.destroy();
 });

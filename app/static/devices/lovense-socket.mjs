@@ -77,7 +77,7 @@ export class LovenseSocket {
       const value = await boundedJson(response,16_384);
       if (this.destroyed || value?.code !== 0) throw Error();
       const address = socketAddress(value?.data?.socketIoUrl), path = value?.data?.socketIoPath;
-      if (!address || typeof path !== "string" || !/^\/[A-Za-z0-9/_-]{1,255}$/.test(path) || path.includes("..")) throw Error();
+      if (!address || typeof path !== "string" || !/^\/[A-Za-z0-9/_.-]{1,255}$/.test(path) || path.includes("..")) throw Error();
       const socket = this.socketFactory(address,{path,transports:["websocket"],forceNew:true,reconnection:false,autoConnect:false,timeout:8000});
       this.socket = socket;
       socket.on("basicapi_update_device_info_tc",raw=>this.deviceInfo(raw));
@@ -124,10 +124,12 @@ export class LovenseSocket {
   appStatus(raw) {
     if(this.destroyed)return;
     try {
-      const value = typeof raw === "boolean" ? raw : data(raw);
+      const parsed = typeof raw === "boolean" ? raw : envelope(raw);
+      const value = plain(parsed) && typeof parsed.data === "boolean" ? parsed.data : plain(parsed) && plain(parsed.data) ? parsed.data : parsed;
       const online = typeof value === "boolean" ? value : value.online ?? value.status;
       if (online === false || online === 0) this.connectionLost();
       else if (online === true || online === 1) {this.online=true;this.emit("appStatusChange",true);}
+      else this.connectionLost();
     } catch {this.connectionLost();}
   }
   deviceInfo(raw) {
