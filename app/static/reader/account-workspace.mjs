@@ -2,7 +2,7 @@ import {createStoryId} from './identity.mjs';
 
 const presetKeys=['id','name','toy','scope','storyId','mode','channels','activeChannels','ceiling','version'];
 export class ReaderAccountClient {
-  constructor({hosted=true,request=fetch,onChange=()=>{}}={}) {
+  constructor({hosted=true,request=(...args)=>globalThis.fetch(...args),onChange=()=>{}}={}) {
     Object.assign(this,{hosted,request,onChange});
     this.value={state:hosted?'loading':'local',registered:false,revision:0,presets:[],message:''};
     this.busy=false; this.generation=0;

@@ -48,7 +48,7 @@ async function boundedJson(response, maximum = 65_536) {
 }
 
 export class LovenseSocket {
-  constructor(options, {fetcher = fetch, socketFactory = io, now = Date.now,
+  constructor(options, {fetcher = (...args) => globalThis.fetch(...args), socketFactory = io, now = Date.now,
     setTimer = setTimeout, clearTimer = clearTimeout, randomId = () => crypto.randomUUID()} = {}) {
     Object.assign(this,{fetcher,socketFactory,now,setTimer,clearTimer,randomId});
     this.platform = options?.platform;

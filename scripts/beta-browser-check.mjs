@@ -233,6 +233,7 @@ try {
   assert.equal(apiRequests.some(value => value.origin === BETA && value.path === "/api/beta/recordings" && value.method === "POST"), false, "No beta recording starts before consent.");
   await beta.locator("#beta-recording-decline").click();
   assert.equal(apiRequests.some(value => value.origin === BETA && value.path === "/api/beta/recordings" && value.method === "POST"), false);
+  await beta.locator("#beta-recording-change").click();
   await beta.locator("#beta-recording-agree").check(); await beta.locator("#beta-recording-start").click();
   await beta.waitForFunction(() => document.querySelector("#beta-recording").dataset.state === "recording");
   await beta.locator("#draft-story").fill(privateCanary);

@@ -667,6 +667,8 @@ async function refinementChecks(page, setPromptReply) {
   assert.equal(await page.locator("#account-welcome").isHidden(), true,
     "The local simulator does not pretend to register a hosted account.");
   assert.equal(await page.locator("#account-settings-mount").getByRole("button", {name: "Download my presets", exact: true}).isDisabled(), true);
+  const accountData = page.locator("#account-settings-mount details");
+  if (!await accountData.evaluate(element => element.open)) await accountData.locator("summary").click();
   assert.equal(await page.locator("#account-settings-mount").getByRole("button", {name: "Delete account data", exact: true}).isDisabled(), true,
     "Account data operations stay unavailable without a real registered hosted account.");
   await page.locator("#delete-all").click();

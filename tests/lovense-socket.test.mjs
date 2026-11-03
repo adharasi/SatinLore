@@ -27,6 +27,22 @@ test("socket authorization sends only the per-user credential and pins secure ve
   for(const [host,port]of [["evil.test",30010],["8-8-8-8.lovense.club",30010],["192-168-1-5.lovense.club",443],["192-168-1-999.lovense.club",30010]])assert.equal(remoteCommandAddress(host,port),null);
   f.sdk.destroy();
 });
+
+test("the default fetch path preserves the browser receiver for authorization and capability enrichment",async()=>{
+  const original=globalThis.fetch,requests=[];
+  const handlers=new Map();
+  const socket={connected:false,on(name,callback){handlers.set(name,callback);},connect(){queueMicrotask(()=>{this.connected=true;handlers.get("connect")();});},removeAllListeners(){handlers.clear();},disconnect(){this.connected=false;}};
+  globalThis.fetch=function(url,options){
+    assert.equal(this,globalThis,"Browser fetch must retain its Window/global receiver.");requests.push({url,options});
+    return Promise.resolve(Response.json(url===SOCKET_AUTH_URL?{code:0,data:{socketIoUrl:"https://apps.lovense-api.com",socketIoPath:"/socket.io"}}:{code:200,data:{toys:"{}"}}));
+  };
+  let sdk;
+  try{
+    sdk=new LovenseSocket({platform:"neutral fixture",authToken:"synthetic-user-token"},{socketFactory:()=>socket});await sdk.prepared;
+    await sdk.enrichCapabilities("https://192-168-1-5.lovense.club:30010/command",sdk.metadataEpoch);
+    assert.equal(requests.length,2);assert.equal(requests[0].url,SOCKET_AUTH_URL);
+  }finally{sdk?.destroy();globalThis.fetch=original;}
+});
 test("Socket.IO dot paths are accepted while encoded paths traversal and query or fragment suffixes are rejected",async()=>{
   for(const socketPath of ["/socket.io","/lovense/socket.io"]){
     const f=fixture({socketPath});await f.sdk.prepared;assert.equal(f.socket.connected,true);f.sdk.destroy();
