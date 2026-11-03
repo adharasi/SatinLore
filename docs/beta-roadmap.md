@@ -6,7 +6,7 @@ There are separate gates: **S** for the software experience and **H** for physic
 
 ## Flexer Alpha on the app host — 3 November 2026
 
-The first preference study has a separate manual-control route at `/alpha`, using Dilan and Sadie logins, and founder review at `/admin`. The study joins consented control events, optional marks, feedback and timestamped annotations by authenticated username. Verified own-tab diagnostic clips are separate optional uploads. The reader and prior beta use their existing Access and storage rules.
+The first preference study has a separate manual-control route at `/alpha`, using Dilan and Sadie logins, and founder review at `/admin`. The study joins consented control events, optional marks, feedback and timestamped annotations by authenticated username. With consent, Alpha captures masked visual replays of each study screen for founder review. The reader and prior beta use their existing Access and storage rules.
 
 Use the [Alpha setup and rehearsal runbook](alpha-setup.md) for the path-scoped Access settings, password provisioning and hardware checks. Acceptance requires a real simulator journey through both user roles and an independent physical Flexer qualification before interpreting live preferences. The study supplies candidate movement profiles for later reader experiments.
 

@@ -113,7 +113,6 @@
 #alpha-stop-warning { padding: 9px 12px; border: 1px solid var(--stop); border-radius: 9px; margin-bottom: 14px; }
 .alpha-lead { max-width: 54ch; color: var(--secondary); font-size: clamp(1rem, 1.6vw, 1.125rem); }
 .alpha-intro { margin-bottom: 28px; }
-.alpha-intro > .alpha-quiet { margin-inline-start: -8px; }
 .alpha-signin {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr);
@@ -227,7 +226,7 @@
 .alpha-study-grid:has(.alpha-study-side > section:not([hidden])) { grid-template-columns: minmax(0, 1.8fr) minmax(230px, 1fr); }
 .alpha-study-grid:has(#alpha-device-panel[hidden]) { grid-template-columns: minmax(0, 1fr); margin-bottom: 14px; }
 .alpha-study-grid:has(#alpha-device-panel[hidden]) .alpha-study-side { max-width: 690px; }
-.alpha-device-heading, .alpha-movement-heading, .alpha-dialog-heading { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.alpha-device-heading, .alpha-movement-heading { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
 .alpha-device-heading .alpha-tag { margin-top: 3px; }
 .alpha-instructions { margin: 10px 0 18px; padding-left: 23px; }
 .alpha-instructions li { margin-bottom: 5px; }
@@ -236,6 +235,10 @@
 .alpha-qr p { margin: 7px 0 0; }
 .alpha-device-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 15px; align-items: end; }
 .alpha-device-selection label { grid-column: 1 / -1; }
+.alpha-test-guide { margin: 12px 0; padding: 0 13px; background: var(--alpha-tint); border: 1px solid var(--separator); border-radius: 10px; }
+.alpha-test-guide ol { margin: 0 0 9px; padding-inline-start: 1.3rem; font-size: .9rem; }
+.alpha-test-guide li + li { margin-top: 6px; }
+.alpha-test-guide .note { margin-bottom: 12px; }
 .alpha-verify-grid, .alpha-movement-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
 .alpha-verify-movement, .alpha-movement { min-width: 0; border: 1px solid var(--separator); border-radius: 12px; background: var(--page); padding: 13px; }
 .alpha-verify-movement > .note { margin: 5px 0 10px; }
@@ -243,16 +246,16 @@
 .alpha-movement-heading p { margin: 2px 0 0; }
 .alpha-channel-select { font-size: .8rem; }
 .alpha-output { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 9px; padding: 7px 9px; border-radius: 7px; background: var(--alpha-tint); font-size: .82rem; }
-.alpha-slider { margin: 8px 0; font-size: .84rem; }
+.alpha-slider { padding-block-start: 7px; font-size: .84rem; }
 .alpha-slider output, #alpha-review-time-label { float: right; color: var(--action); }
-.alpha-slider input { height: 44px; }
-.alpha-movement-detail summary { font-size: .85rem; }
+.alpha-slider output, .alpha-time-field label { margin-inline-end: 37px; }
+.alpha-movement-detail > summary { font-size: .85rem; }
 .alpha-movement-detail select, .alpha-movement-detail button { margin: 5px 0 8px; }
+.alpha-range-settings:has(button[hidden]) { display: none; }
 .alpha-playback-actions { margin: 9px 0 3px; }
 .alpha-mark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .alpha-mark-grid button { padding-inline: 7px; font-size: .84rem; }
 #alpha-mark-status { margin-top: 8px; }
-.alpha-card video { display: block; width: 100%; max-height: 300px; margin-block: 10px; border-radius: 8px; background: #000; }
 
 .alpha-stop-dock {
   position: fixed;
@@ -277,20 +280,41 @@ body:has(#alpha-study:not([hidden]) #alpha-study-actions:not([hidden])) { paddin
 .alpha-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
 .alpha-fields input, .alpha-fields select { margin-top: 4px; }
 .alpha-fields-note { grid-column: 1 / -1; margin: 0; }
+.alpha-field, .alpha-control-field { position: relative; min-width: 0; }
+.alpha-field-name { display: block; min-height: 36px; padding: 6px 37px 0 0; }
+.alpha-field-name small { color: var(--secondary); font-size: .75rem; font-weight: 650; }
+.alpha-fields .alpha-field label { display: flex; flex-direction: column; justify-content: space-between; }
+.alpha-time-field .alpha-field-name { display: inline-block; padding-inline-end: 0; }
+#alpha-review-time-label { padding-top: 6px; }
+.alpha-tip summary {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  color: var(--action);
+  border-radius: 7px;
+  list-style: none;
+}
+.alpha-tip summary::-webkit-details-marker { display: none; }
+.alpha-tip summary:hover, .alpha-tip[open] summary { background: var(--selection); }
+.alpha-tip summary span { display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid currentColor; border-radius: 50%; font-size: .75rem; }
+.alpha-tip > p { margin: 6px 0 10px; padding: 8px 10px; border-inline-start: 2px solid var(--alpha-signal); border-radius: 4px; background: var(--alpha-tint); color: var(--text); font-size: .83rem; }
+#alpha-feedback-form [aria-invalid="true"] { border-color: var(--stop); box-shadow: inset 0 0 0 1px var(--stop); }
+.alpha-field-error { display: block; margin-top: 4px; color: var(--stop); font-size: .82rem; font-weight: 550; }
 .alpha-review-moments { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
 .alpha-review-moments button { padding-inline: 8px; font-size: .83rem; }
 .alpha-review-moments [aria-pressed="true"] { background: var(--selection); border-color: var(--action); }
-.alpha-annotations, .alpha-history-list { margin: 12px 0; padding: 0; list-style: none; }
-.alpha-annotations li, .alpha-history-list li { padding: 9px 0; border-top: 1px solid var(--separator); overflow-wrap: anywhere; }
+.alpha-annotations { margin: 12px 0; padding: 0; list-style: none; }
+.alpha-annotations li { padding: 9px 0; border-top: 1px solid var(--separator); overflow-wrap: anywhere; }
 .alpha-annotations li p { white-space: pre-wrap; margin: 3px 0 0; }
-.alpha-history-list li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-.alpha-history-list .note { margin: 1px 0 0; }
 .alpha-footer { border-top: 1px solid var(--separator); display: flex; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; padding-block: 15px 22px; color: var(--secondary); font-size: .85rem; }
 
 @media (max-width: 900px) {
   .alpha-study-grid:has(.alpha-study-side > section:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
-  .alpha-study-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .alpha-study-grid:has(#alpha-device-panel[hidden]) .alpha-study-side { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 620px) {

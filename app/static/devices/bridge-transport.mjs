@@ -22,6 +22,7 @@ export class BridgeTransport {
     Object.assign(this, {document, window, navigator, Channel, request, framePath, now, setTimer, clearTimer, onChange});
     this.listeners = new Set(); this.pending = new Map(); this.toys = []; this.selected = null;
     this.epoch = 0; this.serial = 0; this.frame = null; this.port = null; this.release = null;
+    this.releasing = null;
     this.credentials = null; this.qrUrl = null; this.available = null; this.state = "disconnected";
     this.message = ""; this.channel = "vibrate"; this.ceiling = 5; this.ready = false; this.expiresAt = 0;
     this.configurationChecks = null;
@@ -58,27 +59,33 @@ export class BridgeTransport {
   async acquire() {
     if (!this.navigator?.locks?.request) throw new Error("Use a browser with Web Locks support to connect a physical toy.");
     return new Promise((resolve, reject) => {
-      this.navigator.locks.request("satinlore-device-check", {ifAvailable: true}, async lock => {
+      const lease = this.navigator.locks.request("satinlore-device-check", {ifAvailable: true}, async lock => {
         if (!lock) { reject(new Error("Another tab has the toy connection. Disconnect it first.")); return; }
-        await new Promise(release => { let done = false; resolve(() => { if (!done) {done = true; release();} }); });
+        await new Promise(release => { resolve(() => {release(); return lease;}); });
       }).catch(() => reject(new Error("The toy connection lock could not be obtained.")));
     });
   }
   async begin() {
     this.notifierFailed = false;
-    this.dispose();
-    if (this.notifierFailed) return false;
+    this.dispose(undefined, {notify: false});
     const operation = this.epoch;
     this.state = "connecting"; this.message = "Preparing a private connection…"; this.notify();
     if(this.notifierFailed)return false;
     try {
+      if (this.releasing) await this.releasing;
+      if (operation !== this.epoch) return false;
       if (this.document?.hidden || !await this.status()) throw new Error(this.message);
       if (operation !== this.epoch) return false;
       const release = await this.acquire();
       if (operation !== this.epoch || this.document?.hidden) { release(); return false; }
       this.release = release;
       const response = await this.request("/api/lovense/session", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-      if (!response.ok) throw new Error(response.status === 403 || response.status === 401 ? "Sign in again before pairing a toy." : "The private Lovense connection could not be prepared.");
+      if (!response.ok) {
+        const message = {401: "Sign in again before pairing a toy.", 403: "Sign in again before pairing a toy.",
+          429: "There have been several connection attempts. Wait a minute and try again.",
+          502: "Lovense could not start the pairing session. Try again shortly."}[response.status];
+        throw new Error(message || "The private Lovense connection could not be prepared. Try again shortly.");
+      }
       const value = await response.json();
       if (operation !== this.epoch || this.document?.hidden) return false;
       if (!value || typeof value.uid !== "string" || !validId(value.uid) || typeof value.platform !== "string" || !value.platform || value.platform.length > 256 ||
@@ -117,12 +124,14 @@ export class BridgeTransport {
       if (this.ready || !this.credentials) return;
       this.ready = true;
       this.port.postMessage({type: "init", session: this.credentials}); this.credentials = null;
-      this.state = "waiting"; this.message = "Pair your toy in Lovense Remote, then scan the code.";
+      this.message = "Getting a pairing code from Lovense…";
       this.opening?.resolve(true); this.opening = null; this.notify();
     } else if (message.type === "qr") {
       const url = safeQrUrl(message.url);
       if (!url) { this.dispose("The pairing code was invalid. Reconnect."); return; }
-      this.qrUrl = url; this.clearTimer(this.openTimer); this.notify();
+      this.qrUrl = url; this.clearTimer(this.openTimer);
+      if (!this.toys.length) {this.state = "waiting"; this.message = "Scan this code in Lovense Remote.";}
+      this.notify();
     } else if (message.type === "toys" && Array.isArray(message.toys)) {
       const seen = new Set();
       const toys = message.toys.slice(0,50).filter(toy => toy && validId(toy.id) && typeof toy.label === "string" && toy.label.length <= 100 && Array.isArray(toy.capabilities) && toy.capabilities.length<=5 && toy.capabilities.some(value=>CHANNELS.has(value)&&(value!=="oscillate"||toy.controlTransport==="standard-socket-v1")) && !seen.has(toy.id) && seen.add(toy.id)).map(toy => ({
@@ -134,10 +143,12 @@ export class BridgeTransport {
       const previous = this.selected;
       this.toys = toys;
       if (previous && (!toys.some(toy => toy.id === previous) || Object.hasOwn(message,"selected") && message.selected === null)) { this.selected = null; this.personalRangeChannels.clear();this.ceiling=Math.min(5,this.ceiling);this.emit({type: "disconnect", deviceId: previous}); }
-      this.state = toys.length ? "discovered" : "waiting";
+      if (this.selected) this.state = "paused";
+      else if (toys.length) {this.state = "discovered"; this.message = "Choose your toy below.";}
+      else if (this.qrUrl) {this.state = "waiting"; this.message = "Waiting for Lovense Remote. Make sure your toy is connected in the app.";}
       this.notify();
     } else if (message.type === "selected" && validId(message.id) && this.toys.some(toy => toy.id === message.id)) {
-      this.selected = message.id; this.state = "paused";
+      this.selected = message.id; this.state = "paused"; this.message = "Toy selected. Try each movement at a low level.";
       for (const [key,pending] of this.pending) if (pending.kind === "select" && pending.toyId === message.id) { this.pending.delete(key); this.clearTimer(pending.timer); pending.resolve(true); }
       this.notify();
     } else if (message.type === "result" && typeof message.requestId === "string") {
@@ -149,11 +160,19 @@ export class BridgeTransport {
       if (["waiting", "connecting", "disconnected"].includes(message.state) && this.selected) {
         const id = this.selected; this.selected = null; this.emit({type: "disconnect", deviceId: id});
       }
-      if (message.state === "disconnected") { this.dispose("The Lovense connection ended. Reconnect explicitly."); return; }
-      if (message.state === "waiting") this.state = "waiting";
+      if (message.state === "disconnected") {
+        this.dispose(this.state === "connecting" ? "Lovense could not show a pairing code. Try connecting again." : "The Lovense connection ended. Connect again.");
+        return;
+      }
+      if (message.state === "waiting" && this.qrUrl) this.state = "waiting";
       this.notify();
     } else if (message.type === "closed") this.dispose("The Lovense connection closed. Reconnect explicitly.");
-    else if (message.type === "error") { this.message = "The device request failed. Check Lovense Remote and reconnect."; if(validId(this.selected))this.emit({type: "disconnect", deviceId: this.selected}); this.notify(); }
+    else if (message.type === "error") {
+      if (this.state === "connecting") {this.dispose("Lovense could not show a pairing code. Try connecting again."); return;}
+      this.message = "The device request failed. Check Lovense Remote and reconnect.";
+      if (validId(this.selected)) this.emit({type: "disconnect", deviceId: this.selected});
+      this.notify();
+    }
   }
   send(type, extra = {}, {timeout = 1700} = {}) {
     if (!this.port || !this.ready || this.document?.hidden || this.now() >= this.expiresAt) return Promise.reject(new Error("Reconnect Lovense before sending a request."));
@@ -213,7 +232,7 @@ export class BridgeTransport {
   }
   setCeiling(value) { if (!personalLevel(value)||value>5&&!this.personalRangeChannels.size) throw new Error("Enable your personal range before choosing a maximum above 5."); this.ceiling = value; }
   setChannel(channel) { if (!CHANNELS.has(channel)) throw new Error("Choose a supported channel."); this.channel = channel; }
-  dispose(message = "Disconnected. Reconnect explicitly.") {
+  dispose(message = "Disconnected. Reconnect explicitly.", {notify = true} = {}) {
     ++this.epoch;
     const id = this.selected, frame = this.frame, port = this.port, release = this.release;
     this.frame = this.port = this.release = null; this.credentials = null; this.selected = null; this.toys = []; this.qrUrl = null;
@@ -224,14 +243,25 @@ export class BridgeTransport {
     for (const pending of this.pending.values()) {this.clearTimer(pending.timer);pending.reject(new Error(message));}
     this.pending.clear();
     if (port) {
-      try { port.postMessage({type:"dispose"}); } catch {}
-      let removed = false;
-      const remove = () => {if(removed)return; removed=true; try{port.close();}catch{} frame?.remove(); release?.();};
-      port.onmessage = event => {if(event.data?.type === "closed")remove();};
-      this.setTimer(remove,250);
-    } else { frame?.remove(); release?.(); }
+      this.releasing = new Promise(resolve => {
+        let removed = false;
+        const remove = () => {
+          if (removed) return;
+          removed = true;
+          try {port.close();} catch {}
+          frame?.remove();
+          resolve(release?.());
+        };
+        port.onmessage = event => {if(event.data?.type === "closed")remove();};
+        try {port.postMessage({type:"dispose"});} catch {}
+        this.setTimer(remove,250);
+      });
+    } else {
+      frame?.remove();
+      if (release) this.releasing = release();
+    }
     if (id) this.emit({type:"disconnect",deviceId:id});
-    this.notify();
+    if (notify) this.notify();
   }
   destroy() { this.dispose(); this.document?.removeEventListener("visibilitychange",this.visibility);this.window?.removeEventListener("pagehide",this.leaving);this.listeners.clear(); }
 }

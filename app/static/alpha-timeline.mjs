@@ -1,7 +1,11 @@
 const LIMIT_MS = 60 * 60 * 1000;
 const MAX_PENDING = 1000;
 const BATCH_SIZE = 100;
+const BATCH_BYTES = 60 * 1024;
 const MAX_EVENTS = 20_000;
+const encoder = new TextEncoder();
+const bytes = value => encoder.encode(JSON.stringify(value)).byteLength;
+const BATCH_ENVELOPE_BYTES = bytes({seq: MAX_EVENTS, events: []});
 
 /** One session's bounded, in-memory queue. Retried batches keep the exact sequence and payload. */
 export class AlphaTimeline {
@@ -36,18 +40,21 @@ export class AlphaTimeline {
     if (this.destroyed || this.state !== "recording" || Date.now() >= this.expiresAt) return false;
     if (this.savedCount + this.queue.length >= MAX_EVENTS) {
       this.state = "paused";
-      this.error = "The timeline reached its event limit. You can finish and add feedback.";
+      this.error = "This session has reached its data limit. You can still finish and share feedback.";
       this.notify();
       return false;
     }
     if (this.queue.length >= MAX_PENDING) {
       this.state = "paused";
-      this.error = "Recording paused while the pending timeline is saved.";
+      this.error = "Data collection will resume when your changes finish saving.";
       this.notify();
       return false;
     }
     this.lastTime = this.elapsed();
-    this.queue.push({...structuredClone(event), t: this.lastTime});
+    const entry = {...structuredClone(event), t: this.lastTime};
+    const size = bytes(entry);
+    if (size + BATCH_ENVELOPE_BYTES > BATCH_BYTES) return false;
+    this.queue.push({entry, size});
     this.notify();
     return true;
   }
@@ -80,9 +87,21 @@ export class AlphaTimeline {
     return this.sending;
   }
 
+  nextBatch() {
+    const events = [];
+    let length = BATCH_ENVELOPE_BYTES;
+    for (const {entry, size} of this.queue) {
+      const added = size + (events.length ? 1 : 0);
+      if (events.length === BATCH_SIZE || length + added > BATCH_BYTES) break;
+      events.push(entry);
+      length += added;
+    }
+    return {seq: this.sequence + 1, events};
+  }
+
   async sendPending() {
     while (this.queue.length && !this.destroyed) {
-      if (!this.pending) this.pending = {seq: this.sequence + 1, events: this.queue.slice(0, BATCH_SIZE)};
+      if (!this.pending) this.pending = this.nextBatch();
       const batch = this.pending;
       try {
         const acknowledgement = await this.append(this.id, batch, this.abort.signal);
@@ -95,7 +114,7 @@ export class AlphaTimeline {
         this.error = "";
       } catch {
         if (!this.destroyed) {
-          this.error = "The timeline has unsaved changes. Retry when your connection is ready.";
+          this.error = "Some study data is still waiting to save. Check your internet connection.";
           this.notify();
         }
         return false;

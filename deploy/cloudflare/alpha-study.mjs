@@ -1,5 +1,5 @@
 import {
-  ALPHA_ORIGIN, ALPHA_COOKIE, ALPHA_CONSENT, ALPHA_CLIP_CONSENT, AUTH_MS, STUDY_MS, RETENTION_MS,
+  ALPHA_ORIGIN, ALPHA_COOKIE, ALPHA_CONSENT, LEGACY_ALPHA_CONSENT, ALPHA_CLIP_CONSENT, AUTH_MS, STUDY_MS, RETENTION_MS,
   CLIP_RETENTION_MS, CLIP_LIMIT, USERNAMES, MODES, UUID, HASH, AlphaError, json, check, exact, integer,
   bytes, hex, digest, readBody, readJson, normalizeAlphaEvent, normalizeFeedback, normalizeAnnotation,
 } from "./alpha-contract.mjs";
@@ -250,7 +250,7 @@ export class AlphaStudy {
     const result = this.storage.transactionSync(() => {
       const old = this.one("SELECT * FROM alpha_sessions WHERE username=? AND request_id=?", username, requestId);
       if (old) {
-        check(old.mode === value.mode, "This session start was already used.", 409);
+        check(old.mode === value.mode && old.consent_version === ALPHA_CONSENT, "This session start was already used.", 409);
         return { row: old, duplicate: true };
       }
       check(!this.one("SELECT id FROM alpha_withdrawals WHERE username=? AND request_id=?", username, requestId), "This session was deleted.", 410);
@@ -267,6 +267,9 @@ export class AlphaStudy {
   append(row, value) {
     check(exact(value, ["seq", "events"]) && integer(value.seq, 1, SESSION_EVENT_LIMIT) && Array.isArray(value.events) && value.events.length >= 1 && value.events.length <= 100);
     const events = value.events.map(normalizeAlphaEvent);
+    if (events.some(event => event.type === "screen" || event.type === "pointer")) {
+      check(row.consent_version === ALPHA_CONSENT, "Start a session with the current recording choice to save the replay.", 403);
+    }
     for (let index = 1; index < events.length; index++) check(events[index].t >= events[index - 1].t, "Keep alpha events in time order.");
     const encoded = JSON.stringify(events), length = bytes(encoded);
     const updated = this.storage.transactionSync(() => {
@@ -307,6 +310,7 @@ export class AlphaStudy {
   }
 
   async shareClip(request, row, auth) {
+    check(row.consent_version === LEGACY_ALPHA_CONSENT, "Clip uploads are available only for earlier Alpha sessions.", 405);
     check(studySummary(row).state === "finished", "Finish the session before sharing a clip.", 409);
     const meta = clipMetadata(request);
     const payload = await readBody(request, CLIP_LIMIT, 30000);
@@ -371,11 +375,12 @@ export class AlphaStudy {
     const admin = Boolean(adminPath);
     check(!admin || auth.username === "Dilan", "Founder access required.", 403);
     const get = request.method === "GET" || request.method === "HEAD";
+    check(!get || admin, "Saved Alpha recordings are available to the study reviewer.", 403);
     if (!id && get) {
       const keys = [...url.searchParams.keys()];
       const username = url.searchParams.get("username");
       check(keys.length === 0 || admin && keys.length === 1 && keys[0] === "username" && USERNAMES.includes(username));
-      return this.list(admin ? username : auth.username);
+      return this.list(username);
     }
     check(!url.search);
     if (!id) {
@@ -420,7 +425,6 @@ export class AlphaStudy {
       this.sql.exec("UPDATE alpha_sessions SET finished_at=COALESCE(finished_at,?) WHERE id=?", Date.now(), id);
       return json({ session: studySummary(this.getSession(id)) });
     }
-    check(studySummary(current).state === "finished", "Finish the session before saving feedback.", 409);
     if (action === "feedback") {
       const feedback = normalizeFeedback(value);
       this.sql.exec("UPDATE alpha_sessions SET feedback=? WHERE id=?", JSON.stringify(feedback), id);
@@ -428,6 +432,7 @@ export class AlphaStudy {
     }
     check(action === "annotations", "This alpha action is unavailable.", 405);
     const note = normalizeAnnotation(value);
+    check(note.t <= current.last_event_at, "Choose a saved time on the session timeline.");
     const existing = this.one("SELECT id,t,text,created_at createdAt FROM alpha_annotations WHERE session_id=? AND t=? AND text=?", id, note.t, note.text);
     if (existing) return json({ annotation: existing });
     check(this.one("SELECT COUNT(*) count FROM alpha_annotations WHERE session_id=?", id).count < 50, "This session has reached its note limit.", 507);

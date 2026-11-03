@@ -67,6 +67,48 @@
 .alpha-review-markers { display: flex; gap: .45rem; flex-wrap: wrap; }
 .alpha-review-markers button { border-color: var(--alpha-marker); padding-inline: .65rem; }
 .alpha-review-markers > p { margin: 0; }
+.alpha-replay-controls { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .65rem; margin-block: .75rem; }
+.alpha-replay-controls select { max-width: 100%; }
+.alpha-replay-controls output { color: var(--secondary); font-variant-numeric: tabular-nums; }
+.alpha-replay-controls input[type="range"] { flex: 1 1 100%; margin-block: 0; }
+.alpha-replay-view {
+  position: relative;
+  width: min(100%, calc(30rem * var(--replay-ratio, 1.5)));
+  aspect-ratio: var(--replay-ratio, 1.5);
+  overflow: hidden;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--page);
+  margin: .65rem auto;
+  container-type: inline-size;
+}
+.alpha-replay-item {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding-inline: .3em;
+  border: 1px solid var(--separator);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: clamp(.45rem, 2.3cqi, .76rem);
+  line-height: 1.15;
+}
+.alpha-replay-item[data-state="disabled"] { color: var(--secondary); }
+.alpha-replay-item[data-state="checked"] { border-color: var(--action); background: var(--selection); }
+.alpha-replay-item[data-state="masked"] { border-style: dashed; color: var(--secondary); }
+.alpha-replay-pointer {
+  position: absolute;
+  width: .75rem;
+  height: .75rem;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--page);
+  border-radius: 50%;
+  background: var(--alpha-marker);
+  pointer-events: none;
+}
+.alpha-replay-pointer[data-click="true"] { box-shadow: 0 0 0 .3rem var(--alpha-marker); }
 #alpha-review-clip { width: 100%; max-height: 380px; background: var(--page); border-radius: 8px; display: block; }
 .alpha-feedback-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: .35rem .8rem; margin: 0; }
 .alpha-feedback-grid dt, .alpha-feedback-grid dd { font-size: .9rem; margin: 0; overflow-wrap: anywhere; }

@@ -1,8 +1,12 @@
+import { ALPHA_SCREEN_LABELS, ALPHA_SCREEN_STAGES } from "./alpha-screen-schema.mjs";
+
 const API = "/alpha/api/alpha";
 const ADMIN = `${API}/admin/sessions`;
 const ID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
 const TESTERS = new Set(["Dilan", "Sadie"]);
 const EVENT_PAGE = 50;
+const REPLAY_SCREENS = new Set(ALPHA_SCREEN_STAGES);
+const REPLAY_STEPS = new Set([...REPLAY_SCREENS, "welcome", "complete"]);
 const CHANNELS = [
   { key: "vibrate", alias: "vibration", label: "Vibration", className: "alpha-chart-vibrate" },
   { key: "fingering", alias: "flexing", label: "Flexing", className: "alpha-chart-flex" }
@@ -88,6 +92,26 @@ function durationOf(data) {
     data.clip.offsetMs + data.clip.durationMs : 0;
   return Math.max(clipEnd, data.events.at(-1)?.t ?? 0, ...data.annotations.map(note => note.t));
 }
+function screenVisits(events, duration) {
+  const visits = [];
+  let visit;
+  for (const event of events) {
+    const screen = event.type === "step" && REPLAY_STEPS.has(event.step) ? event.step :
+      event.type === "screen" && REPLAY_SCREENS.has(event.screen) ? event.screen : null;
+    if (screen && screen !== visit?.screen) {
+      if (visit) visit.end = event.t;
+      visit = REPLAY_SCREENS.has(screen) ? { screen, start: event.t, end: duration, frames: [], pointers: [] } : null;
+      if (visit) visits.push(visit);
+    }
+    if (!visit) continue;
+    if (event.type === "screen" && Array.isArray(event.items) && event.viewport?.w > 0 && event.viewport?.h > 0) visit.frames.push(event);
+    if (event.type === "pointer" && normalized(event.x) && normalized(event.y)) visit.pointers.push(event);
+  }
+  return visits;
+}
+const normalized = value => Number.isInteger(value) && value >= 0 && value <= 1000;
+const percent = value => `${value / 10}%`;
+const isReplayEvent = event => event.type === "screen" || event.type === "pointer";
 function traceSegments(events, channel, duration) {
   const lines = [];
   let previous = null;
@@ -134,6 +158,7 @@ export function initializeAlphaAdmin() {
   let listRequest, detailRequest, generation = 0;
   let viewEvents = [], eventStart = 0, seekSync = true, deleteTarget = null, deleting = false;
   let traces = {};
+  let visits = [], visitIndex = -1, replayAnimation = null, drawnFrame = null;
   const themeKey = "satinlore.alpha.appearance";
   function setTheme(theme, save = false) {
     document.documentElement.dataset.theme = theme;
@@ -156,10 +181,16 @@ export function initializeAlphaAdmin() {
     current = null;
     viewEvents = [];
     traces = {};
+    stopReplay();
+    visits = [];
+    visitIndex = -1;
+    drawnFrame = null;
     clearClip();
     $("detail").hidden = true;
     $("empty").hidden = false;
-    for (const id of ["events", "feedback", "annotations", "markers", "levels", "chart"]) $(id).replaceChildren();
+    for (const id of ["events", "feedback", "annotations", "markers", "levels", "chart", "replay-screen", "replay-items"]) $(id).replaceChildren();
+    $("replay-controls").hidden = $("replay-view").hidden = $("replay-pointer").hidden = true;
+    $("replay-note").textContent = "";
     for (const id of ["alpha-detail-meta", "alpha-detail-title", "alpha-detail-subtitle", "alpha-review-clip-note"]) {
       document.getElementById(id).textContent = "";
     }
@@ -207,7 +238,7 @@ export function initializeAlphaAdmin() {
       button.append(
         el("strong", `${session.username} · ${human(session.mode)}`),
         el("span", date(session.createdAt)),
-        el("span", [session.state === "active" ? "In progress" : "Finished", `${session.eventCount ?? 0} actions`, session.hasFeedback ? "Feedback" : "", session.hasClip ? "Clip" : ""].filter(Boolean).join(" · "))
+        el("span", [session.state === "active" ? "In progress" : "Finished", `${session.eventCount ?? 0} records`, session.hasFeedback ? "Feedback" : "", session.hasClip ? "Clip" : ""].filter(Boolean).join(" · "))
       );
       button.addEventListener("click", () => void openSession(session.id, button));
       item.append(button);
@@ -272,8 +303,75 @@ export function initializeAlphaAdmin() {
   function clipOffset() {
     return isNumber(current?.clip?.offsetMs) ? current.clip.offsetMs : null;
   }
-  function setPosition(position, moveClip = false) {
+  function stopReplay() {
+    if (replayAnimation !== null) cancelAnimationFrame(replayAnimation);
+    replayAnimation = null;
+    $("replay-play").textContent = "Play screen";
+  }
+  function showScreenFrame(frame) {
+    if (frame === drawnFrame) return;
+    drawnFrame = frame;
+    $("replay-view").hidden = !frame;
+    if (!frame) {
+      $("replay-items").replaceChildren();
+      return;
+    }
+    $("replay-view").style.setProperty("--replay-ratio", Math.max(.3, Math.min(4, frame.viewport.w / frame.viewport.h)));
+    $("replay-items").replaceChildren(...frame.items.filter(item =>
+      item && Object.hasOwn(ALPHA_SCREEN_LABELS, item.id) && [item.x, item.y, item.w, item.h].every(normalized)
+    ).map(item => {
+      const node = el("span", ALPHA_SCREEN_LABELS[item.id], "alpha-replay-item");
+      node.dataset.state = item.state ?? "";
+      Object.assign(node.style, { left: percent(item.x), top: percent(item.y), width: percent(item.w), height: percent(item.h) });
+      return node;
+    }));
+  }
+  function drawScreenReplay(keepVisit) {
+    let visit = visits[visitIndex];
+    if (visit && !keepVisit && (at < visit.start || at >= visit.end)) {
+      const index = visits.findLastIndex(entry => entry.start <= at && at <= entry.end);
+      if (index !== -1) {
+        visitIndex = index;
+        visit = visits[index];
+        $("replay-screen").value = String(index);
+      }
+    }
+    const position = visit ? Math.max(visit.start, Math.min(visit.end, at)) : 0;
+    const frame = visit?.frames.findLast(entry => entry.t <= position) ?? null;
+    const pointer = frame && visit.pointers.findLast(entry => entry.t <= position && position - entry.t <= 1500);
+    showScreenFrame(frame);
+    $("replay-pointer").hidden = !pointer;
+    if (pointer) {
+      $("replay-pointer").style.left = percent(pointer.x);
+      $("replay-pointer").style.top = percent(pointer.y);
+      $("replay-pointer").dataset.click = String(pointer.action === "click" && position - pointer.t <= 450);
+    }
+    const elapsed = visit ? position - visit.start : 0;
+    const length = visit ? visit.end - visit.start : 0;
+    $("replay-play").disabled = !visit?.frames.length || !length;
+    $("replay-position").disabled = !length;
+    $("replay-position").max = String(Math.max(1, length));
+    $("replay-position").value = String(elapsed);
+    $("replay-position").setAttribute("aria-valuetext", `${time(elapsed)} of ${time(length)}`);
+    $("replay-time").textContent = `${time(elapsed)} / ${time(length)}`;
+    $("replay-note").textContent = frame ? "" : visit?.frames.length ? "The first screen view appears shortly after this visit begins." :
+      visit ? "No screen views were saved for this visit." : "No screen visits were saved for this session.";
+  }
+  function loadScreenVisits() {
+    visits = screenVisits(current.events, duration);
+    const firstRecorded = visits.findIndex(visit => visit.frames.length);
+    visitIndex = visits.length ? Math.max(0, firstRecorded) : -1;
+    $("replay-controls").hidden = !visits.length;
+    $("replay-screen").replaceChildren(...visits.map((visit, index) => {
+      const option = el("option", `${human(visit.screen)} · ${time(visit.start)}–${time(visit.end)}`);
+      option.value = String(index);
+      return option;
+    }));
+    $("replay-screen").value = String(visitIndex);
+  }
+  function setPosition(position, moveClip = false, keepVisit = false) {
     if (!current) return;
+    if (moveClip) stopReplay();
     at = Math.max(0, Math.min(duration, Number(position) || 0));
     $("position").value = String(at);
     $("position").setAttribute("aria-valuetext", `${time(at)} of ${time(duration)}`);
@@ -293,6 +391,7 @@ export function initializeAlphaAdmin() {
       }
     }
     for (const item of $("events").children) item.dataset.current = String(Number(item.dataset.time) === at);
+    drawScreenReplay(keepVisit);
     const offset = clipOffset();
     if (moveClip && offset !== null && clip.readyState && isNumber(clip.duration)) {
       const target = (at - offset) / 1000;
@@ -324,7 +423,7 @@ export function initializeAlphaAdmin() {
   }
   function filterEvents() {
     const group = $("event-type").value;
-    viewEvents = current?.events.filter(event => !group || eventGroup(event) === group) ?? [];
+    viewEvents = current?.events.filter(event => !isReplayEvent(event) && (!group || eventGroup(event) === group)) ?? [];
     eventStart = 0;
     displayEvents();
   }
@@ -371,13 +470,14 @@ export function initializeAlphaAdmin() {
       current = data;
       at = 0;
       duration = durationOf(data);
+      loadScreenVisits();
       traces = Object.fromEntries(CHANNELS.map(({ key }) => [key, traceSegments(data.events, key, duration)]));
       $("empty").hidden = true;
       $("detail").hidden = false;
       document.getElementById("alpha-detail-meta").textContent = `${data.session.username} · ${date(data.session.createdAt)}`;
       document.getElementById("alpha-detail-title").textContent = `Flexer · ${human(data.session.mode)}`;
       document.getElementById("alpha-detail-subtitle").textContent =
-        `${data.events.length} actions · ${time(duration)} elapsed${isNumber(data.session.retainedUntil) ? ` · Retained until ${date(data.session.retainedUntil)}` : ""}`;
+        `${data.events.filter(event => !isReplayEvent(event)).length} actions · ${time(duration)} elapsed${isNumber(data.session.retainedUntil) ? ` · Retained until ${date(data.session.retainedUntil)}` : ""}`;
       $("position").max = String(Math.max(1, duration));
       $("position").disabled = !duration;
       $("event-type").value = "";
@@ -387,7 +487,7 @@ export function initializeAlphaAdmin() {
       $("load-clip").hidden = !data.clip;
       drawChart();
       filterEvents();
-      setPosition(0);
+      setPosition(visits[visitIndex]?.start ?? 0, false, true);
       displayFeedback();
       displayNotes();
       for (const listButton of $("list").querySelectorAll("button")) listButton.setAttribute("aria-current", String(listButton === button));
@@ -398,6 +498,36 @@ export function initializeAlphaAdmin() {
     }
   }
   $("position").addEventListener("input", () => setPosition($("position").value, true));
+  $("replay-screen").addEventListener("change", () => {
+    visitIndex = Number($("replay-screen").value);
+    clip.pause();
+    if (visits[visitIndex]) setPosition(visits[visitIndex].start, true, true);
+  });
+  $("replay-position").addEventListener("input", () => {
+    const visit = visits[visitIndex];
+    if (!visit) return;
+    clip.pause();
+    setPosition(visit.start + Number($("replay-position").value), true, true);
+  });
+  $("replay-play").addEventListener("click", () => {
+    if (replayAnimation !== null) {
+      stopReplay();
+      return;
+    }
+    const visit = visits[visitIndex];
+    if (!visit?.frames.length || visit.end <= visit.start) return;
+    clip.pause();
+    const start = at < visit.start || at >= visit.end ? visit.start : at;
+    const started = performance.now();
+    const tick = now => {
+      const position = Math.min(visit.end, Math.round(start + Math.max(0, now - started)));
+      if (position === visit.end || position - at >= 40 || position < at) setPosition(position, false, true);
+      if (position >= visit.end) stopReplay();
+      else replayAnimation = requestAnimationFrame(tick);
+    };
+    $("replay-play").textContent = "Pause screen";
+    replayAnimation = requestAnimationFrame(tick);
+  });
   $("event-type").addEventListener("change", filterEvents);
   $("events-before").addEventListener("click", () => { eventStart = Math.max(0, eventStart - EVENT_PAGE); displayEvents(); });
   $("events-after").addEventListener("click", () => { if (eventStart + EVENT_PAGE < viewEvents.length) eventStart += EVENT_PAGE; displayEvents(); });
@@ -405,12 +535,14 @@ export function initializeAlphaAdmin() {
   $("user").addEventListener("change", () => void loadSessions());
   $("load-clip").addEventListener("click", () => {
     if (!current?.clip) return;
+    stopReplay();
     clip.src = `${ADMIN}/${current.session.id}/clip`;
     seekSync = true;
     clip.hidden = false;
     $("load-clip").hidden = true;
     clip.load();
   });
+  clip.addEventListener("play", stopReplay);
   clip.addEventListener("timeupdate", () => {
     const offset = clipOffset();
     if (offset !== null && seekSync && clip.hasAttribute("src")) setPosition(offset + clip.currentTime * 1000);
@@ -437,6 +569,7 @@ export function initializeAlphaAdmin() {
   function closeDelete() { if (!deleting) dialog.close(); }
   $("delete-open").addEventListener("click", () => {
     if (!current) return;
+    stopReplay();
     clip.pause();
     deleteTarget = current.session.id;
     $("delete-target").textContent = `${current.session.username} · ${date(current.session.createdAt)}`;
@@ -477,6 +610,7 @@ export function initializeAlphaAdmin() {
   });
   $("signout").addEventListener("click", async () => {
     $("signout").disabled = true;
+    stopReplay();
     clip.pause();
     try {
       await api(`${API}/logout`, { body: {} });
@@ -485,7 +619,11 @@ export function initializeAlphaAdmin() {
     } catch (error) { status(error.message, true); }
     finally { $("signout").disabled = false; }
   });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) clip.pause(); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) return;
+    stopReplay();
+    clip.pause();
+  });
   window.addEventListener("pagehide", () => { detailRequest?.abort(); listRequest?.abort(); clearDetail(); });
   window.addEventListener("pageshow", event => { if (event.persisted) window.location.reload(); });
   void (async () => {

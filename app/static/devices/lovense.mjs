@@ -65,7 +65,8 @@ export class LovenseCheck {
   }
 
   connect(session) {
-    this.disconnect();
+    // Reset the adapter without telling the parent that its new bridge ended.
+    this.disconnect(null, {notify: false});
     if (!session || typeof session.uid !== "string" || !session.uid || session.uid.length > 128 ||
         typeof session.platform !== "string" || !session.platform || session.platform.length > 256 ||
         typeof session.authToken !== "string" || !session.authToken || session.authToken.length > 16384 ||
@@ -269,7 +270,7 @@ export class LovenseCheck {
     } catch { return Promise.resolve({status: "unconfirmed"}); }
   }
 
-  stop(clearSelection = false) {
+  stop(clearSelection = false, {notify = true} = {}) {
     const id = this.selected;
     const gentle = this.runningGentleTest; this.runningGentleTest = null;
     this.lastStopSubmitted = null;
@@ -284,7 +285,7 @@ export class LovenseCheck {
         result = Promise.resolve(this.sdk.stopToyAction(id)).then(stopResult, () => ({status: "unconfirmed"}));
       } catch { /* The finite command is the fallback after transport failure. */ }
     }
-    this.emit({type: "state", state: this.connected ? "paused" : "waiting"});
+    if (notify) this.emit({type: "state", state: this.connected ? "paused" : "waiting"});
     return result.then(outcome=>{
       if(!clearSelection&&this.selected===id&&outcome.status==="submitted"&&this.active()&&this.commandTimer===null){
         this.lastStopSubmitted={id,generation:this.generation};
@@ -319,8 +320,8 @@ export class LovenseCheck {
     this.disconnect(message);
   }
 
-  disconnect(message = null) {
-    this.stop(true);
+  disconnect(message = null, {notify = true} = {}) {
+    this.stop(true, {notify});
     this.pendingCommand?.reject?.(new Error("The device request was cancelled."));
     this.pendingCommand = null;
     ++this.generation;
@@ -334,7 +335,9 @@ export class LovenseCheck {
     this.knownIds.clear();
     this.expiresAt = 0;
     if (sdk) { try { sdk.destroy(); } catch { /* Already disconnected. */ } }
-    this.emit({type: "toys", toys: [], selected: null});
-    this.emit({type: "state", state: "disconnected", ...(message ? {message} : {})});
+    if (notify) {
+      this.emit({type: "toys", toys: [], selected: null});
+      this.emit({type: "state", state: "disconnected", ...(message ? {message} : {})});
+    }
   }
 }

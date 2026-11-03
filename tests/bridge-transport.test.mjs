@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {BridgeTransport} from "../app/static/devices/bridge-transport.mjs";
+import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
 
 const settle = async () => { for (let index = 0; index < 16; index++) await Promise.resolve(); };
 const toy = (id = "toy-one") => ({id, label: "Lush simulator fixture", model: "lush", capabilities: ["vibrate"], battery: 60});
 const operation = (kind, extra = {}) => ({kind, deviceId: "toy-one", operationId: "fixture-operation", generation: 1, ...extra});
 
 /** Executes the real parent transport against a neutral DOM/port boundary. No SDK, network or hardware. */
-function fixture({autoLoad = true, autoToys = true, autoResults = true, locks = true, lockAvailable = true, onChange = () => {}} = {}) {
+function fixture({autoLoad = true, autoToys = true, autoQr = true, autoClose = true, autoResults = true, locks = true, lockAvailable = true, onChange = () => {}} = {}) {
   let time = 1_000_000, timerId = 0, held = 0, statusGate = null, sessionGate = null;
   const timers = new Map(), requests = [], frames = [], channels = [], handshakes = [], outgoing = [];
   const docEvents = new Map(), winEvents = new Map();
@@ -40,10 +41,10 @@ function fixture({autoLoad = true, autoToys = true, autoResults = true, locks = 
       this.port1 = {closed: false, onmessage: null, start() {}, close() {this.closed = true;}, postMessage(message) {
         outgoing.push(message);
         if (message.type === "init") {
-          queueMicrotask(() => deliver({type: "qr", url: "https://apps.lovense-api.com/fixture.jpg"}, channel));
+          if (autoQr) queueMicrotask(() => deliver({type: "qr", url: "https://apps.lovense-api.com/fixture.jpg"}, channel));
           if (autoToys) queueMicrotask(() => deliver({type: "toys", toys: [toy()]}, channel));
         } else if (message.type === "select") queueMicrotask(() => deliver({type: "selected", id: message.id}, channel));
-        else if (message.type === "dispose") queueMicrotask(() => deliver({type: "closed"}, channel));
+        else if (message.type === "dispose" && autoClose) queueMicrotask(() => deliver({type: "closed"}, channel));
         else if (autoResults && ["command", "stop"].includes(message.type)) {
           queueMicrotask(() => deliver({type: "result", requestId: message.requestId, ok: true, status: "submitted"}, channel));
         }
@@ -67,7 +68,7 @@ function fixture({autoLoad = true, autoToys = true, autoResults = true, locks = 
   };
   const navigator = {locks: locks ? {async request(name, options, callback) {
     assert.equal(name, "satinlore-device-check"); assert.equal(options.ifAvailable, true);
-    if (!lockAvailable) return callback(null);
+    if (!lockAvailable || held) return callback(null);
     held++;
     try {return await callback({name});} finally {held--;}
   }} : undefined};
@@ -118,6 +119,41 @@ test("setup surfaces bounded value-free server diagnostics without treating inva
   assert.equal(await f.bridge.status(),false);assert.equal(f.bridge.snapshot().configurationChecks,null);
   assert.match(f.bridge.snapshot().connectionMessage,/not configured/);
   await f.finish();
+});
+
+test("pairing stays in progress before the code arrives and an explicit restart waits for its previous lock", async () => {
+  const f = fixture({autoQr: false, autoToys: false, autoClose: false});
+  try {
+    assert.equal(await f.bridge.begin(), true);
+    f.deliver({type: "toys", toys: [], selected: null});
+    f.deliver({type: "state", state: "waiting"});
+    assert.equal(f.bridge.snapshot().connectionState, "connecting");
+    f.deliver({type: "qr", url: "https://apps.lovense-api.com/fixture.jpg"});
+    assert.equal(f.bridge.snapshot().connectionState, "waiting");
+    const restarting = f.bridge.begin();
+    await settle();
+    assert.equal(f.held(), 1);
+    assert.equal(f.requests.length, 2, "The next pairing has not started while the previous bridge is closing.");
+    await f.advance(250);
+    assert.equal(await restarting, true);
+    assert.equal(f.held(), 1);
+    assert.equal(f.frames[0].removed, true);
+  } finally {
+    await f.finish();
+  }
+});
+
+test("the reader shows the actual pairing failure rather than a second generic disconnect", async () => {
+  const f = fixture();
+  const reader = new ReaderDeviceController({bridge: f.bridge});
+  try {
+    f.sessionGate(Promise.resolve(new Response(null, {status: 429})));
+    assert.equal(await reader.beginConnection({mode: "lovense", model: "flexer"}), false);
+    assert.match(reader.setupSnapshot().connectionMessage, /Wait a minute and try again/);
+  } finally {
+    reader.destroy();
+    await f.finish();
+  }
 });
 
 test("cancelled status and credential responses cannot reopen a frame or leak a hardware lease", async () => {

@@ -25,7 +25,7 @@
     <section class="alpha-review-intro" aria-labelledby="alpha-review-heading">
       <p class="eyebrow">FOUNDER REVIEW</p>
       <h1 id="alpha-review-heading">Session review</h1>
-      <p>Follow the controls a tester chose, jump to marked moments and read their feedback.</p>
+      <p>Replay each screen visit, follow the controls a tester chose and read their feedback.</p>
       <p id="alpha-review-account" class="note" hidden></p>
     </section>
     <p id="alpha-review-status" class="alpha-review-status" role="status" aria-live="polite">Checking founder access…</p>
@@ -45,7 +45,7 @@
       <section class="alpha-review-detail" aria-label="Session details">
         <div id="alpha-review-empty" class="surface alpha-review-card">
           <h2 id="alpha-detail-heading">Choose a session</h2>
-          <p class="note">Select a tester session to see its timeline, feedback and any shared clip.</p>
+          <p class="note">Select a tester session to see its screen replays, timeline and feedback.</p>
         </div>
         <article id="alpha-review-detail" hidden>
           <header class="surface alpha-review-card alpha-session-overview">
@@ -59,6 +59,22 @@
               <button id="alpha-review-delete-open" type="button" class="stop">Delete session</button>
             </div>
           </header>
+          <section class="surface alpha-review-card" aria-labelledby="alpha-replay-heading">
+            <h3 id="alpha-replay-heading">Screen replay</h3>
+            <p class="note">Watch the controls and pointer on each Alpha screen. Typed answers and pairing details are hidden.</p>
+            <div id="alpha-review-replay-controls" class="alpha-replay-controls" hidden>
+              <label for="alpha-review-replay-screen">Screen visit</label>
+              <select id="alpha-review-replay-screen"></select>
+              <button id="alpha-review-replay-play" type="button">Play screen</button>
+              <output id="alpha-review-replay-time" aria-label="Screen position">0:00 / 0:00</output>
+              <input id="alpha-review-replay-position" type="range" min="0" max="1" step="1" value="0" aria-label="Seek within this screen visit">
+            </div>
+            <div id="alpha-review-replay-view" class="alpha-replay-view" role="img" aria-label="Reconstructed Alpha screen" hidden>
+              <div id="alpha-review-replay-items"></div>
+              <span id="alpha-review-replay-pointer" class="alpha-replay-pointer" aria-hidden="true" hidden></span>
+            </div>
+            <p id="alpha-review-replay-note" class="note"></p>
+          </section>
           <section class="surface alpha-review-card" aria-labelledby="alpha-timeline-heading">
             <div class="alpha-card-heading"><h3 id="alpha-timeline-heading">Control timeline</h3><output id="alpha-review-time">0:00 / 0:00</output></div>
             <p class="note">Flexer levels represent requests or simulator output. Physical responses appear as tester observations.</p>
@@ -105,7 +121,7 @@
   <dialog id="alpha-review-delete-dialog" class="confirmation-dialog" aria-labelledby="alpha-delete-heading">
     <h2 id="alpha-delete-heading">Delete this session?</h2>
     <p id="alpha-review-delete-target"></p>
-    <p class="note">This permanently removes the timeline, feedback, annotations and any shared clip from Alpha.</p>
+    <p class="note">This permanently removes screen replays, the timeline, feedback, annotations and any shared clip from Alpha.</p>
     <label class="alpha-delete-check"><input id="alpha-review-delete-confirm" type="checkbox"> I want to permanently delete this session.</label>
     <p id="alpha-review-delete-error" role="alert" hidden></p>
     <div class="buttons alpha-delete-actions">

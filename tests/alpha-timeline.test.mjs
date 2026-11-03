@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {AlphaTimeline} from "../app/static/alpha-timeline.mjs";
+import {ALPHA_SCREEN_LABELS} from "../app/static/alpha-screen-schema.mjs";
 
 test("Alpha capture retries the exact unconfirmed batch before later events", async () => {
   let now = 10;
@@ -50,4 +51,29 @@ test("Alpha pause suppresses events and withdrawal invalidates an outstanding fl
   assert.equal(await request, false);
   assert.equal(timeline.status().pending, 0);
   assert.equal(timeline.status().savedCount, 0);
+});
+
+test("Alpha screen views are batched within the keepalive body limit and remain in order", async () => {
+  let now = 0, saved = 0;
+  const batches = [];
+  const timeline = new AlphaTimeline({
+    session: {id: "neutral-session", seq: 0, expiresAt: Date.now() + 60_000},
+    now: () => now,
+    async append(id, batch) {
+      assert.ok(Buffer.byteLength(JSON.stringify(batch)) <= 60 * 1024);
+      assert.equal(batch.seq, batches.length + 1);
+      batches.push(batch);
+      saved += batch.events.length;
+      return {id, seq: batch.seq, eventCount: saved};
+    },
+  });
+  const frame = {
+    type: "screen", screen: "controls", viewport: {w: 1400, h: 900},
+    items: Object.keys(ALPHA_SCREEN_LABELS).slice(0, 50).map(id => ({id, x: 100, y: 100, w: 100, h: 100, state: "disabled"})),
+  };
+  for (; now < 100; now++) assert.ok(timeline.record(frame));
+  assert.equal(await timeline.flush(), true);
+  assert.ok(batches.length > 1);
+  assert.deepEqual(batches.flatMap(batch => batch.events.map(event => event.t)), Array.from({length: 100}, (_, index) => index));
+  assert.equal(timeline.status().savedCount, 100);
 });

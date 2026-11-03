@@ -1,5 +1,8 @@
+import { ALPHA_SCREEN_ITEM_LIMIT, ALPHA_SCREEN_LABELS, ALPHA_SCREEN_STAGES, ALPHA_SCREEN_STATES } from "../../app/static/alpha-screen-schema.mjs";
+
 export const ALPHA_ORIGIN = "https://app.satinlore.com";
-export const ALPHA_CONSENT = "alpha-controls-2026-11-03-v1";
+export const ALPHA_CONSENT = "alpha-controls-2026-11-03-v2";
+export const LEGACY_ALPHA_CONSENT = "alpha-controls-2026-11-03-v1";
 export const ALPHA_CLIP_CONSENT = "alpha-clip-2026-11-03-v1";
 export const ALPHA_COOKIE = "__Host-satinlore_alpha";
 export const AUTH_MS = 8 * 3600000;
@@ -78,7 +81,10 @@ const feedbackChoices = {
 const feedbackNumbers = { vibrationMaximum: 20, flexingMaximum: 20, enjoyment: 10, comfort: 10, easeOfUse: 10, connectionEase: 10 };
 const feedbackText = ["bestMoment", "setupFeedback", "improvements", "overallNotes"];
 export function normalizeFeedback(value) {
-  check(exact(value, [...Object.keys(feedbackChoices), ...Object.keys(feedbackNumbers), ...feedbackText], []) && Object.keys(value).length > 0);
+  check(exact(value, [...Object.keys(feedbackChoices), ...Object.keys(feedbackNumbers), ...feedbackText], []));
+  check(feedbackChoices.minimum.includes(value.minimum), "Choose how you felt about a constant minimum level.");
+  check(integer(value.connectionEase, 0, 10), "Rate how easy it was to connect from 0 to 10.");
+  check(integer(value.easeOfUse, 0, 10), "Rate how easy the controls were to use from 0 to 10.");
   const result = {};
   for (const [key, options] of Object.entries(feedbackChoices)) {
     if (Object.hasOwn(value, key)) { check(options.includes(value[key])); result[key] = value[key]; }
@@ -108,11 +114,36 @@ const enumEvents = {
 const controls = ["vibration", "flexing", "vibrationMaximum", "flexingMaximum", "minimum", "rhythm", "start", "stop", "hold", "easeOff", "pause", "test", "finish", "connect", "select", "range", "choose", "easeoff", "resume", "disconnect", "level", "maximum", "recovery"];
 const controlValues = ["steady", "gentle", "dynamic", "vibrate", "fingering", "vibration", "flexing", "both", "simulator", "live", "on", "off"];
 const valueLevel = value => value === null || integer(value, 0, 20);
+const normalizedCoordinate = value => integer(value, 0, 1000);
+
+function normalizeScreen(value, base) {
+  check(exact(value, ["t", "type", "screen", "viewport", "items"]) && ALPHA_SCREEN_STAGES.includes(value.screen), "This replay view is unsupported.");
+  const { viewport, items } = value;
+  check(exact(viewport, ["w", "h"]) && integer(viewport.w, 1, 10000) && integer(viewport.h, 1, 10000), "The replay viewport is invalid.");
+  check(Array.isArray(items) && items.length <= ALPHA_SCREEN_ITEM_LIMIT, "This replay view has too many elements.");
+  const seen = new Set();
+  const normalizedItems = items.map(item => {
+    check(exact(item, ["id", "x", "y", "w", "h", "state"], ["id", "x", "y", "w", "h"]) &&
+      typeof item.id === "string" && Object.hasOwn(ALPHA_SCREEN_LABELS, item.id) && !seen.has(item.id) &&
+      [item.x, item.y, item.w, item.h].every(normalizedCoordinate) &&
+      item.x + item.w <= 1000 && item.y + item.h <= 1000 &&
+      (!Object.hasOwn(item, "state") || ALPHA_SCREEN_STATES.includes(item.state)), "This replay element is unsupported.");
+    seen.add(item.id);
+    return { id: item.id, x: item.x, y: item.y, w: item.w, h: item.h, ...(item.state === undefined ? {} : { state: item.state }) };
+  });
+  return { ...base, screen: value.screen, viewport: { w: viewport.w, h: viewport.h }, items: normalizedItems };
+}
 
 export function normalizeAlphaEvent(value) {
   check(value && typeof value.type === "string" && integer(value.t, 0, STUDY_MS));
   const base = { t: value.t, type: value.type };
   const only = (allowed, required = allowed) => exact(value, ["t", "type", ...allowed], ["t", "type", ...required]);
+  if (value.type === "screen") return normalizeScreen(value, base);
+  if (value.type === "pointer") {
+    check(only(["x", "y", "action"]) && normalizedCoordinate(value.x) && normalizedCoordinate(value.y) &&
+      ["move", "click"].includes(value.action), "This replay pointer event is unsupported.");
+    return { ...base, x: value.x, y: value.y, action: value.action };
+  }
   if (Object.hasOwn(enumEvents, value.type)) {
     const [key, options] = enumEvents[value.type];
     check(only([key]) && options.includes(value[key]));

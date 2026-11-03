@@ -182,7 +182,6 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
       control("connect");
       activeChannels = [];
       settings = freshSettings();
-      controller.disconnect();
       mode = nextMode;
       notify();
       const result = await controller.beginConnection({mode: mode === "live" ? "lovense" : "simulator", model: "flexer"});
@@ -285,7 +284,9 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
         (field === "rhythm" ? !RHYTHMS.includes(value) : !wholeLevel(value))) throw new Error("Choose a checked movement and an available setting.");
     const draft = settings[channel];
     if (field === "maximum" && value > limit(channel)) throw new Error(`This movement can use a limit up to ${limit(channel)}.`);
-    if (field !== "maximum" && field !== "rhythm" && value > draft.maximum) throw new Error("Keep the level within the chosen limit.");
+    if (field !== "maximum" && field !== "rhythm" && value > draft.maximum) {
+      throw new Error(field === "minimum" ? "Keep the continuous minimum at or below your personal maximum." : "Keep the level within the chosen limit.");
+    }
     if (field === "maximum" && value > draft.maximum && controller.snapshot().running) stop();
     settings[channel] = {...draft, [field]: value};
     if (field === "maximum") {

@@ -107,6 +107,8 @@ try {
         const modulePath = path.join(ROOT, "deploy/cloudflare", `${name}.mjs`);
         return { type: "ESModule", path: modulePath, contents: await readFile(modulePath, "utf8") };
       })),
+      { type: "ESModule", path: path.join(ROOT, "app/static/alpha-screen-schema.mjs"),
+        contents: await readFile(path.join(ROOT, "app/static/alpha-screen-schema.mjs"), "utf8") },
     ],
     compatibilityDate: "2026-05-22",
     cf: false,
@@ -183,7 +185,9 @@ try {
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   await checkViewport(page, 390);
   await login(page, "Sadie");
-  assert.equal(await page.locator("#alpha-founder-link").isVisible(), false);
+  for (const selector of ["#alpha-founder-link", "#alpha-history-open", "#alpha-clip-panel", "#alpha-record-pause", "#alpha-record-resume"]) {
+    assert.equal(await page.locator(selector).count(), 0, `The tester interface omits ${selector}.`);
+  }
   assert.equal((await get(page, `${API}/auth`)).data.username, "Sadie");
   assert.equal((await get(page, `${API}/admin/sessions`)).status, 403);
   const bridgeNavigation = page.waitForResponse(response => new URL(response.url()).pathname === "/alpha/device-bridge");
@@ -213,7 +217,11 @@ try {
   begin("recording a consented simulated Flexer session");
   await page.locator("#alpha-adult").check();
   await page.locator('input[name="alpha-mode"][value="simulator"]').check();
+  const sessionStarted = page.waitForResponse(response => new URL(response.url()).pathname === `${API}/sessions` && response.request().method() === "POST");
   await page.locator("#alpha-consent-start").click();
+  const startResponse = await sessionStarted;
+  assert.equal(startResponse.status(), 201);
+  const { id: sessionId } = await startResponse.json();
   await page.locator('#alpha-record-strip[data-state="recording"]').waitFor({ state: "visible" });
   await page.locator("#alpha-device-connect").click();
   const select = page.locator("#alpha-device-select");
@@ -236,14 +244,42 @@ try {
   await captureNeutral(page, "alpha-control-lab-mobile.png");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await captureNeutral(page, "alpha-control-lab.png");
+  const vibration = page.locator('#alpha-movement-cards .alpha-movement[data-channel="vibrate"]');
+  await vibration.locator(".alpha-movement-detail > summary").click();
+  const minimum = vibration.locator('input[data-setting="minimum"]');
+  const maximum = vibration.locator('input[data-setting="maximum"]');
+  await minimum.press("End");
+  const oldMaximum = Number(await maximum.inputValue());
+  assert.equal(Number(await minimum.inputValue()), oldMaximum);
+  await maximum.press("ArrowLeft");
+  assert.equal(Number(await maximum.inputValue()), oldMaximum - 1);
+  assert.equal(Number(await minimum.inputValue()), oldMaximum - 1, "Lowering a movement maximum also lowers its continuous minimum.");
+
+  await page.locator("#alpha-back-to-checks").click();
+  await page.locator("#alpha-verification").waitFor({ state: "visible" });
+  await page.locator("#alpha-verify-continue").click();
+  await page.locator("#alpha-controls").waitFor({ state: "visible" });
   await page.locator('#alpha-movement-cards input[data-setting="level"]').first().press("ArrowRight");
   await page.locator("#alpha-device-start").click();
   await page.locator('[data-alpha-mark="good"]').click();
   await page.locator('[data-alpha-mark="climax"]').click();
   await page.locator("#alpha-finish").click();
   await page.locator("#alpha-feedback-form").waitFor({ state: "visible" });
+  assert.ok(!calls.some(call => call.path === `${API}/sessions/${sessionId}/finish`), "Stopping the device leaves the study open for feedback capture.");
+  await page.locator('#alpha-record-strip[data-state="recording"]').waitFor({ state: "visible" });
   const form = page.locator("#alpha-feedback-form");
+  const feedbackField = name => form.locator(`[name="${name}"]`);
+  async function expectRequiredField(name) {
+    await page.locator("#alpha-feedback-save").click();
+    assert.equal(await feedbackField(name).evaluate(field => document.activeElement === field), true, `${name} receives focus when it is required.`);
+    assert.equal(await feedbackField(name).getAttribute("aria-invalid"), "true");
+    assert.ok(!calls.some(call => call.path === `${API}/sessions/${sessionId}/feedback`), "An incomplete feedback form stays local.");
+  }
+  await expectRequiredField("minimum");
   await form.locator('[name="minimum"]').selectOption("depends");
+  await expectRequiredField("connectionEase");
+  await feedbackField("connectionEase").fill("7");
+  await expectRequiredField("easeOfUse");
   await form.locator('[name="vibrationMaximum"]').fill("4");
   await form.locator('[name="flexingMaximum"]').fill("3");
   await form.locator('[name="easeOfUse"]').fill("8");
@@ -252,33 +288,27 @@ try {
   await page.locator("#alpha-feedback-save").click();
   assert.ok((await feedbackSaved).ok(), "The study API must acknowledge feedback.");
   await page.waitForFunction(() => document.querySelector("#alpha-feedback-status").textContent.startsWith("Feedback saved"));
+  await page.locator("#alpha-review-moments button").filter({ hasText: /climax/i }).click();
   await page.locator("#alpha-annotation").fill(annotationNote);
+  await page.locator("#alpha-annotation-peak").click();
   const annotationSaved = page.waitForResponse(response => /\/annotations?$/.test(new URL(response.url()).pathname) && response.request().method() === "POST");
   await page.locator('#alpha-annotation-form button[type="submit"]').click();
   assert.ok((await annotationSaved).ok(), "The study API must acknowledge the annotation.");
-  const sessionList = await get(page, `${API}/sessions`);
-  assert.equal(sessionList.status, 200);
-  assert.equal(sessionList.data.sessions.length, 1);
-  const [summary] = sessionList.data.sessions;
-  assert.equal(summary.username, "Sadie");
-  assert.equal(summary.mode, "simulator");
-  assert.equal(summary.state, "finished");
-  const { data: detail } = await get(page, `${API}/sessions/${summary.id}`);
-  assert.ok(detail.events.some(event => event.type === "output" && Object.values(event.channels || {}).some(level => level > 0)), "Capture includes nonzero requested or simulated output.");
-  assert.ok(detail.events.some(event => event.type === "mark" && event.mark === "climax"), "A tester's optional moment marker survives finishing.");
-  assert.equal(detail.feedback.minimum, "depends");
-  assert.equal(detail.feedback.vibrationMaximum, 4);
-  assert.equal(detail.feedback.flexingMaximum, 3);
-  assert.equal(detail.feedback.easeOfUse, 8);
-  assert.equal(detail.annotations.length, 1);
+  await page.waitForFunction(() => document.querySelector("#alpha-annotation-status").textContent.includes("saved"));
+  assert.equal((await get(page, `${API}/sessions`)).status, 403);
+  assert.equal((await get(page, `${API}/sessions/${sessionId}`)).status, 403);
+  const sessionFinished = page.waitForResponse(response => new URL(response.url()).pathname === `${API}/sessions/${sessionId}/finish`);
+  await page.locator("#alpha-back-to-start").click();
+  assert.ok((await sessionFinished).ok(), "Leaving the study closes the recorded session.");
+  await page.locator("#alpha-welcome").waitFor({ state: "visible" });
   assert.equal((await page.goto(`${APP}/admin`)).status(), 403, "Sadie cannot load the founder document.");
 
   begin("reviewing the study under the separate founder identity");
   const { context: founder, page: admin } = await openContext();
   await admin.goto(`${APP}/alpha`);
   await login(admin, "Dilan");
-  await admin.locator("#alpha-founder-link").click();
-  await admin.waitForURL(`${APP}/admin`);
+  assert.equal(await admin.locator("#alpha-founder-link").count(), 0);
+  assert.equal((await admin.goto(`${APP}/admin`)).status(), 200);
   const rows = admin.locator("#alpha-review-list button");
   await rows.first().waitFor({ state: "visible" });
   assert.equal(await rows.count(), 1);
@@ -289,6 +319,36 @@ try {
   await rows.first().click();
   await admin.locator("#alpha-review-detail").waitFor({ state: "visible" });
   assert.match(await admin.locator("#alpha-detail-meta").textContent(), /Sadie/);
+  const persisted = await get(admin, `${API}/admin/sessions/${sessionId}`);
+  assert.equal(persisted.status, 200);
+  const detail = persisted.data;
+  assert.equal(detail.session.username, "Sadie");
+  assert.equal(detail.session.mode, "simulator");
+  assert.equal(detail.session.state, "finished");
+  assert.ok(detail.events.some(event => event.type === "output" && Object.values(event.channels || {}).some(level => level > 0)), "Capture includes nonzero requested or simulated output.");
+  assert.ok(detail.events.some(event => event.type === "mark" && event.mark === "climax"), "A tester's optional moment marker survives finishing.");
+  assert.equal(detail.feedback.minimum, "depends");
+  assert.equal(detail.feedback.vibrationMaximum, 4);
+  assert.equal(detail.feedback.flexingMaximum, 3);
+  assert.equal(detail.feedback.connectionEase, 7);
+  assert.equal(detail.feedback.easeOfUse, 8);
+  assert.equal(detail.annotations.length, 1);
+  assert.ok(detail.annotations[0].text.includes("I climaxed around this time."), "The optional retrospective note stays associated with the chosen timestamp.");
+  const captured = detail.events.filter(event => event.type === "screen" || event.type === "pointer");
+  const screens = new Set(captured.filter(event => event.type === "screen").map(event => event.screen));
+  assert.deepEqual([...screens].sort(), ["connect", "controls", "feedback", "verify"]);
+  assert.ok(captured.some(event => event.type === "pointer" && event.action === "click"), "Replay includes a safe click event.");
+  const captureJson = JSON.stringify(captured);
+  assert.ok(![setupNote, annotationNote, ...Object.values(passwords)].some(value => captureJson.includes(value)),
+    "Screen replay omits typed notes and credentials.");
+
+  const replay = admin.locator("#alpha-review-replay-screen");
+  const controlVisits = replay.locator("option").filter({ hasText: /control lab/i });
+  assert.equal(await controlVisits.count(), 2, "Returning to the controls creates a distinct screen visit.");
+  await replay.selectOption(await controlVisits.first().getAttribute("value"));
+  await admin.locator("#alpha-review-replay-position").press("End");
+  await admin.locator("#alpha-review-replay-view").waitFor({ state: "visible" });
+  assert.ok(await admin.locator("#alpha-review-replay-items .alpha-replay-item").count(), "A selected visit reconstructs the study screen.");
   assert.ok((await admin.locator("#alpha-review-feedback").textContent()).includes(setupNote), "Founder sees the saved setup feedback.");
   assert.ok((await admin.locator("#alpha-review-annotations").textContent()).includes(annotationNote), "Founder sees the timestamped annotation.");
   await admin.locator("#alpha-review-markers button").filter({ hasText: /climax|peak/i }).click();
@@ -302,7 +362,7 @@ try {
   assert.equal(routeErrors, 0, "Fixture requests completed without internal routing errors.");
   assert.equal(pageErrors, 0, "Alpha browser pages ran without unhandled errors.");
   await Promise.all([tester.close(), founder.close()]);
-  console.log("Alpha browser checks passed: separate accounts, study consent, simulated Flexer setup, markers, feedback, annotations, role isolation and responsive founder review.");
+  console.log("Alpha browser checks passed: separate accounts, study consent, simulated Flexer setup, limit clamping, markers, masked screen visits, required feedback, annotations and founder review.");
 } catch (error) {
   const pages = await Promise.all(diagnosticPages.filter(page => !page.isClosed()).slice(-2).map(pageState));
   const recentCalls = calls.slice(-24).map(call => ({ ...call, path: scrub(call.path) }));

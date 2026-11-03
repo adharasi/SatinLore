@@ -100,11 +100,14 @@ export class ReaderDeviceController {
       return this.notify(),this.setupSnapshot();
     }
     this.ensureReal();
+    this.connectionMessage = "Checking your sign-in before pairing…";
+    this.notify();
     try {
       if (!this.visible || !this.authorized || !await this.authorize() || operation !== this.operation) { if(operation===this.operation){this.connectionState="disconnected";this.connectionMessage="Check your sign-in, then reconnect explicitly.";this.notify();} return false;}
       this.real.setStory(this.levels);this.real.setManualZeros([...this.manualZeros]); if(this.levels.length)this.real.setPosition(Math.min(previous.position,this.levels.length-1));
       this.real.ceiling=Math.min(previous.ceiling,5);this.bridge.setCeiling(this.real.ceiling);this.real.setStrength(1);
-      if (!await this.bridge.begin() || operation !== this.operation || !this.visible || !this.authorized) {
+      if (!await this.bridge.begin()) return false;
+      if (operation !== this.operation || !this.visible || !this.authorized) {
         if(operation===this.operation)this.bridge.dispose(); return false;
       }
       this.notify(); return this.setupSnapshot();

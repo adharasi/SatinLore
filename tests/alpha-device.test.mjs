@@ -149,6 +149,22 @@ test("Alpha live range remains per checked movement and every command targets on
   assert.ok(bridge.stops.every(frame => frame.deviceId === "one-flexer"));
 });
 
+test("lowering a personal maximum also lowers the continuous minimum and rejects any increase above it", async t => {
+  const app = fixture(), {device} = app;
+  t.after(() => device.destroy());
+  await device.connect("simulator");
+  await device.select("sim-flexer");
+  await app.checkMovement("vibrate");
+  await device.choose(["vibrate"]);
+  device.set("vibrate", "minimum", 4);
+  device.set("vibrate", "maximum", 2);
+  assert.equal(device.snapshot().settings.vibrate.minimum, 2);
+  assert.throws(() => device.set("vibrate", "minimum", 3), /at or below your personal maximum/);
+  assert.equal(device.snapshot().settings.vibrate.minimum, 2);
+  device.set("vibrate", "maximum", 0);
+  assert.equal(device.snapshot().settings.vibrate.minimum, 0);
+});
+
 test("Stop cancels pending authorization without sending a new movement", async t => {
   let resolve, deferred = false;
   const app = fixture({authorize: () => deferred ? new Promise(done => {resolve = done;}) : Promise.resolve(true)});
