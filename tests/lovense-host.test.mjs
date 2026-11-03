@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
+import { Miniflare } from "miniflare";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
 import { LOVENSE_TOKEN_URL, emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseReadiness, lovenseIdentity } from "../deploy/cloudflare/lovense.mjs";
 
@@ -110,7 +113,7 @@ test("server exchange sends only server credential and derived UID; response exp
   assert.ok(value.expires_at >= start+899 && value.expires_at <= start+901);
   const sent = f.vendorCalls[0]; assert.equal(sent.url, LOVENSE_TOKEN_URL);
   assert.deepEqual(JSON.parse(sent.options.body), {token: VENDOR.LOVENSE_DEVELOPER_TOKEN, uid:value.uid});
-  assert.equal(sent.options.credentials, "omit"); assert.equal(sent.options.redirect, "error"); assert.ok(sent.options.signal);
+  assert.equal(sent.options.credentials, "omit"); assert.equal(sent.options.redirect, "manual"); assert.ok(sent.options.signal);
   assert.equal(f.names[0], `lovense-issue:v1:${value.uid}`); assert.equal(f.quotas[0].input.url, "https://feedback.internal/internal/lovense-rate");
   assert.equal(await f.quotas[0].input.text(), "{}");
   assert.doesNotMatch(JSON.stringify(value), /synthetic-server-only|synthetic-subject|founder@example/);
@@ -176,4 +179,43 @@ test("Alpha token failures expose only safe upstream diagnostics to the founder"
       assert.deepEqual(await response.json(), expected);
     }
   }
+});
+
+test("native Workers fetch issues a Lovense token request and refuses to forward redirects", async t => {
+  const tokenModule = new URL("../deploy/cloudflare/lovense.mjs", import.meta.url);
+  const outbound = [];
+  const mf = new Miniflare({
+    modulesRoot: fileURLToPath(new URL("../", import.meta.url)),
+    modules: [
+      { type: "ESModule", path: fileURLToPath(new URL("../lovense-runtime-fixture.mjs", import.meta.url)), contents: `
+        import { issueLovenseToken } from "./deploy/cloudflare/lovense.mjs";
+        export default { async fetch() {
+          try {
+            const token = await issueLovenseToken({ developerToken: "synthetic-developer-token" }, "synthetic-user");
+            return Response.json({ token });
+          } catch (error) {
+            return Response.json(error.diagnostic, { status: error.status });
+          }
+        }};
+      ` },
+      { type: "ESModule", path: fileURLToPath(tokenModule), contents: await readFile(tokenModule, "utf8") },
+    ],
+    compatibilityDate: "2026-05-22",
+    async outboundService(request) {
+      outbound.push({ url: request.url, method: request.method, body: await request.json() });
+      if (outbound.length === 1) return Response.json({ code: 0, data: { authToken: "synthetic-auth-token" } });
+      return Response.redirect("https://redirect.example.test/", 307);
+    },
+  });
+  t.after(() => mf.dispose());
+  const success = await mf.dispatchFetch("http://localhost/");
+  assert.equal(success.status, 200);
+  assert.deepEqual(await success.json(), { token: "synthetic-auth-token" });
+  const redirect = await mf.dispatchFetch("http://localhost/");
+  assert.equal(redirect.status, 502);
+  assert.deepEqual(await redirect.json(), { stage: "upstream-http", upstreamStatus: 307 });
+  const expectedRequest = {
+    url: LOVENSE_TOKEN_URL, method: "POST", body: { token: "synthetic-developer-token", uid: "synthetic-user" },
+  };
+  assert.deepEqual(outbound, [expectedRequest, expectedRequest]);
 });

@@ -76,7 +76,8 @@ export async function issueLovenseToken(config, uid, { fetcher = fetch } = {}) {
   try {
     const response = await fetcher(LOVENSE_TOKEN_URL, {
       method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ token: config.developerToken, uid }), redirect: "error", credentials: "omit",
+      // Workers supports manual redirects. Only the fixed endpoint's HTTP 200 is accepted.
+      body: JSON.stringify({ token: config.developerToken, uid }), redirect: "manual", credentials: "omit",
       signal,
     });
     diagnostic.upstreamStatus = response.status;
