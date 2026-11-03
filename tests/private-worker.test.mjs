@@ -3,6 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Script } from "node:vm";
 import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
@@ -197,6 +198,9 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.doesNotMatch(hosted, /<script[^>]+(?:lovense-api|device-bridge)/i);
   const bridge = await readFile(resolve(output, "device-bridge.html"), "utf8");
   assert.match(bridge, /<script id="lovense-isolated-bundle">/);
+  const embedded = bridge.match(/<script id="lovense-isolated-bundle">([\s\S]*?)<\/script>/);
+  assert.ok(embedded, "The compiled bridge script is present in the packaged document.");
+  assert.doesNotThrow(() => new Script(embedded[1], { filename: "packaged-device-bridge.js" }));
   assert.doesNotMatch(bridge, /<script[^>]+src=|import\s+.*from\s+["']/i);
   assert.match(bridge, /https:\/\/api\.lovense-api\.com\/basic-sdk\/core\.min\.js/);
   assert.doesNotMatch(bridge, /LOVENSE_DEVELOPER_TOKEN|LOVENSE_UID_SECRET/);

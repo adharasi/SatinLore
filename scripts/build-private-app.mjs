@@ -28,8 +28,10 @@ for (const [source, target] of entries) {
       alias: {parseuri: resolve(SOURCE, "devices/safe-uri.cjs")},
       write: false, format: "iife", platform: "browser", target: "es2022", charset: "ascii", legalComments: "none" });
     const code = bundle.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
+    // The compiled code can contain replacement metacharacters such as a
+    // regex end anchor followed by a backtick. Insert it literally.
     content = content.replace(/<script type="module" src="\/static\/device-bridge\.mjs"><\/script>/,
-      `<script id="lovense-isolated-bundle">${code}</script>`);
+      () => `<script id="lovense-isolated-bundle">${code}</script>`);
     if (!content.includes('id="lovense-isolated-bundle"') || /<script[^>]+src=/i.test(content)) throw new Error("The device bridge must be self-contained.");
   }
   if (source.endsWith(".html")) {

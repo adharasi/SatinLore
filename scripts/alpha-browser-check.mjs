@@ -142,7 +142,9 @@ try {
   browser = await chromium.launch({ headless: true });
 
   async function openContext() {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: "block" });
+    // Fresh fixture contexts have no worker registrations. Playwright's block
+    // option reads navigator.serviceWorker inside the opaque sandbox and throws.
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     await context.route("**/*", async route => {
       const source = route.request(), url = new URL(source.url()), method = source.method();
       if (url.origin !== APP) { outsideRequests++; await route.abort(); return; }
@@ -185,16 +187,26 @@ try {
   assert.equal((await get(page, `${API}/auth`)).data.username, "Sadie");
   assert.equal((await get(page, `${API}/admin/sessions`)).status, 403);
   const bridgeNavigation = page.waitForResponse(response => new URL(response.url()).pathname === "/alpha/device-bridge");
-  await page.evaluate(() => {
+  const bridgeReady = page.evaluate(() => new Promise(resolve => {
     const frame = document.createElement("iframe");
-    frame.id = "alpha-ci-bridge";
+    const channel = new MessageChannel();
+    const finish = ready => {
+      clearTimeout(timer);
+      channel.port1.close();
+      frame.remove();
+      resolve(ready);
+    };
+    const timer = setTimeout(() => finish(false), 8_000);
+    channel.port1.onmessage = event => finish(event.data?.type === "bridge-ready");
+    frame.addEventListener("load", () => frame.contentWindow.postMessage({type: "satinlore:bridge"}, "*", [channel.port2]), {once: true});
     frame.setAttribute("sandbox", "allow-scripts");
     frame.src = "/alpha/device-bridge";
     frame.hidden = true;
     document.body.append(frame);
-  });
-  assert.equal((await bridgeNavigation).status(), 200, "The real browser's sandboxed bridge navigation receives its Alpha session.");
-  await page.locator("#alpha-ci-bridge").evaluate(frame => frame.remove());
+  }));
+  const [bridgeResponse, ready] = await Promise.all([bridgeNavigation, bridgeReady]);
+  assert.equal(bridgeResponse.status(), 200, "The real browser's sandboxed bridge navigation receives its Alpha session.");
+  assert.equal(ready, true, "The packaged bridge runs under its hashed CSP and acknowledges the private parent port.");
   assert.equal(await page.locator("#alpha-consent-start").isDisabled(), true, "The study requires an adult acknowledgement.");
   assert.ok(!calls.some(call => call.path === `${API}/sessions` && call.method === "POST"), "Sign-in must not start recording.");
 
