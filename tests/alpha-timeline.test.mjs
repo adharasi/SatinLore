@@ -77,3 +77,33 @@ test("Alpha screen views are batched within the keepalive body limit and remain 
   assert.deepEqual(batches.flatMap(batch => batch.events.map(event => event.t)), Array.from({length: 100}, (_, index) => index));
   assert.equal(timeline.status().savedCount, 100);
 });
+
+test("Alpha storage limit stops retrying and preserves the last saved timestamp", async () => {
+  let now = 0, calls = 0;
+  const timeline = new AlphaTimeline({
+    session: {id: "neutral-session", seq: 0, expiresAt: Date.now() + 60_000},
+    now: () => now,
+    async append(id, batch) {
+      if (++calls > 1) throw Object.assign(new Error("Study storage is full"), {status: 507});
+      return {id, seq: batch.seq, eventCount: 1};
+    },
+  });
+  now = 300;
+  assert.equal(timeline.record({type: "mark", mark: "good"}), true);
+  assert.equal(await timeline.flush(), true);
+  now = 1000;
+  timeline.record({type: "mark", mark: "change"});
+  timeline.record({type: "step", step: "feedback"});
+  assert.equal(await timeline.flush(), false);
+  assert.equal(timeline.status().state, "limited");
+  assert.equal(timeline.status().limitReached, true);
+  assert.equal(timeline.status().lastSavedTime, 300);
+  assert.equal(timeline.status().savedCount, 1);
+  assert.equal(timeline.status().pending, 0);
+  timeline.resume();
+  timeline.close();
+  assert.equal(timeline.record({type: "mark", mark: "finished"}), false);
+  assert.equal(await timeline.flush(), false);
+  assert.equal(timeline.status().limitReached, true);
+  assert.equal(calls, 2);
+});

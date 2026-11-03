@@ -207,12 +207,12 @@ function renderRecord() {
   const capture = timeline?.status();
   const label = session?.finished && session?.id ? "Session data saved" :
     capture?.state === "recording" ? "Collecting study data" :
-      capture?.state === "closing" ? "Saving session data" :
+      capture?.state === "closing" ? "Saving session data" : capture?.limitReached ? "Data limit reached" :
         session?.id ? "Data collection interrupted" : "Practice without data collection";
   $("alpha-record-strip").dataset.state = capture?.state ?? "off";
   note("alpha-record-label", label);
   note("alpha-record-note", capture?.error || (session?.id ? "Only the research team can review this session." : "Your actions and answers stay on this page."));
-  $("alpha-record-retry").hidden = !session?.id || session.finished || !(capture?.error || session.sealing);
+  $("alpha-record-retry").hidden = !session?.id || session.finished || !(session.sealing || capture?.error && !capture.limitReached);
   $("alpha-record-retry").disabled = busy;
   $("alpha-peak").disabled = busy;
 }
@@ -435,10 +435,13 @@ function feedbackValues(form) {
 
 function prepareAnnotations() {
   const range = $("alpha-review-time");
-  range.max = range.value = String(session.controlDuration);
+  const capture = timeline?.status();
+  const latest = capture?.limitReached ? Math.min(capture.lastSavedTime, session.controlDuration) : session.controlDuration;
+  range.max = range.value = String(latest);
   const marks = $("alpha-review-moments");
   marks.replaceChildren();
   for (const event of session.marks) {
+    if (event.t > latest) continue;
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.time = String(event.t);
@@ -446,7 +449,7 @@ function prepareAnnotations() {
     button.addEventListener("click", () => { range.value = String(event.t); renderReviewTime(); });
     marks.append(button);
   }
-  if (!session.marks.length) marks.textContent = "Use the time slider to choose a point.";
+  if (!marks.childElementCount) marks.textContent = "Use the time slider to choose a point.";
   renderReviewTime();
   renderAnnotations();
 }
@@ -491,11 +494,12 @@ async function completeSave() {
     screenCapture.frame({force: true});
     timeline?.close();
     const saved = await flushStudy();
-    if (!saved && Date.now() < timeline.expiresAt) throw new Error("Some changes are still waiting to save. Choose Retry saving.");
+    if (!saved && !timeline.status().limitReached && Date.now() < timeline.expiresAt) throw new Error("Some changes are still waiting to save. Choose Retry saving.");
     const response = await post(`${sessionPath(current.id)}/finish`, {});
     if (current !== session) return false;
     if (response.session?.id !== current.id || response.session?.state !== "finished") throw new Error("We couldn’t confirm the session was saved.");
     current.finished = true;
+    current.partial = !saved;
     timeline?.destroy();
     timeline = null;
     note("alpha-feedback-status", saved ? "Session saved." : "The session ended before every change could be saved.");
@@ -653,7 +657,13 @@ $("alpha-annotation-form").addEventListener("submit", async event => {
   busy = true;
   button.disabled = true;
   try {
-    if (!await flushStudy()) throw new Error("Your session data is still saving. Try saving the note again.");
+    const saved = await flushStudy();
+    const capture = timeline?.status();
+    if (!saved && !capture?.limitReached) throw new Error("Your session data is still saving. Try saving the note again.");
+    if (capture?.limitReached && Number($("alpha-review-time").value) > capture.lastSavedTime) {
+      prepareAnnotations();
+      throw new Error("Choose a time from the saved part of the session, then save the note again.");
+    }
     const value = await post(`${sessionPath()}/annotations`, {t: Number($("alpha-review-time").value), text});
     if (!value.annotation) throw new Error("Note save could not be confirmed.");
     const annotations = session.annotations;
@@ -667,7 +677,9 @@ $("alpha-annotation-form").addEventListener("submit", async event => {
 
 $("alpha-back-to-start").addEventListener("click", async () => {
   if (busy || !await completeSave()) return;
+  const partial = session?.partial;
   resetStudy();
+  if (partial) note("alpha-global-status", "Part of the session was saved before data collection ended.");
   focusHeading("alpha-welcome-title");
 });
 

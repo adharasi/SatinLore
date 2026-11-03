@@ -25,13 +25,17 @@ export class AlphaTimeline {
     this.destroyed = false;
     this.abort = new AbortController();
     this.lastTime = 0;
+    this.lastSavedTime = 0;
     this.savedCount = 0;
   }
 
   elapsed() { return Math.min(LIMIT_MS, Math.max(this.lastTime, Math.floor(this.now() - this.started))); }
 
   status() {
-    return {state: this.state, error: this.error, pending: this.queue.length, savedCount: this.savedCount};
+    return {
+      state: this.state, error: this.error, pending: this.queue.length, savedCount: this.savedCount,
+      limitReached: this.state === "limited", lastSavedTime: this.lastSavedTime,
+    };
   }
 
   notify() { if (!this.destroyed) this.onChange(this.status()); }
@@ -75,13 +79,14 @@ export class AlphaTimeline {
   }
 
   close() {
+    if (this.state === "limited") return;
     if (this.state === "recording") this.record({type: "step", step: "complete"});
     this.state = "closing";
     this.notify();
   }
 
   flush() {
-    if (this.destroyed) return Promise.resolve(false);
+    if (this.destroyed || this.state === "limited") return Promise.resolve(false);
     if (this.sending) return this.sending;
     this.sending = this.sendPending().finally(() => { this.sending = null; });
     return this.sending;
@@ -111,12 +116,17 @@ export class AlphaTimeline {
         this.sequence = batch.seq;
         this.pending = null;
         this.savedCount = acknowledgement.eventCount;
+        this.lastSavedTime = batch.events.at(-1).t;
         this.error = "";
-      } catch {
-        if (!this.destroyed) {
-          this.error = "Some study data is still waiting to save. Check your internet connection.";
-          this.notify();
-        }
+      } catch (error) {
+        if (this.destroyed) return false;
+        if (error?.status === 507) {
+          this.queue = [];
+          this.pending = null;
+          this.state = "limited";
+          this.error = "Study data reached its storage limit. You can still finish and share feedback.";
+        } else this.error = "Some study data is still waiting to save. Check your internet connection.";
+        this.notify();
         return false;
       }
       this.notify();
