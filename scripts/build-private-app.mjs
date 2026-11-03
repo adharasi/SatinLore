@@ -3,12 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { build } from "esbuild";
-import { READER_ASSETS } from "../deploy/cloudflare/assets.mjs";
+import { READER_ASSETS, ALPHA_ASSETS } from "../deploy/cloudflare/assets.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE = resolve(ROOT, "app/static");
 const OUTPUT = resolve(ROOT, "dist/private-app");
-const paths = new Set(READER_ASSETS.map(([, path]) => path));
+const entries = [...READER_ASSETS, ...ALPHA_ASSETS];
+const paths = new Set(entries.map(([, path]) => path));
 const assets = [];
 let revision = process.env.WORKERS_CI_COMMIT_SHA ?? "";
 if (!/^[a-f0-9]{40}$/.test(revision)) {
@@ -18,7 +19,7 @@ if (!/^[a-f0-9]{40}$/.test(revision)) {
 if (!/^[a-f0-9]{40}$/.test(revision)) revision = "local";
 
 // Read and validate the entire bundle before replacing a previous output.
-for (const [source, target] of READER_ASSETS) {
+for (const [source, target] of entries) {
   let content = await readFile(resolve(SOURCE, source), "utf8");
   if (source === "device-bridge.html") {
     // Opaque iframes cannot authenticate module subrequests with Access cookies.
@@ -44,7 +45,10 @@ for (const [source, target] of READER_ASSETS) {
     ];
     for (const [, specifier] of imports) {
       const dependency = new URL(specifier, "https://app.satinlore.com" + target);
-      if (dependency.origin !== "https://app.satinlore.com" || !paths.has(dependency.pathname)) throw new Error(`Unlisted reader module dependency in ${source}.`);
+      if (dependency.origin !== "https://app.satinlore.com" || !paths.has(dependency.pathname) ||
+          (target.startsWith("/alpha/") && !dependency.pathname.startsWith("/alpha/static/"))) {
+        throw new Error(`Unlisted module dependency in ${source}: ${specifier}.`);
+      }
     }
   }
   assets.push([target.slice(1), content]);

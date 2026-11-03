@@ -22,12 +22,14 @@
     "bindings": [
       { "name": "PRIVATE_FEEDBACK", "class_name": "PrivateFeedback" },
       { "name": "READER_ACCOUNTS", "class_name": "ReaderAccount" },
-      { "name": "BETA_RECORDINGS", "class_name": "BetaRecordings" }
+      { "name": "BETA_RECORDINGS", "class_name": "BetaRecordings" },
+      { "name": "ALPHA_STUDY", "class_name": "AlphaStudy" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["PrivateFeedback"] },
-    { "tag": "v2", "new_sqlite_classes": ["ReaderAccount", "BetaRecordings"] }
+    { "tag": "v2", "new_sqlite_classes": ["ReaderAccount", "BetaRecordings"] },
+    { "tag": "v3", "new_sqlite_classes": ["AlphaStudy"] }
   ],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",

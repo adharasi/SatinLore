@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>SatinLore · Alpha review</title>
+  <link rel="icon" href="/alpha/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/alpha/static/theme.css">
+  <link rel="stylesheet" href="/alpha/static/alpha-admin.css">
+  <script type="module" src="/alpha/static/alpha-admin.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#alpha-review-main">Skip to review</a>
+  <header class="alpha-review-header">
+    <a class="alpha-review-brand" href="/alpha">SatinLore.</a>
+    <span class="alpha-review-label">ALPHA RESEARCH</span>
+    <nav aria-label="Alpha navigation">
+      <a href="/alpha">Open control lab</a>
+      <button id="alpha-review-theme" type="button" role="switch" aria-checked="true">Dark mode</button>
+      <button id="alpha-review-signout" type="button" hidden>Sign out</button>
+    </nav>
+  </header>
+  <main id="alpha-review-main" class="alpha-review-shell" tabindex="-1">
+    <section class="alpha-review-intro" aria-labelledby="alpha-review-heading">
+      <p class="eyebrow">FOUNDER REVIEW</p>
+      <h1 id="alpha-review-heading">Session review</h1>
+      <p>Follow the controls a tester chose, jump to marked moments and read their feedback.</p>
+      <p id="alpha-review-account" class="note" hidden></p>
+    </section>
+    <p id="alpha-review-status" class="alpha-review-status" role="status" aria-live="polite">Checking founder access…</p>
+    <p id="alpha-review-login" hidden><a href="/alpha?next=admin">Sign in to Alpha as Dilan</a></p>
+    <div id="alpha-review-workspace" class="alpha-review-layout" hidden>
+      <aside class="alpha-review-sessions surface" aria-labelledby="alpha-session-heading">
+        <div class="alpha-card-heading"><h2 id="alpha-session-heading">Sessions</h2><button id="alpha-review-refresh" type="button">Refresh</button></div>
+        <label for="alpha-review-user">Tester</label>
+        <select id="alpha-review-user">
+          <option value="">All testers</option>
+          <option value="Dilan">Dilan</option>
+          <option value="Sadie">Sadie</option>
+        </select>
+        <p id="alpha-review-count" class="note"></p>
+        <ul id="alpha-review-list" class="alpha-session-list"></ul>
+      </aside>
+      <section class="alpha-review-detail" aria-label="Session details">
+        <div id="alpha-review-empty" class="surface alpha-review-card">
+          <h2 id="alpha-detail-heading">Choose a session</h2>
+          <p class="note">Select a tester session to see its timeline, feedback and any shared clip.</p>
+        </div>
+        <article id="alpha-review-detail" hidden>
+          <header class="surface alpha-review-card alpha-session-overview">
+            <div>
+              <p id="alpha-detail-meta" class="eyebrow"></p>
+              <h2 id="alpha-detail-title" tabindex="-1"></h2>
+              <p id="alpha-detail-subtitle" class="note"></p>
+            </div>
+            <div class="buttons">
+              <button id="alpha-review-export" type="button">Export data</button>
+              <button id="alpha-review-delete-open" type="button" class="stop">Delete session</button>
+            </div>
+          </header>
+          <section class="surface alpha-review-card" aria-labelledby="alpha-timeline-heading">
+            <div class="alpha-card-heading"><h3 id="alpha-timeline-heading">Control timeline</h3><output id="alpha-review-time">0:00 / 0:00</output></div>
+            <p class="note">Flexer levels represent requests or simulator output. Physical responses appear as tester observations.</p>
+            <svg id="alpha-review-chart" class="alpha-review-chart" viewBox="0 0 640 146" aria-hidden="true"></svg>
+            <div class="alpha-review-legend"><span class="alpha-legend-vibrate">Vibration</span><span class="alpha-legend-flex">Flexing</span><span class="alpha-legend-marker">Marked moment</span></div>
+            <label for="alpha-review-position">Session position</label>
+            <input id="alpha-review-position" type="range" min="0" max="1" step="1" value="0">
+            <div id="alpha-review-levels" class="alpha-review-levels"></div>
+            <div id="alpha-review-markers" class="alpha-review-markers"></div>
+          </section>
+          <div class="alpha-review-evidence">
+            <section class="surface alpha-review-card" aria-labelledby="alpha-clip-heading">
+              <h3 id="alpha-clip-heading">Shared screen clip</h3>
+              <p id="alpha-review-clip-note" class="note"></p>
+              <button id="alpha-review-load-clip" type="button" hidden>Load private clip</button>
+              <video id="alpha-review-clip" controls playsinline preload="none" hidden></video>
+            </section>
+            <section class="surface alpha-review-card" aria-labelledby="alpha-feedback-heading">
+              <h3 id="alpha-feedback-heading">Tester feedback</h3>
+              <div id="alpha-review-feedback"></div>
+            </section>
+          </div>
+          <section class="surface alpha-review-card" aria-labelledby="alpha-annotation-heading">
+            <h3 id="alpha-annotation-heading">Annotations</h3>
+            <p class="note">Select a timestamp to see the recorded settings around that note.</p>
+            <ul id="alpha-review-annotations" class="alpha-review-annotations"></ul>
+          </section>
+          <section class="surface alpha-review-card" aria-labelledby="alpha-events-heading">
+            <div class="alpha-card-heading">
+              <h3 id="alpha-events-heading">Recorded actions</h3>
+              <label class="alpha-event-filter">Show<select id="alpha-review-event-type"><option value="">All actions</option><option value="moment">Marked moments</option><option value="control">Control changes</option><option value="command">Command stages</option><option value="connection">Setup and connection</option></select></label>
+            </div>
+            <p id="alpha-review-event-count" class="note"></p>
+            <ol id="alpha-review-events" class="alpha-review-events"></ol>
+            <div class="buttons">
+              <button id="alpha-review-events-before" type="button">Earlier actions</button>
+              <button id="alpha-review-events-after" type="button">Later actions</button>
+            </div>
+          </section>
+        </article>
+      </section>
+    </div>
+  </main>
+  <dialog id="alpha-review-delete-dialog" class="confirmation-dialog" aria-labelledby="alpha-delete-heading">
+    <h2 id="alpha-delete-heading">Delete this session?</h2>
+    <p id="alpha-review-delete-target"></p>
+    <p class="note">This permanently removes the timeline, feedback, annotations and any shared clip from Alpha.</p>
+    <label class="alpha-delete-check"><input id="alpha-review-delete-confirm" type="checkbox"> I want to permanently delete this session.</label>
+    <p id="alpha-review-delete-error" role="alert" hidden></p>
+    <div class="buttons alpha-delete-actions">
+      <button id="alpha-review-delete-cancel" type="button" autofocus>Cancel</button>
+      <button id="alpha-review-delete" type="button" class="stop" disabled>Delete session</button>
+    </div>
+  </dialog>
+</body>
+</html>

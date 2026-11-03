@@ -4,6 +4,12 @@ Approved workspace revision: 29 October 2026 (frontend specification v1.2), refi
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The 2 November eight-model request adds simulated rehearsal and a configured bounded live path; no physical model is qualified by implementation alone. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
+## Flexer Alpha on the app host — 3 November 2026
+
+The first preference study has a separate manual-control route at `/alpha`, using Dilan and Sadie logins, and founder review at `/admin`. The study joins consented control events, optional marks, feedback and timestamped annotations by authenticated username. Verified own-tab diagnostic clips are separate optional uploads. The reader and prior beta use their existing Access and storage rules.
+
+Use the [Alpha setup and rehearsal runbook](alpha-setup.md) for the path-scoped Access settings, password provisioning and hardware checks. Acceptance requires a real simulator journey through both user roles and an independent physical Flexer qualification before interpreting live preferences. The study supplies candidate movement profiles for later reader experiments.
+
 ## Accounts calibration and recorded beta sessions on 2 November 2026
 
 **Current requested scope:** verified-email hosted accounts, explicit 18+ registration, account/story presets, capability-led calibration, per-action and qualified combined controls, personal-range permission and a separate protected beta recording/admin host. This supersedes earlier account-backlog and blanket reader 5/20 statements; dated evidence below remains historical.

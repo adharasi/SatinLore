@@ -55,6 +55,20 @@ export const READER_ASSETS = Object.freeze([
 ].map(entry => Object.freeze(entry)));
 
 export const PRIVATE_ASSET_PATHS = Object.freeze(READER_ASSETS.map(([, path]) => path));
+// Keep the Alpha dependency tree under one edge-auth exception. Reader assets
+// and APIs at their original paths still require the reader's Access JWT.
+export const ALPHA_ASSETS = Object.freeze([
+  ["alpha.html", "/alpha/index.html"],
+  ["alpha-admin.html", "/alpha/admin.html"],
+  ...[
+    "alpha.css", "alpha.mjs", "alpha-device.mjs", "alpha-capture.mjs", "alpha-timeline.mjs",
+    "alpha-admin.css", "alpha-admin.mjs", "theme.css", "favicon.svg",
+    "devices/reader-device.mjs", "devices/bridge-transport.mjs",
+    "devices/profile-simulator.mjs", "devices/toy-profiles.mjs",
+    "playback/controller.mjs", "playback/async-controller.mjs", "reader/calibration.mjs",
+  ].map(source => [source, `/alpha/static/${source}`]),
+].map(entry => Object.freeze(entry)));
+export const ALPHA_STATIC_PATHS = Object.freeze(ALPHA_ASSETS.map(([, path]) => path).filter(path => path.startsWith("/alpha/static/")));
 export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
   "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
   "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html",

@@ -1,0 +1,504 @@
+const API = "/alpha/api/alpha";
+const ADMIN = `${API}/admin/sessions`;
+const ID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
+const TESTERS = new Set(["Dilan", "Sadie"]);
+const EVENT_PAGE = 50;
+const CHANNELS = [
+  { key: "vibrate", alias: "vibration", label: "Vibration", className: "alpha-chart-vibrate" },
+  { key: "fingering", alias: "flexing", label: "Flexing", className: "alpha-chart-flex" }
+];
+const LABELS = {
+  good: "Good moment", tooMuch: "Too much", change: "Wanted a change", finished: "Finished", climax: "Marked climax",
+  yes: "Yes", no: "No", depends: "Depends", vibration: "Vibration", flexing: "Flexing", vibrate: "Vibration",
+  fingering: "Flexing", both: "Both", neither: "Neither", live: "Physical toy", simulator: "Simulator",
+  unknown: "Unknown output", submitted: "Submitted to bridge", acknowledged: "Acknowledged by software",
+  clamped: "Limits applied", requested: "Requested", observed: "Tester observed", easeOff: "Ease off",
+  verification: "Hardware check", verify: "Hardware check", step: "Setup step", output: "Output",
+  vibrationMaximum: "Vibration maximum", flexingMaximum: "Flexing maximum", failed: "Failed",
+  welcome: "Welcome", connect: "Connect", controls: "Control lab", feedback: "Feedback", complete: "Session complete",
+  start: "Start", stop: "Stop", hold: "Hold", easeoff: "Ease off", minimum: "Minimum", rhythm: "Rhythm",
+  "screen-started": "Screen capture started", "screen-ended": "Screen capture ended"
+};
+const FEEDBACK = [
+  ["minimum", "Preferred a constant minimum"],
+  ["vibrationMaximum", "Preferred vibration maximum", 20],
+  ["flexingMaximum", "Preferred flexing maximum", 20],
+  ["preferredMovement", "Preferred movement"],
+  ["enjoyment", "Enjoyment", 10], ["comfort", "Comfort", 10],
+  ["easeOfUse", "Ease of control", 10], ["connectionEase", "Ease of connection", 10],
+  ["bestMoment", "What felt best"], ["setupFeedback", "Setup feedback"],
+  ["improvements", "Suggested improvements"], ["overallNotes", "Other notes"]
+];
+const svgNS = "http://www.w3.org/2000/svg";
+const human = value => Object.hasOwn(LABELS, value) ? LABELS[value] : String(value).replace(/[_-]+/g, " ");
+const isNumber = value => Number.isFinite(value);
+const time = value => {
+  const seconds = Math.floor(Math.max(0, value || 0) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+const date = value => isNumber(value) ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(value) : "Unknown date";
+const getLevels = event => Object.fromEntries(CHANNELS.map(({ key, alias }) => {
+  const value = event.channels?.[key] ?? event[alias];
+  return [key, Number.isInteger(value) && value >= 0 && value <= 20 ? value : null];
+}));
+const isOutput = event => event.type === "output";
+const isMarker = event => event.type === "mark";
+const hasKnownOutput = event => isOutput(event) && event.state !== "unknown" && !["unknown", "failed"].includes(event.stage);
+const isDiscontinuity = event => ["disconnect", "disconnected", "lost", "failed", "error", "expired", "closed", "hidden", "recording-paused"].some(value =>
+  [event.event, event.status, event.state].includes(value)
+) && ["connection", "lifecycle", "device"].includes(event.type);
+function eventGroup(event) {
+  if (event.type === "mark") return "moment";
+  if (["control", "output", "command"].includes(event.type)) return event.type === "control" ? "control" : "command";
+  return "connection";
+}
+function valueText(value) {
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
+  return typeof value === "string" && value ? human(value) : "";
+}
+function eventDescription(event) {
+  if (isMarker(event)) return human(event.mark ?? "Marked moment");
+  if (event.type === "verification") {
+    return `${human(event.mode)} check · ${human(event.channel)} · Response ${event.response ? "observed" : "unconfirmed"} · Stop ${event.stopped ? "observed" : "unconfirmed"}`;
+  }
+  if (event.type === "verify") return `Hardware check · ${human(event.movement)} · ${human(event.outcome)}`;
+  if (event.type === "device") return `Device selected · ${human(event.mode)} · ${event.channels.map(human).join(", ")}`;
+  if (event.type === "output" || event.type === "command") {
+    const levels = getLevels(event);
+    const states = CHANNELS.map(({ key, label }) => {
+      const value = levels[key];
+      return value === null ? "" : `${label} ${value}/20`;
+    }).filter(Boolean);
+    return [
+      human(event.stage ?? event.state ?? event.type), ...states,
+      isNumber(event.durationMs) ? `${event.durationMs / 1000}s command` : "",
+      isNumber(event.commandId) ? `Request ${event.commandId}` : ""
+    ].filter(Boolean).join(" · ");
+  }
+  return [event.control ?? event.step ?? event.event ?? event.stage ?? event.type, event.channel, event.state, event.value]
+    .map(valueText).filter(Boolean).join(" · ");
+}
+function validSession(session) {
+  return session && ID.test(session.id) && TESTERS.has(session.username) &&
+    ["live", "simulator"].includes(session.mode) && isNumber(session.createdAt);
+}
+function durationOf(data) {
+  const clipEnd = isNumber(data.clip?.offsetMs) && isNumber(data.clip?.durationMs) ?
+    data.clip.offsetMs + data.clip.durationMs : 0;
+  return Math.max(clipEnd, data.events.at(-1)?.t ?? 0, ...data.annotations.map(note => note.t));
+}
+function traceSegments(events, channel, duration) {
+  const lines = [];
+  let previous = null;
+  for (const event of events) {
+    if (!isOutput(event) && !isDiscontinuity(event)) continue;
+    const next = hasKnownOutput(event) ? getLevels(event)[channel] : null;
+    if (previous && event.t > previous.t) {
+      const until = Math.min(event.t, previous.until);
+      if (until > previous.t) lines.push({ start: previous.t, end: until, level: previous.level });
+    }
+    previous = next === null ? null : {
+      t: event.t, level: next,
+      until: event.stage !== "simulated" && isNumber(event.durationMs) && next > 0 ?
+        event.t + event.durationMs : Infinity
+    };
+  }
+  if (previous && duration >= previous.t) {
+    const until = Math.min(duration, previous.until);
+    if (until >= previous.t) lines.push({ start: previous.t, end: until, level: previous.level });
+  }
+  return lines;
+}
+
+export function initializeAlphaAdmin() {
+  const $ = id => document.getElementById(`alpha-review-${id}`);
+  if (!$("workspace")) return;
+  const el = (tag, content, className) => {
+    const node = document.createElement(tag);
+    if (content !== undefined) node.textContent = content;
+    if (className) node.className = className;
+    return node;
+  };
+  const svg = (tag, attrs) => {
+    const node = document.createElementNS(svgNS, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    return node;
+  };
+  const status = (message, error = false) => {
+    $("status").textContent = message;
+    $("status").dataset.error = String(error);
+  };
+  const clip = $("clip");
+  let sessions = [], current = null, duration = 0, at = 0;
+  let listRequest, detailRequest, generation = 0;
+  let viewEvents = [], eventStart = 0, seekSync = true, deleteTarget = null, deleting = false;
+  let traces = {};
+  const themeKey = "satinlore.alpha.appearance";
+  function setTheme(theme, save = false) {
+    document.documentElement.dataset.theme = theme;
+    $("theme").setAttribute("aria-checked", String(theme === "dark"));
+    if (save) try { localStorage.setItem(themeKey, theme); } catch { /* Private browsing may block storage. */ }
+  }
+  try { setTheme(localStorage.getItem(themeKey) === "light" ? "light" : "dark"); } catch { setTheme("dark"); }
+  $("theme").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true));
+
+  function clearClip() {
+    clip.pause();
+    if (clip.hasAttribute("src")) {
+      clip.removeAttribute("src");
+      clip.load();
+    }
+    clip.hidden = true;
+    $("load-clip").hidden = true;
+  }
+  function clearDetail() {
+    current = null;
+    viewEvents = [];
+    traces = {};
+    clearClip();
+    $("detail").hidden = true;
+    $("empty").hidden = false;
+    for (const id of ["events", "feedback", "annotations", "markers", "levels", "chart"]) $(id).replaceChildren();
+    for (const id of ["alpha-detail-meta", "alpha-detail-title", "alpha-detail-subtitle", "alpha-review-clip-note"]) {
+      document.getElementById(id).textContent = "";
+    }
+  }
+  function accessLost() {
+    generation++;
+    detailRequest?.abort();
+    listRequest?.abort();
+    clearDetail();
+    sessions = [];
+    $("list").replaceChildren();
+    $("workspace").hidden = true;
+    $("account").hidden = true;
+    $("signout").hidden = true;
+    $("login").hidden = false;
+    status("Founder sign-in is required to review Alpha sessions.", true);
+  }
+  async function api(path, { signal, body } = {}) {
+    const timeout = AbortSignal.timeout(10000);
+    const response = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      cache: "no-store", credentials: "same-origin", redirect: "error",
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    });
+    if (response.status === 401 || response.status === 403) {
+      accessLost();
+      throw Error("Founder sign-in is required to review Alpha sessions.");
+    }
+    if (!response.ok) throw Error(response.status === 404 ? "This session is unavailable." : "The Alpha service could not complete this request. Please retry.");
+    if (response.status === 204) return {};
+    const data = await response.json();
+    if (!data || typeof data !== "object" || data.ok === false) throw Error("The Alpha response could not be confirmed.");
+    return data;
+  }
+  function showSessions() {
+    const tester = $("user").value;
+    const rows = sessions.filter(session => !tester || session.username === tester);
+    $("count").textContent = `${rows.length} session${rows.length === 1 ? "" : "s"} loaded`;
+    $("list").replaceChildren(...rows.map(session => {
+      const item = el("li");
+      const button = el("button");
+      button.type = "button";
+      button.setAttribute("aria-current", String(current?.session.id === session.id));
+      button.append(
+        el("strong", `${session.username} · ${human(session.mode)}`),
+        el("span", date(session.createdAt)),
+        el("span", [session.state === "active" ? "In progress" : "Finished", `${session.eventCount ?? 0} actions`, session.hasFeedback ? "Feedback" : "", session.hasClip ? "Clip" : ""].filter(Boolean).join(" · "))
+      );
+      button.addEventListener("click", () => void openSession(session.id, button));
+      item.append(button);
+      return item;
+    }));
+  }
+  async function loadSessions() {
+    listRequest?.abort();
+    listRequest = new AbortController();
+    const signal = listRequest.signal;
+    const params = new URLSearchParams();
+    if ($("user").value) params.set("username", $("user").value);
+    generation++;
+    detailRequest?.abort();
+    clearDetail();
+    sessions = [];
+    showSessions();
+    $("refresh").disabled = true;
+    status("Loading Alpha sessions…");
+    try {
+      const data = await api(params.size ? `${ADMIN}?${params}` : ADMIN, { signal });
+      if (signal.aborted) return;
+      if (!Array.isArray(data.sessions) || !data.sessions.every(validSession)) throw Error("The session list could not be confirmed.");
+      sessions = data.sessions;
+      showSessions();
+      status($("list").children.length ? "Choose a session to review." : "No Alpha sessions match this filter.");
+    } catch (error) {
+      if (!signal.aborted) status(error.message, true);
+    } finally {
+      if (!signal.aborted) $("refresh").disabled = false;
+    }
+  }
+  const xFor = t => 34 + Math.max(0, Math.min(1, t / Math.max(1, duration))) * 590;
+  const yFor = level => 116 - level * 4.9;
+  function drawChart() {
+    const nodes = [];
+    for (const level of [0, 5, 10, 15, 20]) {
+      const y = yFor(level);
+      nodes.push(svg("line", { class: "alpha-chart-grid", x1: 34, x2: 624, y1: y, y2: y }));
+      const label = svg("text", { class: "alpha-chart-text", x: 26, y: y + 3, "text-anchor": "end" });
+      label.textContent = level;
+      nodes.push(label);
+    }
+    for (const { key, className } of CHANNELS) {
+      const path = traces[key].map(({ start, end, level }) =>
+        `M${xFor(start).toFixed(2)},${yFor(level).toFixed(2)}H${xFor(end).toFixed(2)}`
+      ).join("");
+      if (path) nodes.push(svg("path", { class: className, d: path }));
+    }
+    for (const marker of current.events.filter(isMarker)) {
+      const x = xFor(marker.t);
+      nodes.push(svg("line", { class: "alpha-chart-marker", x1: x, x2: x, y1: 12, y2: 123 }));
+    }
+    nodes.push(svg("line", { class: "alpha-chart-playhead", "data-playhead": "", x1: 34, x2: 34, y1: 12, y2: 123 }));
+    for (const [position, label, anchor] of [[34, "0:00", "start"], [624, time(duration), "end"]]) {
+      const tick = svg("text", { class: "alpha-chart-text", x: position, y: 138, "text-anchor": anchor });
+      tick.textContent = label;
+      nodes.push(tick);
+    }
+    $("chart").replaceChildren(...nodes);
+  }
+  function clipOffset() {
+    return isNumber(current?.clip?.offsetMs) ? current.clip.offsetMs : null;
+  }
+  function setPosition(position, moveClip = false) {
+    if (!current) return;
+    at = Math.max(0, Math.min(duration, Number(position) || 0));
+    $("position").value = String(at);
+    $("position").setAttribute("aria-valuetext", `${time(at)} of ${time(duration)}`);
+    $("time").textContent = `${time(at)} / ${time(duration)}`;
+    const playhead = $("chart").querySelector("[data-playhead]");
+    playhead?.setAttribute("x1", xFor(at));
+    playhead?.setAttribute("x2", xFor(at));
+    $("levels").replaceChildren(...CHANNELS.map(({ key, label }) => {
+      const segment = traces[key].findLast(entry => entry.start === at || entry.start < at && at < entry.end);
+      return el("span", `${label} · ${segment ? `${segment.level}/20` : "No known level"}`);
+    }));
+    if (moveClip) {
+      const index = Math.max(0, viewEvents.findLastIndex(event => event.t <= at));
+      if (index < eventStart || index >= eventStart + EVENT_PAGE) {
+        eventStart = Math.floor(index / EVENT_PAGE) * EVENT_PAGE;
+        displayEvents();
+      }
+    }
+    for (const item of $("events").children) item.dataset.current = String(Number(item.dataset.time) === at);
+    const offset = clipOffset();
+    if (moveClip && offset !== null && clip.readyState && isNumber(clip.duration)) {
+      const target = (at - offset) / 1000;
+      if (target >= 0 && target <= clip.duration && Math.abs(clip.currentTime - target) > .1) {
+        seekSync = false;
+        clip.currentTime = target;
+      }
+    }
+  }
+  function seekButton(position, title) {
+    const button = el("button", title);
+    button.type = "button";
+    button.addEventListener("click", () => setPosition(position, true));
+    return button;
+  }
+  function displayEvents() {
+    const entries = viewEvents.slice(eventStart, eventStart + EVENT_PAGE);
+    $("events").replaceChildren(...entries.map(event => {
+      const item = el("li");
+      item.dataset.time = String(event.t);
+      item.dataset.current = String(event.t === at);
+      item.append(seekButton(event.t, time(event.t)), el("p", eventDescription(event)));
+      return item;
+    }));
+    $("event-count").textContent = entries.length ?
+      `${eventStart + 1}–${eventStart + entries.length} of ${viewEvents.length} actions` : "No actions match this view.";
+    $("events-before").disabled = eventStart === 0;
+    $("events-after").disabled = eventStart + EVENT_PAGE >= viewEvents.length;
+  }
+  function filterEvents() {
+    const group = $("event-type").value;
+    viewEvents = current?.events.filter(event => !group || eventGroup(event) === group) ?? [];
+    eventStart = 0;
+    displayEvents();
+  }
+  function displayFeedback() {
+    const feedback = current.feedback;
+    const grid = el("dl", undefined, "alpha-feedback-grid");
+    for (const [key, name, scale] of FEEDBACK) {
+      const value = feedback?.[key];
+      if (typeof value === "number" && scale) grid.append(el("dt", name), el("dd", `${value}/${scale}`));
+      if (typeof value === "string" && value.trim()) {
+        grid.append(el("dt", name), el("dd", key === "minimum" || key === "preferredMovement" ? human(value) : value));
+      }
+    }
+    $("feedback").replaceChildren(grid.children.length ? grid : el("p", "No feedback was shared.", "note"));
+  }
+  function displayNotes() {
+    const markers = current.events.filter(isMarker);
+    $("markers").replaceChildren(...(markers.length ?
+      markers.map(marker => seekButton(marker.t, `${time(marker.t)} · ${eventDescription(marker)}`)) :
+      [el("p", "No moments were marked.", "note")]));
+    $("annotations").replaceChildren(...(current.annotations.length ? current.annotations.map(note => {
+      const item = el("li");
+      item.append(seekButton(note.t, time(note.t)), el("p", note.text));
+      return item;
+    }) : [el("li", "No annotations were shared.")]));
+  }
+  async function openSession(id, button) {
+    if (!ID.test(id)) return;
+    detailRequest?.abort();
+    detailRequest = new AbortController();
+    const signal = detailRequest.signal, version = ++generation;
+    clearDetail();
+    status("Loading the selected session…");
+    try {
+      const data = await api(`${ADMIN}/${id}`, { signal });
+      if (version !== generation || signal.aborted) return;
+      if (!validSession(data.session) || data.session.id !== id || !Array.isArray(data.events) || !Array.isArray(data.annotations) ||
+          !data.events.every(event => isNumber(event?.t) && event.t >= 0 && typeof event.type === "string" &&
+            (event.type !== "device" || Array.isArray(event.channels))) ||
+          !data.annotations.every(note => isNumber(note?.t) && note.t >= 0 && typeof note.text === "string")) {
+        throw Error("The selected session could not be confirmed.");
+      }
+      data.events.sort((a, b) => a.t - b.t);
+      current = data;
+      at = 0;
+      duration = durationOf(data);
+      traces = Object.fromEntries(CHANNELS.map(({ key }) => [key, traceSegments(data.events, key, duration)]));
+      $("empty").hidden = true;
+      $("detail").hidden = false;
+      document.getElementById("alpha-detail-meta").textContent = `${data.session.username} · ${date(data.session.createdAt)}`;
+      document.getElementById("alpha-detail-title").textContent = `Flexer · ${human(data.session.mode)}`;
+      document.getElementById("alpha-detail-subtitle").textContent =
+        `${data.events.length} actions · ${time(duration)} elapsed${isNumber(data.session.retainedUntil) ? ` · Retained until ${date(data.session.retainedUntil)}` : ""}`;
+      $("position").max = String(Math.max(1, duration));
+      $("position").disabled = !duration;
+      $("event-type").value = "";
+      $("clip-note").textContent = data.clip ? clipOffset() === null ?
+        "The tester shared a controls-only clip. Its timeline offset is unavailable." :
+        `The tester shared a controls-only clip starting at ${time(clipOffset())}.` : "No screen clip was shared.";
+      $("load-clip").hidden = !data.clip;
+      drawChart();
+      filterEvents();
+      setPosition(0);
+      displayFeedback();
+      displayNotes();
+      for (const listButton of $("list").querySelectorAll("button")) listButton.setAttribute("aria-current", String(listButton === button));
+      status(`Loaded ${data.session.username}’s session.`);
+      document.getElementById("alpha-detail-title").focus();
+    } catch (error) {
+      if (version === generation && !signal.aborted) status(error.message, true);
+    }
+  }
+  $("position").addEventListener("input", () => setPosition($("position").value, true));
+  $("event-type").addEventListener("change", filterEvents);
+  $("events-before").addEventListener("click", () => { eventStart = Math.max(0, eventStart - EVENT_PAGE); displayEvents(); });
+  $("events-after").addEventListener("click", () => { if (eventStart + EVENT_PAGE < viewEvents.length) eventStart += EVENT_PAGE; displayEvents(); });
+  $("refresh").addEventListener("click", () => void loadSessions());
+  $("user").addEventListener("change", () => void loadSessions());
+  $("load-clip").addEventListener("click", () => {
+    if (!current?.clip) return;
+    clip.src = `${ADMIN}/${current.session.id}/clip`;
+    seekSync = true;
+    clip.hidden = false;
+    $("load-clip").hidden = true;
+    clip.load();
+  });
+  clip.addEventListener("timeupdate", () => {
+    const offset = clipOffset();
+    if (offset !== null && seekSync && clip.hasAttribute("src")) setPosition(offset + clip.currentTime * 1000);
+  });
+  clip.addEventListener("seeked", () => { seekSync = true; });
+  clip.addEventListener("error", () => {
+    if (!clip.hasAttribute("src") || !current?.clip) return;
+    clearClip();
+    $("clip-note").textContent = "This clip could not be opened. It may have expired, or the format may be unavailable in this browser.";
+    $("load-clip").hidden = false;
+  });
+  $("export").addEventListener("click", () => {
+    if (!current) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(current, null, 2)], { type: "application/json" }));
+    const link = el("a");
+    link.href = url;
+    link.download = `satinlore-alpha-${current.session.id}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  const dialog = $("delete-dialog"), check = $("delete-confirm"), remove = $("delete");
+  function closeDelete() { if (!deleting) dialog.close(); }
+  $("delete-open").addEventListener("click", () => {
+    if (!current) return;
+    clip.pause();
+    deleteTarget = current.session.id;
+    $("delete-target").textContent = `${current.session.username} · ${date(current.session.createdAt)}`;
+    check.checked = false;
+    remove.disabled = true;
+    $("delete-error").hidden = true;
+    dialog.showModal();
+  });
+  check.addEventListener("change", () => { remove.disabled = !check.checked || deleting; });
+  $("delete-cancel").addEventListener("click", closeDelete);
+  dialog.addEventListener("cancel", event => { if (deleting) event.preventDefault(); });
+  dialog.addEventListener("close", () => { deleteTarget = null; });
+  remove.addEventListener("click", async () => {
+    if (!deleteTarget || !check.checked || deleting) return;
+    deleting = true;
+    remove.disabled = $("delete-cancel").disabled = true;
+    $("delete-error").hidden = true;
+    try {
+      await api(`${ADMIN}/${deleteTarget}/withdraw`, { body: { confirm: true } });
+      dialog.close();
+      clearDetail();
+      await loadSessions();
+      if (!$("workspace").hidden) {
+        status("Session deleted.");
+        $("refresh").focus();
+      }
+    } catch (error) {
+      if ($("workspace").hidden) dialog.close();
+      else {
+        $("delete-error").textContent = error.message;
+        $("delete-error").hidden = false;
+      }
+    } finally {
+      deleting = false;
+      remove.disabled = !check.checked;
+      $("delete-cancel").disabled = false;
+    }
+  });
+  $("signout").addEventListener("click", async () => {
+    $("signout").disabled = true;
+    clip.pause();
+    try {
+      await api(`${API}/logout`, { body: {} });
+      accessLost();
+      status("You signed out of Alpha.");
+    } catch (error) { status(error.message, true); }
+    finally { $("signout").disabled = false; }
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) clip.pause(); });
+  window.addEventListener("pagehide", () => { detailRequest?.abort(); listRequest?.abort(); clearDetail(); });
+  window.addEventListener("pageshow", event => { if (event.persisted) window.location.reload(); });
+  void (async () => {
+    try {
+      const account = await api(`${API}/auth`);
+      if (account.authenticated !== true || account.isFounder !== true || account.username !== "Dilan") {
+        accessLost();
+        return;
+      }
+      $("account").textContent = "Signed in as Dilan · Founder access";
+      $("account").hidden = $("signout").hidden = $("workspace").hidden = false;
+      await loadSessions();
+    } catch (error) { status(error.message, true); }
+  })();
+}
+if (typeof document !== "undefined") initializeAlphaAdmin();

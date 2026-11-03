@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
-import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES } from "../deploy/cloudflare/assets.mjs";
+import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_ASSETS } from "../deploy/cloudflare/assets.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://app.satinlore.com";
@@ -167,8 +167,8 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.equal(config.workers_dev, false); assert.equal(config.preview_urls, false);
   assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }, {pattern:"beta.satinlore.com",custom_domain:true}]);
   assert.equal(config.d1_databases, undefined); assert.equal(config.r2_buckets, undefined);
-  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"}]);
-  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]}]);
+  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"},{name:"ALPHA_STUDY",class_name:"AlphaStudy"}]);
+  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]},{tag:"v3",new_sqlite_classes:["AlphaStudy"]}]);
   assert.equal(config.keep_vars, true);
   for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED"]) assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
   assert.equal(config.vars.PUBLIC_APP_ORIGIN, ORIGIN);
@@ -186,7 +186,7 @@ test("deployment invokes authentication ahead of all assets and packages only th
     }
     return files;
   }
-  assert.deepEqual((await list(output)).sort(), [...PRIVATE_ASSET_PATHS].sort());
+  assert.deepEqual((await list(output)).sort(), [...PRIVATE_ASSET_PATHS, ...ALPHA_ASSETS.map(([, path]) => path)].sort());
   const hosted = await readFile(resolve(output, "index.html"), "utf8");
   assert.match(hosted, /<meta name="satinlore-hosted-access" content="true">/);
   for (const path of Object.values(PRIVATE_DOCUMENT_ROUTES)) {
@@ -201,6 +201,26 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.match(bridge, /https:\/\/api\.lovense-api\.com\/basic-sdk\/core\.min\.js/);
   assert.doesNotMatch(bridge, /LOVENSE_DEVELOPER_TOKEN|LOVENSE_UID_SECRET/);
   assert.equal(await readFile(resolve(ROOT, "app/static/index.html"), "utf8"), localIndex);
+});
+
+test("the unauthenticated Alpha namespace serves its sign-in shell without opening reader or study data", async () => {
+  const f = fixture();
+  const page = await f.worker.fetch(request("/alpha?next=admin"), f.env);
+  assert.equal(page.status, 200);
+  assert.equal(f.reads[0].url, ORIGIN + "/alpha/index.html");
+  assert.match(page.headers.get("Permissions-Policy"), /display-capture=\(self\)/);
+  assert.match(page.headers.get("Content-Security-Policy"), /media-src 'self' blob:/);
+  assert.match(page.headers.get("Content-Security-Policy"), /frame-src https:\/\/app\.satinlore\.com\/alpha\/device-bridge;/);
+  assert.equal((await f.worker.fetch(request("/alpha/static/theme.css"), f.env)).status, 200);
+  for (const path of ["/alpha/device-bridge", "/alpha/api/access", "/alpha/api/lovense/status", "/alpha/static/alpha-admin.mjs"]) {
+    assert.equal((await f.worker.fetch(request(path), f.env)).status, 401, path);
+  }
+  for (const path of ["/alpha/admin.html", "/alpha/static/app.mjs", "/alpha/api/account", "/alpha/static/reader/storage.mjs"]) {
+    assert.equal((await f.worker.fetch(request(path), f.env)).status, 404, path);
+  }
+  assert.equal((await f.worker.fetch(request("/alpha", await token(), { origin: "https://beta.satinlore.com" }), f.env)).status, 404);
+  assert.equal((await f.worker.fetch(request("/static/app.mjs", undefined, { headers: { Cookie: "__Host-satinlore_alpha=synthetic" } }), f.env)).status, 403);
+  assert.equal(f.reads.length, 2);
 });
 
 test("beta review documents and assets require the founder on the beta host", async()=>{

@@ -17,8 +17,9 @@ export class BridgeTransport {
   constructor({document = globalThis.document, window = globalThis.window, navigator = globalThis.navigator,
     Channel = globalThis.MessageChannel, request = (path, options = {}) => fetch(path, {
       credentials: "same-origin", cache: "no-store", redirect: "error", ...options,
-    }), now = Date.now, setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer), onChange = () => {}} = {}) {
-    Object.assign(this, {document, window, navigator, Channel, request, now, setTimer, clearTimer, onChange});
+    }), framePath = "/device-bridge", now = Date.now, setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer), onChange = () => {}} = {}) {
+    if (!["/device-bridge", "/alpha/device-bridge"].includes(framePath)) throw new Error("Use the isolated SatinLore bridge.");
+    Object.assign(this, {document, window, navigator, Channel, request, framePath, now, setTimer, clearTimer, onChange});
     this.listeners = new Set(); this.pending = new Map(); this.toys = []; this.selected = null;
     this.epoch = 0; this.serial = 0; this.frame = null; this.port = null; this.release = null;
     this.credentials = null; this.qrUrl = null; this.available = null; this.state = "disconnected";
@@ -94,7 +95,7 @@ export class BridgeTransport {
     return new Promise((resolve, reject) => {
       const frame = this.document.createElement("iframe");
       frame.setAttribute("sandbox", "allow-scripts"); frame.title = "Isolated Lovense connection";
-      frame.src = "/device-bridge"; frame.hidden = true; this.frame = frame;
+      frame.src = this.framePath; frame.hidden = true; this.frame = frame;
       this.opening = {resolve, reject};
       this.openTimer = this.setTimer(() => { if (operation === this.epoch) this.dispose("Pairing timed out. Try connecting again."); }, 30000);
       this.expiryTimer = this.setTimer(() => { if (operation === this.epoch) this.dispose("The pairing session expired. Sign in and reconnect."); }, Math.min(this.expiresAt - this.now(), 2147483647));

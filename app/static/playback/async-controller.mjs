@@ -147,8 +147,9 @@ export class AsyncPlaybackController {
   }
   devices() { return this.transport.discover().map(value => ({ id: value.id, name: value.name, vibration: value.vibration === true })); }
   selectDevice(deviceId) {
-    const device = this.devices().find(value => value.id === deviceId && value.vibration);
-    if (!device) { void this.pause("Choose a supported simulated device."); throw new RangeError("Choose a device with vibration capability."); }
+    const device = this.transport.discover().find(value => value.id === deviceId && (value.vibration === true ||
+      Array.isArray(value.capabilities) && value.capabilities.some(channel => ["vibrate", "rotate", "fingering", "thrusting", "oscillate"].includes(channel))));
+    if (!device) { void this.pause("Choose a supported device."); throw new RangeError("Choose a device with an available movement."); }
     if (deviceId === this.selected) return this.notify();
     void this.disconnect("Selection changed. Connect the selected device explicitly.");
     this.selected = deviceId; this.output = this.uncertain.size ? null : 0;

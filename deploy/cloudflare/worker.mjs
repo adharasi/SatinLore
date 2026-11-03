@@ -1,17 +1,22 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES } from "./assets.mjs";
+import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_STATIC_PATHS } from "./assets.mjs";
 import { feedbackJson, normalizeFeedback, FeedbackError } from "./feedback.mjs";
 import { storyImportJson, importPublicStory, StoryImportError } from "./story-import.mjs";
 import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseReadiness, lovenseIdentity, LovenseServiceError } from "./lovense.mjs";
 import { handleAccount } from "./accounts.mjs";
 import { handleBetaRecordings } from "./beta-recordings.mjs";
+import { alphaConfigured, handleAlphaApi, verifyAlphaSession } from "./alpha-study.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
+export { AlphaStudy } from "./alpha-study.mjs";
 
 const APP_ORIGIN = "https://app.satinlore.com";
 export const BETA_ORIGIN = "https://beta.satinlore.com";
 const ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS);
+const ALPHA_ASSET_PATHS = new Set(ALPHA_STATIC_PATHS);
+const ALPHA_ADMIN_PATHS = new Set(["/admin", "/admin/"]);
+const ALPHA_ADMIN_ASSETS = new Set(["/alpha/static/alpha-admin.mjs", "/alpha/static/alpha-admin.css"]);
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[a-zA-Z]{2,}$/;
 const cachedKeys = new Map();
 const FEEDBACK_METHODS = new Map([
@@ -44,16 +49,19 @@ export function privateAppConfiguration(env, origin = APP_ORIGIN) {
     ...(testerEmails.length ? { testerEmails: [...new Set(testerEmails)] } : {}) };
 }
 
-function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN } = {}) {
+function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false } = {}) {
   const result = new Response(head ? null : response.body, response);
   result.headers.set("Cache-Control", "no-store");
   result.headers.set("Referrer-Policy", "no-referrer");
   result.headers.set("X-Content-Type-Options", "nosniff");
   result.headers.set("X-Frame-Options", bridgeHash ? "SAMEORIGIN" : "DENY");
   result.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
-  result.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  result.headers.set("Permissions-Policy", `camera=(), microphone=(), geolocation=(), display-capture=${alphaPage ? "(self)" : "()"}`);
+  let pagePolicy = CONTENT_POLICY.replaceAll(APP_ORIGIN, origin);
+  if (alphaPage || alphaAdmin) pagePolicy += "; media-src 'self' blob:";
+  if (alphaPage) pagePolicy = pagePolicy.replace(/frame-src [^;]+/, `frame-src ${APP_ORIGIN}/alpha/device-bridge`);
   result.headers.set("Content-Security-Policy", bridgeHash ?
-    `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${origin}; base-uri 'none'; form-action 'none'` : CONTENT_POLICY.replaceAll(APP_ORIGIN, origin));
+    `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${origin}; base-uri 'none'; form-action 'none'` : pagePolicy);
   return result;
 }
 
@@ -92,15 +100,131 @@ export async function verifyFounder(request, config, keyResolver) {
   }
 }
 
+async function handleLovense(request, env, { config, session, reverify, lovenseFetcher }) {
+  const url = new URL(request.url);
+  const finish = response => secure(response, { head: request.method === "HEAD", origin: config.origin });
+  const status = url.pathname.endsWith("/status");
+  const methods = status ? ["GET", "HEAD"] : ["POST"];
+  if (!methods.includes(request.method)) {
+    const response = json({ error: "Use the connection controls on SatinLore." }, 405);
+    response.headers.set("Allow", methods.join(", "));
+    return finish(response);
+  }
+  if (url.search) return finish(json({ error: "Use the connection controls on SatinLore." }, 400));
+  const vendorConfig = lovenseConfiguration(env);
+  const quotaAvailable = env.PRIVATE_FEEDBACK && typeof env.PRIVATE_FEEDBACK.idFromName === "function" && typeof env.PRIVATE_FEEDBACK.get === "function";
+  const readiness = lovenseReadiness(env, quotaAvailable);
+  const available = Boolean(vendorConfig && readiness.available);
+  const unavailable = readiness.message;
+  if (status) return finish(json(readiness));
+  if (request.headers.get("Origin") !== config.origin ||
+      ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
+    return finish(json({ error: "Please use the connection controls on SatinLore." }, 403));
+  }
+  try {
+    await emptyLovenseRequest(request);
+    if (!available) return finish(json({ error: unavailable }, 503));
+    const uid = await lovenseIdentity(session.subject, config.audience, vendorConfig.uidSecret);
+    // Separate object namespace: quota state never joins feedback, email or stories.
+    const quota = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(`lovense-issue:v1:${uid}`));
+    const permission = await quota.fetch(new Request("https://feedback.internal/internal/lovense-rate", {
+      method: "POST", headers: { Origin: APP_ORIGIN, "Content-Type": "application/json" }, body: "{}",
+    }));
+    if (permission.status !== 200) {
+      const limited = permission.status === 429;
+      const response = json({ error: limited ? "A few connection attempts were made recently. Wait a minute and try again." : "Connection setup is temporarily unavailable. Try again shortly." }, limited ? 429 : 503);
+      if (limited) response.headers.set("Retry-After", /^\d+$/.test(permission.headers.get("Retry-After") || "") ? permission.headers.get("Retry-After") : "60");
+      return finish(response);
+    }
+    if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+    const authToken = await issueLovenseToken(vendorConfig, uid, lovenseFetcher ? { fetcher: lovenseFetcher } : {});
+    // Authentication can expire/change while the vendor request is in flight.
+    const renewed = await reverify();
+    if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+    return finish(json({ uid, platform: vendorConfig.platform, authToken,
+      expires_at: Math.floor(Math.min(renewed.expiresAt, Date.now() + 15 * 60_000) / 1000) }));
+  } catch (error) {
+    if (error instanceof LovenseServiceError) return finish(json({ error: error.message }, error.status));
+    return finish(json({ error: "Connection setup is temporarily unavailable. Try again shortly." }, 503));
+  }
+}
+
+async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false } = {}) {
+  const head = request.method === "HEAD";
+  const finish = response => secure(response, { head, origin, alphaPage, alphaAdmin });
+  if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") return finish(json({ error: "The private preview is not available." }, 503));
+  try {
+    const assetUrl = new URL(path, origin);
+    // No bearer assertion, cookies, user query values or reader content enter an asset request.
+    const bridge = path === "/device-bridge.html";
+    const asset = await env.ASSETS.fetch(new Request(assetUrl, { method: bridge ? "GET" : request.method }));
+    if (asset.status !== 200) return finish(json({ error: "The preview asset is unavailable." }, 404));
+    if (bridge) {
+      const document = await asset.text();
+      const script = document.match(/<script id="lovense-isolated-bundle">([\s\S]*?)<\/script>/)?.[1];
+      if (!script || document.length > 500_000) return finish(json({ error: "The isolated connection bridge is unavailable." }, 503));
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(script));
+      const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
+      return secure(new Response(document, asset), { head, bridgeHash: hash, origin: origin });
+    }
+    return finish(asset);
+  } catch {
+    return finish(json({ error: "The preview asset is unavailable." }, 503));
+  }
+}
+
+async function handleAlphaSurface(request, env, url, lovenseFetcher) {
+  const { pathname } = url;
+  const finish = response => secure(response, { head: request.method === "HEAD" });
+  const read = request.method === "GET" || request.method === "HEAD";
+  if (env.PRIVATE_APP_ENABLED !== "true" || env.PUBLIC_APP_ORIGIN !== APP_ORIGIN) {
+    return finish(json({ error: "Alpha is temporarily unavailable." }, 503));
+  }
+  if (pathname.startsWith("/alpha/api/alpha/")) {
+    const canonical = new URL(url);
+    canonical.pathname = pathname.slice("/alpha".length);
+    return finish(await handleAlphaApi(new Request(canonical, request), env) ?? json({ error: "Not found." }, 404));
+  }
+  if (read && (pathname === "/alpha" || pathname === "/alpha/")) {
+    return serveAsset(request, env, "/alpha/index.html", { alphaPage: true });
+  }
+  if (read && ALPHA_ASSET_PATHS.has(pathname) && !ALPHA_ADMIN_ASSETS.has(pathname)) {
+    return serveAsset(request, env, pathname);
+  }
+  const admin = ALPHA_ADMIN_PATHS.has(pathname) || ALPHA_ADMIN_ASSETS.has(pathname);
+  const vendor = pathname === "/alpha/api/lovense/status" || pathname === "/alpha/api/lovense/session";
+  const bridge = pathname === "/alpha/device-bridge";
+  const probe = pathname === "/alpha/api/access";
+  if (!admin && !vendor && !bridge && !probe) return finish(json({ error: "Not found." }, 404));
+  if (!vendor && !read) return finish(json({ error: "Use the controls on SatinLore Alpha." }, 405));
+  const session = await verifyAlphaSession(request, env);
+  if (!session) {
+    if (ALPHA_ADMIN_PATHS.has(pathname)) return finish(new Response(null, { status: 303, headers: { Location: "/alpha?next=admin" } }));
+    return finish(json({ error: "Sign in to SatinLore Alpha." }, 401));
+  }
+  if (admin) {
+    if (!session.isFounder) return finish(json({ error: "This page is restricted to the Alpha founder." }, 403));
+    return serveAsset(request, env, ALPHA_ADMIN_PATHS.has(pathname) ? "/alpha/admin.html" : pathname, { alphaAdmin: true });
+  }
+  if (probe) return finish(json({ authenticated: true, expiresAt: session.expiresAt }));
+  if (bridge) return serveAsset(request, env, "/device-bridge.html");
+  return handleLovense(request, env, { session, lovenseFetcher,
+    config: { origin: APP_ORIGIN, audience: "satinlore-alpha-v1" }, reverify: () => verifyAlphaSession(request, env) });
+}
+
 export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher } = {}) {
   return {
     async fetch(request, env) {
       const head = request.method === "HEAD";
       let responseOrigin = APP_ORIGIN;
       const finish = response => secure(response, { head, origin: responseOrigin });
+      const url = new URL(request.url);
+      if (url.origin === APP_ORIGIN && (url.pathname === "/alpha" || url.pathname.startsWith("/alpha/") ||
+          (ALPHA_ADMIN_PATHS.has(url.pathname) && alphaConfigured(env)))) {
+        return handleAlphaSurface(request, env, url, lovenseFetcher);
+      }
       const baseConfig = privateAppConfiguration(env);
       if (!baseConfig) return finish(json({ error: "The private preview is not available." }, 503));
-      const url = new URL(request.url);
       // A valid token must not make workers.dev, version URLs or another hostname an origin bypass.
       if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
       const config = url.origin === APP_ORIGIN ? baseConfig : privateAppConfiguration(env, url.origin);
@@ -116,50 +240,8 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       if (["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"].includes(url.pathname) &&
           (config.origin !== BETA_ORIGIN || !session.isFounder)) return finish(json({ error: "This page is restricted to the beta administrator." }, 403));
       if (["/api/lovense/status", "/api/lovense/session"].includes(url.pathname)) {
-        const status = url.pathname.endsWith("/status");
-        const methods = status ? ["GET", "HEAD"] : ["POST"];
-        if (!methods.includes(request.method)) {
-          const response = json({ error: "Use the connection controls on SatinLore." }, 405);
-          response.headers.set("Allow", methods.join(", "));
-          return finish(response);
-        }
-        if (url.search) return finish(json({ error: "Use the connection controls on SatinLore." }, 400));
-        const vendorConfig = lovenseConfiguration(env);
-        const quotaAvailable = env.PRIVATE_FEEDBACK && typeof env.PRIVATE_FEEDBACK.idFromName === "function" && typeof env.PRIVATE_FEEDBACK.get === "function";
-        const readiness = lovenseReadiness(env, quotaAvailable);
-        const available = Boolean(vendorConfig && readiness.available);
-        const unavailable = readiness.message;
-        if (status) return finish(json(readiness));
-        if (request.headers.get("Origin") !== config.origin ||
-            ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
-          return finish(json({ error: "Please use the connection controls on SatinLore." }, 403));
-        }
-        try {
-          await emptyLovenseRequest(request);
-          if (!available) return finish(json({ error: unavailable }, 503));
-          const uid = await lovenseIdentity(session.subject, config.audience, vendorConfig.uidSecret);
-          // Separate object namespace: quota state never joins feedback, email or stories.
-          const quota = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(`lovense-issue:v1:${uid}`));
-          const permission = await quota.fetch(new Request("https://feedback.internal/internal/lovense-rate", {
-            method: "POST", headers: { Origin: APP_ORIGIN, "Content-Type": "application/json" }, body: "{}",
-          }));
-          if (permission.status !== 200) {
-            const limited = permission.status === 429;
-            const response = json({ error: limited ? "A few connection attempts were made recently. Wait a minute and try again." : "Connection setup is temporarily unavailable. Try again shortly." }, limited ? 429 : 503);
-            if (limited) response.headers.set("Retry-After", /^\d+$/.test(permission.headers.get("Retry-After") || "") ? permission.headers.get("Retry-After") : "60");
-            return finish(response);
-          }
-          if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
-          const authToken = await issueLovenseToken(vendorConfig, uid, lovenseFetcher ? { fetcher: lovenseFetcher } : {});
-          // Authentication can expire/change while the vendor request is in flight.
-          const renewed = await verifyFounder(request, config, keyResolver);
-          if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt) return finish(json({ error: "Founder access required." }, 403));
-          return finish(json({ uid, platform: vendorConfig.platform, authToken,
-            expires_at: Math.floor(Math.min(renewed.expiresAt, Date.now() + 15 * 60_000) / 1000) }));
-        } catch (error) {
-          if (error instanceof LovenseServiceError) return finish(json({ error: error.message }, error.status));
-          return finish(json({ error: "Connection setup is temporarily unavailable. Try again shortly." }, 503));
-        }
+        return handleLovense(request, env, { config, session, lovenseFetcher,
+          reverify: () => verifyFounder(request, config, keyResolver) });
       }
       if (url.pathname === "/api/story-import") {
         if (request.method !== "POST") {
@@ -240,25 +322,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       if (url.pathname === "/api/health") return finish(json({ status: "ok", device_mode: "simulator", beta_ready: false }));
       const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
       if (!ASSET_PATHS.has(path)) return finish(json({ error: "This page is not part of the private simulator." }, 404));
-      if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") return finish(json({ error: "The private preview is not available." }, 503));
-      try {
-        const assetUrl = new URL(path, config.origin);
-        // No bearer assertion, cookies, user query values or reader content enter an asset request.
-        const bridge = path === "/device-bridge.html";
-        const asset = await env.ASSETS.fetch(new Request(assetUrl, { method: bridge ? "GET" : request.method }));
-        if (asset.status !== 200) return finish(json({ error: "The preview asset is unavailable." }, 404));
-        if (bridge) {
-          const document = await asset.text();
-          const script = document.match(/<script id="lovense-isolated-bundle">([\s\S]*?)<\/script>/)?.[1];
-          if (!script || document.length > 500_000) return finish(json({ error: "The isolated connection bridge is unavailable." }, 503));
-          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(script));
-          const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
-          return secure(new Response(document, asset), { head, bridgeHash: hash, origin: config.origin });
-        }
-        return finish(asset);
-      } catch {
-        return finish(json({ error: "The preview asset is unavailable." }, 503));
-      }
+      return serveAsset(request, env, path, { origin: config.origin });
     },
   };
 }

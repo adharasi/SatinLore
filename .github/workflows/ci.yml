@@ -31,6 +31,8 @@ jobs:
       - run: npm run test:browser
       - run: node scripts/beta-browser-check.mjs
         if: always() && steps.browser_runtime.outcome == 'success'
+      - run: node scripts/alpha-browser-check.mjs
+        if: always() && steps.browser_runtime.outcome == 'success'
       - name: Upload neutral frontend screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

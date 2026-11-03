@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>SatinLore · Alpha study</title>
+  <link rel="icon" href="/alpha/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/alpha/static/theme.css">
+  <link rel="stylesheet" href="/alpha/static/alpha.css">
+  <script type="module" src="/alpha/static/alpha.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#alpha-main">Skip to the study</a>
+  <header class="alpha-header">
+    <div class="alpha-header-inner">
+      <a class="alpha-brand" href="/alpha" aria-label="SatinLore Alpha"><span aria-hidden="true" class="alpha-brand-mark">S</span><span>SatinLore<span class="alpha-brand-period">.</span></span></a>
+      <span class="alpha-tag">PRIVATE ALPHA</span>
+      <div class="alpha-header-actions">
+        <a id="alpha-founder-link" href="/admin" hidden>Review sessions</a>
+        <button id="alpha-theme" class="alpha-theme" type="button" role="switch" aria-checked="true"><span class="alpha-switch" aria-hidden="true"></span>Dark mode</button>
+        <button id="alpha-logout" class="alpha-quiet" type="button" hidden>Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="alpha-shell" id="alpha-main">
+    <p id="alpha-global-status" class="alpha-status" role="status" aria-live="polite">Checking your sign-in…</p>
+
+    <section id="alpha-login" class="alpha-signin" aria-labelledby="alpha-login-title" hidden>
+      <div class="alpha-signin-intro">
+        <p class="eyebrow">SATINLORE RESEARCH · PHASE 01</p>
+        <h1 id="alpha-login-title" tabindex="-1">Find what feels right.</h1>
+        <p class="alpha-lead">A private study of the Flexer’s movements, settings and rhythm. Explore at your own pace and tell us what you would choose again.</p>
+        <div class="alpha-signal" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <p class="note">For invited adults aged 18 and over.</p>
+      </div>
+      <form id="alpha-login-form" method="post" class="alpha-card alpha-login-form">
+        <p class="eyebrow">YOUR STUDY ACCOUNT</p>
+        <h2>Sign in</h2>
+        <label for="alpha-username">Username</label>
+        <input id="alpha-username" name="username" type="text" autocomplete="username" autocapitalize="none" maxlength="24" required>
+        <label for="alpha-password">Password</label>
+        <input id="alpha-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+        <button class="primary" type="submit">Sign in to Alpha</button>
+        <p id="alpha-login-status" class="note alpha-form-status" role="status"></p>
+        <p class="note">Use the credentials from your study invitation. For help, contact <a href="mailto:team@satinlore.com">team@satinlore.com</a>.</p>
+      </form>
+    </section>
+
+    <section id="alpha-welcome" class="alpha-welcome" aria-labelledby="alpha-welcome-title" hidden>
+      <div class="alpha-intro">
+        <p class="eyebrow">FLEXER CONTROL STUDY</p>
+        <h1 id="alpha-welcome-title" tabindex="-1">Your study session</h1>
+        <p class="alpha-lead">Connect, check each movement, then explore what suits you. A short reflection at the end helps us understand your choices.</p>
+        <button id="alpha-history-open" class="alpha-quiet" type="button">Review my past sessions</button>
+      </div>
+      <div class="alpha-welcome-grid">
+        <section class="alpha-card" aria-labelledby="alpha-mode-heading">
+          <p class="eyebrow">01 · CHOOSE YOUR SETUP</p>
+          <h2 id="alpha-mode-heading">How will you test?</h2>
+          <fieldset id="alpha-mode" class="alpha-mode-options">
+            <legend class="visually-hidden">Connection mode</legend>
+            <label><input type="radio" name="alpha-mode" value="live" checked><span><strong>My Flexer</strong><span>Pair through Lovense Remote on your phone.</span></span></label>
+            <label><input type="radio" name="alpha-mode" value="simulator"><span><strong>Simulator</strong><span>Rehearse the full flow without hardware.</span></span></label>
+          </fieldset>
+          <label class="alpha-check"><input id="alpha-adult" type="checkbox"><span>I am 18 or older.</span></label>
+        </section>
+        <section class="alpha-card" aria-labelledby="alpha-consent-heading">
+          <p class="eyebrow">02 · YOUR RECORDING CHOICE</p>
+          <h2 id="alpha-consent-heading">A timeline to review together</h2>
+          <p>Recorded sessions capture setup steps, control changes, requested output and your optional ratings. The founder can review the timeline under your study username for up to 30 days.</p>
+          <p class="note">You can pause, withdraw or delete a timeline. A separate optional tab clip is offered after setup. Your recording choice and answers do not affect the agreed payment.</p>
+          <div class="buttons alpha-consent-actions">
+            <button id="alpha-consent-start" type="button" class="primary" disabled>Agree &amp; record a session</button>
+            <button id="alpha-unrecorded-start" type="button" disabled>Try without recording</button>
+          </div>
+          <p id="alpha-start-status" class="note alpha-form-status" role="status"></p>
+        </section>
+      </div>
+    </section>
+
+    <section id="alpha-study" aria-label="Current study session" hidden>
+      <div class="alpha-study-heading">
+        <div><p class="eyebrow" id="alpha-study-kicker">PHASE 01 · DEVICE SETUP</p><h1 id="alpha-study-title" tabindex="-1">Connect your Flexer</h1><p class="alpha-lead" id="alpha-study-intro">Select your device and check its response before exploring.</p></div>
+        <ol class="alpha-steps" aria-label="Study progress">
+          <li id="alpha-progress-connect" aria-current="step"><span>1</span>Connect</li>
+          <li id="alpha-progress-controls"><span>2</span>Explore</li>
+          <li id="alpha-progress-feedback"><span>3</span>Reflect</li>
+        </ol>
+      </div>
+      <div id="alpha-record-strip" class="alpha-record-strip" data-state="off">
+        <div class="alpha-record-state"><span class="alpha-record-dot" aria-hidden="true"></span><div><strong id="alpha-record-label">Timeline off</strong><p id="alpha-record-note" class="note" role="status"></p></div></div>
+        <div class="buttons"><button id="alpha-record-pause" type="button" hidden>Pause recording</button><button id="alpha-record-resume" type="button" hidden>Resume recording</button><button id="alpha-record-retry" type="button" hidden>Retry saving</button><button id="alpha-record-withdraw" type="button" hidden>Delete timeline</button></div>
+      </div>
+
+      <div class="alpha-study-grid">
+        <div id="alpha-device-panel" class="alpha-card" aria-label="Flexer connection and controls">
+          <div class="alpha-device-heading"><div><p class="eyebrow" id="alpha-device-mode">FLEXER</p><h2 id="alpha-device-title">Connect your toy</h2></div><span id="alpha-connection-badge" class="alpha-tag">Disconnected</span></div>
+          <p id="alpha-device-status" class="note" role="status"></p>
+          <section id="alpha-pairing" aria-labelledby="alpha-device-title">
+            <ol id="alpha-live-instructions" class="alpha-instructions">
+              <li>Turn on your Flexer and connect it in Lovense Remote.</li>
+              <li>Choose <strong>Connect</strong> here to show your pairing code.</li>
+              <li>Scan it with Lovense Remote on your phone and choose your Flexer below.</li>
+            </ol>
+            <p id="alpha-simulator-instructions" hidden>Connect the simulator to explore both Flexer movements with on-screen output.</p>
+            <div class="buttons"><button id="alpha-device-connect" type="button" class="primary">Connect</button><button id="alpha-device-refresh" type="button" hidden>Refresh device list</button></div>
+            <div id="alpha-device-qr" class="alpha-qr" hidden><img id="alpha-device-qr-image" alt="Private Lovense Remote pairing QR code" width="192" height="192" referrerpolicy="no-referrer"><p class="note">Open the scanner in Lovense Remote on your phone. Keep this code private.</p></div>
+            <div id="alpha-device-select-wrap" class="alpha-device-selection" hidden>
+              <label for="alpha-device-select">Choose the device to test</label>
+              <select id="alpha-device-select"><option value="">Choose a device</option></select>
+              <button id="alpha-device-select-confirm" type="button" class="primary" disabled>Use this Flexer</button>
+            </div>
+          </section>
+          <section id="alpha-verification" class="alpha-verification" aria-labelledby="alpha-verification-title" hidden>
+            <h3 id="alpha-verification-title">Check the movements</h3>
+            <p id="alpha-verification-note">Keep the device out of use for this check. Watch the movement and make sure it stops before confirming.</p>
+            <div id="alpha-verification-movements" class="alpha-verify-grid"></div>
+            <div class="buttons"><button id="alpha-verify-continue" type="button" class="primary" disabled>Continue to controls</button><button id="alpha-device-disconnect" type="button">Disconnect</button></div>
+          </section>
+          <section id="alpha-controls" aria-labelledby="alpha-controls-title" hidden>
+            <h3 id="alpha-controls-title" class="visually-hidden">Flexer movements and playback</h3>
+            <p id="alpha-controls-guidance" class="note">Set each movement and your personal maximum, then press Start. You can return to the checks to try another movement.</p>
+            <div id="alpha-movement-cards" class="alpha-movement-grid"></div>
+            <p id="alpha-playback-status" class="note" role="status"></p>
+            <div class="buttons alpha-playback-actions"><button id="alpha-device-start" type="button" class="primary">Start</button><button id="alpha-device-hold" type="button">Hold</button><button id="alpha-device-ease" type="button">Ease off</button><button id="alpha-device-resume" type="button">Resume levels</button></div>
+            <button id="alpha-back-to-checks" type="button" class="alpha-quiet">Back to movement checks</button>
+          </section>
+        </div>
+
+        <div class="alpha-study-side">
+          <section id="alpha-marks" class="alpha-card" aria-labelledby="alpha-marks-title" hidden>
+            <p class="eyebrow">WHILE YOU EXPLORE</p>
+            <h2 id="alpha-marks-title">Mark a moment</h2>
+            <p class="note">Optional. Add a timestamp now or leave a note after you finish.</p>
+            <div class="alpha-mark-grid"><button type="button" data-alpha-mark="good">Good moment</button><button type="button" data-alpha-mark="tooMuch">Too much</button><button type="button" data-alpha-mark="change">Wanted a change</button></div>
+            <p id="alpha-mark-status" class="note" role="status"></p>
+          </section>
+          <section id="alpha-clip-panel" class="alpha-card" aria-label="Optional study tab video" hidden></section>
+        </div>
+      </div>
+
+      <div id="alpha-study-actions" class="alpha-stop-dock"><div><strong id="alpha-dock-state">Output paused</strong><p id="alpha-dock-note" class="note">Start when you’re ready.</p></div><div class="buttons"><button id="alpha-device-stop" class="stop" type="button">Stop output</button><button id="alpha-peak" type="button" data-alpha-mark="climax" aria-describedby="alpha-peak-description" hidden>Mark a peak</button><button id="alpha-finish" class="primary" type="button">Finish &amp; stop</button></div><p id="alpha-peak-description" class="visually-hidden">Optionally mark a climax or especially enjoyable moment. You stay in control of the output.</p></div>
+
+      <p id="alpha-stop-warning" class="alpha-status" role="status" data-error="true" hidden></p>
+      <section id="alpha-feedback" class="alpha-feedback-grid" aria-label="Session reflection" hidden>
+        <form id="alpha-feedback-form" method="post" class="alpha-card">
+          <p class="eyebrow">WHAT WOULD YOU CHOOSE AGAIN?</p>
+          <h2>Tell us how it went</h2>
+          <p class="note">All questions are optional. Leave anything blank that you would rather skip.</p>
+          <fieldset class="alpha-fields"><legend>Movements and limits</legend>
+            <label>Preferred movement<select name="preferredMovement"><option value="">Skip</option><option value="vibration">Vibration</option><option value="flexing">Flexing</option><option value="both">Both together</option><option value="neither">Neither</option></select></label>
+            <label>Keep a low level between changes?<select name="minimum"><option value="">Skip</option><option value="yes">Yes, I liked a continuous minimum</option><option value="no">No, I preferred quiet breaks</option><option value="depends">It depends on the moment</option></select></label>
+            <label>Preferred vibration maximum<input name="vibrationMaximum" type="number" min="0" max="20" step="1" placeholder="0–20"></label>
+            <label>Preferred flexing maximum<input name="flexingMaximum" type="number" min="0" max="20" step="1" placeholder="0–20"></label>
+          </fieldset>
+          <fieldset class="alpha-fields"><legend>Your ratings</legend>
+            <p class="note alpha-fields-note">Use 0 for very low and 10 for very high. Leave a blank to skip.</p>
+            <label>Enjoyment<input name="enjoyment" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+            <label>Comfort<input name="comfort" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+            <label>Ease of connecting<input name="connectionEase" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+            <label>Ease of using the controls<input name="easeOfUse" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+          </fieldset>
+          <label>What felt best, and what did you want next?<textarea name="bestMoment" maxlength="1500" rows="3"></textarea></label>
+          <label>What made connecting or checking the toy easy or difficult?<textarea name="setupFeedback" maxlength="1500" rows="3"></textarea></label>
+          <label>Which control or instruction would you change?<textarea name="improvements" maxlength="1500" rows="3"></textarea></label>
+          <label>Anything else you’d like us to know?<textarea name="overallNotes" maxlength="1500" rows="3"></textarea></label>
+          <div class="buttons"><button id="alpha-feedback-save" class="primary" type="submit">Save feedback</button><button id="alpha-back-to-start" type="button">Back to study home</button></div>
+          <p id="alpha-feedback-status" class="note alpha-form-status" role="status"></p>
+        </form>
+        <section id="alpha-review" class="alpha-card" aria-labelledby="alpha-review-title" hidden>
+          <p class="eyebrow">AFTER THE SESSION</p>
+          <h2 id="alpha-review-title">Add a note to the timeline</h2>
+          <p class="note">Pick a recorded moment or move the time slider. These are approximate notes added after the session.</p>
+          <div id="alpha-review-moments" class="alpha-review-moments" aria-label="Recorded moments"></div>
+          <p id="alpha-review-state" class="note"></p>
+          <form id="alpha-annotation-form" method="post">
+            <label for="alpha-review-time">Session time <output id="alpha-review-time-label" for="alpha-review-time">0:00</output></label>
+            <input id="alpha-review-time" type="range" min="0" max="0" step="1" value="0">
+            <button id="alpha-annotation-peak" class="alpha-quiet" type="button">I reached my desired result here</button>
+            <label for="alpha-annotation">Your note</label><textarea id="alpha-annotation" rows="3" maxlength="1000" required></textarea>
+            <button type="submit">Save timestamped note</button><p id="alpha-annotation-status" class="note alpha-form-status" role="status"></p>
+          </form>
+          <ol id="alpha-annotations" class="alpha-annotations" aria-label="Saved notes"></ol>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <footer class="alpha-shell alpha-footer"><span>SatinLore Team · Private research · 18+</span><a href="mailto:team@satinlore.com">Get study help</a></footer>
+
+  <dialog id="alpha-history" aria-labelledby="alpha-history-title">
+    <div class="alpha-dialog-heading"><h2 id="alpha-history-title">My sessions</h2><button id="alpha-history-close" type="button">Close</button></div>
+    <p id="alpha-history-status" class="note" role="status"></p><ul id="alpha-history-list" class="alpha-history-list"></ul>
+  </dialog>
+  <dialog id="alpha-withdraw" aria-labelledby="alpha-withdraw-title">
+    <h2 id="alpha-withdraw-title">Delete this study session?</h2>
+    <p>Your saved timeline, ratings, notes and any shared clip for this session will be removed from study review.</p>
+    <div class="buttons"><button id="alpha-withdraw-cancel" type="button" autofocus>Keep session</button><button id="alpha-withdraw-confirm" type="button" class="stop">Delete session</button></div><p id="alpha-withdraw-status" class="note" role="status"></p>
+  </dialog>
+
+  <template id="alpha-verify-template"><div class="alpha-verify-movement"><h4></h4><p class="note"></p><button type="button"></button><label class="alpha-check" hidden><input type="checkbox"><span>I checked the response and the output is stopped.</span></label></div></template>
+  <template id="alpha-movement-template">
+    <article class="alpha-movement">
+      <div class="alpha-movement-heading"><div><h4></h4><p class="note"></p></div><label class="alpha-check alpha-channel-select"><input type="checkbox"><span>Use movement</span></label></div>
+      <div class="alpha-output"><span>Requested output</span><output></output></div>
+      <label class="alpha-slider">Level <output></output><input data-setting="level" type="range" min="0" max="5" step="1" value="1"></label>
+      <label class="alpha-slider">Personal maximum <output></output><input data-setting="maximum" type="range" min="0" max="5" step="1" value="5"></label>
+      <details class="alpha-movement-detail"><summary>Minimum, rhythm and Ease off level</summary>
+        <label class="alpha-slider">Continuous minimum <output></output><input data-setting="minimum" type="range" min="0" max="5" step="1" value="0"></label>
+        <label class="alpha-slider">Ease off level <output></output><input data-setting="recovery" type="range" min="0" max="5" step="1" value="0"></label>
+        <label>Rhythm<select data-setting="rhythm"><option value="steady">Steady</option><option value="gentle">Gentle variation</option><option value="dynamic">More variation</option></select></label>
+        <button data-setting="range" type="button" hidden>Enable personal range</button>
+        <p class="note">Enabling the range keeps your chosen maximum and output unchanged.</p>
+      </details>
+    </article>
+  </template>
+</body>
+</html>
