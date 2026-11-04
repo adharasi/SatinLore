@@ -1,4 +1,6 @@
 /** Account presets only. Authenticated identity is selected by the outer Worker. */
+import {TOY_PROFILES} from "../../app/static/devices/toy-profiles.mjs";
+
 export const ACCOUNT_ROUTES = Object.freeze([
   "/api/account", "/api/presets", "/api/presets/delete", "/api/account/data", "/api/account/delete",
 ]);
@@ -7,14 +9,11 @@ export const ACCOUNT_PRESET_LIMIT = 50;
 export const ACCOUNT_BODY_BYTES = 16_384;
 const ALLOWED_ORIGINS = new Set(["https://app.satinlore.com", "https://beta.satinlore.com"]);
 const INTERNAL_ORIGIN = "https://accounts.internal";
+const ENSURE_EMAIL_ACCOUNT = "/internal/ensure-email-account";
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i;
 const ENCODER = new TextEncoder();
-const PRESET_ACTIONS = Object.freeze({
-  lush: ["vibrate"], flexer: ["vibrate", "fingering"], nora: ["vibrate", "rotate"], domi: ["vibrate"],
-  velvo: ["vibrate", "rotate"], spinel: ["vibrate", "thrusting"], dolce: ["vibrate"], hush: ["vibrate"],
-  // Oscillation may be saved for simulation. Saving never authorises live support.
-  osci3: ["vibrate", "oscillate"],
-});
+// Presets may store simulator movements and never authorise live support.
+const PRESET_ACTIONS = Object.fromEntries(TOY_PROFILES.map(profile => [profile.id, profile.simChannels]));
 const CHANNEL_FIELDS = ["minimum", "background", "preferred", "maximum", "recovery", "gain", "rhythm"];
 const MODES = new Set(["story", "continuous"]);
 const RHYTHMS = new Set(["steady", "gentle", "dynamic", "scene"]);
@@ -31,9 +30,12 @@ const result = (body, status = 200, headers = {}) => Response.json(body, { statu
   "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", ...headers,
 } });
 
-/** A per-user namespace stable across the two explicitly allowed hosts/audiences. */
+/** Cloudflare identities are stable across the private hosts; app email identities are separate. */
 export async function accountIdentity(config, session) {
-  if (typeof config?.issuer !== "string" || !/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(config.issuer) ||
+  const emailIdentity = config?.issuer === "https://app.satinlore.com" && session?.authMode === "email" &&
+    /^email-v1:[a-f0-9]{64}$/.test(session.subject);
+  const accessIdentity = typeof config?.issuer === "string" && /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(config.issuer);
+  if ((!emailIdentity && !accessIdentity) ||
       typeof session?.subject !== "string" || !session.subject || session.subject.length > 512) fail("Sign in again to use your account.", 403);
   const bytes = await crypto.subtle.digest("SHA-256", ENCODER.encode(`satinlore:reader-account:v1:${config.issuer}:${session.subject}`));
   return "account:v1:" + Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, "0")).join("");
@@ -119,8 +121,26 @@ export class ReaderAccount {
   exclusive(task) { const pending = this.queue.then(task, task); this.queue = pending.catch(() => {}); return pending; }
   async handle(request) {
     const url = new URL(request.url);
-    if (url.origin !== INTERNAL_ORIGIN || url.search || !ACCOUNT_ROUTES.includes(url.pathname) ||
-        !ALLOWED_ORIGINS.has(request.headers.get("Origin"))) return result({ error: "Not found." }, 404);
+    if (url.origin !== INTERNAL_ORIGIN || url.search || !ALLOWED_ORIGINS.has(request.headers.get("Origin"))) {
+      return result({ error: "Not found." }, 404);
+    }
+    if (url.pathname === ENSURE_EMAIL_ACCOUNT) {
+      if (request.method !== "POST" || request.headers.get("Origin") !== "https://app.satinlore.com") return result({ error: "Not found." }, 404);
+      const body = await accountJson(request);
+      const now = Date.now();
+      if (!exact(body, ["issuedAt"]) || !Number.isSafeInteger(body.issuedAt) || body.issuedAt <= 0 || body.issuedAt > now) fail();
+      return this.storage.transaction(async txn => {
+        const state = await txn.get("state") || emptyState();
+        // A code requested before deletion must not recreate the deleted account.
+        if ((state.deletedAt ?? 0) >= body.issuedAt) fail("Request a new sign-in code to create an account.", 409);
+        if (state.account) return result({ ok: true });
+        state.account = { id: crypto.randomUUID(), createdAt: now, adultConfirmedAt: now };
+        state.revision++;
+        await txn.put("state", state);
+        return result({ ok: true }, 201);
+      });
+    }
+    if (!ACCOUNT_ROUTES.includes(url.pathname)) return result({ error: "Not found." }, 404);
     const methods = ["/api/account", "/api/presets"].includes(url.pathname) ? ["GET", "POST"] : url.pathname === "/api/account/data" ? ["GET"] : ["POST"];
     if (!methods.includes(request.method)) return result({ error: "Use the account controls on SatinLore." }, 405, { Allow: methods.join(", ") });
     if (request.method === "GET") {
@@ -147,8 +167,9 @@ export class ReaderAccount {
         if (state.account) fail("Your account already exists. Reload to continue.", 409);
         state.account = { id: crypto.randomUUID(), createdAt: now, adultConfirmedAt: now };
       } else if (url.pathname === "/api/account/delete") {
-        // Preserve only revision and rate counters so a stale tab cannot recreate deleted data.
+        // Retain stale-write guards and rate counters after removing the account and presets.
         state.account = null; state.presets = [];
+        state.deletedAt = now;
       } else {
         if (!state.account) fail("Create your account before saving presets.", 409);
         if (url.pathname === "/api/presets") {
@@ -181,7 +202,17 @@ export class ReaderAccount {
   }
 }
 
-/** Return null for another route. Call only after the outer Worker verifies Access. */
+/** The email Worker calls this only after consuming an adult-confirmed, current code. */
+export async function ensureEmailAccount(env, config, session, issuedAt) {
+  if (session?.authMode !== "email" || session.expiresAt <= Date.now()) return false;
+  const identity = await accountIdentity(config, session);
+  const response = await env.READER_ACCOUNTS.get(env.READER_ACCOUNTS.idFromName(identity)).fetch(new Request(INTERNAL_ORIGIN + ENSURE_EMAIL_ACCOUNT, {
+    method: "POST", headers: { Origin: config.origin, "Content-Type": "application/json" }, body: JSON.stringify({ issuedAt }),
+  }));
+  return response.ok;
+}
+
+/** Return null for another route. Call only after the outer Worker verifies the session. */
 export async function handleAccount(request, env, { config, session } = {}) {
   const url = new URL(request.url);
   if (!ACCOUNT_ROUTES.includes(url.pathname)) return null;
@@ -190,6 +221,9 @@ export async function handleAccount(request, env, { config, session } = {}) {
         !Number.isSafeInteger(session?.expiresAt) || session.expiresAt <= Date.now()) return result({ error: "Sign in again to use your account." }, 403);
     if (request.method === "POST" && (request.headers.get("Origin") !== config.origin ||
         ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site")))) return result({ error: "Use the account controls on SatinLore." }, 403);
+    if (session.authMode === "email" && url.pathname === "/api/account" && request.method === "POST") {
+      return result({ error: "Verify your email to create an account." }, 405, { Allow: "GET" });
+    }
     if (!env.READER_ACCOUNTS || typeof env.READER_ACCOUNTS.idFromName !== "function" || typeof env.READER_ACCOUNTS.get !== "function") return result({ error: "Account storage is temporarily unavailable. Your changes have not been saved." }, 503);
     const identity = await accountIdentity(config, session);
     const body = request.method === "POST" ? await accountJson(request, config.origin) : undefined;

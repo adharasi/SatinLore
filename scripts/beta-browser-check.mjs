@@ -125,6 +125,7 @@ try {
         }));
       }};` },
     ...await Promise.all(["accounts", "beta-recordings", "feedback"].map(async name => ({ type: "ESModule", path: path.join(ROOT, `deploy/cloudflare/${name}.mjs`), contents: await readFile(path.join(ROOT, `deploy/cloudflare/${name}.mjs`), "utf8") }))),
+    { type: "ESModule", path: path.join(ROOT, "app/static/devices/toy-profiles.mjs"), contents: await readFile(path.join(ROOT, "app/static/devices/toy-profiles.mjs"), "utf8") },
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0, durableObjects: {
     READER_ACCOUNTS: { className: "ReaderAccount", useSQLite: true }, BETA_RECORDINGS: { className: "BetaRecordings", useSQLite: true }, PRIVATE_FEEDBACK: { className: "PrivateFeedback", useSQLite: true },
   } });

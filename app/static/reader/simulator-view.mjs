@@ -1,8 +1,9 @@
 // This view observes output; it never dispatches a command. Live hardware has no
 // measured feedback, so its requested levels never animate as physical motion.
+import {getToyProfile} from "../devices/toy-profiles.mjs";
+
 const SVG = "http://www.w3.org/2000/svg";
 const MAX_POINTS = 72;
-const MODELS = {lush: "Lush", flexer: "Flexer", nora: "Nora", domi: "Domi", velvo: "Velvo", spinel: "Spinel", dolce: "Dolce", hush: "Hush", osci3: "Osci 3"};
 const CHANNELS = {vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation"};
 const SHAPES = {
   lush: "M140 45C111 45 109 75 112 96C115 118 126 132 140 132C154 132 165 118 168 96C171 75 169 45 140 45ZM141 131C140 153 160 162 176 143L184 126L177 123C165 144 154 146 150 132Z",
@@ -15,6 +16,8 @@ const SHAPES = {
   hush: "M139 32C131 32 127 42 122 58L110 97C104 117 118 129 132 131L132 141L111 145C103 147 104 157 112 158L167 158C176 157 177 147 169 145L148 141L148 131C162 128 176 117 170 97L157 58C152 42 147 32 139 32Z",
   osci3: "M126 27C111 30 108 46 112 65L123 136C125 153 137 162 150 156C165 150 165 136 160 122L153 99L168 94C182 89 185 77 177 69C168 62 158 69 152 77L148 50C145 33 138 25 126 27Z",
 };
+const FAMILY_SHAPES = {egg: SHAPES.lush, dual: SHAPES.flexer, rabbit: SHAPES.nora,
+  wand: SHAPES.domi, shaft: SHAPES.spinel, plug: SHAPES.hush};
 
 // Project only known, currently active movements. Neither an arbitrary report
 // key nor an inactive movement is permission to display a commanded channel.
@@ -41,9 +44,9 @@ export function simulatorReading(snapshot = {}) {
   const output = running && valid ? snapshot.output : 0;
   const live = snapshot.mode === "lovense";
   const unknown = live && snapshot.outputKnown === false;
-  const model = Object.hasOwn(MODELS, snapshot.model) ? snapshot.model : "lush";
-  const channel = Object.hasOwn(CHANNELS, snapshot.channel) ? snapshot.channel : "vibrate";
-  return {connected, running, output, live, unknown, model, channel, channelReadings: simulatorChannelReadings(snapshot),
+  const model = getToyProfile(snapshot.model) || getToyProfile("lush");
+  const channel = Object.hasOwn(CHANNELS, snapshot.channel) ? snapshot.channel : model.simChannels[0];
+  return {connected, running, output, live, unknown, model: model.id, channel, channelReadings: simulatorChannelReadings({...snapshot, channel}),
     position: Number.isInteger(snapshot.position) && snapshot.position >= 0 ? snapshot.position : 0,
     label: unknown ? "Output unconfirmed" : !connected ? "Not connected" : !running ? "Paused" : snapshot.testing ? "Two-second test" : output ? live ? "Command requested" : "Playing" : "Playing · quiet section"};
 }
@@ -189,8 +192,9 @@ export function createSimulatorView(mount, {document = mount?.ownerDocument ?? g
     update(snapshot) {
       if (disposed) return;
       current = simulatorReading(snapshot);
-      title.textContent = `${MODELS[current.model]} · ${current.live ? "live connection" : "simulator"}`;
-      body.setAttribute("d", SHAPES[current.model]);
+      const profile = getToyProfile(current.model);
+      title.textContent = `${profile.label} · ${current.live ? "live connection" : "simulator"}`;
+      body.setAttribute("d", SHAPES[profile.id] || FAMILY_SHAPES[profile.shape]);
       frame.dataset.model = current.model;
       frame.dataset.mode = current.live ? "lovense" : "simulator";
       frame.dataset.running = String(current.running && current.output > 0);

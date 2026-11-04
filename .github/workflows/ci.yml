@@ -29,6 +29,8 @@ jobs:
       - run: npx playwright install --with-deps --only-shell chromium
         id: browser_runtime
       - run: npm run test:browser
+      - run: node scripts/public-reader-browser-check.mjs
+        if: always() && steps.browser_runtime.outcome == 'success'
       - run: node scripts/beta-browser-check.mjs
         if: always() && steps.browser_runtime.outcome == 'success'
       - run: node scripts/alpha-browser-check.mjs

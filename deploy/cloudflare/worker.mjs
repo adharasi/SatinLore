@@ -1,28 +1,39 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_STATIC_PATHS } from "./assets.mjs";
-import { feedbackJson, normalizeFeedback, FeedbackError } from "./feedback.mjs";
+import { feedbackJson, normalizeFeedback, normalizeFeedbackReview, FeedbackError, FEEDBACK_INBOX_NAME } from "./feedback.mjs";
 import { storyImportJson, importPublicStory, StoryImportError } from "./story-import.mjs";
 import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseReadiness, lovenseIdentity, LovenseServiceError } from "./lovense.mjs";
 import { handleAccount } from "./accounts.mjs";
 import { handleBetaRecordings } from "./beta-recordings.mjs";
 import { alphaConfigured, handleAlphaApi, verifyAlphaSession } from "./alpha-study.mjs";
 import { handleSceneAnalysis } from "./scene-analysis.mjs";
+import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
 export { AlphaStudy } from "./alpha-study.mjs";
 export { SceneAnalysisBudget } from "./scene-analysis.mjs";
+export { PublicReaderAuth } from "./public-auth.mjs";
 
-const APP_ORIGIN = "https://app.satinlore.com";
 export const BETA_ORIGIN = "https://beta.satinlore.com";
 const ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS);
 const ALPHA_ASSET_PATHS = new Set(ALPHA_STATIC_PATHS);
 const ALPHA_ADMIN_PATHS = new Set(["/admin", "/admin/"]);
 const ALPHA_ADMIN_ASSETS = new Set(["/alpha/static/alpha-admin.mjs", "/alpha/static/alpha-admin.css"]);
+const BETA_ADMIN_PATHS = new Set(["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"]);
+const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html", "/simulation.html"]);
+const PUBLIC_ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS.filter(path => PUBLIC_DOCUMENTS.has(path) ||
+  (path.startsWith("/static/") && !BETA_ADMIN_PATHS.has(path))));
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[a-zA-Z]{2,}$/;
 const cachedKeys = new Map();
 const FEEDBACK_METHODS = new Map([
   ["/api/feedback", ["GET", "POST"]], ["/api/my-data", ["GET"]], ["/api/my-data/delete", ["POST"]],
+]);
+const FEEDBACK_ADMIN_PATHS = new Map([
+  ["/feedback-admin", "/feedback-admin/index.html"],
+  ["/feedback-admin/", "/feedback-admin/index.html"],
+  ["/feedback-admin/index.html", "/feedback-admin/index.html"],
+  ["/feedback-admin/review.mjs", "/feedback-admin/review.mjs"],
 ]);
 const CONTENT_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://*.lovense-api.com https://*.lovense.com; font-src 'self'; frame-src https://app.satinlore.com/device-bridge https://app.satinlore.com/device-bridge.html; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const BRIDGE_VENDOR_HTTPS = "https://*.lovense.com https://*.lovense-api.com https://*.lovense.club:*";
@@ -138,11 +149,11 @@ async function handleLovense(request, env, { config, session, reverify, lovenseF
       if (limited) response.headers.set("Retry-After", /^\d+$/.test(permission.headers.get("Retry-After") || "") ? permission.headers.get("Retry-After") : "60");
       return finish(response);
     }
-    if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+    if (Date.now() >= session.expiresAt) return finish(json({ error: "Sign in again to connect your toy." }, 403));
     const authToken = await issueLovenseToken(vendorConfig, uid, lovenseFetcher ? { fetcher: lovenseFetcher } : {});
     // Authentication can expire/change while the vendor request is in flight.
     const renewed = await reverify();
-    if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+    if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt) return finish(json({ error: "Sign in again to connect your toy." }, 403));
     return finish(json({ uid, platform: vendorConfig.platform, authToken,
       expires_at: Math.floor(Math.min(renewed.expiresAt, Date.now() + 15 * 60_000) / 1000) }));
   } catch (error) {
@@ -156,7 +167,7 @@ async function handleLovense(request, env, { config, session, reverify, lovenseF
   }
 }
 
-async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false } = {}) {
+async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false, publicAuth = false } = {}) {
   const head = request.method === "HEAD";
   const finish = response => secure(response, { head, origin, alphaPage, alphaAdmin });
   if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") return finish(json({ error: "The private preview is not available." }, 503));
@@ -173,6 +184,15 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(script));
       const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
       return secure(new Response(document, asset), { head, bridgeHash: hash, origin: origin });
+    }
+    if (publicAuth && !head && PUBLIC_DOCUMENTS.has(path)) {
+      const document = await asset.text();
+      const headers = new Headers(asset.headers);
+      headers.delete("Content-Length");
+      headers.delete("Content-Encoding");
+      headers.delete("ETag");
+      return finish(new Response(document.replace("</head>", '<meta name="satinlore-public-auth" content="true"></head>'),
+        { status: asset.status, headers }));
     }
     return finish(asset);
   } catch {
@@ -219,7 +239,44 @@ async function handleAlphaSurface(request, env, url, lovenseFetcher) {
     config: { origin: APP_ORIGIN, audience: "satinlore-alpha-v1" }, reverify: () => verifyAlphaSession(request, env) });
 }
 
-export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher, analysisFetcher } = {}) {
+function feedbackRequest(stub, path, method, payload, owner) {
+  const headers = new Headers({ Origin: APP_ORIGIN });
+  if (owner) headers.set("X-Feedback-Owner", owner);
+  if (payload !== undefined) headers.set("Content-Type", "application/json");
+  return stub.fetch(new Request(`https://feedback.internal${path}`, {
+    method, headers, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}),
+  }));
+}
+
+async function handleFeedbackAdmin(request, env, url, config, session) {
+  if (config.origin !== BETA_ORIGIN || !session.isFounder) return json({ error: "Feedback review requires founder access." }, 403);
+  if (url.pathname !== "/feedback-admin/api") {
+    const asset = FEEDBACK_ADMIN_PATHS.get(url.pathname);
+    if (!asset || !["GET", "HEAD"].includes(request.method)) return json({ error: "Not found." }, 404);
+    return serveAsset(request, env, asset, { origin: config.origin });
+  }
+  if (!["GET", "PATCH"].includes(request.method)) return new Response(null, { status: 405, headers: { Allow: "GET, PATCH" } });
+  if (request.method === "PATCH" && (request.headers.get("Origin") !== BETA_ORIGIN ||
+      ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site")))) {
+    return json({ error: "Use the feedback review page to update notes." }, 403);
+  }
+  try {
+    let update;
+    if (request.method === "PATCH") {
+      const headers = new Headers(request.headers);
+      headers.set("Origin", APP_ORIGIN);
+      update = normalizeFeedbackReview(await feedbackJson(new Request(request, { headers })));
+    }
+    if (Date.now() >= session.expiresAt) return json({ error: "Feedback review requires founder access." }, 403);
+    const inbox = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(FEEDBACK_INBOX_NAME));
+    return await feedbackRequest(inbox, "/internal/inbox/review", request.method, update);
+  } catch (error) {
+    if (error instanceof FeedbackError) return json({ error: error.message }, error.status);
+    return json({ error: "Feedback review is temporarily unavailable." }, 503);
+  }
+}
+
+export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher, analysisFetcher, emailFetcher } = {}) {
   return {
     async fetch(request, env) {
       const head = request.method === "HEAD";
@@ -230,31 +287,56 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
           (ALPHA_ADMIN_PATHS.has(url.pathname) && alphaConfigured(env)))) {
         return handleAlphaSurface(request, env, url, lovenseFetcher);
       }
-      const baseConfig = privateAppConfiguration(env);
-      if (!baseConfig) return finish(json({ error: "The private preview is not available." }, 503));
       // A valid token must not make workers.dev, version URLs or another hostname an origin bypass.
       if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
-      const config = url.origin === APP_ORIGIN ? baseConfig : privateAppConfiguration(env, url.origin);
-      if (!config) return finish(json({ error: "The private preview is not available." }, 503));
+      const publicAuth = url.origin === APP_ORIGIN && env.PUBLIC_READER_ENABLED === "true";
+      const config = publicAuth ? publicReaderConfiguration(env) : privateAppConfiguration(env, url.origin);
+      if (!config) return finish(json({ error: publicAuth ? "Email sign-in is temporarily unavailable." : "The private preview is not available." }, 503));
       responseOrigin = config.origin;
-      const session = await verifyFounder(request, config, keyResolver);
+      if (publicAuth) {
+        const authResponse = await handlePublicAuth(request, env, config, emailFetcher);
+        if (authResponse) return finish(authResponse);
+      }
+      const read = ["GET", "HEAD"].includes(request.method);
+      const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
+      if (publicAuth && BETA_ADMIN_PATHS.has(url.pathname)) return finish(json({ error: "Not found." }, 404));
+      if (publicAuth && read && PUBLIC_ASSET_PATHS.has(path)) {
+        return serveAsset(request, env, path, { origin: config.origin, publicAuth: true });
+      }
+      const reverify = publicAuth ? () => verifyPublicReader(request, config) : () => verifyFounder(request, config, keyResolver);
+      const session = await reverify();
+      if (publicAuth && read && url.pathname === "/api/access") {
+        return finish(json({ authenticated: Boolean(session), expiresAt: session?.expiresAt ?? null }));
+      }
+      if (publicAuth && !session) return finish(json({ error: "Sign in to SatinLore to continue." }, 401));
       if (!session) return finish(json({ error: "Founder access required." }, 403));
-      // These services select identity only from the verified Access context.
+      if (url.pathname === "/feedback-admin" || url.pathname.startsWith("/feedback-admin/")) {
+        return finish(await handleFeedbackAdmin(request, env, url, config, session));
+      }
+      // These services select identity only from the verified session context.
       const accountResponse = await handleAccount(request, env, { config, session });
-      if (accountResponse) return finish(accountResponse);
+      if (accountResponse) {
+        if (publicAuth && url.pathname === "/api/account/delete" && accountResponse.ok) {
+          const cleared = await revokePublicReader(config, session);
+          if (!cleared) return finish(json({ error: "Your account was removed, but sign-out could not be confirmed. Try signing out again." }, 503));
+          const response = new Response(accountResponse.body, accountResponse);
+          response.headers.set("Set-Cookie", cleared["Set-Cookie"]);
+          return finish(response);
+        }
+        return finish(accountResponse);
+      }
       const recordingResponse = await handleBetaRecordings(request, env, { config, session });
       if (recordingResponse) return finish(recordingResponse);
-      if (["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"].includes(url.pathname) &&
+      if (BETA_ADMIN_PATHS.has(url.pathname) &&
           (config.origin !== BETA_ORIGIN || !session.isFounder)) return finish(json({ error: "This page is restricted to the beta administrator." }, 403));
       if (["/api/lovense/status", "/api/lovense/session"].includes(url.pathname)) {
-        return handleLovense(request, env, { config, session, lovenseFetcher,
-          reverify: () => verifyFounder(request, config, keyResolver) });
+        return handleLovense(request, env, { config, session, lovenseFetcher, reverify });
       }
       if (url.pathname === "/api/scene-analysis") {
-        return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher,
-          reverify: () => verifyFounder(request, config, keyResolver) }));
+        return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher, reverify }));
       }
       if (url.pathname === "/api/story-import") {
+        const expired = () => finish(json({ error: publicAuth ? "Sign in again to import a story." : "Founder access required." }, 403));
         if (request.method !== "POST") {
           const response = json({ error: "Use the story-link form to import a story." }, 405);
           response.headers.set("Allow", "POST");
@@ -269,11 +351,12 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
           // canonical internal contract on both authenticated reader hosts.
           const internalHeaders = new Headers(request.headers); internalHeaders.set("Origin", APP_ORIGIN);
           const source = await storyImportJson(new Request(request, { headers: internalHeaders }));
-          if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+          if (Date.now() >= session.expiresAt) return expired();
           // Deliberate link imports are the sole exception to local-only story processing.
           // Only a canonical public AO3 URL enters this fetch; no cookies, assertions or local story data.
           const story = await importPublicStory(source, { ...(storyFetcher ? { fetcher: storyFetcher } : {}), ...(storyParser ? { parse: storyParser } : {}) });
-          if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
+          const renewed = await reverify();
+          if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt) return expired();
           return finish(json(story));
         } catch (error) {
           if (error instanceof StoryImportError) return finish(json({ error: error.message }, error.status));
@@ -310,15 +393,39 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
             }
           }
           if (Date.now() >= session.expiresAt) return finish(json({ error: "Founder access required." }, 403));
-          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:feedback:v1:${config.audience}:${session.subject}`));
+          const ownerScope = session.authMode === "email" ? "email" : config.audience;
+          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:feedback:v1:${ownerScope}:${session.subject}`));
           const name = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-          const stub = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(name));
-          // The durable store receives no identity, cookies, JWTs, query values or automatic story context.
-          const headers = new Headers({ Origin: APP_ORIGIN });
-          if (payload !== undefined) headers.set("Content-Type", "application/json");
-          return finish(await stub.fetch(new Request(`https://feedback.internal${url.pathname}`, {
-            method: request.method, headers, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}),
-          })));
+          const inbox = env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(FEEDBACK_INBOX_NAME));
+          const legacy = session.authMode === "email" ? null : env.PRIVATE_FEEDBACK.get(env.PRIVATE_FEEDBACK.idFromName(name));
+          // No email, cookies, JWT, request query values or story context reach either store.
+          if (request.method === "POST" && url.pathname === "/api/feedback") {
+            if (legacy) {
+              const prior = await feedbackRequest(legacy, "/internal/legacy-retry", "POST", payload);
+              if (prior.status !== 404) return finish(prior);
+            }
+            return finish(await feedbackRequest(inbox, "/internal/inbox/feedback", "POST", payload, name));
+          }
+          if (request.method === "POST") {
+            const cleared = await feedbackRequest(inbox, "/internal/inbox/delete", "POST", payload, name);
+            if (!cleared.ok || !legacy) return finish(cleared);
+            return finish(await feedbackRequest(legacy, "/api/my-data/delete", "POST", payload));
+          }
+          const current = await feedbackRequest(inbox, "/internal/inbox/feedback", "GET", undefined, name);
+          if (!current.ok) return finish(current);
+          const { feedback } = await current.json();
+          if (legacy) {
+            const previous = await feedbackRequest(legacy, "/api/feedback", "GET");
+            if (!previous.ok) return finish(previous);
+            feedback.push(...(await previous.json()).feedback);
+            feedback.sort((first, second) => second.createdAt - first.createdAt);
+          }
+          if (url.pathname === "/api/my-data") {
+            const exported = json({ scope: "SatinLore app feedback", exportedAt: Date.now(), feedback });
+            exported.headers.set("Content-Disposition", 'attachment; filename="satinlore-feedback.json"');
+            return finish(exported);
+          }
+          return finish(json({ feedback }));
         } catch (error) {
           if (error instanceof FeedbackError) return finish(json({ error: error.message }, error.status));
           return finish(json({ error: "Feedback is temporarily unavailable. Please retry the same note." }, 503));
@@ -331,7 +438,6 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       if (url.pathname === "/api/access") return finish(json({ authenticated: true, expiresAt: session.expiresAt }));
       if (url.pathname === "/api/health") return finish(json({ status: "ok", device_mode: "simulator", beta_ready: false }));
-      const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
       if (!ASSET_PATHS.has(path)) return finish(json({ error: "This page is not part of the private simulator." }, 404));
       return serveAsset(request, env, path, { origin: config.origin });
     },

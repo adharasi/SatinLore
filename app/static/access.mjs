@@ -6,9 +6,9 @@ const SESSION_EXPIRED = "Your sign-in has expired. Playback is paused.";
 export class HostedAccessGuard {
   constructor({request = options => fetch("/api/access", options), now = () => Date.now(),
     setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = id => clearTimeout(id),
-    onChange = () => {}, onLost = () => {}, interval = 60000, timeout = 8000} = {}) {
+    onChange = () => {}, onLost = () => {}, interval = 60000, timeout = 8000, allowGuest = false} = {}) {
     this.request = request; this.now = now; this.setTimer = setTimer; this.clearTimer = clearTimer;
-    this.onChange = onChange; this.onLost = onLost; this.interval = interval; this.timeout = timeout;
+    this.onChange = onChange; this.onLost = onLost; this.interval = interval; this.timeout = timeout; this.allowGuest = allowGuest;
     this.active = false; this.visible = true; this.allowed = false; this.expiresAt = 0;
     this.state = "idle"; this.generation = 0; this.pollTimer = null; this.expiryTimer = null;
     this.abort = null; this.pending = null; this.requestTimer = null;
@@ -31,11 +31,11 @@ export class HostedAccessGuard {
     if (remaining <= 0) { this.lose(SESSION_EXPIRED); return; }
     this.expiryTimer = this.setTimer(() => { this.expiryTimer = null; this.scheduleExpiry(); }, Math.min(remaining, 2147483647));
   }
-  lose(reason = CHECK_FAILED) {
+  lose(reason = CHECK_FAILED, {state = "blocked", report = true} = {}) {
     ++this.generation; this.abort?.abort(); this.abort = null; this.pending = null;
     this.clearTimer(this.requestTimer); this.requestTimer = null;
-    this.allowed = false; this.expiresAt = 0; this.state = "blocked";
-    this.clearSchedules(); this.notify(); this.onLost(reason); this.schedulePoll();
+    this.allowed = false; this.expiresAt = 0; this.state = state;
+    this.clearSchedules(); this.notify(); if (report) this.onLost(reason); this.schedulePoll();
   }
   start({visible = true} = {}) {
     this.active = true; this.visible = visible;
@@ -73,6 +73,10 @@ export class HostedAccessGuard {
         if (!result.ok || result.redirected) throw new Error("access");
         const data = await result.json();
         if (!current()) return false;
+        if (this.allowGuest && data?.authenticated === false && data.expiresAt === null) {
+          this.lose(SESSION_EXPIRED, {state: "guest", report: wasAuthorized});
+          return false;
+        }
         if (!data || data.authenticated !== true || !Number.isSafeInteger(data.expiresAt) || data.expiresAt <= this.now()) throw new Error("access");
         this.expiresAt = data.expiresAt; this.allowed = true; this.state = "verified";
         this.scheduleExpiry(); this.schedulePoll(); this.notify();

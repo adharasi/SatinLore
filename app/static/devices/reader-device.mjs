@@ -10,8 +10,8 @@ export class ReaderDeviceController {
   constructor({now = () => performance.now(), setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer),
     onChange = () => {}, onSetupChange = () => {}, onInterfaceError = () => {}, authorize = async () => true,
     document = globalThis.document, window = globalThis.window, navigator = globalThis.navigator,
-    bridge = null, simulator = null, storyRhythms = false, ...controllerOptions} = {}) {
-    Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator});
+    bridge = null, simulator = null, storyRhythms = false, allowGuestSimulation = false, ...controllerOptions} = {}) {
+    Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator,allowGuestSimulation});
     this.channelDefaults = {...DEFAULT_CHANNEL_CALIBRATION, rhythm: storyRhythms ? "scene" : "steady"};
     this.sceneProfiles = undefined;
     this.automaticSceneMovement = false;
@@ -29,6 +29,7 @@ export class ReaderDeviceController {
   }
   get active() { return this.mode === "lovense" && this.real ? this.real : this.sim; }
   get profile() { return getToyProfile(this.model); }
+  get playbackAuthorized() { return this.authorized || this.allowGuestSimulation && this.mode === "simulator"; }
   snapshot() {
     const state = this.active.snapshot(), simulated = this.mode === "simulator", device = simulated ? this.simulator.snapshot() : null;
     const output = simulated ? device.strength : this.testing ? null : state.output;
@@ -37,7 +38,7 @@ export class ReaderDeviceController {
     return {...state,reason:!simulated && state.connected && !checked ? "Complete the short toy check and confirm its response before Start." : state.reason,output,outputKnown: simulated || !this.testing && state.outputKnown !== false,mode:this.mode,model:this.model,
       channel:this.channel,channels:this.channels(),activeChannels:this.activeChannels(),supportsCombined:this.supportsCombined(),verifiedChannels:this.channels().filter(({id})=>this.channelVerified(id)).map(({id})=>id),calibration:this.calibrationSnapshot(),channelOutputs:simulated ? device.channels : this.combinedChannels.length ? state.outputLevels || Object.fromEntries(this.combinedChannels.map(id=>[id,null])) : {[this.channel]:output},
       deviceLabel:this.selectedToy()?.label || this.profile?.label || "Toy",testing:this.testing,
-      canStart:!this.testing && state.connected && !state.running && state.state === "READY_PAUSED" && this.visible && this.authorized && this.levels.length > 0 && (simulated || state.canStart && checked),
+      canStart:!this.testing && state.connected && !state.running && state.state === "READY_PAUSED" && this.visible && this.playbackAuthorized && this.levels.length > 0 && (simulated || state.canStart && checked),
       outputMeaning:simulated ? "simulated" : "requested",maxCeiling:simulated ? 20 : this.rangeMaximum(),personalRangeChannels:[...this.personalRangeChannels],personalRangeEnabled:!simulated&&this.activeChannels().every(channel=>this.personalRangeChannels.has(channel)),
       baseLevel:this.levels[state.position] ?? 0};
   }
@@ -97,16 +98,17 @@ export class ReaderDeviceController {
     this.real.setVisible(this.visible); this.real.setAuthorized(this.authorized);
   }
   async beginConnection({mode = "simulator",model = "lush"} = {}) {
-    if (!["simulator","lovense"].includes(mode) || !getToyProfile(model)) throw new Error("Choose a supported toy and connection.");
+    const profile = getToyProfile(model);
+    if (!["simulator","lovense"].includes(mode) || !profile) throw new Error("Choose a supported toy and connection.");
     const previous = this.snapshot();
     this.disconnect();
     this.notifierFailed = false;
     const operation = ++this.operation;
-    this.mode = mode; this.model = model; this.channel = "vibrate";
+    this.mode = mode; this.model = model; this.channel = profile.simChannels[0];
     this.combinedChannels=[];this.sim.feel=new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum: this.sim.ceiling});if(this.real)this.real.feel=new ReadingFeel({rhythm: this.channelDefaults.rhythm}); this.lastTest = null; this.verifiedTest = null; this.verifiedChannels.clear();
     this.toys = []; this.selectedId = null; this.connectionState = "connecting";
     if (mode === "simulator") {
-      this.simulator.setModel(model); this.simulator.injectFailure("none"); this.simulator.setChannel("vibrate");
+      this.simulator.setModel(model); this.simulator.injectFailure("none"); this.simulator.setChannel(this.channel);
       this.sim.setStory(this.levels,this.sceneProfiles);this.sim.setManualZeros([...this.manualZeros]); if(this.levels.length)this.sim.setPosition(Math.min(previous.position,this.levels.length-1));
       this.toys = [{id:`sim-${model}`,label:`${this.profile.label} simulator`,model,capabilities:[...this.profile.simChannels]}];
       this.connectionState = "discovered"; this.connectionMessage = "Simulator ready. Choose its device to continue.";
@@ -161,7 +163,7 @@ export class ReaderDeviceController {
     this.testResolve?.();this.testResolve=null;this.testTimer=undefined;
   }
   async test({channel=this.channel,level=1}={}) {
-    if(this.testing || !this.visible || !this.authorized || !this.selectedId || !this.snapshot().connected || !Number.isInteger(level) || level<1 || level>5 || !this.channels().some(value=>value.id===channel)) throw new Error("Select a connected toy, movement and a test level from 1 to 5.");
+    if(this.testing || !this.visible || !this.playbackAuthorized || !this.selectedId || !this.snapshot().connected || !Number.isInteger(level) || level<1 || level>5 || !this.channels().some(value=>value.id===channel)) throw new Error("Select a connected toy, movement and a test level from 1 to 5.");
     if(level>this.snapshot().ceiling)throw new Error("Lower the test level to the chosen maximum; a zero maximum prevents output.");
     this.pause("Preparing a short test. Playback stays paused.");
     const serial=++this.testSerial,operation=this.operation,id=this.selectedId,mode=this.mode;
@@ -364,7 +366,7 @@ export class ReaderDeviceController {
   easeOff(...args){return this.active.easeOff(...args);}
   followStory(){this.active.followStory();return this.snapshot();}
   start(){
-    if(this.testing||!this.visible||!this.authorized || this.mode==="lovense" && (this.real?.ceiling>this.rangeMaximum() || !this.activeChannels().every(channel=>this.channelVerified(channel))))return false;
+    if(this.testing||!this.visible||!this.playbackAuthorized || this.mode==="lovense" && (this.real?.ceiling>this.rangeMaximum() || !this.activeChannels().every(channel=>this.channelVerified(channel))))return false;
     if(this.mode==="simulator")return this.sim.start();
     const intent=this.real?.prepareStart();return intent?this.real.start(intent):false;
   }
@@ -377,8 +379,8 @@ export class ReaderDeviceController {
   setAuthorized(value){
     const wasAuthorized=this.authorized;
     this.authorized=value===true;if(this.real)this.real.setAuthorized(this.authorized);
-    if(!this.authorized){this.personalRangeChannels.clear();this.pause("Sign-in expired. Check sign-in before reconnecting.");this.bridge?.dispose();}
-    else if(!wasAuthorized && this.mode==="simulator" && this.sim.state!=="ERROR_PAUSED"){
+    if(!this.authorized){this.personalRangeChannels.clear();if(!this.playbackAuthorized)this.pause("Sign-in expired. Check sign-in before reconnecting.");this.bridge?.dispose();}
+    else if(!wasAuthorized && !this.allowGuestSimulation && this.mode==="simulator" && this.sim.state!=="ERROR_PAUSED"){
       this.sim.pause(this.sim.connected ? "Sign-in checked. Confirm Start when ready." : "Choose Toy setup to connect a toy or rehearse with a simulator.");
     }
     return this.snapshot();

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {simulatorReading, simulatorChannelReadings, SimulatorTrace, createSimulatorView} from "../app/static/reader/simulator-view.mjs";
+import {TOY_PROFILES} from "../app/static/devices/toy-profiles.mjs";
 import {setupDOM} from "./helpers/setup-dom.mjs";
 
 test("the visual never substitutes target output for actual reported output", () => {
@@ -56,7 +57,7 @@ test("reduced motion, hidden documents and hidden mounts suspend motion without 
   view.destroy(); dom.hide(false); assert.equal(dom.frames.size, 0);
 });
 
-test("all nine toy profiles have distinct silhouettes and truthful simulated movement labels", () => {
+test("the original nine toy profiles retain distinct silhouettes and truthful simulated movement labels", () => {
   const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
   const silhouettes = new Set();
   for (const model of ["lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush", "osci3"]) {
@@ -67,6 +68,20 @@ test("all nine toy profiles have distinct silhouettes and truthful simulated mov
     silhouettes.add(graphic.children.at(-1).children[0].getAttribute("d"));
   }
   assert.equal(silhouettes.size, 9);
+  view.destroy();
+});
+
+test("the additional models use their own names and a representative shape, including thrust-only models", () => {
+  const dom = setupDOM(), mount = dom.make("div"), view = createSimulatorView(mount, dom);
+  for (const profile of TOY_PROFILES) {
+    const snapshot = {mode: "simulator", model: profile.id, connected: true, running: true, output: 3};
+    view.update(snapshot);
+    const frame = mount.children[0];
+    assert.equal(frame.dataset.model, profile.id);
+    assert.equal(frame.children[0].children[0].textContent, `${profile.label} · simulator`);
+    assert.ok(frame.children[1].children.at(-1).children[0].getAttribute("d").startsWith("M"));
+    assert.equal(simulatorReading(snapshot).channel, profile.simChannels[0]);
+  }
   view.destroy();
 });
 

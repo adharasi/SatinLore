@@ -4,6 +4,8 @@ A private browser reader that turns a person's chosen story into changing contro
 
 **For 3 November testing:** start with the [founder and tester session runbook](docs/beta-session-2026-11-03.md). It covers the remaining Cloudflare hostname/allowlist steps, account creation, the simulator rehearsal, live checks, personal-range permission, controlled stories and the private recording admin.
 
+**Public reader rollout:** use the [email sign-in activation checklist](deploy/cloudflare/public-reader.md) to verify delivery and open the app hostname. The beta and Alpha workflows keep their existing authentication. See the [onboarding walkthrough and UX review](docs/public-reader-ux-review.md) for the next usability improvements.
+
 ## Current experience
 
 The NovelAI-inspired reader retains Satin Editorial, Midnight Ink and System appearance, a collapsible library, a continuous reading canvas and a right settings sidebar. Type/paste, upload and supported AO3 link import remain separate choices. Story analysis runs locally and suggests intensity, rhythm and movement by section. Review is optional. The dock changes the current section target one level at a time, and the maximum slider applies directly.
@@ -12,7 +14,7 @@ The NovelAI-inspired reader retains Satin Editorial, Midnight Ink and System app
 
 After the existing Cloudflare email one-time PIN login, a reader explicitly confirms 18+ and creates a durable private app account. Named account-wide and story-specific presets retain per-movement minimum, background, preferred, maximum, recovery, rhythm and gain, plus selected active movements and master maximum. Applying them always pauses. **Story text is not cloud-synced:** it remains session-only until Save on this browser is chosen. Story-specific preset links use an opaque local story ID, so the same text newly imported on another device is not automatically recognized as the same story.
 
-Setup offers Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3. Simulate and Connect my toy remain distinct. After explicit device selection, one screen shows sliders for each available movement. Movements start selected when the connection supports them together. Each selected physical movement still needs a gentle test and confirmation that it stopped. The optional test read opens paused. The sidebar re-exposes movement controls, Explore the controls, per-channel tuning, Continuous background, Hold, Ease off, Follow story and saved presets.
+Setup offers 33 [Lovense model and family profiles](docs/lovense-compatibility.md). Simulate and Connect my toy remain distinct. After explicit device selection, one screen shows sliders for each available movement. Movements start selected when the connection supports them together. Each selected physical movement still needs a gentle test and confirmation that it stopped. The optional test read opens paused. The sidebar re-exposes movement controls, Explore the controls, per-channel tuning, Continuous background, Hold, Ease off, Follow story and saved presets.
 
 Live control uses an isolated Lovense Remote bridge. The documented Standard Socket adapter can expose Oscillate and qualified combined actions; its narrower Standard JS fallback does not invent these capabilities. Heating and undocumented independent vibration motors are not implemented. All nonzero requests remain finite at two seconds. Initial gentle checks and unqualified actions are capped at 5/20. After checking a movement's response and targeted Stop, an explicit Enable personal range choice may permit up to 20/20 for that connection. It does not raise the chosen maximum or start output. Presets cannot grant permission; hide, expiry, disconnect and device changes reset it. Lower limits, manual zero and Stop remain authoritative.
 
@@ -50,13 +52,13 @@ For hardware work, follow [the dedicated setup](docs/hardware-check.md). `.env.e
 
 ## Private hosted workspace
 
-The private `app.satinlore.com` deployment uses the same reader and local story processing behind Cloudflare Access. The 1 November deployment and signed-in checks are recorded in the roadmap; each later release needs its own acceptance evidence. Its Worker validates a dedicated Access application's signed token before serving **every** reader asset. Missing configuration fails closed; direct Worker and preview hostnames are disabled. Access expiry or failed revalidation pauses playback, tears down a live connection, blocks Start and leaves the current text readable.
+The `app.satinlore.com` deployment uses the same reader and local story processing. In private mode the Worker requires a signed Cloudflare Access token. With public email sign-in enabled, guests can read and rehearse with the simulator. A verified account is required for live pairing, Nocturne, link imports, saved presets and feedback. Direct Worker and preview hostnames are disabled. Session expiry or failed revalidation pauses playback and tears down a live connection while leaving the current text readable.
 
 The reader explains why Start is unavailable, provides a nearby sign-in retry and supports repeated Start/Stop/reconnect without restoring an armed session. A synchronous access-check failure no longer leaves retries stuck.
 
 This is a private **software beta** with hardware-free simulation, explicit account/preset persistence and a configured Lovense route. It does not claim qualified physical-device playback, a validated intensity algorithm or cloud story storage. The Python invitation/device-check backend stays local and is excluded from the hosted build. The one-time browser setup connects this GitHub repository to Cloudflare for automatic deployment on future pushes. Access settings remain in the Cloudflare dashboard and survive those deployments. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for the exact setup, checks and rollback; source publication alone does not establish a live, protected deployment.
 
-Useful hosted pages: `/help` for controls/privacy/build information, `/support` for private feedback and feedback data, and `/simulator-lab` for the founder's repeatable failure scenarios. Open these from the global gear menu; they open separately so session-only reader text remains in its original tab. Deliberate AO3 link import uses the authenticated `/api/story-import` service, temporarily fetching/extracting the requested public source without server retention or forwarding browser credentials; local drafts/uploads/saved stories are not automatically uploaded.
+Useful hosted pages include `/help` for controls and privacy, `/support` for feedback and your submitted notes, and `/simulator-lab` for repeatable failure scenarios. The header Feedback link opens a separate tab so the reader stays in place. The founder inbox is on `beta.satinlore.com/feedback-admin`. A deliberate AO3 link import uses the authenticated `/api/story-import` service to fetch the requested public source without retaining it or forwarding browser credentials. Local drafts, uploads and saved stories remain on the device.
 
 ![Satin Editorial private-reader preview with neutral sample text](docs/images/private-reader-desktop.jpg)
 
@@ -87,7 +89,7 @@ Optional browser integration checks use Playwright and a fake vendor SDK. See th
 | `app/services/`, `app/db/` | Server-side vendor exchange and SQLite invitation/session records |
 | `app/static/appearance.js`, `theme.css`, `reader.css` | Theme preference, approved semantic colours and responsive reader layout |
 | `app/static/reader/` | Local/direct and supported-link import, folders/storage, background analysis, optional corrections, position, guided setup and simulator visualisation |
-| `app/static/devices/` | Nine-model profiles/simulators, SDK/bridge transport and reader device control |
+| `app/static/devices/` | Lovense profiles and simulators, SDK/bridge transport and reader device control |
 | `app/static/device-check.*`, `device-bridge.*` | Separate hardware check and sandboxed vendor SDK bridge |
 | `app/static/playback/` | Synchronous simulation and asynchronous targeted playback, cadence, ceiling and interruption control |
 | `scripts/create_invite.py` | Local one-use invitation issuance |

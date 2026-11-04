@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createSetupFlow, PRACTICE_STORY, SETUP_MODELS} from "../app/static/reader/setup-flow.mjs";
+import {getToyProfile, TOY_PROFILES} from "../app/static/devices/toy-profiles.mjs";
 import {setupDOM} from "./helpers/setup-dom.mjs";
 
 function harness(options = {}) {
@@ -8,7 +9,7 @@ function harness(options = {}) {
   const flow = createSetupFlow({...dom, coachMount,
     onConnect(request) {
       calls.push("connect"); requests.push(request);
-      const toy = {id: "sim-" + request.model, label: request.model, model: request.model, capabilities: ["vibrate"]};
+      const toy = {id: "sim-" + request.model, label: request.model, model: request.model, capabilities: getToyProfile(request.model).simChannels};
       flow.update({mode: request.mode, model: request.model, connectionState: "discovered", connected: true, running: false, output: 0,
         position: 0, levelAdjustment: 0, ceiling: 5, toys: [toy], selectedId: null});
       return true;
@@ -67,12 +68,13 @@ test("guided setup requires deliberate connection, device selection, test confir
 });
 
 test("every requested model can rehearse detection, explicit selection and bounded testing", async () => {
-  assert.deepEqual(SETUP_MODELS.map(model => model.id), ["lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush", "osci3"]);
+  assert.deepEqual(SETUP_MODELS.map(model => model.id).sort(), TOY_PROFILES.map(model => model.id).sort());
+  assert.match(SETUP_MODELS.find(model => model.id === "gush2").pickerLabel, /Gush 2 Motion/);
   for (const model of SETUP_MODELS) {
     const app = harness(); app.flow.open({model: model.id}); await app.click("setup-primary");
     await app.selectDevice("sim-" + model.id); await app.checkedTest();
     assert.equal(app.flow.snapshot().phase, "practice", model.id);
-    assert.deepEqual(app.calls.find(value => value?.test), {test: {channel: "vibrate", level: 1}});
+    assert.deepEqual(app.calls.find(value => value?.test), {test: {channel: getToyProfile(model.id).simChannels[0], level: 1}});
     assert.equal(app.calls.includes("start"), false);
   }
 });
@@ -183,6 +185,21 @@ test("real pairing waits for detected toys, validates QR origin and never invent
   assert.equal(app.flow.snapshot().active, false);
 });
 
+test("live setup sends guests to sign-in and preserves the chosen toy for explicit pairing", async () => {
+  let signedIn = false, choice = null;
+  const app = harness({canConnectLive: () => signedIn, onLiveSignIn: options => { choice = options; }});
+  app.flow.open({mode: "lovense", model: "flexer"});
+  assert.equal(app.nodes.get("setup-primary").textContent, "Sign in to connect Flexer");
+  await app.click("setup-primary");
+  assert.deepEqual(choice, {mode: "lovense", model: "flexer"});
+  assert.equal(app.flow.snapshot().active, false);
+  assert.deepEqual(app.requests, []);
+  signedIn = true;
+  app.flow.open(choice);
+  assert.equal(app.nodes.get("setup-primary").textContent, "Connect Flexer");
+  assert.equal(app.flow.snapshot().phase, "connect");
+});
+
 test("missing live credentials presents a simulator alternative instead of a usable fake pairing code", async () => {
   const app = harness({onConnect: () => ({liveConfigured: false, connected: false, toys: []})});
   app.flow.open({mode: "lovense"}); await app.click("setup-primary");
@@ -256,11 +273,11 @@ test("live setup treats unknown output as unconfirmed and requires a fresh stopp
   await app.click("setup-primary");
   await app.selectDevice();
   await app.click("setup-test");
-  assert.equal(app.nodes.get("setup-live-output").textContent, "Requested output unconfirmed");
+  assert.equal(app.nodes.get("setup-live-output").textContent, "Test level unconfirmed");
   assert.equal(app.nodes.get("setup-response-checked").disabled, true);
   assert.equal(app.nodes.get("setup-primary").disabled, true);
   app.flow.update({output: 0, outputKnown: false});
-  assert.equal(app.nodes.get("setup-live-output").textContent, "Requested output unconfirmed");
+  assert.equal(app.nodes.get("setup-live-output").textContent, "Test level unconfirmed");
   assert.equal(app.nodes.get("setup-response-checked").disabled, true);
   app.flow.update({output: 0, outputKnown: true});
   assert.equal(app.nodes.get("setup-response-checked").disabled, false);

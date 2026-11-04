@@ -83,6 +83,21 @@ test("fresh capability metadata restricts commands and stale enrichment cannot r
   release(Response.json({code:200,data:{toys:JSON.stringify({velvo:{id:"velvo",fullFunctionNames:["Vibrate","Rotate"]}})}}));await settle();
   assert.deepEqual(f.sdk.getOnlineToys(),[]);assert.throws(()=>f.sdk.sendToyCommand({rotate:1,time:2,toyId:"velvo"}));f.sdk.destroy();
 });
+test("reported thrust-only models issue only a targeted finite movement on the extended socket", async () => {
+  const f = fixture(); await f.sdk.prepared;
+  f.toys([f.raw("Solace Pro", "toy-one"), f.raw("Gravity", "toy-two")]);
+  assert.throws(() => f.sdk.sendToyCommand({thrusting:2,time:2,toyId:"toy-one"}), /unavailable/);
+  f.toys([{...f.raw("Solace Pro", "toy-one"),fullFunctionNames:["Thrusting","Depth","Stroke"]}, f.raw("Gravity", "toy-two")]);
+  assert.throws(() => f.sdk.sendToyCommand({thrusting:6,time:2,toyId:"toy-one"}), /unavailable/);
+  assert.throws(() => f.sdk.sendToyCommand({vibrate:2,time:2,toyId:"toy-one"}), /unavailable/);
+  assert.throws(() => f.sdk.sendToyCommand({thrusting:2,depth:2,time:2,toyId:"toy-one"}), /unavailable/);
+  assert.deepEqual(f.sdk.sendToyCommand({thrusting:2,time:2,toyId:"toy-one"}), {status:"submitted"});
+  assert.deepEqual(f.outgoing.at(-1).value, {command:"Function",action:"Thrusting:2",timeSec:2,toy:"toy-one",stopPrevious:1,apiVer:1});
+  f.sdk.stopToyAction("toy-one");
+  assert.equal(f.outgoing.at(-1).value.action, "Stop");
+  assert.equal(f.outgoing.at(-1).value.toy, "toy-one");
+  f.sdk.destroy();
+});
 test("the real controller independently validates vector ceilings and stops on capability loss",async()=>{
   const f=fixture();await f.sdk.prepared;
   const events=[],controller=new LovenseCheck({sdkFactory:()=>f.sdk,emit:event=>events.push(event),now:()=>0});

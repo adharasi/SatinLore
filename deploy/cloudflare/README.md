@@ -1,5 +1,7 @@
 # Private reader and Lovense pairing on Cloudflare
 
+For the public email sign-in rollout, use the [public reader activation checklist](public-reader.md). The private setup below remains the reference for the beta and founder routes.
+
 This adapter hosts the browser reader at `https://app.satinlore.com`, protected by signed Cloudflare Access assertions and an explicit Worker email allowlist. Simulator rehearsals need no hardware or Lovense credentials. The guided real-toy path uses a separately sandboxed documented Standard Socket adapter with a Standard JS SDK fallback and requires the server settings below. Hardware behaviour remains unqualified until recorded on physical devices. This does not deploy FastAPI, move local SQLite or use the marketing website database, email credentials or routes. The separate local `/device-check` invitation flow remains on Python/loopback.
 
 ## Current account and beta-host refinement

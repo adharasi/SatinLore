@@ -19,6 +19,7 @@ test("accounts use real SQLite Durable Object KV transactions, cross-user isolat
         }));
       }};` },
     { type: "ESModule", path: root + "deploy/cloudflare/accounts.mjs", contents: await readFile(new URL("../deploy/cloudflare/accounts.mjs", import.meta.url), "utf8") },
+    { type: "ESModule", path: root + "app/static/devices/toy-profiles.mjs", contents: await readFile(new URL("../app/static/devices/toy-profiles.mjs", import.meta.url), "utf8") },
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0, durableObjects: {
     READER_ACCOUNTS: { className: "ReaderAccount", useSQLite: true },
   } });

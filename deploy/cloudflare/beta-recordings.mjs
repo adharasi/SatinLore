@@ -1,9 +1,11 @@
 /** Opted-in beta control timelines. Raw DOM, text, device IDs and credentials are never accepted. */
+import {TOY_PROFILES} from "../../app/static/devices/toy-profiles.mjs";
+
 export const BETA_RECORDING_ORIGIN = "https://beta.satinlore.com";
 export const BETA_RECORDING_CONSENT = "beta-controls-2026-11-02-v1";
 export const BETA_RECORDING_RETENTION_MS = 30 * 86400000;
 export const BETA_RECORDING_LIMITS = Object.freeze({ durationMs: 3600000, events: 20000, batchEvents: 100, sessionBytes: 4 * 1024 * 1024, totalBytes: 128 * 1024 * 1024, requestBytes: 98304 });
-export const BETA_TOYS = Object.freeze(["none", "lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush", "osci3"]);
+export const BETA_TOYS = Object.freeze(["none", ...TOY_PROFILES.map(profile => profile.id)]);
 export const BETA_CHANNELS = Object.freeze(["vibrate", "fingering", "rotate", "thrusting", "oscillate"]);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const OWNER = /^[a-f0-9]{64}$/;

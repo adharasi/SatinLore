@@ -8,6 +8,7 @@ import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
 import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_ASSETS } from "../deploy/cloudflare/assets.mjs";
+import { FEEDBACK_INBOX_NAME } from "../deploy/cloudflare/feedback.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://app.satinlore.com";
@@ -72,7 +73,7 @@ test("valid founder assertions grant only read-only allowlisted files and strip 
   const f = fixture(), jwt = await token();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const response = await f.worker.fetch(request(path, jwt), f.env);
-    if (["/admin","/admin/","/beta-admin.html","/static/beta-admin.mjs","/static/beta-admin.css"].includes(path)) {
+    if (path.startsWith("/feedback-admin/") || ["/admin","/admin/","/beta-admin.html","/static/beta-admin.mjs","/static/beta-admin.css"].includes(path)) {
       assert.equal(response.status,403,path);continue;
     }
     assert.equal(response.status, 200, path);
@@ -168,10 +169,12 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.equal(config.workers_dev, false); assert.equal(config.preview_urls, false);
   assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }, {pattern:"beta.satinlore.com",custom_domain:true}]);
   assert.equal(config.d1_databases, undefined); assert.equal(config.r2_buckets, undefined);
-  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"},{name:"ALPHA_STUDY",class_name:"AlphaStudy"},{name:"SCENE_ANALYSIS_BUDGET",class_name:"SceneAnalysisBudget"}]);
-  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]},{tag:"v3",new_sqlite_classes:["AlphaStudy"]},{tag:"v4",new_sqlite_classes:["SceneAnalysisBudget"]}]);
+  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"},{name:"ALPHA_STUDY",class_name:"AlphaStudy"},{name:"SCENE_ANALYSIS_BUDGET",class_name:"SceneAnalysisBudget"},{name:"PUBLIC_READER_AUTH",class_name:"PublicReaderAuth"}]);
+  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]},{tag:"v3",new_sqlite_classes:["AlphaStudy"]},{tag:"v4",new_sqlite_classes:["SceneAnalysisBudget"]},{tag:"v5",new_sqlite_classes:["PublicReaderAuth"]}]);
   assert.equal(config.keep_vars, true);
-  for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED"]) assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
+  for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED", "PUBLIC_READER_ENABLED", "PUBLIC_READER_OTP_KEY"]) {
+    assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
+  }
   assert.equal(config.vars.PUBLIC_APP_ORIGIN, ORIGIN);
   assert.equal(config.vars.FOUNDER_EMAIL, "team@satinlore.com");
   assert.equal(privateAppConfiguration(config.vars), null);
@@ -260,7 +263,10 @@ function feedbackFixture() {
   f.env.PRIVATE_FEEDBACK = {
     idFromName(name) { names.push(name); return name; },
     get(id) { return { async fetch(input) {
-      forwarded.push({ id, request: input, body: input.method === "POST" ? await input.json() : null });
+      const path = new URL(input.url).pathname;
+      forwarded.push({ id, request: input, body: ["POST", "PATCH"].includes(input.method) ? await input.json() : null });
+      if (path === "/internal/legacy-retry") return Response.json({ found: false }, { status: 404 });
+      if (input.method === "GET") return Response.json({ feedback: [] });
       return Response.json({ ok: true });
     } }; },
   };
@@ -287,16 +293,18 @@ test("feedback storage is selected only from verified identity and never receive
   const f = feedbackFixture(), jwt = await token();
   const response = await f.worker.fetch(request("/api/feedback?user=untrusted", jwt, feedbackPost(validFeedback)), f.env);
   assert.equal(response.status, 200); assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.deepEqual(f.forwarded[0].body, { ...validFeedback, rating: null });
-  const firstName = f.names[0]; assert.match(firstName, /^[a-f0-9]{64}$/);
+  assert.deepEqual(f.forwarded[1].body, { ...validFeedback, rating: null });
+  assert.equal(f.forwarded[1].id, FEEDBACK_INBOX_NAME);
+  const firstName = f.forwarded[1].request.headers.get("X-Feedback-Owner"); assert.match(firstName, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(firstName, /synthetic|founder/);
-  await f.worker.fetch(request("/api/my-data?email=untrusted", jwt, { headers: { Cookie: "private=synthetic" } }), f.env);
-  assert.equal(f.names[1], firstName);
-  const forwarded = f.forwarded[1].request;
-  assert.equal(forwarded.url, "https://feedback.internal/api/my-data");
+  await f.worker.fetch(request("/api/my-data?email=untrusted", jwt, { headers: { Cookie: "private=synthetic", "X-Feedback-Owner": "b".repeat(64) } }), f.env);
+  const forwarded = f.forwarded[2].request;
+  assert.equal(forwarded.url, "https://feedback.internal/internal/inbox/feedback");
+  assert.equal(forwarded.headers.get("X-Feedback-Owner"), firstName);
   assert.equal(forwarded.headers.get("Cookie"), null); assert.equal(forwarded.headers.get("Cf-Access-Jwt-Assertion"), null);
+  assert.equal(f.forwarded[3].id, firstName);
   await f.worker.fetch(request("/api/my-data", await token({ sub: "other-synthetic-subject" })), f.env);
-  assert.notEqual(f.names[2], firstName);
+  assert.notEqual(f.forwarded[4].request.headers.get("X-Feedback-Owner"), firstName);
   const access = await (await f.worker.fetch(request("/api/access", jwt), f.env)).json();
   assert.deepEqual(Object.keys(access).sort(), ["authenticated", "expiresAt"]);
   assert.equal(access.authenticated, true); assert.equal(Number.isSafeInteger(access.expiresAt), true);
@@ -314,6 +322,34 @@ test("feedback rejects identity fields, excess bodies and unconfirmed deletion b
   assert.equal(f.forwarded.length, 0);
   assert.equal((await f.worker.fetch(request("/api/my-data/delete", jwt, feedbackPost({ confirm: true })), f.env)).status, 200);
   assert.deepEqual(f.forwarded[0].body, { confirm: true });
+  assert.equal(f.forwarded[0].id, FEEDBACK_INBOX_NAME);
+  assert.deepEqual(f.forwarded[1].body, { confirm: true });
+});
+
+test("feedback review assets and API require the signed founder at the beta host", async () => {
+  const f = feedbackFixture();
+  const origin = "https://beta.satinlore.com";
+  const founder = await token();
+  const testerEmail = "synthetic-tester@example.test";
+  const tester = await token({ email: testerEmail, sub: "synthetic-tester" });
+  f.env.BETA_TESTER_EMAILS = testerEmail;
+  const paths = ["/feedback-admin", "/feedback-admin/index.html", "/feedback-admin/review.mjs", "/feedback-admin/api"];
+  for (const path of paths) {
+    assert.equal((await f.worker.fetch(request(path, undefined, { origin }), f.env)).status, 403);
+    assert.equal((await f.worker.fetch(request(path, tester, { origin }), f.env)).status, 403);
+    assert.equal((await f.worker.fetch(request(path, founder), f.env)).status, 403);
+  }
+  assert.equal(f.forwarded.length, 0);
+  assert.equal(f.reads.length, 0);
+  for (const path of paths) assert.equal((await f.worker.fetch(request(path, founder, { origin }), f.env)).status, 200, path);
+  const update = { id: validFeedback.idempotencyKey, status: "reviewing" };
+  const patch = (body, suppliedOrigin = origin) => ({
+    origin, method: "PATCH", headers: { Origin: suppliedOrigin, "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  assert.equal((await f.worker.fetch(request("/feedback-admin/api", founder, patch(update, ORIGIN)), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(request("/feedback-admin/api", founder, patch({ ...update, owner: "untrusted" })), f.env)).status, 400);
+  assert.equal((await f.worker.fetch(request("/feedback-admin/api", founder, patch(update)), f.env)).status, 200);
+  assert.deepEqual(f.forwarded.map(entry => [entry.id, entry.body]), [[FEEDBACK_INBOX_NAME, null], [FEEDBACK_INBOX_NAME, update]]);
 });
 
 test("feedback outages and wrong methods return truthful errors without private exceptions", async () => {

@@ -33,7 +33,7 @@ test("a successful sign-in check clears the temporary expiry message without sta
   c.destroy();
 });
 
-test("all nine profiles require explicit rehearsal selection and keep chosen channel output finite",async()=>{
+test("all profiles require explicit rehearsal selection and keep chosen channel output finite",async()=>{
   for(const profile of TOY_PROFILES){
     const app=fixture();const c=app.controller;c.setStory([3,0,5]);
     const setup=await c.beginConnection({mode:"simulator",model:profile.id});

@@ -20,7 +20,8 @@ export const PRACTICE_STORY = Object.freeze({
 
 // All connection callbacks stay in the application adapter. This view receives
 // status snapshots; model choice alone never authorises a command or a toy ID.
-export const SETUP_MODELS = Object.freeze(TOY_PROFILES.map(({id, label}) => Object.freeze({id, label})));
+export const SETUP_MODELS = Object.freeze(TOY_PROFILES.map(({id, label, pickerLabel}) => Object.freeze({id, label, pickerLabel}))
+  .sort((first, second) => first.pickerLabel.localeCompare(second.pickerLabel, "en")));
 export const SETUP_STORIES = Object.freeze([Object.freeze({...PRACTICE_STORY, betaId: "control-check-v1", controlled: true,
   description: "Check scrolling, section levels, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
   .map(story => Object.freeze({...story, authoredLevels: true, quietZeros: true})));
@@ -38,6 +39,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   coachMount = null, onConnect = () => false, onSelectDevice = () => false,
   onRefresh = () => {}, onTest = () => false, onConfirmTest = () => true, onDisconnect = () => {}, onSimulateFailure = () => {},
   onPractice = () => false, onStart = () => {}, onStop = () => {}, onFinish = () => {},
+  canConnectLive = () => true, onLiveSignIn = () => {},
   enableCalibration = false, onCalibrationChange = () => {}, onApplyCalibration = () => false,
   onApplyChannels = null, onEnablePersonalRange = null, onCalibrationModeChange = () => {}, onResearchEvent = () => {}} = {}) {
   if (!document?.body || !document.createElement) return {open() {}, update() {}, finish() {}, cancel() {}, destroy() {}, snapshot: () => ({active: false, checks: {}})};
@@ -68,7 +70,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const intro = make("p", {id: "setup-intro", value: "Connect a toy through Lovense Remote or try the controls with a simulator."});
   const chooser = make("section", {id: "setup-choices", className: "setup-choices"});
   const model = make("select", {id: "setup-model"});
-  for (const toy of SETUP_MODELS) model.append(option(toy.id, toy.label));
+  for (const toy of SETUP_MODELS) model.append(option(toy.id, toy.pickerLabel));
   model.value = "lush";
   const modeGroup = make("div", {className: "setup-mode-options", attrs: {role: "group", "aria-label": "Connection type"}});
   const simMode = button("setup-mode-simulator", "Try a simulator", "setup-mode");
@@ -92,7 +94,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const channel = make("select", {id: "setup-channel"});
   const testLevel = make("input", {id: "setup-test-level", attrs: {type: "range", min: 1, max: 5, step: 1, value: 1}}); testLevel.value = "1";
   const testReadout = make("output", {id: "setup-test-level-value", value: "1 / 20", attrs: {for: "setup-test-level"}});
-  const liveLevel = make("output", {id: "setup-live-output", value: "Output 0 / 20", attrs: {"aria-live": "polite"}});
+  const liveLevel = make("output", {id: "setup-live-output", value: "Level 0 / 20", attrs: {"aria-live": "polite"}});
   const testButton = button("setup-test", "Test for 2 seconds", "primary");
   const confirmation = make("input", {id: "setup-response-checked", attrs: {type: "checkbox"}});
   const confirmationLabel = make("label", {className: "setup-confirmation", attrs: {for: "setup-response-checked"}});
@@ -249,7 +251,7 @@ export function createSetupFlow({document = globalThis.document, window = global
     if (phase === "connect") {
       step.textContent = "01 / Choose your toy"; heading.textContent = "Set up your toy";
       intro.textContent = "Connect a toy through Lovense Remote or try the controls with a simulator.";
-      primary.textContent = simulator ? "Connect " + label() + " simulator" : "Connect " + label();
+      primary.textContent = simulator ? "Connect " + label() + " simulator" : canConnectLive() ? "Connect " + label() : "Sign in to connect " + label();
     } else if (phase === "pair") {
       step.textContent = "02 / Connect"; heading.textContent = simulator ? "Connect the simulator" : "Pair your toy in Lovense Remote";
       intro.textContent = simulator ? "Reconnect to practise selecting a toy, checking a movement and trying the reader controls." :
@@ -276,11 +278,11 @@ export function createSetupFlow({document = globalThis.document, window = global
       primary.textContent = "Use this toy";
     } else if (phase === "test") {
       step.textContent = "04 / Check a movement"; heading.textContent = "Try a two-second test";
-      intro.textContent = "Choose a movement and start at level 1. Watch for the movement and check that it stops.";
+      intro.textContent = "Start at level 1. Watch or feel for two seconds of movement, then check that it stops before you continue.";
       testMaximumNote.textContent = maximum === 0 ? "Testing is off at maximum 0. Close setup, adjust Maximum in the playback bar, then reopen setup." :
         "Current maximum: " + current.ceiling + "/20. This short test can use levels 1 to " + maximum + ".";
       testNote.textContent = simulator ? "Watch the simulated level return to zero before confirming." :
-        "Place the toy somewhere you can check its response. Keep Lovense Remote or the toy’s Stop control within reach.";
+        "Place your toy where you can see or feel it move. Keep Lovense Remote or the toy’s Stop control within reach.";
       const movement = CHANNEL_LABELS[channel.value]?.toLowerCase() || "the selected movement";
       confirmationText.textContent = simulator ? "I saw the simulated level return to zero." :
         "I saw or felt " + movement + " and checked that the toy stopped.";
@@ -299,7 +301,7 @@ export function createSetupFlow({document = globalThis.document, window = global
     }
     const output = Number.isInteger(current.output) && current.outputKnown !== false ?
       Math.min(20, Math.max(0, current.output)) + " / 20" : "unconfirmed";
-    liveLevel.textContent = (simulator ? "Simulated output " : "Requested output ") + output;
+    liveLevel.textContent = (simulator ? "Simulator level " : "Test level ") + output;
   }
   const enterPairOrSelect = () => {
     phase = discovered() ? "select" : "pair";
@@ -307,6 +309,10 @@ export function createSetupFlow({document = globalThis.document, window = global
     render();
   };
   const connect = async () => {
+    if (mode === "lovense" && !canConnectLive()) {
+      const options = {mode, model: preferredModel};
+      leave(); onLiveSignIn(options); return;
+    }
     const activeEpoch = ++epoch; device.value = ""; setBusy(true); status.textContent = mode === "simulator" ? "Connecting simulator…" : "Preparing a private Lovense connection…";
     try {
       const result = await onConnect({mode, model: preferredModel});

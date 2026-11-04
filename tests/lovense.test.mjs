@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {LovenseCheck, safeQrUrl, supportedToys} from "../app/static/devices/lovense.mjs";
+import {TOY_PROFILES} from "../app/static/devices/toy-profiles.mjs";
 
 const toy = (id = "toy-a", version = "3") => ({id, name: "Untrusted vendor label", toyType: "lush", hVersion: version, connected: true});
 const session = {uid: "user-a", platform: "SatinLore tests", authToken: "fake-token", expires_at: 100};
@@ -187,18 +188,18 @@ test("pairing images are limited to HTTPS vendor domains", () => {
 });
 
 test("all requested models can be explicitly targeted without broadcasting", async () => {
-  for(const model of ["lush","flexer","nora","domi","velvo","spinel","dolce","hush","osci3"]) {
+  for(const {id:model, physicalChannels:[channel]} of TOY_PROFILES.filter(profile => profile.physicalChannels.length)) {
     const {controller,connect}=harness();const sdk=connect();
     sdk.toys=[{id:`only-${model}`,toyType:model,connected:true}];sdk.event("toyInfoChange");
     controller.select(`only-${model}`);
-    assert.deepEqual(await controller.command(5,2),{status:"submitted",level:2,channel:"vibrate"});
-    assert.deepEqual(sdk.commands,[{vibrate:2,time:2,toyId:`only-${model}`}]);
+    assert.deepEqual(await controller.command(5,2,{channel}),{status:"submitted",level:2,channel});
+    assert.deepEqual(sdk.commands,[{[channel]:2,time:2,toyId:`only-${model}`}]);
     assert.ok(sdk.commands.every(command=>command.toyId));
   }
 });
 
 test("channel dispatch follows current manufacturer capabilities and never adds unknown commands", async () => {
-  for(const [model,channel] of [["nora","rotate"],["flexer","fingering"],["velvo","rotate"],["spinel","thrusting"]]) {
+  for(const [model,channel] of [["nora","rotate"],["flexer","fingering"],["gravity","thrusting"]]) {
     const {controller,connect}=harness();const sdk=connect();
     sdk.toys=[{id:"selected",toyType:model,connected:true,fullFunctionNames:["Vibrate",channel]}];sdk.event("toyInfoChange");controller.select("selected");
     await controller.command(3,5,{channel,seconds:2});

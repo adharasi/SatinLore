@@ -1,12 +1,13 @@
 // Deliberately structured beta research, never a DOM, screen or input recorder.
 // Only fixed event names and bounded numeric controls can leave this module.
 import {normalizeReadingMark} from "./reading-feedback.mjs";
+import {TOY_PROFILES} from "../devices/toy-profiles.mjs";
 
 export const BETA_RECORDING_HOST = "beta.satinlore.com";
 export const BETA_CONSENT_VERSION = "beta-controls-2026-11-02-v1";
 export const BETA_RECORDING_MAX_DURATION = 3600000;
 const PATH = "/api/beta/recordings";
-const TOYS = new Set(["none", "lush", "flexer", "nora", "domi", "velvo", "spinel", "dolce", "hush", "osci3"]);
+const TOYS = new Set(["none", ...TOY_PROFILES.map(profile => profile.id)]);
 const CHANNELS = new Set(["vibrate", "fingering", "rotate", "thrusting", "oscillate"]);
 const STEPS = new Set(["account", "choose", "connect", "features", "calibration", "playground", "practice", "story", "presets", "complete"]);
 const CONTROLS = new Set(["minimum", "background", "preferred", "maximum", "recovery", "gain", "rhythm", "continuity", "strength", "section-level", "action", "mode", "start", "pause", "stop", "hold", "easeoff", "follow", "test"]);

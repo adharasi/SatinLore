@@ -2,13 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
 import vm from "node:vm";
+import {TOY_PROFILES} from "../app/static/devices/toy-profiles.mjs";
 
 // Node's fetch accepts receivers that the browser Window API rejects. Execute
 // the real module code with a receiver check rather than replacing its client.
 async function browserModule(file, exports, responseFor) {
   const source = (await readFile(new URL(file, import.meta.url), "utf8"))
     .replace(/^import .+;\s*$/gm, "").replace(/^export /gm, "");
-  const context = vm.createContext({Response, AbortSignal, AbortController, responseFor});
+  const context = vm.createContext({Response, AbortSignal, AbortController, responseFor, TOY_PROFILES});
   vm.runInContext(`
     "use strict";
     globalThis.fetchCalls = [];

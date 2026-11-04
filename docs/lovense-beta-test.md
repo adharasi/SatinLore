@@ -1,10 +1,10 @@
-# Lovense setup and nine-model beta rehearsal
+# Lovense setup and beta rehearsal
 
 Use [the 3 November founder and tester runbook](beta-session-2026-11-03.md) for the complete account → connection → calibration → controlled-story → optional personal-story journey, including recording and founder review. This guide summarizes device boundaries and replaces the older simulator-only Osci 3 and blanket 5/20 reader descriptions.
 
 ## Current connection contract
 
-The nine profiles are **Lush, Flexer, Nora, Domi, Velvo, Spinel, Dolce, Hush and Osci 3**. Hardware-free simulation and physical connection remain separate. Choosing a model does not select a device or start output; choose the actual discovered toy explicitly.
+The [compatibility catalogue](lovense-compatibility.md) lists the simulation profiles and the conditions for each live movement. Choose the actual discovered toy before starting a live test.
 
 Lovense Remote is the phone/Bluetooth bridge. The isolated vendor frame uses a documented Standard Socket Function adapter, with a narrower Standard JS SDK fallback. It receives only connection/control information, never local story text/title or private preset names. Developer credentials remain server-side; the browser receives a short-lived per-user authToken for the authenticated session only.
 
@@ -14,21 +14,7 @@ All nonzero live requests remain finite at two seconds, including personal-range
 
 ## Model and movement boundaries
 
-| Profile | Available baseline | Additional action when this connection qualifies it | Boundary |
-| --- | --- | --- | --- |
-| Lush | Vibration | None | Record the actual generation. |
-| Flexer | Vibration | Fingering / flexing | Test each separately; combine only through a qualified connection. |
-| Nora | Vibration | Rotation | Each chosen action needs its own check. |
-| Domi | Vibration | None | Record the actual generation. |
-| Velvo | Vibration | Rotation with an explicit compatible capability report | Native support alone does not establish every web transport's support. |
-| Spinel | Vibration | Thrusting with an explicit compatible capability report | No heating, guessed depth or stroke command. |
-| Dolce | General vibration | None | Independent internal/external vibration motors are not exposed here. |
-| Hush | Vibration | None | Record the actual generation. |
-| Osci 3 | Vibration | Oscillation through the qualified Standard Socket adapter | The Basic SDK fallback remains vibration-only; no heating or guessed separate motors. |
-
-The extended adapter can combine qualified actions on **one** selected toy. Each active action has independent levels and must be individually checked before Start; each also needs its own range grant before higher output. Missing, malformed or unsupported capabilities stay unavailable. This is not full Lovense Remote parity or multiple-toy control.
-
-Osci 3 matching accepts its explicit name/type or the Osci family with hardware version 3. It must not promote older Osci/Osci 2 devices. A capability string alone cannot authorize an undocumented Basic SDK parameter.
+The extended adapter can combine qualified actions on **one** selected toy. Each active action has independent levels and needs its own check before Start and its own range grant before higher output. When the connection reports a capability list, the reader only offers movements that also appear in the [supported model and transport table](lovense-compatibility.md).
 
 ## Guided preferences and controlled reading
 
@@ -41,10 +27,10 @@ Readers can explicitly save account-wide or story-specific presets after verifie
 ## Founder readiness before the session
 
 1. Confirm the Worker deployment and v2 account/recording bindings succeeded.
-2. Configure whole-host Access for app and beta, plus the invited email in both the relevant Access Allow policy and runtime `BETA_TESTER_EMAILS`.
+2. Confirm the appropriate reader sign-in and the protected admin route using the [deployment guide](../deploy/cloudflare/README.md). On the restricted beta host, allow the tester in Cloudflare Access and runtime `BETA_TESTER_EMAILS`.
 3. Retain runtime Secrets `LOVENSE_DEVELOPER_TOKEN` and `LOVENSE_UID_SECRET` (independent 64 hex), plus exact Website Name in `LOVENSE_PLATFORM`. Do not paste values into a report or chat.
 4. After deploying settings, sign in and check `/api/lovense/status`. Its token/platform/UID/storage checks must be ready. This is configuration readiness, not vendor acceptance or physical qualification.
-5. Rehearse all nine profiles with simulation, including calibration, qualified combinations, presets, Stop/restart, maximum zero, hide/return and failure/reconnect. Keep physical devices disconnected during this rehearsal.
+5. Rehearse the tester's models with simulation. Exercise calibration, available movement combinations, presets, Stop/restart, maximum zero, hide/return and failure/reconnect.
 6. On beta only, explicitly start a synthetic recording and confirm its control timeline/graphs are visible in founder `/admin`. The normal app host must not record the beta timeline.
 
 The full [session runbook](beta-session-2026-11-03.md) includes exact dashboard steps, expected results and the physical-session sequence. The local Python invitation/device-check service remains separate and keeps its discrete level-5 test ceiling; a local invitation is not a hosted account or Access permission.
