@@ -22,7 +22,7 @@ export async function requestAccount(action, data, request = fetch) {
   return value;
 }
 
-export function mountPublicAccount({document, openDialog, closeDialog, onVerified, onSignOut,
+export function mountPublicAccount({document, openDialog, closeDialog, onVerified, onSignOut, onSignedIn = continuation => continuation?.(),
   request = requestAccount, setTimer = setTimeout, clearTimer = clearTimeout}) {
   const node = id => document.getElementById(id);
   const dialog = node('public-account-dialog'), status = node('public-account-status');
@@ -126,7 +126,7 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
       if (!current()) return;
       if (!allowed) { status.textContent = 'You signed in, but your session could not be checked. Try again.'; return; }
       const continuation = dialog.open ? next : null;
-      close(); continuation?.();
+      close(); await onSignedIn(continuation);
     });
   });
   submit('public-register-form', () => {

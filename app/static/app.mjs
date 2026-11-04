@@ -16,11 +16,14 @@ import {createSetupFlow} from "./reader/setup-flow.mjs";
 import {PRACTICE_STORIES} from "./reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
 import {AccountLibrary} from "./reader/account-library.mjs";
+import {DEFAULT_EXPERIENCE, validateExperience} from "./reader/experience-preferences.mjs";
+import {mountExperienceDialog} from "./reader/experience-dialog.mjs";
 import {mountPublicAccount} from "./reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
-import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel} from "./reader/calibration.mjs";
+import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel, selectPeakPreset} from "./reader/calibration.mjs";
 import {nocturneAvailable, nocturneCandidates, requestNocturne} from "./reader/nocturne.mjs";
+import {storyToyRecommendation} from "./reader/toy-recommendations.mjs";
 
 const $ = id => document.getElementById(id);
 const importer = new TextImporter();
@@ -34,6 +37,8 @@ let simulatorView = null;
 let setupFlow = null;
 let accountClient = null, accountWorkspace = null, betaRecorder = null;
 let publicAccount = null, publicSignedIn = false;
+let peakChoice = {peakPattern: "auto", edging: false};
+let savingPeakChoice = false;
 let recordedDevice = "", recordedStory = "", recordedStep = "", feelChannelSignature = "", feelEditingChannel = null, combinationSignature = "";
 let connection = {mode: "simulator", model: "lush", toys: [], selectedId: null};
 const backupImporter = new BackupImporter();
@@ -76,9 +81,22 @@ const accountLibrary = publicMode ? new AccountLibrary() : null;
 const sessionChangeKey = "satinlore.public-session-change";
 let pendingAccountLibrary = null, localLibraryReady = Promise.resolve();
 let accountPreferences = null;
+let accountExperience = null, guestExperience = null;
+const offeredExperience = new Set();
+const currentExperience = () => accountExperience ?? guestExperience ?? DEFAULT_EXPERIENCE;
+const experienceDialog = mountExperienceDialog({document,
+  openDialog: opener => openDialog("experience-dialog", opener),
+  closeDialog: options => closeDialog("experience-dialog", options),
+  save: savePlaybackPreferences,
+  finish: ({initial, saved, continuation}) => {
+    if (continuation) continuation();
+    else if (initial && saved) setupFlow?.open({mode: "lovense"});
+  },
+});
 const hostedMode = publicMode || document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
 let nocturneReady = null, checkingNocturne = false, nocturneOperation = null;
 let nextStoryModel = "loom";
+let recommendationModel = null, recommendationGeneration = null;
 let hostedAccess = null;
 let hostedAccessReady = !hostedMode;
 const hasVerifiedAccess = () => !hostedMode || Boolean(hostedAccessReady && hostedAccess?.isAuthorized());
@@ -115,11 +133,29 @@ function syncManualZeros(story) {
     (!story.controlled || story.explicitCorrections.has(index)) ? [index] : []));
 }
 function readerProfiles(story) {
-  return story.controlled ? undefined : story.model.effectiveProfiles({nocturne: story.sceneModel === "nocturne"});
+  return story.controlled ? undefined : story.model.effectiveProfiles({nocturne: story.sceneModel === "nocturne", ...peakChoice});
 }
 function syncReaderMapping(story) {
   controller.updateLevels(story.model.effectiveLevels(), readerProfiles(story));
   syncManualZeros(story);
+}
+function applyReadingDefaults(values) {
+  const previous = peakChoice;
+  peakChoice = {peakPattern: values?.peakPattern ?? "auto", edging: values?.edging === true};
+  cancelStart();
+  controller.setReadingDefaults(values);
+  const story = currentStory();
+  if (story?.sceneModel === "nocturne" && !story.controlled &&
+      (previous.peakPattern !== peakChoice.peakPattern || previous.edging !== peakChoice.edging)) {
+    pause("Peak pattern changed. Choose Start when ready.");
+    syncReaderMapping(story);
+  }
+  display(controller.snapshot());
+}
+function renderNocturnePeakSettings(story) {
+  $("nocturne-peak-settings").hidden = !story || story.controlled || story.sceneModel !== "nocturne";
+  $("nocturne-peak-pattern").value = peakChoice.peakPattern;
+  $("nocturne-peak-pattern").disabled = Boolean(savingPeakChoice || libraryMutation || story?.deleting);
 }
 function selectedSettings(state = latest,channel = feelEditingChannel || state.channel) {
   const stored = state.calibration?.channels?.[channel] || {minimum:0,background:1,preferred:3,maximum:5,recovery:0,gain:1,rhythm:"steady"};
@@ -141,7 +177,7 @@ function updateFeelControls(state) {
   $("feel-channel").disabled=state.testing || !channels.length;
   text("available-features", channels.length ? `Available for ${state.deviceLabel || "this toy"}: ${channels.map(c=>c.label).join(" · ")}.` : "Select a connected toy to see its available movements.");
   const settings=selectedSettings(state), feel=state.feel || {mode:"story",playbackMode:"story"};
-  $("feel-mode").value=feel.mode;
+  $("feel-mode").value=feel.mode === "continuous" && feel.quietEdging ? "edging" : feel.mode;
   const editRange=state.mode!=="lovense"?20:(state.personalRangeChannels || []).includes(feelEditingChannel)?20:5;
   for(const key of ["minimum","background","preferred","recovery","maximum"]){$("feel-"+key).value=settings[key];$("feel-"+key).max=key==="maximum"?editRange:settings.maximum;text("feel-"+key+"-value",settings[key]);}
   $("feel-rhythm").value=settings.rhythm;
@@ -149,7 +185,8 @@ function updateFeelControls(state) {
   if($("manual-level")){$("manual-level").value=typeof output==="number"?output:0;$("manual-level").max=Math.min(settings.maximum,state.ceiling);$("manual-level").disabled=!state.running||typeof output!=="number";text("manual-level-value",typeof output==="number"?output:"Unknown");}
   for(const id of ["feel-hold","feel-easeoff","feel-follow"])$(id).disabled=!state.running;
   for(const id of ["mark-good","mark-uncomfortable"])if($(id))$(id).disabled=!state.running||betaRecorder?.snapshot().recording!==true;
-  text("feel-status",feel.playbackMode==="hold"?"Holding your chosen level":feel.playbackMode==="ease-off"?"Eased off · automatic increases are held":"Following the story"+(feel.mode==="continuous"?" · background enabled":""));
+  const quietStatus = feel.mode !== "continuous" ? "" : feel.quietEdging && state.mode === "simulator" ? " · gentle pulses in quiet passages" : " · light background in quiet passages";
+  text("feel-status",feel.playbackMode==="hold"?"Holding your chosen level":feel.playbackMode==="ease-off"?"Eased off · automatic increases are held":"Following the story"+quietStatus);
   if($("enable-personal-range")){
     const granted=(state.personalRangeChannels || []).includes(feelEditingChannel);
     $("enable-personal-range").hidden=state.mode!=="lovense"||granted;
@@ -410,7 +447,8 @@ function updateCurrentCorrection(story) {
   $("level").disabled = !paragraph || libraryMutation || story?.deleting;
   $("reset-level").disabled = !paragraph || paragraph.override === null || libraryMutation || story?.deleting;
   const pattern = story?.sceneModel === "nocturne" ? story.model.nocturneLabels.get(latest.position) : undefined;
-  const stagePattern = latest.mode === "simulator" ? sceneStagePatternLabel(paragraph?.phase, pattern) : null;
+  const preset = story?.sceneModel === "nocturne" ? selectPeakPreset(paragraph?.phase, pattern, peakChoice.peakPattern, peakChoice.edging) : undefined;
+  const stagePattern = latest.mode === "simulator" && (selectedSettings().rhythm === "scene" || preset) ? sceneStagePatternLabel(paragraph?.phase, pattern, preset) : null;
   const rhythm = stagePattern ?? {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
   const endedMovements = paragraph?.endedMovements?.length ? `${paragraph.endedMovements.map(channelLabel).join(" + ")} paused in this scene` : null;
   const movements = paragraph?.movements?.length ? `Movement cue: ${paragraph.movements.map(channelLabel).join(" + ")}` :
@@ -516,7 +554,9 @@ function display(state = latest) {
   $("analysis-status").dataset.state = analysis;
   text("analysis-status", !story ? "" : analysis === "ready" ? "Scene patterns ready · review is optional" :
     analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Analysing quietly on this page… You can read now.");
+  renderToyRecommendation(story);
   renderStoryModel(story);
+  renderNocturnePeakSettings(story);
   const saved = saveState(story);
   $("save-status").dataset.state = saved.state;
   text("save-status", saved.label);
@@ -564,6 +604,16 @@ function pause(reason) {
   try { display(controller.snapshot()); } catch { controlRecovery(controller.snapshot()); }
 }
 
+function renderToyRecommendation(story) {
+  const model = !story?.controlled && story?.model.analysisStatus === "ready" ? story.model : null;
+  const generation = model?.analysisGeneration ?? null;
+  if (model === recommendationModel && generation === recommendationGeneration) return;
+  recommendationModel = model;
+  recommendationGeneration = generation;
+  $("story-toy-recommendations").hidden = !model;
+  text("story-toy-recommendations-summary", model ? storyToyRecommendation(model.paragraphs) : "");
+}
+
 function renderStoryModel(story) {
   const analysedStory = story && !story.controlled;
   const selected = analysedStory ? story.sceneModel : nextStoryModel;
@@ -572,18 +622,18 @@ function renderStoryModel(story) {
   $("scene-model").value = selected;
   $("scene-model").disabled = Boolean(story?.deleting || libraryMutation);
   text("scene-model-help", story?.controlled ? "This calibration story keeps its fixed levels. Choose a model for your next story, or open a model practice story to try it now." :
-    analysedStory ? "Loom follows the story on this device. Nocturne adds rolling waves and sustained crests in the simulator." :
-    "Choose a model for your next story. Loom runs on this device. Nocturne adds rolling waves and sustained crests in the simulator.");
+    analysedStory ? "Both models follow the scene’s pacing. Nocturne adds more ways to shape the peaks." :
+    "Choose a model for your next story. Nocturne adds more ways to shape the peaks.");
   $("model-practice-shortcut").hidden = !story?.controlled;
   $("model-practice-shortcut").disabled = libraryMutation || story?.deleting;
   $("nocturne-panel").hidden = selected !== "nocturne" || !analysedStory;
   $("nocturne-sign-in").hidden = !signInNeeded;
   $("nocturne-run").hidden = signInNeeded;
   $("nocturne-run").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
-  text("nocturne-run", nocturneReady === false ? "Check availability" : "Send cues and analyse");
-  text("nocturne-status", !hostedMode ? "Nocturne is available in the hosted SatinLore app. Loom is ready here." :
+  text("nocturne-run", nocturneReady === false ? "Check availability" : "Analyse with Nocturne");
+  text("nocturne-status", !hostedMode ? "Nocturne is available in the hosted SatinLore app." :
     signInNeeded ? "Sign in to compare Nocturne. Loom is ready as a guest." : checkingNocturne ? "Checking Nocturne availability…" : busy ? "Nocturne is reviewing eligible cues. Playback is paused." :
-    story?.nocturneMessage || (nocturneReady === false ? "Nocturne is unavailable right now. Loom is ready." : "Choose Send cues and analyse when you’re ready."));
+    story?.nocturneMessage || (nocturneReady === false ? "Nocturne is unavailable right now. Loom is ready." : "Choose Analyse with Nocturne when you’re ready."));
 }
 
 async function checkNocturne() {
@@ -1017,6 +1067,7 @@ function closeDialog(id, {restore = true} = {}) {
   dialogOpeners.delete(id);
 }
 function closeDialogs() {
+  experienceDialog.close({restore: false});
   for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog", "story-details-dialog", "practice-story-dialog"]) closeDialog(id, {restore: false});
   startIntent = ceilingIntent = saveIntent = null;
 }
@@ -1358,17 +1409,32 @@ $("import-url")?.addEventListener("click", () => void importStoryUrl());
 $("story-url")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void importStoryUrl(); } });
 $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings-dialog"));
 for (const id of ["close-app-settings", "app-settings-close"]) $(id)?.addEventListener("click", () => closeDialog("app-settings-dialog"));
+$("open-experience").addEventListener("click", () => experienceDialog.open({values: currentExperience(), account: publicSignedIn,
+  opener: $("open-experience"), canStop: latest.connected}));
+$("experience-stop").addEventListener("click", stopEverything);
 for (const id of ["open-setup", "empty-setup", "choose-toy"]) $(id)?.addEventListener("click", () => {recordAllowedEvent({type:"step",step:"choose"});setupFlow?.open();});
 $("open-calibration")?.addEventListener("click",()=>{recordAllowedEvent({type:"step",step:"calibration"});setupFlow?.openCalibration();});
 $("open-account-welcome")?.addEventListener("click",()=>{closeDialog("app-settings-dialog");if(publicMode){publicAccount?.open($("open-app-settings"));return;}if(accountClient?.snapshot().registered){setPanel("settings",true);selectSettingsTab("story");$("account-preset-picker")?.focus();}else accountWorkspace?.focus();});
 $("feel-channel")?.addEventListener("change",async()=>{
-  const channel=$("feel-channel").value, mode=latest.feel?.mode || "story";
+  const channel=$("feel-channel").value, mode=latest.feel?.mode || "story", quietEdging=latest.feel?.quietEdging === true;
   feelEditingChannel=channel;
   if((latest.activeChannels || []).length>1&&(latest.activeChannels || []).includes(channel)){updateFeelControls(latest);return;}
-  try{cancelStart();if(await controller.applyCalibration(channel))controller.setFeel({mode});recordAllowedEvent({type:"control",control:"action",value:channel});}
+  try{cancelStart();if(await controller.applyCalibration(channel))controller.setFeel({mode,quietEdging});recordAllowedEvent({type:"control",control:"action",value:channel});}
   catch(error){show(error.message||"The movement could not be changed.");}display();
 });
-$("feel-mode")?.addEventListener("change",()=>{cancelStart();controller.setFeel({mode:$("feel-mode").value});recordAllowedEvent({type:"control",control:"continuity",value:$("feel-mode").value});});
+$("feel-mode")?.addEventListener("change",()=>{const quietEdging=$("feel-mode").value==="edging",mode=quietEdging?"continuous":$("feel-mode").value;cancelStart();controller.setFeel({mode,quietEdging});recordAllowedEvent({type:"control",control:"continuity",value:mode});});
+$("nocturne-peak-pattern").addEventListener("change", async () => {
+  const choice = $("nocturne-peak-pattern").value;
+  if (savingPeakChoice || currentStory()?.sceneModel !== "nocturne" || !["auto", "crest", "accents", "ease"].includes(choice)) return;
+  savingPeakChoice = true;
+  $("nocturne-peak-pattern").disabled = true;
+  text("nocturne-peak-status", "Saving your peak pattern…");
+  try {
+    const saved = await savePlaybackPreferences({peakPattern: choice});
+    text("nocturne-peak-status", saved ? publicSignedIn ? "Saved to your account." : "Set for this visit." : "Could not save your peak pattern. Try again.");
+  } catch { text("nocturne-peak-status", "Could not save your peak pattern. Try again."); }
+  finally { savingPeakChoice = false; renderNocturnePeakSettings(currentStory()); }
+});
 for(const key of ["minimum","background","preferred","recovery","maximum"])$("feel-"+key)?.addEventListener("input",()=>{
   try{
     cancelStart();const value=Number($("feel-"+key).value), settings={...selectedSettings(),[key]:value};
@@ -1746,6 +1812,8 @@ function loadAccountLibrary() {
       accountPreferences = snapshot.preferences ?? {...preferences.values, appearance: document.documentElement.dataset.appearance || "dark"};
       applyReaderPreferences(accountPreferences);
       accountAppearance(true, accountPreferences.appearance);
+      accountExperience = snapshot.preferences?.experience ?? null;
+      if (accountExperience) applyReadingDefaults(accountExperience);
       text("reader-preferences-note", snapshot.preferences ? "Your saved account settings are in use." : "Changes to these settings will be saved to your account.");
       if (!activeId && stories.length) selectStory(stories[0].id);
       else { display(); renderLibrary(); }
@@ -1763,21 +1831,57 @@ function loadAccountLibrary() {
 
 async function saveAccountPreferences(patch) {
   const owner = await loadAccountLibrary();
-  if (!owner || !publicSignedIn || owner !== accountLibrary.owner || !accountPreferences) return;
+  if (!owner || !publicSignedIn || owner !== accountLibrary.owner || !accountPreferences) return false;
   const {revision, ...next} = {...accountPreferences, ...patch};
   accountPreferences = next;
   applyReaderPreferences(next);
   if (patch.appearance !== undefined) accountAppearance(true, patch.appearance);
   try {
-    await accountLibrary.savePreferences(owner, next);
-    if (publicSignedIn && owner === accountLibrary.owner) text("reader-preferences-note", "Reading preferences saved to your account.");
+    const result = await accountLibrary.savePreferences(owner, next);
+    if (!publicSignedIn || owner !== accountLibrary.owner) return false;
+    if (accountPreferences === next) accountPreferences = result.preferences;
+    if (patch.experience) {
+      accountExperience = validateExperience(result.preferences.experience);
+      applyReadingDefaults(accountExperience);
+    }
+    text("reader-preferences-note", "Reading preferences saved to your account.");
+    return true;
   } catch (error) {
-    if (publicSignedIn && owner === accountLibrary.owner) text("reader-preferences-note", error.message || "Your account settings could not be saved.");
+    if (publicSignedIn && owner === accountLibrary.owner) {
+      if (patch.experience && accountPreferences === next) {
+        if (accountExperience) accountPreferences.experience = accountExperience;
+        else delete accountPreferences.experience;
+      }
+      text("reader-preferences-note", error.message || "Your account settings could not be saved.");
+    }
+    return false;
   }
+}
+
+async function savePlaybackPreferences(patch) {
+  const experience = validateExperience({...currentExperience(), ...patch});
+  if (publicSignedIn) return saveAccountPreferences({experience});
+  guestExperience = experience;
+  applyReadingDefaults(guestExperience);
+  return true;
+}
+
+async function offerExperience(continuation = null) {
+  if (window.location?.search === "?sign-in=feedback") { continuation?.(); return; }
+  const owner = await loadAccountLibrary();
+  if (!owner || !publicSignedIn || owner !== accountLibrary.owner || accountExperience || offeredExperience.has(owner) ||
+      document.hidden || anyDialog()) { continuation?.(); return; }
+  offeredExperience.add(owner);
+  experienceDialog.open({values: currentExperience(), account: true, initial: true, continuation, opener: $("public-account"), canStop: latest.connected});
 }
 
 function clearAccountLibrary() {
   accountLibrary.clear(); pendingAccountLibrary = null; accountPreferences = null;
+  experienceDialog.close({restore: false});
+  if (accountExperience) {
+    accountExperience = null;
+    applyReadingDefaults(guestExperience);
+  }
   for (const story of stories.filter(value => value.accountOwner)) {
     clearTimeout(story.saveTimer);
     story.model.cancelAnalysis();
@@ -1831,6 +1935,7 @@ if (publicMode) {
       announceSessionChange();
       return hostedAccess.check({fresh: true});
     },
+    onSignedIn: offerExperience,
     onSignOut: async request => {
       pause("Signing out. Start when you’re ready.");
       if (latest.mode === "lovense") controller.disconnect();
@@ -1889,7 +1994,7 @@ if (hostedMode) {
   if (publicMode && window.location?.search === "?sign-in=feedback") {
     const openFeedback = () => window.location.assign("/support");
     void accessCheck.then(allowed => allowed ? openFeedback() : publicAccount?.open($("public-account"), openFeedback));
-  }
+  } else if (publicMode) void accessCheck.then(allowed => { if (allowed) return offerExperience(); });
 }
 
 const loadedPreferences = preferences.load();
@@ -1901,6 +2006,13 @@ if (document.createElementNS) {
   simulatorView = createSimulatorView($("simulator-visual"), {document, window});
   setupFlow = createSetupFlow({document, window, coachMount: $("setup-coach-mount"),
     enableCalibration: true,
+    quickSetup: publicMode || window.location?.hostname === "app.satinlore.com",
+    onQuickTest: options => controller.quickTest(options),
+    onConfirmQuickTest: () => controller.confirmQuickTest(),
+    onOpenAdvanced: () => {
+      setPanel("settings", true, {restore: false}); selectSettingsTab("story", {focus: true});
+      show(currentStory() ? "Toy checked. Start when you’re ready." : "Toy checked. Add or open a story when you’re ready.");
+    },
     canConnectLive: () => !publicMode || hasVerifiedAccess(),
     onLiveSignIn: options => publicAccount?.open($("choose-toy"), () => setupFlow?.open(options)),
     onCalibrationChange: ({channel,settings}) => controller.setCalibration(channel,settings),

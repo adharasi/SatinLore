@@ -124,6 +124,49 @@ async function registerAndSignIn(page, {wrongFirst = false, remember = false} = 
   await page.locator("#public-login").click();
 }
 
+async function setMaximum(page, maximum) {
+  const slider = page.locator("#experience-maximum");
+  await slider.press("Home");
+  for (let level = 1; level < maximum; level++) await slider.press("ArrowRight");
+  await expect(slider).toHaveValue(String(maximum));
+}
+
+async function completeExperience(page) {
+  await expect(page.locator("#experience-dialog")).toBeVisible();
+  await page.locator("#experience-quiet").selectOption("continuous");
+  await page.locator("#experience-edging").selectOption("yes");
+  await setMaximum(page, 7);
+  await page.locator("#experience-rhythm").selectOption("gentle");
+  await page.locator("#experience-save").click();
+  await expect(page.locator("#experience-dialog")).toBeHidden();
+}
+
+async function checkQuickSimulatorSetup(page) {
+  await page.locator("#setup-mode-simulator").click();
+  await page.locator("#setup-primary").click();
+  const devices = page.locator("#setup-devices");
+  const flexer = devices.locator("option").filter({hasText: /Flexer/i});
+  await expect(devices).toBeVisible();
+  await expect(flexer).toHaveCount(1);
+  await devices.selectOption(await flexer.getAttribute("value"));
+  await page.locator("#setup-primary").click();
+  const test = page.locator("#setup-test");
+  const confirmation = page.locator("#setup-response-checked");
+  await expect(page.locator("#setup-step-label")).toContainText(/quick test/i);
+  await expect(page.locator("#setup-test-maximum")).toContainText(/vibration.+flexing/i);
+  await expect(page.locator("#setup-test-level")).toBeHidden();
+  await expect(confirmation).toBeDisabled();
+  await test.click();
+  await expect(confirmation).toBeEnabled({timeout: 15_000});
+  await confirmation.check();
+  await page.locator("#setup-primary").click();
+  await expect(page.locator("#setup-dialog")).toBeHidden();
+  await expect(page.locator("#settings-story-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator('#combination-choices input[value="vibrate"]')).toBeChecked();
+  await expect(page.locator('#combination-choices input[value="fingering"]')).toBeChecked();
+  await expect(page.locator("#output")).toHaveText("0 / 20");
+}
+
 try {
   const desktop = await browserPage(1440), {page, posts} = desktop;
   await page.goto(origin);
@@ -132,17 +175,22 @@ try {
   await expect(page.locator("#public-account-dialog")).not.toBeVisible();
   await page.locator("#toggle-settings").click();
   await expect(page.locator("#scene-model")).toBeEnabled();
+  await expect(page.locator('#scene-model option[value="loom"]')).toHaveText("Loom");
   await page.locator("#scene-model").selectOption("nocturne");
   await expect(page.locator("#scene-model")).toHaveValue("nocturne");
   await expect(page.locator("#nocturne-panel")).toBeHidden();
   await page.locator("#scene-model").selectOption("loom");
   await page.locator("#draft-title").fill("Synthetic browser story");
   await page.locator("#draft-story").fill(["They drew closer. She held her breath.",
-    "Their slow tender kiss expressed affection.", "Their passionate, tender kiss and romantic embrace expressed affection.",
+    "Their tender romantic kiss expressed affection. The toy flexed.", "Their passionate, tender kiss and romantic embrace expressed affection.",
     "They slowed and relaxed."].join("\n\n"));
   await page.locator("#open-draft").click();
   await expect(page.locator("#scene-model")).toBeEnabled();
   await expect(page.locator("#scene-model")).toHaveValue("loom");
+  const recommendations = page.locator("#story-toy-recommendations-summary");
+  await expect(recommendations).toBeVisible();
+  await expect(recommendations).toContainText("Flexer");
+  await expect(recommendations).toContainText(/fingering/i);
   await page.locator("#connect").click();
   await page.locator("#start").click();
   await page.locator("#confirm-start").click();
@@ -156,10 +204,21 @@ try {
   await expect(page.locator("#setup-primary")).toHaveText("Sign in to connect Flexer");
   await page.locator("#setup-primary").click();
   await registerAndSignIn(page, {wrongFirst: true, remember: true});
+  await completeExperience(page);
+  await expect.poll(() => desktop.account.preferences?.experience).toEqual({
+    quiet: "continuous", edging: true, maximum: 7, rhythm: "gentle", peakPattern: "auto",
+  });
   await expect(page.locator("#setup-model")).toHaveValue("flexer");
+  await expect(page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
   await expect(page.locator("#setup-primary")).toHaveText("Connect Flexer");
   await expect(page.locator("#setup-qr")).not.toBeVisible();
-  await page.locator("#setup-close").click();
+  await checkQuickSimulatorSetup(page);
+  await expect(page.locator("#cap")).toHaveValue("7");
+  await expect(page.locator("#nocturne-peak-pattern")).toHaveValue("auto");
+  await page.locator("#nocturne-peak-pattern").selectOption("accents");
+  await expect.poll(() => desktop.account.preferences?.experience?.peakPattern).toBe("accents");
+  await page.locator("#settings-reader-tab").click();
+  await expect(page.locator("#feel-mode")).toHaveValue("continuous");
   await expect(page.locator("#public-account")).toHaveAccessibleName("Account, signed in");
   await page.locator("#nocturne-run").click();
   await expect(page.locator("#nocturne-status")).toContainText("Nocturne applied");
@@ -193,7 +252,7 @@ try {
   await page.locator("#public-account-close").click();
   await expect(page.locator("#story-title")).toHaveText("Synthetic browser story");
   await expect(page.locator("#nocturne-sign-in")).toBeVisible();
-  assert.equal(posts.some(entry => entry.path === "/api/account/library"), false, "Reading and signing in never save stories to an account automatically.");
+  assert.equal(posts.some(entry => entry.path === "/api/account/library" && entry.body.action === "saveStory"), false, "Reading, signing in and onboarding never save stories to an account automatically.");
 
   await page.locator("#save-account-story").click();
   await page.locator("#public-email").fill(email);
@@ -201,7 +260,7 @@ try {
   await page.locator("#public-login").click();
   await expect(page.locator("#save-dialog")).toBeVisible();
   await expect(page.locator("#save-heading")).toHaveText("Save to your account?");
-  assert.equal(posts.some(entry => entry.path === "/api/account/library"), false, "An account save still needs explicit confirmation after login.");
+  assert.equal(posts.some(entry => entry.path === "/api/account/library" && entry.body.action === "saveStory"), false, "An account save still needs explicit confirmation after login.");
   await page.locator("#confirm-save").click();
   await expect(page.locator("#save-status")).toHaveText("Saved to your account");
   await page.locator("#next").click();
@@ -230,6 +289,23 @@ try {
   await expect(second.page.locator("#position")).toHaveText("Section 2 of 4");
   await expect(second.page.locator("#font-size")).toHaveValue("large");
   await expect(second.page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(second.page.locator("#experience-dialog")).toBeHidden();
+  await second.page.locator("#open-app-settings").click();
+  await second.page.locator("#open-experience").click();
+  await expect(second.page.locator("#experience-dialog")).toBeVisible();
+  await expect(second.page.locator("#experience-quiet")).toHaveValue("continuous");
+  await expect(second.page.locator("#experience-edging")).toHaveValue("yes");
+  await expect(second.page.locator("#experience-maximum")).toHaveValue("7");
+  await expect(second.page.locator("#experience-rhythm")).toHaveValue("gentle");
+  await second.page.locator("#experience-quiet").selectOption("edging");
+  await second.page.locator("#experience-rhythm").selectOption("steady");
+  await second.page.locator("#experience-save").click();
+  await expect(second.page.locator("#experience-dialog")).toBeHidden();
+  await expect(second.page.locator("#setup-dialog")).toBeHidden();
+  await expect.poll(() => second.account.preferences?.experience).toEqual({
+    quiet: "edging", edging: true, maximum: 7, rhythm: "steady", peakPattern: "accents",
+  });
+  if (await second.page.locator("#app-settings-dialog").isVisible()) await second.page.locator("#close-app-settings").click();
   const sibling = await second.context.newPage();
   await sibling.goto(origin);
   await expect(sibling.locator("#story-title")).toHaveText("Synthetic browser story");
@@ -259,10 +335,18 @@ try {
   await registerAndSignIn(mobile.page);
   await mobile.page.waitForURL(origin + "/support");
   await expect(mobile.page.locator("#feedback-send")).toBeEnabled();
+  await mobile.page.goto(origin);
+  const onboarding = mobile.page.locator("#experience-dialog");
+  await expect(onboarding).toBeVisible();
+  assert.equal(await onboarding.evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth), true, "Onboarding fits a 320px viewport.");
+  await completeExperience(mobile.page);
+  await expect(mobile.page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
+  await expect(mobile.page.locator("#setup-mode-lovense")).toHaveAttribute("aria-pressed", "true");
+  await mobile.page.locator("#setup-close").click();
   await mobile.page.goto(origin + "/help");
   await expect(mobile.page.locator("#help-signout")).not.toBeVisible();
   await expect(mobile.page.locator("#public-guides")).toHaveCount(0);
   await mobile.context.close();
   assert.deepEqual(errors, []);
-  console.log("Public reader Chromium smoke passed: model selection, guest simulator, Nocturne, email verification, password sign-in and reset, toy resume, feedback, private story and preference sync across contexts, sign-out, and 320px help flow.");
+  console.log("Public reader Chromium smoke passed: model selection, movement-based toy recommendations, guest simulator, email verification and password recovery, onboarding, three-step simulator setup, saved Nocturne controls, feedback, cross-context story and preference sync, sign-out, and 320px onboarding.");
 } finally { await browser.close(); }

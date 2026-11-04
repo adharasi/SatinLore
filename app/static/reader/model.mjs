@@ -1,5 +1,6 @@
 import {splitText} from "./import.mjs";
 import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
+import {selectPeakPreset} from "./calibration.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
@@ -157,12 +158,13 @@ export class ReaderModel {
 
   resetOverride(index) { this.paragraph(index).override = null; }
 
-  effectiveProfiles({nocturne = false} = {}) {
+  effectiveProfiles({nocturne = false, peakPattern, edging} = {}) {
     if (!this.analysisReady) return undefined;
     return this.paragraphs.map(({rhythm, quiet, phase, sceneId, override, movements = [], endedMovements = []}, index) => {
       const pattern = nocturne ? this.nocturneLabels.get(index) : undefined;
+      const peakPreset = nocturne ? selectPeakPreset(phase, pattern, peakPattern, edging) : undefined;
       return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
-        ...(pattern === undefined ? {} : {pattern})};
+        ...(pattern === undefined ? {} : {pattern}), ...(peakPreset === undefined ? {} : {peakPreset})};
     });
   }
 

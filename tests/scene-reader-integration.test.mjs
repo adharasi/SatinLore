@@ -71,6 +71,10 @@ test("Nocturne picks a local simulator shape without changing levels, movements 
   model.nocturneLabels.set(1, "crest");
   const [profile] = normalizeSceneProfiles([model.effectiveProfiles({nocturne: true})[1]], 1);
   assert.deepEqual(profile, {...loom, pattern: "crest"});
+  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "auto"})[1].peakPreset, "crest");
+  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "auto", edging: true})[1].peakPreset, "ease");
+  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "accents", edging: true})[1].peakPreset, "accents");
+  assert.equal(model.effectiveProfiles({peakPattern: "ease", edging: true})[1].peakPreset, undefined);
   assert.deepEqual(model.effectiveLevels(), before);
   assert.deepEqual(model.effectiveProfiles()[1], loom);
   assert.equal(scenePatternChanged(loom, profile, false, true), true);
@@ -84,6 +88,7 @@ test("Nocturne picks a local simulator shape without changing levels, movements 
   assert.equal(feel.desired({...context, scene: profile}), feel.desired({...context, scene: loom}));
   assert.equal(feel.desired({...context, scene: profile, simulatorStagePatterns: true, manualZero: true}), 0);
   assert.throws(() => normalizeSceneProfiles([{...profile, phase: "sustain"}], 1), /supported scene stage/);
+  assert.throws(() => normalizeSceneProfiles([{...profile, peakPreset: "unknown"}], 1), /supported scene stage/);
   await model.analyse({yieldTask: async () => {}});
   assert.equal(model.effectiveProfiles({nocturne: true})[1].pattern, undefined);
 });

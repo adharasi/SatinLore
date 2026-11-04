@@ -9,6 +9,9 @@
 .public-account-dialog .public-account-check{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0}
 .public-account-dialog .public-account-check input{margin:0}
 .public-account-dialog form>input[aria-describedby]{margin-bottom:.35rem}
+.experience-dialog select{display:block;width:100%;min-height:44px;margin:.35rem 0 .9rem}
+.experience-dialog form>input[type=range]{padding:0;border:0}
+.experience-dialog .dialog-actions{flex-wrap:wrap}
 .public-account-links{display:flex;gap:.5rem;flex-wrap:wrap}
 #public-account-status:empty{display:none}
 @media(max-width:699px){.header-actions .public-account-button{width:44px}.public-account-button span{display:none}}
