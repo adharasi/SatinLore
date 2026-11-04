@@ -12,8 +12,8 @@ export class ReaderDeviceController {
   constructor({now = () => performance.now(), setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer),
     onChange = () => {}, onSetupChange = () => {}, onInterfaceError = () => {}, authorize = async () => true,
     document = globalThis.document, window = globalThis.window, navigator = globalThis.navigator,
-    bridge = null, simulator = null, storyRhythms = false, allowGuestSimulation = false, ...controllerOptions} = {}) {
-    Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator,allowGuestSimulation});
+    bridge = null, simulator = null, storyRhythms = false, allowGuestSimulation = false, independentRhythms = false, ...controllerOptions} = {}) {
+    Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator,allowGuestSimulation,independentRhythms});
     this.channelDefaults = {...DEFAULT_CHANNEL_CALIBRATION, rhythm: storyRhythms ? "scene" : "steady"};
     this.factoryRhythm = this.channelDefaults.rhythm;
     this.readingDefaults = null;
@@ -132,7 +132,7 @@ export class ReaderDeviceController {
       this.notify();
     };
     this.real = new AsyncPlaybackController({transport:this.bridge,now:this.now,setTimer:this.setTimer,clearTimer:this.clearTimer,
-      onChange:()=>this.notify(),getMovement: () => this.channel,heartbeatMs:1100});
+      onChange:()=>this.notify(),getMovement: () => this.channel,heartbeatMs:1100,independentRhythms:this.independentRhythms});
     this.real.feel = this.newReadingFeel();
     this.real.setVisible(this.visible); this.real.setAuthorized(this.authorized);
   }
@@ -432,7 +432,7 @@ export class ReaderDeviceController {
     this.setCeilingFromControl(Math.max(...Object.values(settings).map(value=>value.maximum)));
     this.notify();return this.snapshot();
   }
-  setChannelFeel(channel,value) {
+  setChannelFeel(channel,value,{rhythmOnly=false}={}) {
     if(!this.activeChannels().includes(channel)||!this.channels().some(item=>item.id===channel))throw new RangeError("Choose an active movement to adjust.");
     const names=Object.keys(DEFAULT_CHANNEL_CALIBRATION);
     if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).some(key=>!names.includes(key)))throw new RangeError("Use the available movement controls.");
@@ -448,7 +448,10 @@ export class ReaderDeviceController {
     }
     const checked=normalizeChannelCalibration(merged);this.calibrations.set(this.calibrationKey(channel),checked);
     if(this.active.feel.updateChannel)this.active.feel.updateChannel(channel,checked);else this.active.feel.configure(checked);
-    if(this.mode==="lovense")this.real.changed();else this.sim._desiredChanged();
+    const rhythmEdit = this.independentRhythms && rhythmOnly && names.every(key => key === "rhythm" || checked[key] === current[key]);
+    if (this.mode === "lovense") this.real.changed({rhythmOnly: rhythmEdit});
+    else if (rhythmEdit && active.combined && this.sim._desired() > 0) this.notify();
+    else this.sim._desiredChanged();
     return this.snapshot();
   }
   setFeel(value){this.active.setFeel(value);return this.snapshot();}
