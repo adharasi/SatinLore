@@ -285,6 +285,71 @@ test("desktop reading follows scroll while the simulator sidebar is visible", as
   assert.equal(app.read("latest.position"), 0, "A mobile drawer obscures the reading area.");
 });
 
+test("Sync here selects the visible paragraph without starting paused playback", async t => {
+  const app = await ready(t);
+  app.nodes.get("follow-scroll").checked = false;
+  app.read("scrollY = 80");
+  await app.click("sync-here");
+  assert.equal(app.read("latest.position"), 1);
+  assert.equal(app.read("activeNode.getAttribute('aria-current')"), "true");
+  assert.equal(app.read("activeNode.dataset.playing"), "false");
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.read("latest.output"), 0);
+});
+
+test("scroll jumps mute the old output and settle only on the final paragraph; Stop cancels recovery", async t => {
+  const app = workspace(); t.after(() => app.destroy());
+  await app.settle();
+  await app.add(Array.from({length: 12}, () => "They shared a tender kiss.").join("\n\n"));
+  await app.click("connect");
+  app.read("controller.setLevel(0, 5); controller.setLevel(6, 5)");
+  await start(app);
+  assert.equal(app.read("latest.output"), 5);
+  assert.equal(app.read("activeNode.dataset.playing"), "true");
+  await app.advance(600);
+  assert.equal(app.read("latest.output"), 5, "Dwelling at the same location keeps the current section.");
+  app.read('scrollY = 820; window.dispatchEvent({type:"scroll"})');
+  assert.equal(app.read("latest.readingSeeking"), true);
+  assert.equal(app.read("latest.output"), 0);
+  await app.advance(100);
+  app.read('scrollY = 1040; window.dispatchEvent({type:"scroll"})');
+  assert.equal(app.read("latest.position"), 0, "Intermediate paragraphs are skipped.");
+  await app.advance(180);
+  assert.equal(app.read("latest.position"), 6);
+  assert.equal(app.read("latest.readingSeeking"), false);
+  await app.advance(1000);
+  assert.ok(app.read("latest.output") > 0 && app.read("latest.output") < 5, "The destination level returns in steps.");
+  app.read('scrollY = 0; window.dispatchEvent({type:"scroll"})');
+  assert.equal(app.read("latest.readingSeeking"), true);
+  await app.click("stop");
+  await app.advance(2000);
+  assert.equal(app.read("latest.readingSeeking"), false);
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.read("latest.output"), 0);
+});
+
+test("a jump past the story stays quiet until a destination is visible and invalidates a pending Start", async t => {
+  const app = await ready(t);
+  app.read("controller.setLevel(0, 5)");
+  await app.click("start");
+  assert.equal(app.nodes.get("start-dialog").open, true);
+  app.read('scrollY = 1000; window.dispatchEvent({type:"scroll"})');
+  assert.equal(app.nodes.get("start-dialog").open, false);
+  assert.equal(app.read("latest.running"), false);
+  await app.advance(180);
+  app.read('scrollY = 0; window.dispatchEvent({type:"scroll"})');
+  await app.advance(180);
+  await start(app);
+  app.read('scrollY = 1000; window.dispatchEvent({type:"scroll"})');
+  await app.advance(1200);
+  assert.equal(app.read("latest.readingSeeking"), true, "There is no new paragraph in view.");
+  assert.equal(app.read("latest.output"), 0);
+  app.read('scrollY = 80; window.dispatchEvent({type:"scroll"})');
+  await app.advance(180);
+  assert.equal(app.read("latest.position"), 1);
+  assert.equal(app.read("latest.readingSeeking"), false);
+});
+
 test("global Settings opens paused and both Close controls return to the reader", async t => {
   const app = await ready(t);
   await start(app); await app.click("open-app-settings");

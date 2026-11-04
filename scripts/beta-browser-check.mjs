@@ -208,6 +208,12 @@ try {
   await range(page, "cap", 0); await output(page, 0);
   assert.equal(await page.locator("#ceiling-dialog").isVisible(), false);
   await stopped(page); await range(page, "cap", 4); await output(page, 0);
+  await sidebar(page, "story"); await disclosure(page, "#reading-feedback");
+  const appRequestsBeforeMark = apiRequests.filter(value => value.origin === APP && value.path === "/api/beta/recordings").length;
+  await page.locator('[data-reading-issue="too-strong"]').click();
+  assert.match(await page.locator("#reading-feedback [role=status]").textContent(), /for this visit/);
+  assert.equal(await page.locator("#reading-feedback-sharing").isHidden(), true);
+  assert.equal(apiRequests.filter(value => value.origin === APP && value.path === "/api/beta/recordings").length, appRequestsBeforeMark);
   const globalPreset = await savePreset(page, "Synthetic global settings", "account");
   const storyPreset = await savePreset(page, "Synthetic story settings", "story");
   assert.equal(globalPreset.toy, "flexer"); assert.equal(storyPreset.scope, "story");
@@ -235,6 +241,12 @@ try {
   await beta.waitForFunction(() => document.querySelector("#beta-recording").dataset.state === "recording");
   await beta.locator("#draft-story").fill(privateCanary);
   await chooseFlexer(beta); await beta.locator("#setup-close").click();
+  await beta.locator("#open-draft").click();
+  await beta.waitForFunction(() => document.querySelector("#analysis-status").dataset.state === "ready");
+  await start(beta); await stopped(beta);
+  await sidebar(beta, "story"); await disclosure(beta, "#reading-feedback");
+  await beta.locator('[data-reading-issue="wrong-moment"]').click();
+  assert.match(await beta.locator("#reading-feedback [role=status]").textContent(), /queued in the beta recording/);
   await sidebar(beta, "story"); await disclosure(beta, "#preset-mount details");
   await beta.locator("#account-preset-name").fill(privateName); // Never saved, never a recording field.
   await disclosure(beta, ".feel-adjustments details:has(#feel-minimum)"); await range(beta, "feel-background", 2);
@@ -250,6 +262,7 @@ try {
   const detail = await requestInPage(beta, "GET", "/api/beta/recordings/" + sid);
   assert.equal(detail.status, 200); assert.ok(detail.value.events.length > 0);
   assert.ok(detail.value.events.some(event => event.type === "output" && Object.values(event.channels).some(level => level > 0)), "The consented timeline retains a real simulated test's nonzero output.");
+  assert.deepEqual(detail.value.events.filter(event => event.type === "reading-feedback").map(({issue, position}) => ({issue, position})), [{issue: "wrong-moment", position: 0}]);
   const privateCapture = JSON.stringify(apiRequests.filter(value => /\/api\/(?:beta|lovense)\//.test(value.path)));
   assert.ok(!privateCapture.includes(privateCanary) && !privateCapture.includes(privateName), "Private text or preset input entered a recording/control request.");
   assert.equal((await requestInPage(beta, "GET", "/api/admin/beta-recordings")).status, 403, "A tester cannot inspect other participants.");

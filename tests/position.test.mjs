@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {selectReadingParagraph} from "../app/static/reader/position.mjs";
+import {isReadingJump, selectReadingParagraph} from "../app/static/reader/position.mjs";
 
 const rects = [{id: "a", top: 0, bottom: 100}, {id: "b", top: 112, bottom: 220}, {id: "c", top: 232, bottom: 350}];
 
@@ -31,4 +31,14 @@ test("gaps choose a nearby paragraph but offscreen and malformed geometry cannot
 test("layout changes use fresh rectangles and do not restore an absent selection", () => {
   assert.equal(selectReadingParagraph([{id: "b", top: 0, bottom: 500}], 120, "a"), "b");
   assert.equal(selectReadingParagraph([{id: "b", top: 800, bottom: 1000}], 120, "a"), null);
+});
+
+test("only travel of a visible reading band qualifies as a large jump", () => {
+  assert.equal(isReadingJump(100, 399, 300), false);
+  assert.equal(isReadingJump(100, 400, 300), true);
+  assert.equal(isReadingJump(400, 100, 300), true);
+  assert.equal(isReadingJump(0, 239, 80), false);
+  assert.equal(isReadingJump(0, 240, 80), true);
+  assert.equal(isReadingJump(0, 500, 0), false);
+  assert.equal(isReadingJump(0, NaN, 80), false);
 });

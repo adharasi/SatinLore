@@ -26,7 +26,7 @@ async function digest(value) { return Array.from(new Uint8Array(await crypto.sub
 
 /** Strict and deliberately non-extensible without a reviewed schema update. */
 export function normalizeBetaEvent(value) {
-  check(exact(value, ["t", "type", "step", "control", "channel", "value", "channels", "state", "question", "field", "scope", "fixture", "position", "event", "panel", "width", "kind", "x", "y", "toy", "mode"]));
+  check(exact(value, ["t", "type", "step", "control", "channel", "value", "channels", "state", "question", "field", "scope", "fixture", "position", "issue", "event", "panel", "width", "kind", "x", "y", "toy", "mode"]));
   check(integer(value.t, 0, BETA_RECORDING_LIMITS.durationMs) && typeof value.type === "string");
   const base = { t: value.t, type: value.type };
   const only = keys => check(Object.keys(value).every(key => ["t", "type", ...keys].includes(key)));
@@ -50,6 +50,9 @@ export function normalizeBetaEvent(value) {
       check(value.field === undefined || ["minimum", "background", "preferred", "maximum", "recovery"].includes(value.field));
       return { ...base, question: value.question, value: value.value, ...(value.channel === undefined ? {} : { channel: value.channel }), ...(value.field === undefined ? {} : { field: value.field }) };
     }
+    case "reading-feedback":
+      only(["issue", "position"]); check(["too-strong", "wrong-moment", "wrong-movement"].includes(value.issue) && integer(value.position, 0, 1999));
+      return { ...base, issue: value.issue, position: value.position };
     case "preset": only(["event", "scope"]); check(["save", "apply", "delete"].includes(value.event) && ["account", "story"].includes(value.scope)); return { ...base, event: value.event, scope: value.scope };
     case "story": only(["fixture", "position"]); check(["practice", "harbour", "garden", "personal"].includes(value.fixture) && (value.position === undefined || integer(value.position, 0, 10000))); return { ...base, fixture: value.fixture, ...(value.position === undefined ? {} : { position: value.position }) };
     case "lifecycle": only(["event"]); check(["hidden", "visible", "connected", "disconnected", "error", "unload", "paused", "resumed"].includes(value.event)); return { ...base, event: value.event };

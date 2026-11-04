@@ -1,6 +1,11 @@
 // Geometry only: the UI supplies visible paragraph rectangles and handles settling.
 export const MAX_ANCHOR_GAP = 240;
 
+export function isReadingJump(previousTop, currentTop, readingHeight) {
+  return [previousTop, currentTop, readingHeight].every(Number.isFinite) && readingHeight > 0 &&
+    Math.abs(currentTop - previousTop) >= Math.max(MAX_ANCHOR_GAP, readingHeight);
+}
+
 export function selectReadingParagraph(rects, anchorY, currentId, hysteresisPx = 24) {
   if (!Array.isArray(rects) || !Number.isFinite(anchorY) ||
       !Number.isFinite(hysteresisPx) || hysteresisPx < 0) return null;

@@ -3,7 +3,7 @@ import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v2";
+export const ANALYSIS_VERSION = "scene-rules-v3";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
@@ -14,8 +14,8 @@ function applySceneSuggestions(paragraphs) {
   const scenes = groupScenes(paragraphs.map(paragraph => ({...paragraph, override: null})));
   if (scenes.length !== paragraphs.length || !scenes.every(validScore)) throw new Error("Invalid scene analysis.");
   for (let index = 0; index < scenes.length; index++) {
-    const {band, level, reason, rhythm, quiet, sceneId, advisory, movements} = scenes[index];
-    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, advisory, movements});
+    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements} = scenes[index];
+    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements});
   }
 }
 
@@ -67,6 +67,7 @@ export class ReaderModel {
       paragraph.rhythm = "steady";
       paragraph.quiet = false;
       paragraph.sceneId = null;
+      paragraph.phase = "quiet";
       paragraph.advisory = null;
       paragraph.movements = [];
     }
@@ -151,7 +152,8 @@ export class ReaderModel {
 
   effectiveProfiles() {
     if (!this.analysisReady) return undefined;
-    return this.paragraphs.map(({rhythm, quiet, movements = []}) => ({rhythm, quiet, movements: [...movements]}));
+    return this.paragraphs.map(({rhythm, quiet, phase, sceneId, override, movements = []}) =>
+      ({rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements]}));
   }
 
   effectiveLevels() {

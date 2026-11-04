@@ -21,10 +21,14 @@ test("beta event schema admits only fixed steps and numeric controls, rejecting 
   assert.deepEqual(normalizeBetaEvent({ t: 4, type: "rating", question: "intensity", value: 3, channel: "fingering", field: "background" }), { t: 4, type: "rating", question: "intensity", value: 3, channel: "fingering", field: "background" });
   assert.deepEqual(normalizeBetaEvent({ t: 5, type: "preset", event: "apply", scope: "story" }), { t: 5, type: "preset", event: "apply", scope: "story" });
   assert.equal(normalizeBetaEvent({ t: 6, type: "step", step: "presets" }).step, "presets");
+  const mark = {t: 7, type: "reading-feedback", issue: "too-strong", position: 3};
+  assert.deepEqual(normalizeBetaEvent(mark), mark);
+  assert.equal(betaEventDescription(mark), "Reading feedback · Section 4 · Too strong");
   for (const value of [
     { t: 0, type: "control", control: "maximum", value: 5, storyText: "private canary" },
     { t: 0, type: "output", channels: { email: "synthetic@example.invalid" }, state: "playing" },
     { t: 0, type: "rating", question: "free response", value: 5 },
+    { ...mark, issue: "free response" }, { ...mark, position: 2000 }, { ...mark, fixture: "personal" },
     { t: 0, type: "rating", question: "intensity", value: 3, channel: "private toy" },
     { t: 0, type: "rating", question: "intensity", value: 3, field: "private field" },
     { t: 0, type: "preset", event: "apply", scope: "story", id: crypto.randomUUID() },

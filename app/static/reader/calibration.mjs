@@ -8,6 +8,7 @@ export const DEFAULT_CHANNEL_CALIBRATION = Object.freeze({
 const fields = Object.keys(DEFAULT_CHANNEL_CALIBRATION);
 const whole = value => Number.isInteger(value) && value >= 0 && value <= 20;
 const movementIds = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
+const scenePhases = ["quiet", "build", "sustain", "peak", "recover"];
 export function normalizeSceneProfiles(profiles, length) {
   if (profiles === undefined) return [];
   if (!Array.isArray(profiles) || profiles.length !== length) throw new RangeError("Use the current paragraph patterns.");
@@ -19,8 +20,18 @@ export function normalizeSceneProfiles(profiles, length) {
         Array.from(movements).some(id => !movementIds.includes(id)) || new Set(movements).size !== movements.length)) {
       throw new RangeError("Use supported scene movements.");
     }
-    return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]})};
+    const {phase, sceneId, manual} = profile;
+    if (phase !== undefined && !scenePhases.includes(phase) ||
+        sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
+        manual !== undefined && typeof manual !== "boolean") throw new RangeError("Use a supported scene stage.");
+    return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
+      ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
+}
+
+export function scenePatternChanged(previous, next, automaticMovement = false) {
+  return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
+    next.rhythm !== previous?.rhythm || automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
 
 // A capped beat can hide part of an adjustment. Skip that flat portion so
@@ -62,6 +73,11 @@ export class ReadingFeel {
   snapshot() { return {...this.settings, playbackMode: this.playbackMode, heldLevel: this.heldLevel,returningToStory:this.ramping}; }
   reset() { this.playbackMode = "story"; this.heldLevel = null; this.startedAt = 0;this.followLevel=null; }
   start(now = 0) { this.startedAt = now;this.followLevel=null; }
+  reanchor(now, level = 0) {
+    if (this.playbackMode !== "story") return;
+    this.startedAt = now;
+    this.followLevel = whole(level) ? level : 0;
+  }
   configure(value) {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !Object.hasOwn(this.settings, key))) throw new TypeError("Use the available reading controls.");
     const next = {...this.settings, ...value};
@@ -86,7 +102,11 @@ export class ReadingFeel {
     const phase = Math.floor(Math.max(0, now - this.startedAt) / 2000) % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
     const modulation = variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
-    const scaled = base * strength * this.settings.gain;
+    const preferred = Math.min(ceiling, this.settings.preferred);
+    const peak = preferred + Math.ceil((ceiling - preferred) / 2);
+    const calibrated = scene?.phase && !scene.manual ?
+      (base <= 3 ? base * preferred / 3 : preferred + (peak - preferred) * Math.min(1, (base - 3) / 2)) : base;
+    const scaled = calibrated * strength * this.settings.gain;
     // A softer beat must not round an otherwise active scene down to a stop.
     const target = Math.max(rhythm === "scene" && scaled >= 1 ? 1 : 0, Math.floor(scaled * modulation));
     return adjust(Math.min(ceiling, Math.max(minimum, target)));
@@ -95,21 +115,29 @@ export class ReadingFeel {
 
 /** Independently calibrated actions on one explicitly selected device. */
 export class CombinedReadingFeel {
-  constructor(channels, {mode = "story"} = {}) {
+  constructor(channels, {mode = "story", automaticMovement = false, preferredMovement = Object.keys(channels || {})[0]} = {}) {
     if(!channels || typeof channels!=="object" || Array.isArray(channels) || Object.keys(channels).length<2 || Object.keys(channels).length>5 ||
         Object.keys(channels).some(key=>!movementIds.includes(key)))throw new TypeError("Choose two or more available movements on one toy.");
     this.channels=Object.fromEntries(Object.entries(channels).map(([id,value])=>[id,{...normalizeChannelCalibration(value)}]));
     this.policies=Object.fromEntries(Object.entries(this.channels).map(([id,{maximum,...value}])=>{
       const policy=new ReadingFeel();policy.configure({mode,maximum,...value});return[id,policy];
     }));
+    this.setSceneMovement(automaticMovement, preferredMovement);
   }
   get settings(){return Object.values(this.policies)[0].settings;}
   snapshot(){
     const primary=Object.values(this.policies)[0].snapshot();
-    return {...primary,combined:true,returningToStory:this.ramping,channels:Object.fromEntries(Object.entries(this.policies).map(([id,policy])=>[id,{...policy.snapshot(),maximum:this.channels[id].maximum}]))};
+    return {...primary,combined:true,automaticMovement:this.automaticMovement,preferredMovement:this.preferredMovement,
+      returningToStory:this.ramping,channels:Object.fromEntries(Object.entries(this.policies).map(([id,policy])=>[id,{...policy.snapshot(),maximum:this.channels[id].maximum}]))};
   }
   reset(){for(const policy of Object.values(this.policies))policy.reset();}
   start(now){for(const policy of Object.values(this.policies))policy.start(now);}
+  reanchor(now, levels) { for (const [id, policy] of Object.entries(this.policies)) policy.reanchor(now, levels?.[id]); }
+  setSceneMovement(automatic, preferred) {
+    if (!Object.hasOwn(this.channels, preferred)) throw new RangeError("Choose an active default movement.");
+    this.automaticMovement = automatic === true;
+    this.preferredMovement = preferred;
+  }
   configure(value){for(const [id,policy] of Object.entries(this.policies)){policy.configure(value);if(value.maximum!==undefined)this.channels[id].maximum=value.maximum;}return this.snapshot();}
   updateChannel(id,value){
     if(!Object.hasOwn(this.channels,id))throw new RangeError("Choose an active movement.");
@@ -118,14 +146,16 @@ export class CombinedReadingFeel {
   }
   followStory(from){for(const [id,policy] of Object.entries(this.policies))policy.followStory(from?.[id]);}
   get ramping(){return Object.values(this.policies).some(policy=>policy.ramping);}
-  advanceFollow(from,ceiling=20){for(const [id,policy] of Object.entries(this.policies))policy.advanceFollow(from?.[id],Math.min(ceiling,this.channels[id].maximum));}
+  advanceFollow(from,ceiling=20){for(const [id,policy] of Object.entries(this.policies))policy.advanceFollow(from?.[id] ?? 0,Math.min(ceiling,this.channels[id].maximum));}
   ceilings(ceiling){return Object.fromEntries(Object.entries(this.channels).map(([id,value])=>[id,Math.min(ceiling,value.maximum)]));}
   vector(context) {
     const entries = Object.entries(this.policies);
     let selected;
     if (context.scene?.movements) {
-      selected = context.scene.movements.filter(id => Object.hasOwn(this.policies, id));
-      if (!selected.length) selected = [Object.hasOwn(this.policies, "vibrate") ? "vibrate" : entries[0][0]];
+      selected = this.automaticMovement || !context.scene.phase ?
+        context.scene.movements.filter(id => Object.hasOwn(this.policies, id)) : [];
+      if (!selected.length) selected = [context.scene.phase ? this.preferredMovement :
+        Object.hasOwn(this.policies, "vibrate") ? "vibrate" : entries[0][0]];
     }
     return Object.fromEntries(entries.map(([id, policy]) => [
       id, selected && policy.playbackMode === "story" && !selected.includes(id) ? 0 : policy.desired(context)

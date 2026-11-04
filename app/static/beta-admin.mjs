@@ -1,3 +1,5 @@
+import { READING_FEEDBACK_LABELS } from "./reader/reading-feedback.mjs";
+
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CHANNELS = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
 const LABELS = { vibrate: "Vibration", fingering: "Flexing", rotate: "Rotation", thrusting: "Thrusting", oscillate: "Oscillation", lush: "Lush", flexer: "Flexer", nora: "Nora", domi: "Domi", velvo: "Velvo", spinel: "Spinel", dolce: "Dolce", hush: "Hush", osci3: "Osci 3", none: "Toy not selected", account: "Account", choose: "Choose your toy", connect: "Connection", features: "Explore the features", calibration: "Find your settings", playground: "Explore controls", practice: "Guided reading", story: "Story reading", complete: "Session complete", presets: "Saved presets", minimum: "Minimum", background: "Background", preferred: "Preferred level", maximum: "Maximum", recovery: "Ease off level", gain: "Story strength", rhythm: "Rhythm", continuity: "Continuity", strength: "Strength", "section-level": "Section level", action: "Movement", mode: "Mode", start: "Start", pause: "Pause", stop: "Stop", hold: "Hold", easeoff: "Ease off", follow: "Follow story", test: "Short test", comfort: "Comfort", intensity: "Intensity", sync: "Story timing", overall: "Overall", pleasure: "Pleasure" };
@@ -21,6 +23,7 @@ export function betaReplayState(recording, at) {
       delete state.settings[key]; state.settings[key] = event.value === undefined ? "Chosen" : typeof event.value === "number" ? String(event.value) : label(event.value);
     }
     else if (event.type === "rating") state.rating = ratingText(event);
+    else if (event.type === "reading-feedback") state.rating = betaEventDescription(event);
     else if (event.type === "preset") { delete state.settings.Preset; state.settings.Preset = `${({ save: "Saved", apply: "Applied", delete: "Deleted" })[event.event]} ${event.scope} preset`; }
     else if (event.type === "story") state.story = event.fixture === "personal" ? "Personal story · text masked" : `${label(event.fixture)} practice${event.position === undefined ? "" : ` · ${Math.round(event.position / 100)}%`}`;
     else if (event.type === "view") state.panel = event.panel;
@@ -34,6 +37,7 @@ export function betaEventDescription(event) {
     case "control": return `${label(event.control)}${event.channel ? " · " + label(event.channel) : ""}${event.value === undefined ? "" : " · " + (typeof event.value === "number" ? event.value : label(event.value))}`;
     case "output": return `${label(event.state)} · ${Object.entries(event.channels).map(([channel, value]) => `${label(channel)} ${value}/20`).join(", ") || "No active channel"}`;
     case "rating": return ratingText(event);
+    case "reading-feedback": return `Reading feedback · Section ${event.position + 1} · ${READING_FEEDBACK_LABELS[event.issue]}`;
     case "preset": return `${({ save: "Saved", apply: "Applied", delete: "Deleted" })[event.event]} ${event.scope === "story" ? "story" : "account"} preset · name and ID excluded`;
     case "story": return event.fixture === "personal" ? "Personal story · text excluded" : `Practice ${label(event.fixture)}${event.position === undefined ? "" : " · " + Math.round(event.position / 100) + "%"}`;
     case "lifecycle": return `Session ${label(event.event)}`;
@@ -106,7 +110,7 @@ export function initializeBetaAdmin() {
     for (const level of [0, 5, 10, 15, 20]) { const y = 187 - level / 20 * 172; nodes.push(make("line", { x1: 42, x2: 884, y1: y, y2: y, stroke: "#aa9ba6", "stroke-width": .5, opacity: .4 })); const text = make("text", { x: 30, y: y + 4, "text-anchor": "end", "font-size": 10, fill: "#8b7985" }); text.textContent = String(level); nodes.push(text); }
     const paths = betaGraphPaths(current.events, duration());
     for (const [channel, d] of Object.entries(paths)) nodes.push(make("path", { d, stroke: COLORS[channel], "stroke-width": 2, fill: "none" }));
-    for (const event of current.events.filter(value => value.type === "rating")) { const dot = make("circle", { cx: 42 + event.t / Math.max(1, duration()) * 842, cy: 201, r: 3, fill: "#875c79" }), title = make("title", {}); title.textContent = betaEventDescription(event); dot.append(title); nodes.push(dot); }
+    for (const event of current.events.filter(value => value.type === "rating" || value.type === "reading-feedback")) { const dot = make("circle", { cx: 42 + event.t / Math.max(1, duration()) * 842, cy: 201, r: 3, fill: "#875c79" }), title = make("title", {}); title.textContent = betaEventDescription(event); dot.append(title); nodes.push(dot); }
     nodes.push(make("line", { "data-playhead": "", x1: 42, x2: 42, y1: 10, y2: 207, stroke: "#523248", "stroke-width": 1.5 }));
     const begin = make("text", { x: 42, y: 217, "font-size": 10, fill: "#8b7985" }); begin.textContent = "0:00";
     const end = make("text", { x: 884, y: 217, "text-anchor": "end", "font-size": 10, fill: "#8b7985" }); end.textContent = replayTime(duration()); nodes.push(begin, end); svg.replaceChildren(...nodes);

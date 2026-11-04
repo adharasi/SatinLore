@@ -1,4 +1,4 @@
-import {normalizeSceneProfiles, ReadingFeel, stepSectionLevel} from "../reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged, stepSectionLevel} from "../reader/calibration.mjs";
 /** Experimental async contract for the deterministic lab only; not a qualified hardware adapter. */
 export const ASYNC_COMMAND_MS = 2000;
 const level = value => {
@@ -16,6 +16,7 @@ export class AsyncPlaybackController {
     this.feel = new ReadingFeel(); this.manualZeros = new Set();
     this.levels = []; this.sceneProfiles = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
     this.levelAdjustment = 0;
+    this.readingSeeking = false;
     this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose a simulated device explicitly.";
     this.requests = new Map(); this.stopTasks = new Map(); this.uncertain = new Set(); this.errorLatch = false;
     this.commandSettlements = new Map(); this.needsFreshStop = new Set();
@@ -30,13 +31,13 @@ export class AsyncPlaybackController {
       output: this.output,outputLevels:this.outputLevels?{...this.outputLevels}:null, outputKnown: this.output !== null, target, ceiling: this.ceiling, strength: this.strengthTenths / 10,
       levelAdjustment: this.levelAdjustment, levelDown: target > 0 && this.intent(-20, now).level < target,
       levelUp: target < this.ceiling && this.intent(20, now).level > target,
-      position: this.position, generation: this.generation, staleReplies: this.staleReplies, uncertainTargets: [...this.uncertain],
+      position: this.position, readingSeeking: this.readingSeeking, generation: this.generation, staleReplies: this.staleReplies, uncertainTargets: [...this.uncertain],
       feel: this.feel.snapshot(),
       pending: [...this.requests.values()].filter(value => !value.rawSettled).map(value => ({ ...value.frame })), reason: this.reason };
   }
   intent(levelAdjustment = this.levelAdjustment, now = this.now()) {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],levelAdjustment,now};
+      ceiling:this.ceiling,manualZero:this.readingSeeking || this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],levelAdjustment,now};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }
@@ -186,6 +187,7 @@ export class AsyncPlaybackController {
   async pause(reason = "Paused. Confirm a new Start to continue.") {
     const generation = this.invalidate(), deviceId = this.selected;
     this.feel.reset();
+    this.readingSeeking = false;
     this.state = deviceId && (this.connected || this.uncertain.has(deviceId) || this.outstanding(deviceId)) ? "STOPPING" : "DISCONNECTED";
     this.reason = reason; this.notify();
     const targets = new Set([...this.uncertain, ...(deviceId && (this.connected || this.outstanding(deviceId)) ? [deviceId] : [])]);
@@ -230,13 +232,27 @@ export class AsyncPlaybackController {
   }
   setPosition(index) {
     if (!Number.isInteger(index) || index < 0 || index >= this.levels.length) { void this.pause("Invalid position."); throw new RangeError("Choose an existing section."); }
-    if (index !== this.position) this.levelAdjustment = 0;
+    if (index !== this.position) {
+      this.levelAdjustment = 0;
+      if (this.state === "PLAYING" && !this.readingSeeking && (scenePatternChanged(this.sceneProfiles[this.position], this.sceneProfiles[index], this.feel.automaticMovement) ||
+          this.sceneProfiles[index]?.phase && this.levels[this.position] !== this.levels[index])) {
+        this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output);
+      }
+    }
     this.position = index; return this.changed();
+  }
+  setReadingSeeking(active) {
+    const seeking = active === true && this.state === "PLAYING";
+    if (seeking === this.readingSeeking) return this.snapshot();
+    this.readingSeeking = seeking;
+    if (!seeking && this.state === "PLAYING") this.feel.reanchor(this.now());
+    return this.changed();
   }
   setLevel(index, value, {manual = true} = {}) {
     try { level(value); if (!Number.isInteger(index) || index < 0 || index >= this.levels.length) throw new RangeError("Choose an existing section."); }
     catch (error) { void this.pause("Invalid section level."); throw error; }
     this.levels[index] = value;
+    if (this.sceneProfiles[index]?.phase) this.sceneProfiles[index].manual = manual;
     if (index === this.position) this.levelAdjustment = 0;
     if(manual && value === 0)this.manualZeros.add(index);else this.manualZeros.delete(index);
     return this.changed();

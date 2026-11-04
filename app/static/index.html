@@ -129,9 +129,31 @@
             <button id="show-upcoming" class="quiet-button" disabled>Show upcoming sections</button><p class="note">Future passages stay hidden until you choose to reveal them.</p><button id="reanalyze" disabled>Analyse again</button><p class="note">Your corrections are kept.</p>
           </div>
         </details>
+        <details id="reading-feedback" class="review-settings" hidden>
+          <summary>Reading feedback <span class="optional-tag">Optional</span></summary>
+          <div class="review-content">
+            <p class="note">Mark a section you played. Your marks stay in this tab unless you download them or share them through beta recording.</p>
+            <p id="reading-feedback-sharing" class="note" hidden>With beta recording on, choosing a reason also adds it and the section number to the recording queue.</p>
+            <label for="reading-feedback-section">Section to mark</label>
+            <select id="reading-feedback-section"></select>
+            <div class="feel-actions" aria-label="Reason for feedback" role="group">
+              <button type="button" data-reading-issue="too-strong">Too strong</button>
+              <button type="button" data-reading-issue="wrong-moment">Wrong moment</button>
+              <button type="button" data-reading-issue="wrong-movement">Wrong movement</button>
+            </div>
+            <p class="note" role="status"></p>
+            <ul class="note reading-feedback-marks" aria-label="Your reading feedback marks"></ul>
+            <button id="download-reading-feedback" type="button" class="quiet-control" hidden>Download feedback</button>
+          </div>
+        </details>
         <section class="sidebar-section feel-adjustments" aria-labelledby="movement-tuning-heading">
           <h3 id="movement-tuning-heading">Movement tuning</h3>
           <details id="combination-controls" hidden><summary>Use movements together</summary><div id="combination-choices"></div><button id="apply-combined">Apply selected movements</button><p class="note">Test each movement first. Applying pauses output; Start still asks you to confirm. Use the movement menu to tune each one.</p></details>
+          <div id="scene-movement-settings" hidden>
+            <label for="scene-preferred-movement">Default story movement</label><select id="scene-preferred-movement"></select>
+            <label class="check-label"><input id="scene-auto-movement" type="checkbox"> Let the story switch movements</label>
+            <p class="note">Switching uses clear action cues and only the movements you enabled.</p>
+          </div>
           <details><summary>Tune this movement</summary>
             <label for="feel-maximum">Movement maximum <output id="feel-maximum-value">5</output></label><input id="feel-maximum" type="range" min="0" max="20" step="1" value="5">
             <label for="feel-minimum">Minimum <output id="feel-minimum-value">0</output></label><input id="feel-minimum" type="range" min="0" max="20" step="1" value="0">
@@ -153,7 +175,7 @@
       <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
       <div class="level-step-control"><span id="section-level-label" class="control-caption">Section level</span><div class="level-step-buttons" role="group" aria-labelledby="section-level-label"><button id="level-down" class="icon-button" aria-label="Lower section level by one" disabled>−</button><output id="target-output" aria-live="polite">0 / 20</output><button id="level-up" class="icon-button" aria-label="Raise section level by one" disabled>+</button></div></div>
       <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
-      <div class="transport-navigation"><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div></div>
+      <div class="transport-navigation"><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div><button id="sync-here" class="quiet-button" type="button" aria-describedby="position" title="Follow the paragraph at your current view" hidden disabled>Sync here</button></div>
     </div>
   </aside>
 

@@ -1,5 +1,7 @@
 // Deliberately structured beta research, never a DOM, screen or input recorder.
 // Only fixed event names and bounded numeric controls can leave this module.
+import {normalizeReadingMark} from "./reading-feedback.mjs";
+
 export const BETA_RECORDING_HOST = "beta.satinlore.com";
 export const BETA_CONSENT_VERSION = "beta-controls-2026-11-02-v1";
 export const BETA_RECORDING_MAX_DURATION = 3600000;
@@ -46,6 +48,10 @@ export function normalizeBetaEvent(value, elapsed = 0) {
       (!own(value, "field") || RATING_FIELDS.has(value.field))) {
     return {t, type, question: value.question, value: value.value,
       ...(own(value, "channel") ? {channel: value.channel} : {}), ...(own(value, "field") ? {field: value.field} : {})};
+  }
+  if (type === "reading-feedback" && exact(value, ["type", "issue", "position"])) {
+    const mark = normalizeReadingMark(value.issue, value.position);
+    return mark ? {t, type, ...mark} : null;
   }
   if (type === "preset" && exact(value, ["type", "event", "scope"]) && ["save", "apply", "delete"].includes(value.event) &&
       ["account", "story"].includes(value.scope)) return {t, type, event: value.event, scope: value.scope};
@@ -321,7 +327,7 @@ export function mountBetaRecording({mount, recorder, document = mount?.ownerDocu
   const top = make("div", "beta-recording-top"), title = make("strong", "", "Beta session review"); title.id = "beta-recording-heading";
   const badge = make("span", "beta-recording-badge", "Your choice"); badge.setAttribute("aria-live", "polite"); top.append(title, badge);
   const choice = make("div", "beta-recording-choice");
-  choice.append(make("p", "", "Help the SatinLore Team understand what works. You can share a replay of the setup steps, pointer positions, toy control levels, requested output and any ratings you choose to give."),
+  choice.append(make("p", "", "Help the SatinLore Team understand what works. You can share a replay of the setup steps, pointer positions, toy control levels, requested output and any ratings or reading feedback you choose to give."),
     make("p", "", "These control choices and ratings can reveal intimate preferences. Only the SatinLore Team can review them, for up to 30 days. Private story text, typing, pairing details, camera and sound are excluded. This is a structured activity replay, not a screen video."),
     make("p", "", "Recording is optional. Pause or stop at any time, or delete this session. Your account, toy controls and testing access work without it."));
   const accepted = make("input"); accepted.type = "checkbox"; accepted.id = "beta-recording-agree";
@@ -339,7 +345,7 @@ export function mountBetaRecording({mount, recorder, document = mount?.ownerDocu
   const status = make("p", "beta-recording-status"); status.id = "beta-recording-status"; status.setAttribute("role", "status");
   const note = make("details", "beta-recording-note");
   note.append(make("summary", "", "Recording details"),
-    make("p", "", "Only beta setup, navigation, requested levels and chosen ratings are shared. Private text and pairing details are excluded. The SatinLore Team can review a session for up to 30 days. Each recording is limited to one hour; you can begin another afterwards."),
+    make("p", "", "Beta setup, navigation, requested levels and feedback you choose to give are shared. A reading feedback mark contains a section number and one of three fixed reasons. Private text and pairing details are excluded. The SatinLore Team can review a session for up to 30 days. Each recording is limited to one hour; you can begin another afterwards."),
     make("p", "", "Stopping recording does not stop your toy. Use the reader’s Stop control for that."));
   const historyPanel = make("section", "beta-recording-history"); historyPanel.id = "beta-recording-history-panel"; historyPanel.hidden = true;
   const historyStatus = make("p", "beta-recording-note"); historyStatus.setAttribute("role", "status");

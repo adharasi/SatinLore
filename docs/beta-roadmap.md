@@ -107,6 +107,8 @@ Compare the existing rules, contextual improvements, a simple linear baseline an
 
 Preserve deliberate corrections during future reanalysis or obtain an explicit choice before replacing them. Invalid, uncertain or refused results must not raise output. A model cannot choose a device, start playback, raise a ceiling or extend a command. Local processing is the default direction; hosted experiments need a separate product/privacy decision and current provider review, with no silent upload of private stories. AI work does not block F1–F4.
 
+The local revision has a repeatable neutral regression and a matched browser comparison with the previous analyser. In the eight-paragraph Nora simulator fixture, the revised build followed a gentle build, held across two room details, rose at the stronger beat, eased off and went quiet at the time jump. The old build was quiet apart from a rotation triggered by the room fan. The next F5 check is a same-settings, counterbalanced pilot with representative readers and permission-cleared stories. [Fixture, protocol and simulator observations](reader-scene-testing.md)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

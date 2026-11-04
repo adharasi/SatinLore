@@ -57,6 +57,7 @@ test("safe event dialect rejects private context and every extra field", () => {
     {type: "output", channels: {vibrate: 3, fingering: 2}, state: "testing"},
     {type: "rating", question: "comfort", value: 4},
     {type: "rating", question: "intensity", value: 3, channel: "fingering", field: "preferred"},
+    {type: "reading-feedback", issue: "wrong-moment", position: 2},
     {type: "preset", event: "save", scope: "story"},
     {type: "step", step: "presets"},
     {type: "story", fixture: "personal", position: 2},
@@ -80,6 +81,7 @@ test("safe event dialect rejects private context and every extra field", () => {
   assert.equal(normalizeBetaEvent({type: "preset", event: "save", scope: "story", id: SID}, 0), null);
   assert.equal(normalizeBetaEvent({type: "preset", event: "publish", scope: "story"}, 0), null);
   assert.equal(normalizeBetaEvent({type: "control", control: "maximum", value: 21}, 0), null);
+  assert.equal(normalizeBetaEvent({type: "reading-feedback", issue: "PRIVATE_CANARY", position: 0}, 0), null);
   assert.equal(normalizeBetaEvent({type: "step", step: "choose"}, 3600001), null);
 });
 
@@ -90,6 +92,7 @@ test("client and server share the extended event contract and one-hour budget", 
   for (const input of [
     {type: "step", step: "presets"},
     {type: "rating", question: "intensity", value: 3, channel: "fingering", field: "preferred"},
+    {type: "reading-feedback", issue: "wrong-movement", position: 1999},
     {type: "preset", event: "apply", scope: "story"},
     {type: "output", channels: {fingering: 2.5}, state: "testing"},
   ]) {

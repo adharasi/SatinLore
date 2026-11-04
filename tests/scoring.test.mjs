@@ -42,13 +42,13 @@ function sceneRows(...paragraphs) {
   });
 }
 
-test("one brief contextual paragraph holds the preceding level and rhythm within a matching scene", () => {
+test("one brief contextual paragraph eases down without breaking the matching scene", () => {
   const rows = sceneRows("A tender and romantic kiss expressed affection.",
-    "Rain brushed against the window.", "A gentle romantic embrace expressed affection.");
+    "Rain brushed against the window.", "A gentle, tender romantic embrace expressed affection.");
   const result = groupScenes(rows);
   assert.deepEqual(result.map(paragraph => paragraph.sceneId), [1, 1, 1]);
-  assert.equal(result[1].level, result[0].level);
-  assert.equal(result[1].rhythm, result[0].rhythm);
+  assert.deepEqual(result.map(paragraph => paragraph.level), [3, 2, 3]);
+  assert.equal(result[1].rhythm, "gentle");
   assert.equal(rows[1].suggestedLevel, 0);
   assert.equal(Object.hasOwn(result[1], "text"), false);
 });
@@ -58,14 +58,16 @@ test("low scene continuity remains steady and several missing matches stay quiet
   const bridge = "Rain brushed against the window.";
   assert.deepEqual(groupScenes(sceneRows(cue, bridge, cue)).map(p => [p.level, p.rhythm]),
     [[1, "steady"], [1, "steady"], [1, "steady"]]);
-  assert.deepEqual(groupScenes(sceneRows(cue, bridge, bridge, cue)).map(p => p.sceneId), [1, null, null, 2]);
+  assert.deepEqual(groupScenes(sceneRows(cue, bridge, bridge, cue)).map(p => p.sceneId), [1, 1, 1, 1]);
+  assert.deepEqual(groupScenes(sceneRows(cue, bridge, bridge, bridge, cue)).map(p => p.sceneId), [1, null, null, null, 2]);
   assert.deepEqual(groupScenes(sceneRows(bridge, cue, bridge)).map(p => p.level), [0, 1, 0]);
 });
 
 test("explicit breaks, uncertain wording and deliberate zero prevent scene continuity", () => {
   const cue = "A tender kiss.";
   for (const boundary of ["* * *", "Chapter IV — Morning", "They needed a break.",
-    "The next morning brought rain.", "There was no tender kiss.", "A dictionary defined a romantic kiss."]) {
+    "The next morning brought rain.", "There was no tender kiss.", "A dictionary defined a romantic kiss.",
+    "They pulled away.", "They stopped."]) {
     const result = groupScenes(sceneRows(cue, boundary, cue));
     assert.deepEqual(result.map(p => p.sceneId), [1, null, 2]);
     assert.equal(result[1].level, 0);
@@ -94,8 +96,8 @@ test("pace and stronger cue matches produce distinct bounded rhythm suggestions"
 
 test("matched scenes expose only distinct, explicitly described movements", () => {
   const cue = "A tender kiss.";
-  const descriptions = ["The rhythm oscillated and moved side to side.", "A rotation.",
-    "A repeated thrust.", "Flexing, then flexing again.", "A vibration."].join(" ");
+  const descriptions = ["The rhythm oscillated and moved side to side.", "The motion rotated.",
+    "The movement thrust repeatedly.", "The motion flexed, then flexed again.", "The vibration continued."].join(" ");
   const result = groupScenes(sceneRows(`${cue} ${descriptions}`, cue, `${cue} A microvibration.`));
   assert.deepEqual(result.map(p => p.movements), [
     ["vibrate", "fingering", "rotate", "thrusting", "oscillate"], [], [],
@@ -107,7 +109,7 @@ test("matched scenes expose only distinct, explicitly described movements", () =
 
 test("short context retains a scene's movement, while quiet boundaries clear it", () => {
   const flex = "A tender kiss. The motion flexed.";
-  const vibration = "A tender kiss. A soft vibration.";
+  const vibration = "A tender kiss. The soft vibration continued.";
   const result = groupScenes(sceneRows(flex, "Rain brushed against the window.", vibration,
     "They needed a break. A tender kiss. The motion flexed.", vibration));
   assert.deepEqual(result.map(p => p.movements), [["fingering"], ["fingering"], ["vibrate"], [], ["vibrate"]]);
@@ -124,4 +126,66 @@ test("sensitive wording receives an advisory zero and no story text in the resul
   assert.deepEqual(result[1].movements, []);
   assert.ok(result[1].advisory);
   assert.equal(JSON.stringify(result).includes(sample), false);
+});
+
+
+test("only the relevant clause contributes contact, context, and movement", () => {
+  const paragraphs = groupScenes(sceneRows(
+    "She imagined a tender kiss.",
+    "He didn't want to leave. They shared a tender kiss.",
+    "The fan rotated as they shared a tender kiss.",
+    "They shared a tender kiss as the motion flexed.",
+    "He passionately hated the commute. They kissed.",
+    "They remembered a romantic embrace, but they shared a tender kiss.",
+    "They shared a tender kiss. She asked him to stop."
+  ));
+  assert.deepEqual(paragraphs.map(p => p.level), [0, 1, 1, 1, 0, 1, 0]);
+  assert.deepEqual(paragraphs.map(p => p.movements), [[], [], [], ["fingering"], [], [], []]);
+  assert.equal(paragraphs[0].quiet, true);
+  assert.equal(paragraphs[6].quiet, true);
+});
+
+test("a scene can build, sustain, peak, and recover before becoming quiet", () => {
+  const anticipation = "They drew closer. She held her breath.";
+  const sustain = "Their slow tender kiss expressed affection.";
+  const peak = "Their passionate, tender kiss and romantic embrace expressed affection.";
+  const recovery = "They slowed and relaxed.";
+  const result = groupScenes(sceneRows(anticipation, sustain, peak, recovery, "***", anticipation, "The lights went out."));
+  assert.deepEqual(result.map(p => p.phase), ["build", "sustain", "peak", "recover", "quiet", "quiet", "quiet"]);
+  assert.deepEqual(result.map(p => p.level), [1, 2, 5, 1, 0, 0, 0]);
+  assert.deepEqual(result.map(p => p.sceneId), [1, 1, 1, 1, null, null, null]);
+  assert.equal(result[4].quiet, true);
+});
+
+test("repetition and unrelated pacing cannot create peaks or a faster rhythm", () => {
+  const dense = "Their passionate, tender kiss and romantic embrace expressed affection.";
+  const result = groupScenes(sceneRows(dense, dense, dense, "The fan quickly rotated while they shared a tender romantic kiss full of affection."));
+  assert.deepEqual(result.map(p => p.level), [3, 3, 3, 3]);
+  assert.deepEqual(result.map(p => p.rhythm), ["steady", "steady", "steady", "steady"]);
+  assert.deepEqual(result[3].movements, []);
+});
+
+test("two brief details ease down through an active scene without crossing a hard boundary", () => {
+  const lead = "They shared a tender romantic kiss full of affection.";
+  const result = groupScenes(sceneRows(lead, "Rain brushed the window.", "The lamps cast long shadows.", lead, "***", lead));
+  assert.deepEqual(result.map(p => p.level), [3, 2, 1, 3, 0, 3]);
+  assert.deepEqual(result.map(p => p.sceneId), [1, 1, 1, 1, null, 2]);
+});
+
+
+test("speculation extends through coordination and can end at a clear change", () => {
+  assert.equal(scoreParagraph("She imagined their tender kiss and their romantic embrace lasted.").level, 0);
+  assert.equal(scoreParagraph("He didn't want to leave, and they shared a tender kiss.").level, 1);
+  assert.equal(scoreParagraph("She imagined a tender kiss but they shared a romantic embrace.").level, 1);
+  assert.equal(scoreParagraph('She said, "A tender kiss would be nice."').level, 0);
+  assert.equal(scoreParagraph("They shared a tender kiss. She asked him to stop.").level, 0);
+});
+
+
+test("a character moving an object and detached past action do not choose a movement", () => {
+  const result = groupScenes(sceneRows("Her hand rotated the door knob as they shared a tender kiss.",
+    "Her hand rotated slowly while they shared a tender kiss.",
+    "Last summer they shared a tender kiss.",
+    "Last summer they shared a tender kiss. Today they kissed tenderly."));
+  assert.deepEqual(result.map(p => [p.level, p.movements]), [[1, []], [1, ["rotate"]], [0, []], [1, []]]);
 });

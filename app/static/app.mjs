@@ -4,7 +4,7 @@ import {TextImporter} from "./reader/import.mjs";
 import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
 import {StoryStore} from "./reader/storage.mjs";
-import {selectReadingParagraph} from "./reader/position.mjs";
+import {isReadingJump, selectReadingParagraph} from "./reader/position.mjs";
 import {HostedAccessGuard} from "./access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "./reader/library-view.mjs";
 import {BackupImporter, serializeBackup, downloadBackup} from "./reader/backup.mjs";
@@ -15,6 +15,7 @@ import {createSimulatorView} from "./reader/simulator-view.mjs";
 import {createSetupFlow, PRACTICE_STORY} from "./reader/setup-flow.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
+import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
 import {clampCalibration} from "./reader/calibration.mjs";
 
 const $ = id => document.getElementById(id);
@@ -51,6 +52,7 @@ let selectionEpoch = 0;
 let positionTimer = null;
 let positionEpoch = 0;
 let programmaticScrollTop = null;
+let scrollWindow = {start: 0, last: 0, at: 0};
 let synchronizing = false;
 let startEpoch = 0;
 let pendingStart = false;
@@ -79,7 +81,8 @@ function text(id, value) {
   if (node && node.textContent !== String(value)) node.textContent = String(value);
 }
 function show(message) { text("message", message); }
-function recordAllowedEvent(event) { try { betaRecorder?.record(event); } catch { /* Optional research never owns output. */ } }
+function recordAllowedEvent(event) { try { return betaRecorder?.record(event) === true; } catch { return false; } }
+const readingFeedback = mountReadingFeedback({mount: $("reading-feedback"), record: recordAllowedEvent});
 function recordCalibrationEvent(event) {
   const channel = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"].includes(event.channel) ? event.channel : undefined;
   const field = ["minimum", "background", "preferred", "maximum", "recovery"].includes(event.field) ? event.field : undefined;
@@ -139,6 +142,24 @@ function updateFeelControls(state) {
     const active=state.activeChannels || [state.channel], sig=JSON.stringify([channels,active]);
     if(sig!==combinationSignature){combinationSignature=sig;$("combination-choices").replaceChildren(...channels.map(channel=>{const label=document.createElement("label"),input=document.createElement("input");label.className="check-label";input.type="checkbox";input.value=channel.id;input.checked=active.includes(channel.id);label.append(input,document.createTextNode(channel.label));return label;}));}
     $("apply-combined").disabled=state.testing||!state.connected;
+  }
+  const preferredMovement = $("scene-preferred-movement");
+  if (preferredMovement) {
+    const active = channels.filter(channel => state.activeChannels?.includes(channel.id));
+    $("scene-movement-settings").hidden = !feel.combined;
+    if (feel.combined) {
+      if (preferredMovement.children.length !== active.length ||
+          active.some((channel, index) => preferredMovement.children[index]?.value !== channel.id)) {
+        preferredMovement.replaceChildren(...active.map(channel => {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = channel.label;
+          return option;
+        }));
+      }
+      preferredMovement.value = feel.preferredMovement;
+      $("scene-auto-movement").checked = feel.automaticMovement;
+    }
   }
 }
 function recordControlSnapshot(state) {
@@ -291,9 +312,11 @@ function updateCurrentCorrection(story) {
   $("level").disabled = !paragraph || libraryMutation || story?.deleting;
   $("reset-level").disabled = !paragraph || paragraph.override === null || libraryMutation || story?.deleting;
   const rhythm = {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
-  const movements = paragraph?.movements?.length ? paragraph.movements.map(channelLabel).join(" + ") : "Default movement";
+  const movements = paragraph?.movements?.length ? `Movement cue: ${paragraph.movements.map(channelLabel).join(" + ")}` : "Default movement";
+  const stage = {build: "Building", sustain: "Sustaining", peak: "Peak", recover: "Easing off"}[paragraph?.phase];
   text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
-    paragraph.advisory || (paragraph.quiet ? "Quiet section" : paragraph.sceneId && rhythm ? `Scene ${paragraph.sceneId} · ${rhythm} · ${movements}` : "Using the local suggestion."));
+    paragraph.advisory || (paragraph.quiet ? "Quiet section" : paragraph.sceneId && rhythm ?
+      [`Scene ${paragraph.sceneId}`, stage, rhythm, movements].filter(Boolean).join(" · ") : "Using the local suggestion."));
   text("effective-level", `${latest.target ?? 0} / 20`);
   text("correction-position", paragraph ? `Current section ${latest.position + 1} of ${story.model.paragraphs.length}` : "No section selected");
   const nodes = reviewNodes.get(latest.position);
@@ -306,6 +329,7 @@ function display(state = latest) {
   accountWorkspace?.update();
   recordControlSnapshot(state);
   const story = currentStory();
+  readingFeedback.update(story, state);
   for (const id of ["new-story", "empty-new-story", "library-import-file", "upload-story-trigger"]) $(id).disabled = libraryLoading || libraryMutation;
   if ($("story-actions")) $("story-actions").hidden = !story;
   if (story && !synchronizing && story.position !== state.position) {
@@ -364,6 +388,8 @@ function display(state = latest) {
   $("pause").disabled = !state.running && !pendingStart;
   $("previous").disabled = libraryMutation || !story || story.deleting || state.position === 0;
   $("next").disabled = libraryMutation || !story || story.deleting || state.position >= story.model.paragraphs.length - 1;
+  $("sync-here").hidden = !story;
+  $("sync-here").disabled = libraryMutation || !story || story.deleting;
   for (const id of ["save-story", "session-only", "rename-story", "delete-story", "reanalyze"]) {
     $(id).disabled = libraryMutation || !story || story.deleting || story.saving;
   }
@@ -372,7 +398,7 @@ function display(state = latest) {
   $("session-only").disabled ||= !story?.saved;
   text("story-title", story?.title ?? "Your reading space");
   text("header-story-title", story?.title ?? "Add a story to begin");
-  text("position", story ? `Section ${state.position + 1} of ${story.model.paragraphs.length}` : "");
+  text("position", state.readingSeeking ? "Finding your place…" : story ? `Section ${state.position + 1} of ${story.model.paragraphs.length}` : "");
   const metadata = storyMetadata(story);
   text("story-word-count", story ? `${metadata.words.toLocaleString()} words` : "");
   text("story-progress", story ? `${metadata.progressPercent}% · ${metadata.positionLabel}` : "");
@@ -388,10 +414,11 @@ function display(state = latest) {
   $("reading-workspace").hidden = !story;
   const nextNode = story ? paragraphNodes[state.position] ?? null : null;
   if (activeNode !== nextNode) {
-    if (activeNode) { activeNode.classList.remove("active"); activeNode.removeAttribute("aria-current"); }
+    if (activeNode) { activeNode.classList.remove("active"); activeNode.removeAttribute("aria-current"); activeNode.removeAttribute("data-playing"); }
     activeNode = nextNode;
     if (activeNode) { activeNode.classList.add("active"); activeNode.setAttribute("aria-current", "true"); }
   }
+  if (activeNode) activeNode.dataset.playing = String(state.running && !state.readingSeeking);
   updateCurrentCorrection(story);
   simulatorView?.update(state);
   setupFlow?.update({...connection, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent});
@@ -400,6 +427,7 @@ function display(state = latest) {
 
 function controlRecovery(state) {
   latest = state; cancelStart(); releasePlayback();
+  if (activeNode) activeNode.dataset.playing = "false";
   for (const id of ["start", "pause"]) if ($(id)) $(id).disabled = true;
   if ($("connect")) { $("connect").disabled = false; $("connect").hidden = false; text("connect", "Reconnect"); }
   if ($("stop")) $("stop").disabled = false;
@@ -551,7 +579,7 @@ function resetLevel(index) {
   const story = currentStory(); if (!story || story.deleting || libraryMutation) return;
   story.model.resetOverride(index);
   story.explicitCorrections.delete(index);
-  controller.setLevel(index, story.model.effectiveLevels()[index]);
+  controller.setLevel(index, story.model.effectiveLevels()[index], {manual: false});
   syncManualZeros(story);
   markDirty(story);
   const nodes = reviewNodes.get(index); if (nodes) updateReviewRow(story, index, nodes);
@@ -633,36 +661,71 @@ function readingBounds() {
   return {top, bottom, anchor: top + (bottom - top) * .35};
 }
 function anyDialog() { return document.querySelector("dialog[open]") !== null; }
+function readingIsVisible() {
+  return !document.hidden && !anyDialog() && (!isNarrow() || ($("settings-panel").hidden && $("library-panel").hidden));
+}
+function readingScrollTop() { return scrollY + (window.visualViewport?.offsetTop ?? 0); }
+function resetScrollWindow() {
+  const top = readingScrollTop();
+  scrollWindow = {start: top, last: top, at: performance.now()};
+}
 function scrollToCurrent() {
   const node = paragraphNodes[latest.position]; if (!node || anyDialog()) return;
   cancelPosition();
   window.scrollTo({top: Math.max(0, scrollY + node.getBoundingClientRect().top - readingBounds().anchor + 12), behavior: "instant"});
   programmaticScrollTop = scrollY;
+  resetScrollWindow();
 }
-function followPosition() {
+function followPosition({explicit = false} = {}) {
   const story = currentStory();
-  if (!story || document.hidden || anyDialog() ||
-      (isNarrow() && (!$("settings-panel").hidden || !$("library-panel").hidden)) || !$("follow-scroll").checked) return;
+  if (!story || !readingIsVisible() || (!explicit && !$("follow-scroll").checked)) return false;
   // Short stories can fit entirely above the reading anchor. At the document
   // top, a layout change or Start is not evidence that the reader moved on.
-  if (scrollY + (window.visualViewport?.offsetTop ?? 0) <= 1 && story.position === 0) return;
+  if (readingScrollTop() <= 1 && story.position === 0) return true;
   const {top, bottom, anchor} = readingBounds();
   const rectangles = paragraphNodes.map(node => {
     const rect = node.getBoundingClientRect(); return {id: node.dataset.paragraphId, top: rect.top, bottom: rect.bottom};
   }).filter(rect => rect.bottom >= top && rect.top <= bottom);
   const currentId = story.model.paragraphs[latest.position]?.id;
-  const id = selectReadingParagraph(rectangles, anchor, currentId);
-  if (!id || id === currentId) return;
+  const id = selectReadingParagraph(rectangles, anchor, explicit ? null : currentId);
+  if (!id) return false;
   const index = story.model.paragraphs.findIndex(paragraph => paragraph.id === id);
-  if (index >= 0) controller.setPosition(index);
+  if (index < 0) return false;
+  if (id !== currentId) {
+    if (explicit && latest.running && latest.feel?.playbackMode === "story") controller.setReadingSeeking(true);
+    controller.setPosition(index);
+  }
+  return true;
+}
+function completeReadingSeek() {
+  resetScrollWindow();
+  if (latest.readingSeeking) controller.setReadingSeeking(false);
 }
 function settlePosition() {
   cancelPosition();
   if (!currentStory() || document.hidden) return;
+  const now = performance.now(), currentTop = readingScrollTop();
+  // Compare travel within a short window so slow reading scrolls can stay active.
+  if (now - scrollWindow.at > 320) scrollWindow = {start: scrollWindow.last, last: currentTop, at: now};
+  else scrollWindow.last = currentTop;
+  const {top, bottom} = readingBounds();
+  if (isReadingJump(scrollWindow.start, currentTop, bottom - top)) {
+    if (pendingStart || startIntent) {
+      cancelStart();
+      closeDialog("start-dialog");
+      display();
+    }
+    if (readingIsVisible() && $("follow-scroll").checked && latest.running && latest.feel?.playbackMode === "story" && !latest.readingSeeking) {
+      controller.setReadingSeeking(true);
+    }
+  }
   const operation = positionEpoch, storyId = activeId;
   positionTimer = setTimeout(() => {
     positionTimer = null;
-    if (operation === positionEpoch && activeId === storyId) followPosition();
+    if (operation === positionEpoch && activeId === storyId) {
+      if (followPosition()) completeReadingSeek();
+      else if (!latest.readingSeeking) resetScrollWindow();
+    }
   }, 180);
 }
 function reflow(reason) {
@@ -982,6 +1045,12 @@ for(const key of ["minimum","background","preferred","recovery","maximum"])$("fe
   }catch(error){show(error.message||"Check the movement settings.");display();}
 });
 $("feel-rhythm")?.addEventListener("change",()=>{try{const settings={...selectedSettings(),rhythm:$("feel-rhythm").value};controller.setChannelFeel(feelEditingChannel || latest.channel,settings);recordAllowedEvent({type:"control",control:"rhythm",channel:feelEditingChannel || latest.channel,value:settings.rhythm});}catch(error){show(error.message);} });
+for (const id of ["scene-preferred-movement", "scene-auto-movement"]) {
+  $(id)?.addEventListener("change", () => {
+    cancelStart();
+    controller.setSceneMovement($("scene-auto-movement").checked, $("scene-preferred-movement").value);
+  });
+}
 $("enable-personal-range")?.addEventListener("click",async()=>{try{pause("Paused while you choose this movement's personal range.");await controller.enablePersonalRange({channel:feelEditingChannel || latest.channel});display(controller.snapshot());}catch(error){show(error.message||"Complete the gentle movement and Stop check first.");}});
 $("manual-level")?.addEventListener("input",()=>{try{const channel=feelEditingChannel || latest.channel,value=Number($("manual-level").value);if((latest.activeChannels || []).length>1){const levels={...latest.channelOutputs,[channel]:value};controller.holdChannels(levels);}else controller.hold(value);recordAllowedEvent({type:"control",control:"hold",channel,value});display(controller.snapshot());}catch(error){show(error.message||"Check the current level before changing it.");}});
 for(const[id,value]of[["mark-good",5],["mark-uncomfortable",1]])$(id)?.addEventListener("click",()=>{
@@ -1031,6 +1100,7 @@ $("start").addEventListener("click", () => {
   const story = currentStory();
   if (!canStartHere() || !story?.model.analysisReady || !latest.connected || latest.running || pendingStart || document.hidden) return;
   cancelPosition(); followPosition();
+  resetScrollWindow();
   openDialog("start-dialog");
   startIntent = {id: story.id, ceiling: latest.ceiling, levelAdjustment: latest.levelAdjustment, device: playbackIdentity()};
   const movement = (latest.activeChannels || [latest.channel || "vibrate"]).map(channel=>`${latest.channels?.find(item=>item.id===channel)?.label || channel} · up to ${Math.min(latest.ceiling,selectedSettings(latest,channel).maximum)}/20`).join(" + ");
@@ -1066,8 +1136,24 @@ for (const [id, delta] of [["previous", -1], ["next", 1]]) $(id).addEventListene
   const story = currentStory(); if (!story || story.deleting || libraryMutation) return;
   cancelPosition();
   controller.setPosition(Math.max(0, Math.min(story.model.paragraphs.length - 1, latest.position + delta)));
+  completeReadingSeek();
   scrollToCurrent();
   if ($("review-settings").open) renderReview();
+});
+$("sync-here").addEventListener("click", () => {
+  if ($("sync-here").disabled) return;
+  if (!readingIsVisible()) {
+    show("Close the side panel, then try Sync here.");
+    return;
+  }
+  cancelPosition();
+  cancelStart();
+  if (followPosition({explicit: true})) {
+    completeReadingSeek();
+    display();
+  } else {
+    show("Scroll until a story section is visible, then try Sync here.");
+  }
 });
 $("level").addEventListener("input", () => changeLevel(latest.position, Number($("level").value)));
 $("reset-level").addEventListener("click", () => resetLevel(latest.position));
@@ -1329,7 +1415,7 @@ if (document.createElementNS) {
   mountBetaRecording({mount:$("beta-recording-mount"),recorder:betaRecorder,document,
     context:()=>({mode:latest.mode==="lovense"?"live":"simulator",toy:latest.model||"none"})});
   let wasRecording=false;
-  betaRecorder.subscribe(state=>{const began=state.recording&&!wasRecording;wasRecording=state.recording;for(const id of ["mark-good","mark-uncomfortable"])$(id).disabled=!latest.running||!state.recording;if(began){recordedDevice=recordedStory=recordedStep="";recordControlSnapshot(latest);}});
+  betaRecorder.subscribe(state=>{const began=state.recording&&!wasRecording;wasRecording=state.recording;readingFeedback.sharing(state.recording);for(const id of ["mark-good","mark-uncomfortable"])$(id).disabled=!latest.running||!state.recording;if(began){recordedDevice=recordedStory=recordedStep="";recordControlSnapshot(latest);}});
   const setupDialog=$("setup-dialog"),recordingNode=$("beta-recording");
   if(setupDialog&&recordingNode&&typeof MutationObserver!=="undefined")new MutationObserver(()=>{
     if(setupDialog.open)setupDialog.prepend(recordingNode);else $("beta-recording-mount").append(recordingNode);

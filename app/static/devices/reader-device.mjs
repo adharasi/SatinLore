@@ -14,6 +14,8 @@ export class ReaderDeviceController {
     Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator});
     this.channelDefaults = {...DEFAULT_CHANNEL_CALIBRATION, rhythm: storyRhythms ? "scene" : "steady"};
     this.sceneProfiles = undefined;
+    this.automaticSceneMovement = false;
+    this.preferredSceneMovement = null;
     this.mode = "simulator"; this.model = "lush"; this.channel = "vibrate";
     this.personalRangeChannels=new Set();this.combinedChannels=[];this.calibrations = new Map(); this.verifiedChannels = new Map(); this.manualZeros = new Set();
     this.operation = 0; this.testSerial = 0; this.testing = false; this.visible = true; this.authorized = true;
@@ -38,6 +40,14 @@ export class ReaderDeviceController {
       canStart:!this.testing && state.connected && !state.running && state.state === "READY_PAUSED" && this.visible && this.authorized && this.levels.length > 0 && (simulated || state.canStart && checked),
       outputMeaning:simulated ? "simulated" : "requested",maxCeiling:simulated ? 20 : this.rangeMaximum(),personalRangeChannels:[...this.personalRangeChannels],personalRangeEnabled:!simulated&&this.activeChannels().every(channel=>this.personalRangeChannels.has(channel)),
       baseLevel:this.levels[state.position] ?? 0};
+  }
+  setSceneMovement(automatic, preferred) {
+    if (!this.active.feel.vector) return this.snapshot();
+    this.active.feel.setSceneMovement(automatic, preferred);
+    this.automaticSceneMovement = automatic === true;
+    this.preferredSceneMovement = preferred;
+    if (this.mode === "lovense") this.real.changed(); else this.sim._desiredChanged();
+    return this.snapshot();
   }
   selectedToy() { return this.toys.find(toy => toy.id === this.selectedId) || null; }
   channels() {
@@ -233,7 +243,10 @@ export class ReaderDeviceController {
     return this.snapshot();
   }
   setPosition(index){return this.active.setPosition(index),this.snapshot();}
-  setLevel(index,value,options){this.active.setLevel(index,value,options);this.levels[index]=value;if(value===0&&options?.manual!==false)this.manualZeros.add(index);else this.manualZeros.delete(index);return this.notify();}
+  setReadingSeeking(active){return this.active.setReadingSeeking(active),this.snapshot();}
+  setLevel(index,value,options){this.active.setLevel(index,value,options);this.levels[index]=value;
+    if(this.sceneProfiles?.[index]?.phase)this.sceneProfiles[index].manual=options?.manual!==false;
+    if(value===0&&options?.manual!==false)this.manualZeros.add(index);else this.manualZeros.delete(index);return this.notify();}
   setManualZeros(indices){this.active.setManualZeros(indices);this.manualZeros=new Set(indices);return this.snapshot();}
   adjustLevel(direction){this.active.adjustLevel(direction);return this.snapshot();}
   setCeilingFromControl(value){
@@ -314,8 +327,9 @@ export class ReaderDeviceController {
     else this.sim.pause("Combined movements selected. Confirm Start when ready.");
     const cap=this.mode==="lovense"?this.rangeMaximum(channels):20;
     const settings=Object.fromEntries(channels.map(id=>[id,clampCalibration(this.calibrations.get(`${this.model}:${id}`)||this.channelDefaults,cap)]));
-    this.active.feel=new CombinedReadingFeel(settings,{mode});this.combinedChannels=[...channels];
     if(!channels.includes(this.channel))this.channel=channels[0];
+    const preferredMovement=channels.includes(this.preferredSceneMovement)?this.preferredSceneMovement:this.channel;
+    this.active.feel=new CombinedReadingFeel(settings,{mode,automaticMovement:this.automaticSceneMovement,preferredMovement});this.combinedChannels=[...channels];
     this.setCeilingFromControl(Math.max(...Object.values(settings).map(value=>value.maximum)));
     this.notify();return this.snapshot();
   }

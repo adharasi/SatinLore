@@ -12,24 +12,57 @@ Open [SatinLore](https://app.satinlore.com/) and sign in to the private reader. 
 
 ## Scene patterns and controls
 
-Paste the paragraphs below with one blank line between them. You can also save them as a UTF-8 text file and import it.
+Paste this original test story with a blank line between paragraphs. For the comparison with the previous version, use the Nora simulator with both movements active, a maximum of 5, the same preferred levels and **Follow scene rhythm**.
 
-> Their tender romantic kiss expressed affection. The low vibration stayed steady.
+> They drew closer. She held her breath.
 >
-> Rain tapped softly on the window.
+> He didn’t want to leave. They shared a tender kiss.
 >
-> They shared a slow, tender romantic embrace full of affection. The soft flexing continued.
+> Rain tapped on the glass.
 >
-> Later that evening, the room fell quiet.
+> A clock ticked in the hall.
 >
-> They made tea and read the paper.
+> The fan rotated as they shared a tender romantic kiss. Their affectionate embrace grew quicker.
+>
+> They slowed and relaxed.
+>
+> Later that evening, she imagined a tender kiss.
+>
+> They washed the dishes and closed the curtains.
 
-1. Wait for **Scene patterns ready**, then open the section review in **Advanced**. The brief rain detail should retain the preceding level, rhythm and movement inside the scene. The later time transition should break it.
-2. Select **Follow scene rhythm**, connect the simulator and explicitly confirm **Start**. Compare the result with **Steady**. Try **Gentle variation** and **More variation** to check that your selection takes precedence over the scene pattern. Step through the first three paragraphs. With both Flexer movements enabled, the simulator should vibrate through the rain paragraph, then switch to flexing.
-3. Use **−** and **+** to move the section target down or up by one. Set a lower maximum and check that the target stays within it. Move to another section and check it opens at its own level. Set a section correction to zero and verify it stays quiet with continuous background enabled. Test **Hold**, **Ease off**, **Follow story**, **Pause** and **Stop**.
-4. Open a different story during analysis or retry the analysis after changing a correction. Playback should stay paused until a new Start, and deliberate corrections should remain in place.
+1. Wait for **Scene patterns ready**, then open **Advanced → Adjust story sections**. Read a paragraph before checking its suggestion. The early anticipation can build gently because the next beat confirms a scene. The separate thought about leaving should not cancel the kiss. The two short room details should keep the scene connected. The closer moment can feel stronger without interpreting the fan as an instruction to rotate. Expect a softer recovery and quiet at the time jump.
+2. Enable **Let the story switch movements** in movement tuning to exercise the movement classifier. Explicitly confirm **Start**, then move through the paragraphs. Compare the active marker, the suggested level and the actual simulator meters. The suggestion is the story score. The requested level can vary with the rhythm, the selected movement and its calibrated range. The Nora rotation channel should stay quiet in this fixture.
+3. In a longer story, scroll a few lines and wait while reading. The marker should follow the active paragraph without repeatedly switching at its boundary. Make a large scroll jump and let the viewport settle. Watch for the brief reduction while finding the new place and a gradual return on an active section. Use **Sync here** to align playback with the paragraph in view. Check that using it while paused leaves playback paused.
+4. Use **−** and **+** to adjust the current section one step at a time. Lower the maximum, and try a manual section correction of zero with continuous background enabled. Both limits should take effect immediately. Reanalyse and verify the saved correction is retained. Test **Hold**, **Ease off**, **Follow story**, **Pause** and **Stop**.
+5. After playback, open **Advanced → Reading feedback**. Pick a section you have read and a reason such as **Too strong**, **Wrong moment** or **Wrong movement**. Check that a marker never changes the suggestion or starts playback. A local export contains the section number and reason. Consented beta recordings can receive the same structured marker.
 
-The classifier uses English-language cues for scene, rhythm and movement suggestions. You can review and correct the suggested levels. Local cues can miss context or classify a passage incorrectly. Advisory flags identify passages that warrant review. They do not certify content, consent or safety.
+The rules still work from English cues and can miss an implied event, mistake a quoted action for a current one, or infer an incorrect reading position. Section review is optional and lets you correct the suggested level. The separate device controls still determine what can play.
+
+## Compare with the previous analyser
+
+- Use version `caadcd1` as the baseline. Run the same passages, viewport, movement setup, rhythm setting and ceiling in both versions. The baseline switches automatically on a movement cue, so enable switching in the revised version for that comparison and separately test the revised default.
+- For a tester pilot, prepare 20–30 short passages you have permission to use. Include ordinary paragraphs, slow build-up, obvious action, dialogue and remembered action, unrelated objects moving, interruptions and endings. Give readers both versions and alternate which version comes first. Keep the hardware qualification check separate.
+- Ask readers to mark unexpected activations, missed moments, timing mistakes, unwanted movement switches and corrections. Compare corrections per ten minutes and ask which version they could keep reading with. Record device model, settings, build and paragraph number or a fixture ID. Collect feedback only with the reader's knowledge and use no private excerpts in telemetry.
+- Run the neutral regression with `node --test tests/scene-evaluation.test.mjs`. It covers isolated cue traps and the progression in the test story. It gives reproducible software evidence and is separate from a reader preference study.
+
+## Simulator read-through evidence
+
+The same eight paragraphs were read in order in localhost Chromium 153, with the Nora simulator, both movements active, **Follow scene rhythm** and maximum 5. The revised run enabled movement switching so both versions had the opportunity to react to the turning fan. The values below are the simulator readings sampled about 1.2 seconds after moving to each paragraph. Rhythm can change the value later in a paragraph.
+
+| Paragraph | Expected while reading | Baseline `caadcd1` | Revised |
+| --- | --- | --- | --- |
+| 1. Anticipation | Gentle build leading into the next beat | Still | Vibration 1 |
+| 2. Kiss after a separate thought about leaving | Continue gently | Still | Vibration 1 |
+| 3. Rain | Keep the same scene through the brief detail | Still | Vibration 1 |
+| 4. Clock | Keep the scene connected through a second brief detail | Still | Vibration 1 |
+| 5. Stronger moment with a fan turning | Increase without switching to the fan’s motion | Rotation 1 | Vibration 3 |
+| 6. Relaxing | Ease down | Still | Vibration 1 |
+| 7. Time jump and imagined kiss | Go quiet | Still | Still |
+| 8. Ordinary ending | Stay quiet | Still | Still |
+
+Both runs returned to zero on **Stop** and reported no browser errors. A second, longer fixture held a steady level 3 during an ordinary pause in scrolling. A jump to section 14 showed **Finding your place** at zero, then the simulator rose from zero to 2 to 3 after the view settled. **Sync here** while paused kept output at zero. An action cue left rotation at zero under the default movement setting and produced rotation after enabling switching and pressing **Start**. A post-session feedback download contained the format version, the selected section and the issue code.
+
+These checks cover simulator behaviour in this browser and build. Preference on representative stories and physical device behaviour still need their own checks.
 
 ## Alpha
 

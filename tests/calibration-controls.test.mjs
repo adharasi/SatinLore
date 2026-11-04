@@ -224,3 +224,83 @@ test("a combined simulator follows selected scene movements and never enables an
   clock.advance(1000);
   assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 3, fingering: 3});
 });
+
+test("automatic levels use the reader's calibration, while explicit corrections keep their own level", () => {
+  const feel = new ReadingFeel();
+  feel.configure({preferred: 6, maximum: 12});
+  const scene = {phase: "sustain", quiet: false};
+  assert.equal(feel.desired({base: 3, ceiling: 12, scene}), 6);
+  assert.equal(feel.desired({base: 5, ceiling: 12, scene: {...scene, phase: "peak"}}), 9);
+  assert.equal(feel.desired({base: 3, ceiling: 12, scene: {...scene, manual: true}}), 3);
+  assert.equal(feel.desired({base: 5, ceiling: 4, scene}), 4);
+  assert.equal(feel.desired({base: 5, ceiling: 12, scene, manualZero: true}), 0);
+});
+
+test("scene motion defaults to the selected movement, with opt-in switching and a safe fallback", async t => {
+  const {clock} = synchronous();
+  const controller = new ReaderDeviceController(clock);
+  t.after(() => controller.destroy());
+  const profile = movements => ({sceneId: 1, phase: "sustain", rhythm: "steady", quiet: false, movements});
+  controller.setStory([3, 3], [profile(["fingering"]), profile(["oscillate"])]);
+  await controller.beginConnection({mode: "simulator", model: "flexer"});
+  await controller.selectDevice("sim-flexer");
+  await controller.applyChannels(["vibrate", "fingering"]);
+  controller.start();
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 3, fingering: 0});
+  controller.setSceneMovement(true, "vibrate");
+  clock.advance(1000);
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 0, fingering: 3});
+  controller.setPosition(1);
+  clock.advance(1000);
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 2, fingering: 0});
+  clock.advance(1000);
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 3, fingering: 0});
+});
+
+test("seeking quiets the simulator, ramps back from zero and cannot undo Stop", () => {
+  const {clock, controller, device} = synchronous();
+  controller.setStory([4, 5]);
+  controller.connect();
+  controller.start();
+  assert.equal(device.snapshot().strength, 4);
+  controller.setReadingSeeking(true);
+  assert.equal(device.snapshot().strength, 0);
+  controller.setPosition(1);
+  clock.advance(1000);
+  assert.equal(device.snapshot().strength, 0);
+  controller.setReadingSeeking(false);
+  clock.advance(1000);
+  assert.equal(device.snapshot().strength, 2);
+  clock.advance(1000);
+  assert.equal(device.snapshot().strength, 4);
+  controller.setReadingSeeking(true);
+  controller.pause();
+  controller.setReadingSeeking(false);
+  clock.advance(2000);
+  assert.equal(device.snapshot().strength, 0);
+  assert.equal(controller.snapshot().running, false);
+});
+
+test("a live seek stops the old intensity and can only resume the newest position", async t => {
+  const clock = new SimulationClock(), transport = new ScenarioTransport({clock});
+  const controller = new AsyncPlaybackController({transport, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer});
+  t.after(() => controller.destroy());
+  controller.selectDevice("sim-a");
+  controller.setStory([4, 5, 3]);
+  const connecting = controller.connect();
+  await clock.advance(200);
+  assert.equal(await connecting, true);
+  assert.equal(controller.start(controller.prepareStart()), true);
+  await clock.advance(200);
+  assert.equal(controller.snapshot().output, 4);
+  controller.setReadingSeeking(true);
+  controller.setPosition(1);
+  controller.setPosition(2);
+  await clock.advance(300);
+  assert.equal(controller.snapshot().output, 0);
+  controller.setReadingSeeking(false);
+  await clock.advance(1000);
+  const commands = transport.requests.filter(request => request.kind === "command");
+  assert.deepEqual(commands.map(command => command.level), [4, 2]);
+  assert.ok(commands.every(command => command.deviceId === "sim-a" && command.durationMs === 2000));
+});

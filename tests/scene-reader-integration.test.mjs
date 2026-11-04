@@ -12,10 +12,11 @@ test("immediate and deferred analysis produce the same local scene mapping and p
   const immediate = new ReaderModel();
   immediate.load(story);
   assert.ok(immediate.effectiveLevels()[0] > 0);
-  assert.equal(immediate.effectiveLevels()[1], immediate.effectiveLevels()[0], "A brief sensory detail retains the preceding level.");
-  assert.equal(immediate.effectiveProfiles()[1].rhythm, immediate.effectiveProfiles()[0].rhythm);
+  assert.deepEqual(immediate.effectiveLevels(), [3, 2, 3], "A brief sensory detail eases down within the scene.");
+  assert.equal(immediate.effectiveProfiles()[1].rhythm, "gentle");
   const profiles = immediate.effectiveProfiles();
   assert.deepEqual(profiles.map(profile => profile.movements), [["fingering"], ["fingering"], []]);
+  assert.deepEqual(profiles.map(profile => [profile.sceneId, profile.phase]), [[1, "sustain"], [1, "sustain"], [1, "sustain"]]);
   profiles[0].movements.push("rotate");
   assert.deepEqual(immediate.effectiveProfiles()[0].movements, ["fingering"]);
   assert.equal(immediate.paragraphs[0].sceneId, immediate.paragraphs[2].sceneId);
@@ -24,9 +25,10 @@ test("immediate and deferred analysis produce the same local scene mapping and p
   deferred.setOverride(1, 0);
   assert.equal(deferred.effectiveProfiles(), undefined);
   assert.equal(await deferred.analyse({yieldTask: async () => {}, batchSize: 1}), true);
-  assert.deepEqual(deferred.effectiveProfiles(), immediate.effectiveProfiles());
+  assert.equal(deferred.effectiveProfiles()[1].manual, true);
   assert.equal(deferred.effectiveLevels()[1], 0);
   deferred.resetOverride(1);
+  assert.deepEqual(deferred.effectiveProfiles(), immediate.effectiveProfiles());
   assert.deepEqual(deferred.effectiveLevels(), immediate.effectiveLevels());
 });
 

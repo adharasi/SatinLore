@@ -6,7 +6,7 @@ import {MockDevice} from "../../app/static/devices/mock.mjs";
 import {TextImporter} from "../../app/static/reader/import.mjs";
 import {createStoryId} from "../../app/static/reader/identity.mjs";
 import {ReaderModel} from "../../app/static/reader/model.mjs";
-import {selectReadingParagraph} from "../../app/static/reader/position.mjs";
+import {isReadingJump, selectReadingParagraph} from "../../app/static/reader/position.mjs";
 import {PlaybackController} from "../../app/static/playback/controller.mjs";
 import {ReaderDeviceController} from "../../app/static/devices/reader-device.mjs";
 import {HostedAccessGuard} from "../../app/static/access.mjs";
@@ -137,13 +137,13 @@ export function workspace({hosted = false, locks = true} = {}) {
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     MockDevice: TestDevice, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore,
-    selectReadingParagraph, PlaybackController, ReaderDeviceController: TestController, HostedAccessGuard: TestGuard,
+    isReadingJump, selectReadingParagraph, PlaybackController, ReaderDeviceController: TestController, HostedAccessGuard: TestGuard,
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
     WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORY,
     ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration,
-    createSimulatorView: () => null, createSetupFlow: () => null,
+    createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,
     innerHeight: 1000, scrollY: 0, console, confirm: () => true, prompt: () => null,
   });

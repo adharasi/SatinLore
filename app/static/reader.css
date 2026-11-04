@@ -39,6 +39,9 @@ button,input,textarea,select{border-radius:6px}
 .settings-panel select,.library-filter select{width:100%;min-width:0;min-height:44px;border-color:var(--secondary);background:var(--page);font-size:.8125rem}
 .settings-panel label:not(.check-label,.visually-hidden){font-size:.75rem;margin-bottom:4px}
 .settings-panel .feel-actions button{font-size:.75rem;padding:7px}
+#reading-feedback .feel-actions{margin-top:.6rem}
+.reading-feedback-marks{padding-inline-start:1.2rem}
+.reading-feedback-marks:empty,#reading-feedback [role=status]:empty{display:none}
 .settings-panel .feel-adjustments>details>summary{min-height:44px}
 .settings-panel .simulator-section .simulator-device{height:110px}
 .settings-panel .simulator-section .simulator-trace{height:38px}
@@ -79,6 +82,9 @@ button,input,textarea,select{border-radius:6px}
   .level-step-buttons{gap:0}
   #target-output{min-width:32px}
 }
+
+.story-paragraph.active[data-playing="true"]{background:color-mix(in srgb,var(--selection) 48%,transparent)}
+#sync-here{display:block;margin-inline:auto;padding:4px;font-size:.6875rem;line-height:1.25}
 @container (max-width: 24rem){
   .transport-layout{grid-template-columns:minmax(164px,1.1fr) minmax(0,.9fr)}
   .playback-buttons{grid-area:1/1/2/3;position:sticky;top:0;z-index:2;background:var(--surface)}
