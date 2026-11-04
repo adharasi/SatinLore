@@ -995,9 +995,12 @@ export async function checkReader(page, context, origin) {
   await page.clock.runFor(1100);
   await output(page, 4);
   assert.equal(await page.locator("#capValue").textContent(), "10");
-  await page.locator("#level-down").click();
-  assert.equal(await page.locator("#target-output").textContent(), "3 / 20");
-  await output(page, 0); // A lower resulting command stops the old one immediately.
+  // Read within the click's browser task, before the next heartbeat can send 3.
+  const lowered = await page.locator("#level-down").evaluate(button => {
+    button.click();
+    return [document.querySelector("#target-output").textContent, document.querySelector("#output").textContent];
+  });
+  assert.deepEqual(lowered, ["3 / 20", "0 / 20"], "A lower resulting command stops the old one immediately.");
   await page.clock.runFor(1100); await output(page, 3);
   await setRange(page, "cap", 0);
   await output(page, 0); await page.clock.runFor(1100); await output(page, 0);
