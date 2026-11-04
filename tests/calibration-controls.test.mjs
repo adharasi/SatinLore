@@ -23,6 +23,56 @@ test("calibration separates zero recovery from a nonzero minimum and clamps a sa
   assert.throws(()=>normalizeChannelCalibration({...value,token:"private"}),TypeError);
 });
 
+test("quiet defaults distinguish off, continuous and gentle simulator pulses without bypassing deliberate zeros", () => {
+  const {controller, clock, device} = synchronous();
+  const ordinary = {phase: "quiet", rhythm: "steady", quiet: false};
+  const boundary = {...ordinary, quiet: true};
+  controller.connect();
+  controller.setStory([0, 0], [ordinary, boundary]);
+  controller.start();
+  assert.equal(device.snapshot().strength, 0);
+  controller.pause();
+  controller.setFeel({mode: "continuous", background: 1});
+  controller.start();
+  clock.advance(4000);
+  assert.equal(device.snapshot().strength, 1);
+  controller.pause();
+  controller.setFeel({quietEdging: true});
+  controller.start();
+  clock.advance(1000);
+  assert.equal(device.snapshot().strength, 1);
+  clock.advance(1000);
+  assert.equal(device.snapshot().strength, 0);
+  clock.advance(4000);
+  assert.equal(device.snapshot().strength, 1);
+  controller.setPosition(1);
+  assert.equal(device.snapshot().strength, 0);
+  controller.setPosition(0);
+  controller.setLevel(0, 0);
+  clock.advance(3000);
+  assert.equal(device.snapshot().strength, 0);
+  controller.pause();
+  controller.setManualZeros([]);
+  clock.advance(6000);
+  assert.equal(device.snapshot().strength, 0);
+  const feel = new ReadingFeel();
+  feel.configure({mode: "continuous", quietEdging: true, background: 1});
+  assert.equal(feel.desired({base: 0, scene: ordinary, now: 2000}), 1, "The live policy keeps the existing steady background.");
+});
+
+test("an explicit Nocturne peak shape applies in simulation despite ordinary rhythm, and stays out of live output", () => {
+  const feel = new ReadingFeel();
+  const peak = {phase: "peak", rhythm: "dynamic", quiet: false, peakPreset: "ease"};
+  feel.configure({rhythm: "steady", preferred: 5});
+  const outputs = (simulatorStagePatterns, scene = peak) => [0, 2000, 4000, 6000].map(now =>
+    feel.desired({base: 5, ceiling: 8, scene, now, simulatorStagePatterns}));
+  assert.deepEqual(outputs(true), [3, 5, 3, 6]);
+  assert.deepEqual(outputs(false), [7, 7, 7, 7]);
+  assert.deepEqual(outputs(true, {...peak, manual: true}), [5, 5, 5, 5]);
+  assert.equal(feel.desired({base: 5, ceiling: 1, scene: peak, simulatorStagePatterns: true}), 1);
+  assert.equal(feel.desired({base: 5, ceiling: 0, scene: peak, simulatorStagePatterns: true}), 0);
+});
+
 test("a continuous background is opt-in and explicit paragraph zero, strength zero and maximum zero outrank it",()=>{
   const {controller:c,clock,device}=synchronous();c.connect();c.setStory([0,4]);
   c.start();assert.equal(device.snapshot().strength,0);

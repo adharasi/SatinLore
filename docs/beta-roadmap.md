@@ -4,6 +4,12 @@ Approved workspace revision: 29 October 2026 (frontend specification v1.2), refi
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The 2 November eight-model request adds simulated rehearsal and a configured bounded live path; no physical model is qualified by implementation alone. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
+## Main reader quick start — 4 November 2026
+
+The public reader offers four optional questions on quiet passages, edging, maximum and rhythm after first sign-in. A signed-in reader can save those defaults and edit or reset them in Settings. The protected preview can try the form for the current visit. The main hosted pairing flow moves from device selection to one quick movement check, then opens Advanced controls. Existing physical limits and the separate beta test flow still apply. Nocturne offers a choice of simulator peak patterns, and the scan lists matching toy models above a story when it detects movement cues.
+
+The remaining release checks are real inbox delivery for public signup, physical movement and Stop qualification, and validation of the pattern defaults with consenting testers.
+
 ## Flexer Alpha on the app host — 3 November 2026
 
 The first preference study has a separate manual-control route at `/alpha`, using Dilan and Sadie logins, and founder review at `/admin`. The study joins consented control events, optional marks, feedback and timestamped annotations by authenticated username. With consent, Alpha captures masked visual replays of each study screen for founder review. The reader and prior beta use their existing Access and storage rules.

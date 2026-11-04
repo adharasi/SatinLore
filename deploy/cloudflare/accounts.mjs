@@ -1,6 +1,7 @@
 /** Account data. Authenticated identity is selected by the outer Worker. */
 import {TOY_PROFILES} from "../../app/static/devices/toy-profiles.mjs";
 import {MAX_SAVED_STORIES, validateStoryRecord} from "../../app/static/reader/storage.mjs";
+import {validateExperience} from "../../app/static/reader/experience-preferences.mjs";
 
 const LIBRARY_ROUTE = "/api/account/library";
 export const ACCOUNT_ROUTES = Object.freeze([
@@ -145,10 +146,15 @@ function normalizeLibraryMutation(body) {
   if (body.action === "savePreferences") {
     if (!exact(body, [...common, "preferences"]) || (body.expectedRevision !== null && !revision(body.expectedRevision))) fail();
     const value = body.preferences;
-    if (!exact(value, PREFERENCE_FIELDS) || !["dark", "light", "system"].includes(value.appearance) ||
+    if (!fields(value, [...PREFERENCE_FIELDS, "experience"]) || !PREFERENCE_FIELDS.every(key => Object.hasOwn(value, key)) || !["dark", "light", "system"].includes(value.appearance) ||
         !["comfortable", "wide", "full"].includes(value.width) || !["small", "normal", "large"].includes(value.fontSize) ||
         !["compact", "normal", "relaxed"].includes(value.spacing) || typeof value.follow !== "boolean") fail("Check your reading preferences and try again.");
-    return { ...body, preferences: Object.fromEntries(PREFERENCE_FIELDS.map(key => [key, value[key]])) };
+    const preferences = Object.fromEntries(PREFERENCE_FIELDS.map(key => [key, value[key]]));
+    if (Object.hasOwn(value, "experience")) {
+      try { preferences.experience = validateExperience(value.experience); }
+      catch (error) { fail(error.message); }
+    }
+    return { ...body, preferences };
   }
   if (!revision(body.expectedRevision)) fail();
   if (body.action === "saveStory" && exact(body, [...common, "story"]) && fields(body.story, STORY_FIELDS)) {
@@ -207,7 +213,9 @@ export class ReaderAccount {
       if (mutation.action === "savePreferences") {
         const current = library.preferences?.revision ?? null;
         if (current !== mutation.expectedRevision) fail("Your reading preferences changed. Reload before saving again.", 409);
-        const preferences = { ...mutation.preferences, revision: (current ?? 0) + 1 };
+        // Older tabs can save appearance without losing a profile saved in another tab.
+        const preferences = { ...(library.preferences?.experience ? {experience: library.preferences.experience} : {}),
+          ...mutation.preferences, revision: (current ?? 0) + 1 };
         allowRate(library, now, 60, 3000);
         library.preferences = preferences;
         await txn.put(LIBRARY_KEY, library);

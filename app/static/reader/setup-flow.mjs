@@ -40,6 +40,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   onRefresh = () => {}, onTest = () => false, onConfirmTest = () => true, onDisconnect = () => {}, onSimulateFailure = () => {},
   onPractice = () => false, onStart = () => {}, onStop = () => {}, onFinish = () => {},
   canConnectLive = () => true, onLiveSignIn = () => {},
+  quickSetup = false, onQuickTest = () => false, onConfirmQuickTest = () => false, onOpenAdvanced = () => {},
   enableCalibration = false, onCalibrationChange = () => {}, onApplyCalibration = () => false,
   onApplyChannels = null, onEnablePersonalRange = null, onCalibrationModeChange = () => {}, onResearchEvent = () => {}} = {}) {
   if (!document?.body || !document.createElement) return {open() {}, update() {}, finish() {}, cancel() {}, destroy() {}, snapshot: () => ({active: false, checks: {}})};
@@ -90,6 +91,9 @@ export function createSetupFlow({document = globalThis.document, window = global
   const device = make("select", {id: "setup-devices"});
   const discoveryNote = make("p", {id: "setup-discovery-note", className: "note"});
   selection.append(field("Choose the toy to use", device), discoveryNote);
+  const pairStage = make("div", {id: "setup-pair-stage"});
+  const pairSummary = make("p", {id: "setup-pair-summary", className: "note"});
+  pairStage.append(chooser, pairSummary, connection, selection);
   const testPanel = make("section", {id: "setup-test-panel", className: "setup-test-panel"});
   const channel = make("select", {id: "setup-channel"});
   const testLevel = make("input", {id: "setup-test-level", attrs: {type: "range", min: 1, max: 5, step: 1, value: 1}}); testLevel.value = "1";
@@ -104,7 +108,13 @@ export function createSetupFlow({document = globalThis.document, window = global
   const testMaximumNote = make("p", {id: "setup-test-maximum", className: "note setup-test-maximum"});
   const capabilityNote = make("p", {id: "setup-capability-note", className: "note setup-capability-note"});
   const testControls = make("div", {className: "setup-test-controls"});
-  testControls.append(field("Test one movement", channel), field("Test level", testLevel), testReadout, testButton);
+  const movementField = field("Test one movement", channel), levelField = field("Test level", testLevel);
+  testControls.append(movementField, levelField, testReadout, testButton);
+  if (quickSetup) {
+    movementField.hidden = levelField.hidden = testReadout.hidden = true;
+    testControls.className += " setup-test-controls-quick";
+    testButton.textContent = "Run quick test";
+  }
   testPanel.append(testMaximumNote, testControls, liveLevel, testNote, capabilityNote, confirmationLabel);
   const rehearsal = make("div", {id: "setup-rehearsal-tools", className: "setup-rehearsal-tools"});
   rehearsal.append(make("strong", {value: "Rehearsal tools"}), make("p", {className: "note", value: "Try a lost connection. Output stops and reconnecting never restarts it."}));
@@ -127,7 +137,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const skip = button("setup-skip", "Skip for now");
   const primary = button("setup-primary", "Connect simulator", "primary");
   actions.append(stop, back, skip, primary);
-  dialog.append(header, intro, chooser, connection, selection, testPanel, calibrationMount, practicePicker, rehearsal, status, actions);
+  dialog.append(header, intro, pairStage, testPanel, calibrationMount, practicePicker, rehearsal, status, actions);
   document.body.append(dialog);
 
   const coach = make("section", {id: "setup-coach", className: "setup-coach" + (coachMount ? "" : " setup-coach-floating"),
@@ -225,8 +235,11 @@ export function createSetupFlow({document = globalThis.document, window = global
   };
   function render() {
     dialog.dataset.phase = phase;
+    pairStage.hidden = !["connect", "pair", "select"].includes(phase);
+    pairSummary.hidden = !quickSetup || !["pair", "select"].includes(phase);
+    if (!pairSummary.hidden) pairSummary.textContent = label() + (mode === "simulator" ? " · Simulator" : " · Lovense Remote");
     chooser.hidden = phase !== "connect"; connection.hidden = phase !== "pair"; selection.hidden = phase !== "select";
-    testPanel.hidden = phase !== "test"; rehearsal.hidden = mode !== "simulator" || !["pair", "select", "test", "calibrate"].includes(phase);
+    testPanel.hidden = phase !== "test"; rehearsal.hidden = quickSetup || mode !== "simulator" || !["pair", "select", "test", "calibrate"].includes(phase);
     calibrationMount.hidden = phase !== "calibrate";
     practicePicker.hidden = phase !== "practice" || !enableCalibration;
     primary.hidden = phase === "calibrate";
@@ -249,11 +262,13 @@ export function createSetupFlow({document = globalThis.document, window = global
       qr.removeAttribute?.("src");
     }
     if (phase === "connect") {
-      step.textContent = "01 / Choose your toy"; heading.textContent = "Set up your toy";
+      step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "01 / Choose your toy";
+      heading.textContent = quickSetup ? "Pair your toy" : "Set up your toy";
       intro.textContent = "Connect a toy through Lovense Remote or try the controls with a simulator.";
       primary.textContent = simulator ? "Connect " + label() + " simulator" : canConnectLive() ? "Connect " + label() : "Sign in to connect " + label();
     } else if (phase === "pair") {
-      step.textContent = "02 / Connect"; heading.textContent = simulator ? "Connect the simulator" : "Pair your toy in Lovense Remote";
+      step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "02 / Connect";
+      heading.textContent = quickSetup ? "Pair your toy" : simulator ? "Connect the simulator" : "Pair your toy in Lovense Remote";
       intro.textContent = simulator ? "Reconnect to practise selecting a toy, checking a movement and trying the reader controls." :
         "Keep this page open on one screen while you use Lovense Remote on your phone.";
       const source = simulator ? null : qrSource(current.qrUrl);
@@ -273,22 +288,30 @@ export function createSetupFlow({document = globalThis.document, window = global
       primary.textContent = needsReconnect() ? "Reconnect" : "Refresh device list";
       primary.disabled = busy || (!simulator && current.liveConfigured === false);
     } else if (phase === "select") {
-      step.textContent = "03 / Choose your toy"; heading.textContent = "Choose the toy to use";
+      step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "03 / Choose your toy";
+      heading.textContent = quickSetup ? "Pair your toy" : "Choose the toy to use";
       intro.textContent = simulator ? "Select the simulator to continue." : "Select one connected toy. It stays paused until you run the movement check.";
       primary.textContent = "Use this toy";
     } else if (phase === "test") {
-      step.textContent = "04 / Check a movement"; heading.textContent = "Try a two-second test";
-      intro.textContent = "Start at level 1. Watch or feel for two seconds of movement, then check that it stops before you continue.";
+      step.textContent = quickSetup ? "Step 2 of 3 · Quick test" : "04 / Check a movement";
+      heading.textContent = quickSetup ? "Check your toy’s movements" : "Try a two-second test";
+      intro.textContent = quickSetup ? "Run one quick test to check each available movement at level 1. Each movement runs for two seconds, with a short pause between checks." :
+        "Start at level 1. Watch or feel for two seconds of movement, then check that it stops before you continue.";
       testMaximumNote.textContent = maximum === 0 ? "Testing is off at maximum 0. Close setup, adjust Maximum in the playback bar, then reopen setup." :
-        "Current maximum: " + current.ceiling + "/20. This short test can use levels 1 to " + maximum + ".";
+        quickSetup ? "Movements: " + channels().map(name => CHANNEL_LABELS[name]).join(", ") + "." :
+          "Current maximum: " + current.ceiling + "/20. This short test can use levels 1 to " + maximum + ".";
       testNote.textContent = simulator ? "Watch the simulated level return to zero before confirming." :
         "Place your toy where you can see or feel it move. Keep Lovense Remote or the toy’s Stop control within reach.";
       const movement = CHANNEL_LABELS[channel.value]?.toLowerCase() || "the selected movement";
-      confirmationText.textContent = simulator ? "I saw the simulated level return to zero." :
-        "I saw or felt " + movement + " and checked that the toy stopped.";
-      capabilityNote.textContent = getToyProfile(selected()?.model || preferredModel)?.physicalNotes || "";
+      confirmationText.textContent = quickSetup ? (simulator ? "I saw the level change for each movement and return to zero." :
+        "I saw or felt each movement and checked it stopped.") : simulator ? "I saw the simulated level return to zero." :
+          "I saw or felt " + movement + " and checked that the toy stopped.";
+      if (quickSetup) testButton.textContent = tested ? "Run the test again" : "Run quick test";
+      capabilityNote.textContent = quickSetup ? (channels().length > 1 && current.supportsCombined !== true ?
+        "This connection uses one movement at a time. The test checks each one so you can choose among them in Advanced controls." : "") :
+        getToyProfile(selected()?.model || preferredModel)?.physicalNotes || "";
       capabilityNote.hidden = !capabilityNote.textContent;
-      primary.textContent = enableCalibration ? "Set my movement preferences" : "Continue to practice";
+      primary.textContent = quickSetup ? "Open advanced controls" : enableCalibration ? "Set my movement preferences" : "Continue to practice";
     } else if (phase === "practice") {
       step.textContent = "05 / A short practice read"; heading.textContent = "Make it feel like you.";
       intro.textContent = "Try scrolling, the level buttons, maximum and Stop with a short neutral story before importing your own.";
@@ -350,7 +373,7 @@ export function createSetupFlow({document = globalThis.document, window = global
         if (activeEpoch !== epoch || disposed || !dialog.open) return;
         safeSnapshot(result);
         if (result === false || current.selectedId !== id || !effectiveConnected()) throw new Error();
-        if (enableCalibration) { openCalibration(); return; }
+        if (enableCalibration && !quickSetup) { openCalibration(); return; }
         resetTest(); channel.replaceChildren(...channels().map(name => option(name, CHANNEL_LABELS[name])));
         channel.value = channels()[0] || ""; phase = "test"; status.textContent = "Selected. Output is paused.";
       } catch { if (activeEpoch === epoch) status.textContent = "Selection did not complete. Refresh the connection and choose a toy again."; }
@@ -359,6 +382,20 @@ export function createSetupFlow({document = globalThis.document, window = global
     }
     if (phase === "test") {
       if (!tested || !confirmation.checked || !effectiveConnected() || !selected() || !testOutputStopped() || testMaximum() === 0) return;
+      if (quickSetup) {
+        const activeEpoch = ++epoch;
+        setBusy(true);
+        try {
+          const confirmed = await onConfirmQuickTest();
+          if (activeEpoch !== epoch || disposed || !dialog.open) return;
+          if (!confirmed) throw new Error();
+          leave(); onOpenAdvanced();
+        } catch {
+          if (activeEpoch !== epoch || disposed) return;
+          resetTest(); status.textContent = "The movement check could not be confirmed. Run the quick test again.";
+        } finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
+        return;
+      }
       let confirmed = false;
       try { confirmed = onConfirmTest() === true; } catch { /* Connection may have changed while confirming. */ }
       if (!confirmed) {
@@ -381,19 +418,23 @@ export function createSetupFlow({document = globalThis.document, window = global
     finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
   });
   testButton.addEventListener("click", async () => {
-    if (busy || phase !== "test" || !selected() || !channels().includes(channel.value)) return;
-    const level = Number(testLevel.value);
+    if (busy || phase !== "test" || !selected() || !quickSetup && !channels().includes(channel.value)) return;
+    const level = quickSetup ? 1 : Number(testLevel.value);
     if (!Number.isInteger(level) || level < 1 || level > testMaximum()) return;
+    if (quickSetup && tested) stopped();
     const activeEpoch = ++epoch; setBusy(true); tested = false; confirmation.checked = false;
     status.textContent = mode === "simulator" ? "Running the simulated test…" : "Running the short test. Watch for movement and check that it stops.";
     try {
-      const result = await onTest({channel: channel.value, level});
+      const result = quickSetup ? await onQuickTest({onMovement({channel: name, index, total}) {
+        if (activeEpoch === epoch) status.textContent = `Checking ${CHANNEL_LABELS[name]} (${index + 1} of ${total})…`;
+      }}) : await onTest({channel: channel.value, level});
       if (activeEpoch !== epoch || disposed || phase !== "test") return;
       safeSnapshot(result);
       if (result === false || !effectiveConnected() || !selected()) throw new Error();
       tested = true;
-      status.textContent = mode === "simulator" ? "Test complete. Check the simulated level and confirm below." :
-        "Test complete. Confirm below once you have checked the movement and the physical stop.";
+      status.textContent = quickSetup ? "Test complete. Confirm each movement worked and stopped, or run the test again." :
+        mode === "simulator" ? "Test complete. Check the simulated level and confirm below." :
+          "Test complete. Confirm below once you have checked the movement and the physical stop.";
     } catch { if (activeEpoch === epoch && !disposed) status.textContent = "The test was not confirmed. Stop, check the connection and retry. Nothing will restart automatically."; }
     finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
   });
@@ -425,7 +466,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   simFailure.addEventListener("click", () => simulate("disconnect"));
   simError.addEventListener("click", () => simulate("error"));
   close.addEventListener("click", () => leave()); skip.addEventListener("click", () => leave());
-  stop.addEventListener("click", () => { ++epoch; setBusy(false); stopped(); if (phase === "calibrate") calibration.interrupt(); status.textContent = "Stopped. You can continue setup when ready."; });
+  stop.addEventListener("click", () => { ++epoch; if (quickSetup) resetTest(); setBusy(false); stopped(); if (phase === "calibrate") calibration.interrupt(); status.textContent = "Stopped. You can continue setup when ready."; });
   coachStop.addEventListener("click", () => { stopped(); coachStatus.textContent = "Stopped. Start again when you are ready."; });
   start.addEventListener("click", () => {
     if (phase !== "reading" || disposed) return;

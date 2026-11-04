@@ -67,6 +67,55 @@ test("guided setup requires deliberate connection, device selection, test confir
   assert.equal(PRACTICE_STORY.text.split("\n\n").length, PRACTICE_STORY.corrections.length);
 });
 
+test("quick setup has one pairing step, one movement check and direct advanced controls", async () => {
+  const events = [];
+  const app = harness({quickSetup: true, enableCalibration: true,
+    onQuickTest({onMovement}) {
+      onMovement({channel: "vibrate", index: 0, total: 2});
+      onMovement({channel: "fingering", index: 1, total: 2});
+      events.push("tested"); return true;
+    },
+    onConfirmQuickTest() { events.push("confirmed"); return true; },
+    onOpenAdvanced() { events.push("advanced"); }});
+  const label = app.nodes.get("setup-step-label"), primary = app.nodes.get("setup-primary");
+  app.flow.open({model: "flexer"});
+  assert.match(label.textContent, /Step 1 of 3/);
+  await app.click("setup-primary");
+  assert.match(label.textContent, /Step 1 of 3/);
+  assert.equal(app.nodes.get("setup-pair-stage").hidden, false);
+  assert.equal(app.nodes.get("setup-pair-summary").textContent, "Flexer · Simulator");
+  assert.equal(primary.disabled, true);
+  await app.selectDevice("sim-flexer");
+  assert.match(label.textContent, /Step 2 of 3/);
+  assert.equal(app.nodes.get("setup-pair-stage").hidden, true);
+  assert.equal(app.nodes.get("setup-calibration-mount").hidden, true);
+  assert.equal(primary.textContent, "Open advanced controls");
+  await app.click("setup-test");
+  assert.equal(primary.disabled, true);
+  await app.click("setup-stop");
+  assert.equal(app.nodes.get("setup-response-checked").disabled, true);
+  await app.checkedTest();
+  assert.deepEqual(events, ["tested", "tested", "confirmed", "advanced"]);
+  assert.equal(app.nodes.get("setup-dialog").open, false);
+  assert.equal(app.nodes.get("setup-coach").hidden, true);
+  assert.equal(app.calls.includes("start"), false);
+});
+
+test("stopping while quick setup is applying prevents late navigation", async () => {
+  let confirm;
+  const app = harness({quickSetup: true, onQuickTest: () => true,
+    onConfirmQuickTest: () => new Promise(resolve => { confirm = resolve; }),
+    onOpenAdvanced() { assert.fail("Stopped setup must not open Advanced controls."); }});
+  app.flow.open(); await app.click("setup-primary"); await app.selectDevice();
+  const pending = app.checkedTest();
+  for (let attempt = 0; attempt < 20 && !confirm; attempt++) await Promise.resolve();
+  assert.equal(typeof confirm, "function");
+  await app.click("setup-stop");
+  confirm(true); await pending;
+  assert.equal(app.flow.snapshot().phase, "test");
+  assert.equal(app.nodes.get("setup-primary").disabled, true);
+});
+
 test("every requested model can rehearse detection, explicit selection and bounded testing", async () => {
   assert.deepEqual(SETUP_MODELS.map(model => model.id).sort(), TOY_PROFILES.map(model => model.id).sort());
   assert.match(SETUP_MODELS.find(model => model.id === "gush2").pickerLabel, /Gush 2 Motion/);

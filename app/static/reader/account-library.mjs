@@ -1,5 +1,6 @@
 import {validateStoryRecord} from "./storage.mjs";
 import {validateReaderPreferences} from "./preferences.mjs";
+import {validateExperience} from "./experience-preferences.mjs";
 
 const ownerPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const revision = value => Number.isSafeInteger(value) && value >= 0;
@@ -9,8 +10,9 @@ const unavailable = () => new Error("The account library is temporarily unavaila
 function validatedPreferences(value) {
   if (value === null) return null;
   if (!value || !revision(value.revision) || !["dark", "light", "system"].includes(value.appearance)) throw unavailable();
-  const {revision: savedRevision, appearance, ...reader} = value;
-  return {revision: savedRevision, appearance, ...validateReaderPreferences(reader)};
+  const {revision: savedRevision, appearance, experience, ...reader} = value;
+  return {revision: savedRevision, appearance, ...validateReaderPreferences(reader),
+    ...(experience === undefined ? {} : {experience: validateExperience(experience)})};
 }
 
 /** Story data lives only in authenticated requests and in this tab's memory. */

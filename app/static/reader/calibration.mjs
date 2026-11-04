@@ -26,8 +26,18 @@ const nocturnePatterns = {
   wave: {label: "Rolling wave", levels: [.8, 1, .75, .9]},
   steady: {label: "Steady hold", levels: [1]},
 };
-const scenePattern = (phase, pattern) => nocturnePatterns[pattern] ?? stagePatterns[phase];
-export const sceneStagePatternLabel = (phase, pattern) => scenePattern(phase, pattern)?.label;
+const peakPresets = {
+  crest: nocturnePatterns.crest,
+  accents: {...stagePatterns.peak, label: "Peak pulses"},
+  ease: {label: "Build and ease", levels: [.55, .8, .5, .95, .6, 1, .45]},
+};
+const scenePattern = (phase, pattern, peakPreset) => peakPresets[peakPreset] ?? nocturnePatterns[pattern] ?? stagePatterns[phase];
+export const sceneStagePatternLabel = (phase, pattern, peakPreset) => scenePattern(phase, pattern, peakPreset)?.label;
+export function selectPeakPreset(phase, pattern, preference, edging) {
+  if (phase !== "peak" || preference === undefined) return undefined;
+  if (Object.hasOwn(peakPresets, preference)) return preference;
+  return edging ? "ease" : pattern === "crest" ? "crest" : "accents";
+}
 const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
   Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
@@ -41,21 +51,23 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual, pattern} = profile;
+    const {phase, sceneId, manual, pattern, peakPreset} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean" ||
-        pattern !== undefined && (profile.quiet || pattern === "abstain" || !NOCTURNE_LABELS[phase]?.includes(pattern))) throw new RangeError("Use a supported scene stage.");
+        pattern !== undefined && (profile.quiet || pattern === "abstain" || !NOCTURNE_LABELS[phase]?.includes(pattern)) ||
+        peakPreset !== undefined && (profile.quiet || phase !== "peak" || !Object.hasOwn(peakPresets, peakPreset))) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(pattern === undefined ? {} : {pattern}),
+      ...(peakPreset === undefined ? {} : {peakPreset}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
 
 export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
   return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
-    next.rhythm !== previous?.rhythm || simulatorStagePatterns && next.pattern !== previous?.pattern ||
+    next.rhythm !== previous?.rhythm || simulatorStagePatterns && (next.pattern !== previous?.pattern || next.peakPreset !== previous?.peakPreset) ||
     (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
     automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
@@ -93,21 +105,21 @@ export function clampCalibration(value, maximum = 20) {
 /** Shared output policy. All callers must still enforce their armed/visible/connection state. */
 export class ReadingFeel {
   constructor({rhythm = "steady", maximum = 20} = {}) {
-    this.settings = {mode: "story", minimum: 0, background: 1, preferred: 3, maximum, recovery: 0, gain: 1, rhythm};
+    this.settings = {mode: "story", quietEdging: false, minimum: 0, background: 1, preferred: 3, maximum, recovery: 0, gain: 1, rhythm};
     this.reset();
   }
   snapshot() { return {...this.settings, playbackMode: this.playbackMode, heldLevel: this.heldLevel,returningToStory:this.ramping}; }
   reset() { this.playbackMode = "story"; this.heldLevel = null; this.startedAt = 0;this.followLevel=null; }
   start(now = 0) { this.startedAt = now;this.followLevel=null; }
-  reanchor(now, level = 0, keepStageTime = false) {
+  reanchor(now, level = 0, keepStageTime = false, forceStageTime = false) {
     if (this.playbackMode !== "story") return;
-    if (!keepStageTime || this.settings.rhythm !== "scene") this.startedAt = now;
+    if (!keepStageTime || this.settings.rhythm !== "scene" && !forceStageTime) this.startedAt = now;
     this.followLevel = whole(level) ? level : 0;
   }
   configure(value) {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !Object.hasOwn(this.settings, key))) throw new TypeError("Use the available reading controls.");
     const next = {...this.settings, ...value};
-    if (!["story", "continuous"].includes(next.mode) || !["minimum", "background", "preferred", "maximum", "recovery"].every(key => whole(next[key])) || !gain(next.gain) || !RHYTHMS.includes(next.rhythm)) throw new RangeError("Check the reading control values.");
+    if (!["story", "continuous"].includes(next.mode) || typeof next.quietEdging !== "boolean" || !["minimum", "background", "preferred", "maximum", "recovery"].every(key => whole(next[key])) || !gain(next.gain) || !RHYTHMS.includes(next.rhythm)) throw new RangeError("Check the reading control values.");
     this.settings = next;
     return this.snapshot();
   }
@@ -124,13 +136,18 @@ export class ReadingFeel {
     ceiling=Math.min(ceiling,this.settings.maximum);
     if (this.playbackMode !== "story") return Math.min(ceiling, this.heldLevel ?? 0);
     if (scene?.endedMovements?.includes(movement)) return 0;
-    const {mode, minimum, background, rhythm} = this.settings;
+    const {mode, quietEdging, minimum, background, rhythm} = this.settings;
     const adjust = target => this.capReturn(Math.max(0, Math.min(ceiling, target + levelAdjustment)));
-    if (base === 0) return adjust(mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0);
     const step = Math.floor(Math.max(0, now - this.startedAt) / 2000);
+    if (base === 0) {
+      const level = mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0;
+      if (mode === "continuous" && quietEdging && simulatorStagePatterns) return step % 4 === 1 || step % 4 === 2 ? 0 : Math.min(2, adjust(level));
+      return adjust(level);
+    }
     const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
-    const stages = simulatorStagePatterns && rhythm === "scene" && !scene?.manual ? scenePattern(scene?.phase, scene?.pattern)?.levels : undefined;
+    const stages = simulatorStagePatterns && !scene?.manual && (rhythm === "scene" || scene?.peakPreset) ?
+      scenePattern(scene?.phase, scene?.pattern, scene?.peakPreset)?.levels : undefined;
     // A stage plays through once, then holds its last step until a new beat.
     const modulation = stages ? stages[Math.min(preview ? 0 : step, stages.length - 1)] :
       variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
@@ -143,7 +160,7 @@ export class ReadingFeel {
     const scaled = calibrated * strength * this.settings.gain;
     const amplitude = stages ? Math.min(ceiling, scaled) : scaled;
     // A softer beat must not round an otherwise active scene down to a stop.
-    const target = Math.max(rhythm === "scene" && scaled >= 1 ? 1 : 0, Math.floor(amplitude * modulation));
+    const target = Math.max((rhythm === "scene" || stages) && scaled >= 1 ? 1 : 0, Math.floor(amplitude * modulation));
     return adjust(Math.min(ceiling, Math.max(minimum, target)));
   }
 }
@@ -167,8 +184,8 @@ export class CombinedReadingFeel {
   }
   reset(){for(const policy of Object.values(this.policies))policy.reset();}
   start(now){for(const policy of Object.values(this.policies))policy.start(now);}
-  reanchor(now, levels, keepStageTime) {
-    for (const [id, policy] of Object.entries(this.policies)) policy.reanchor(now, levels?.[id], keepStageTime);
+  reanchor(now, levels, keepStageTime, forceStageTime) {
+    for (const [id, policy] of Object.entries(this.policies)) policy.reanchor(now, levels?.[id], keepStageTime, forceStageTime);
   }
   setSceneMovement(automatic, preferred) {
     if (!Object.hasOwn(this.channels, preferred)) throw new RangeError("Choose an active default movement.");

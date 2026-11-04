@@ -1,5 +1,13 @@
 # Test today without a physical device
 
+## Main hosted reader quick start
+
+1. In the main reader, open **Settings → Device preferences → Edit device preferences**. Try gentle quiet movement, a maximum of 8, and a rhythm. The protected preview keeps these choices for the current visit. A verified public account can save them across sign-ins.
+2. Open **Toy setup** and choose the Flexer simulator. Connect and select it, run the quick check, confirm the displayed movements stopped, and open **Advanced controls**. Check that vibration and flexing are selected and playback is paused.
+3. Open a story with a detected movement. For a neutral test, use `Their tender romantic kiss expressed affection. The toy vibrated and flexed together.` Check that the scan lists Flexer above the story.
+4. Open an analysed practice story with a peak, choose **Nocturne**, and change the peak pattern in Reading controls. Compare the simulator at the same maximum. Verify that Stop still stops it and a manual zero still produces zero.
+
+## Existing beta and local checks
 
 For the current hosted account, presets, guided calibration, personal range and beta-recording journey, use [the 3 November session runbook](beta-session-2026-11-03.md). The steps below retain the local hardware-free and invitation checks; the local invitation screen is separate from hosted email login.
 

@@ -36,6 +36,56 @@ async function select(f,mode="lovense"){
 async function check(f,channel){const pulse=f.c.test({channel,level:1});await settle();await f.clock.advance(2000);assert.equal(await pulse,true);assert.equal(f.c.confirmTest(),true);}
 const vectorCalls=f=>f.bridge.calls.filter(call=>call.levels);
 
+test("account maximum is a simulator default while real commands remain gentle and re-pairing preserves a deliberate zero", async t => {
+  const f = fixture(), {c, bridge, clock} = f;
+  t.after(() => c.destroy());
+  c.setReadingDefaults({quiet: "edging", maximum: 16, rhythm: "dynamic"});
+  assert.equal(c.snapshot().ceiling, 16);
+  assert.equal(c.snapshot().feel.rhythm, "dynamic");
+  assert.equal(c.snapshot().running, false);
+  await select(f);
+  assert.equal(c.snapshot().ceiling, 5);
+  assert.equal(bridge.ceiling, 5);
+  assert.equal(bridge.rangeRequest, undefined);
+  await check(f, "vibrate");
+  assert.equal(c.start(), true);
+  await settle();
+  c.setReadingDefaults({quiet: "continuous", maximum: 20, rhythm: "gentle"});
+  await settle();
+  assert.equal(c.snapshot().running, false);
+  assert.equal(c.snapshot().ceiling, 5);
+  assert.ok(bridge.calls.every(({frame}) => frame.level <= 5 && frame.durationMs === 2000));
+  c.setCeilingFromControl(0);
+  await select(f);
+  assert.equal(c.snapshot().ceiling, 0);
+  const calls = bridge.calls.length;
+  assert.equal(await c.quickTest(), false);
+  assert.equal(bridge.calls.length, calls);
+  await select(f, "simulator");
+  assert.equal(c.snapshot().ceiling, 20, "The independently configured simulator cap remains available.");
+  c.setCeilingFromControl(0);
+  await select(f, "simulator");
+  assert.equal(c.snapshot().ceiling, 0);
+  assert.equal(await c.quickTest(), false);
+  await clock.advance(4000);
+  assert.equal(c.snapshot().output, 0);
+});
+
+test("a maximum of one keeps defaults valid for simulator and physical setup", async t => {
+  const f = fixture(), {c} = f;
+  t.after(() => c.destroy());
+  c.setReadingDefaults({quiet: "continuous", maximum: 1, rhythm: "scene"});
+  await select(f, "simulator");
+  assert.equal(c.snapshot().calibration.channels.vibrate.preferred, 1);
+  assert.equal(c.snapshot().ceiling, 1);
+  await c.applyChannels(["vibrate", "fingering"], {mode: "continuous", preserveCeiling: true});
+  assert.equal(c.snapshot().ceiling, 1);
+  await select(f);
+  await check(f, "vibrate");
+  assert.equal(c.snapshot().calibration.channels.vibrate.preferred, 1);
+  assert.equal(c.snapshot().ceiling, 1);
+});
+
 test("simulator exposes independent simultaneous levels and a held vector respects zero/maximum and finite expiry",async()=>{
   const f=fixture();await select(f,"simulator");const {c}=f;
   c.setCalibration("vibrate",settings({maximum:4,preferred:4}));c.setCalibration("fingering",settings({maximum:2,preferred:2,gain:.5}));

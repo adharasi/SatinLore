@@ -86,6 +86,64 @@ test("Stop cancels an in-flight physical setup request; its late completion gets
   assert.equal(c.snapshot().running,false);c.destroy();
 });
 
+test("the quick check uses each simulator movement and activates all together after confirmation", async () => {
+  const app = fixture(), c = app.controller, movements = [];
+  c.setStory([3]);
+  await c.beginConnection({mode: "simulator", model: "flexer"});
+  await c.selectDevice("sim-flexer");
+  c.setCeilingFromControl(3);
+  const pending = c.quickTest({onMovement: ({channel}) => movements.push(channel)});
+  await app.advance(2000);
+  assert.equal(c.snapshot().output, 0, "Separate movements have an observable stop before the next one.");
+  assert.equal(c.start(), false);
+  await app.advance(2300);
+  assert.equal(await pending, true);
+  assert.deepEqual(movements, ["vibrate", "fingering"]);
+  assert.deepEqual(c.snapshot().verifiedChannels, []);
+  assert.equal(c.start(), false);
+  assert.ok(await c.confirmQuickTest());
+  assert.deepEqual(c.snapshot().activeChannels, movements);
+  assert.deepEqual(c.snapshot().verifiedChannels, movements);
+  assert.equal(c.snapshot().feel.automaticMovement, true);
+  assert.equal(c.snapshot().feel.preferredMovement, "vibrate");
+  assert.equal(c.snapshot().ceiling, 3);
+  assert.equal(c.snapshot().running, false);
+  assert.equal(c.snapshot().output, 0);
+  c.destroy();
+});
+
+test("the physical quick check is targeted and cancelling between movements blocks confirmation", async () => {
+  const app = fixture(), c = app.controller;
+  app.bridge.model = "flexer";
+  c.setStory([8]);
+  await c.beginConnection({mode: "lovense", model: "flexer"});
+  await c.selectDevice("physical-toy");
+  c.setCeilingFromControl(2);
+  const cancelled = c.quickTest();
+  await settle(); await app.advance(2000);
+  c.stop(); await app.advance(500);
+  assert.equal(await cancelled, false);
+  assert.equal(await c.confirmQuickTest(), false);
+  assert.equal(c.confirmTest(), false);
+  assert.equal(app.bridge.commands.length, 1);
+  assert.equal(c.start(), false);
+
+  const retried = c.quickTest();
+  await settle(); await app.advance(4300);
+  assert.equal(await retried, true);
+  assert.equal(c.start(), false);
+  assert.ok(await c.confirmQuickTest());
+  assert.deepEqual(app.bridge.commands.map(frame => [frame.channel, frame.level, frame.deviceId, frame.durationMs]),
+    [["vibrate", 1, "physical-toy", 2000], ["vibrate", 1, "physical-toy", 2000], ["fingering", 1, "physical-toy", 2000]]);
+  assert.deepEqual(c.snapshot().verifiedChannels, ["vibrate", "fingering"]);
+  assert.equal(c.snapshot().activeChannels.length, 1, "A connection without combined support retains a single active movement.");
+  assert.equal(c.snapshot().maxCeiling, 5);
+  assert.equal(c.snapshot().ceiling, 2);
+  assert.equal(c.snapshot().personalRangeEnabled, false);
+  assert.equal(c.snapshot().running, false);
+  c.destroy();
+});
+
 test("unconfirmed physical Stop never produces a successful setup result",async()=>{
   const app=fixture(),c=app.controller;c.setStory([2]);await c.beginConnection({mode:"lovense",model:"lush"});await c.selectDevice("physical-toy");
   const pending=c.test({channel:"vibrate",level:1});await settle();app.bridge.failStop=true;await app.advance(2000);

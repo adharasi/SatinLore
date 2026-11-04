@@ -3,6 +3,7 @@ import vm from "node:vm";
 import {webcrypto} from "node:crypto";
 import {setTimeout as nextTurn} from "node:timers/promises";
 import {MockDevice} from "../../app/static/devices/mock.mjs";
+import {channelLabel} from "../../app/static/devices/toy-profiles.mjs";
 import {TextImporter} from "../../app/static/reader/import.mjs";
 import {createStoryId} from "../../app/static/reader/identity.mjs";
 import {ReaderModel} from "../../app/static/reader/model.mjs";
@@ -19,10 +20,13 @@ import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "../../app/stati
 import {PRACTICE_STORIES} from "../../app/static/reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "../../app/static/reader/account-workspace.mjs";
 import {AccountLibrary} from "../../app/static/reader/account-library.mjs";
+import {DEFAULT_EXPERIENCE, validateExperience} from "../../app/static/reader/experience-preferences.mjs";
+import {mountExperienceDialog} from "../../app/static/reader/experience-dialog.mjs";
 import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
-import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel} from "../../app/static/reader/calibration.mjs";
+import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel, selectPeakPreset} from "../../app/static/reader/calibration.mjs";
 import {nocturneCandidates, nocturneAvailable, requestNocturne} from "../../app/static/reader/nocturne.mjs";
+import {storyToyRecommendation} from "../../app/static/reader/toy-recommendations.mjs";
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
@@ -146,10 +150,11 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
     WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORIES,
-    ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, sceneStagePatternLabel,
+    ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, sceneStagePatternLabel, selectPeakPreset,
     AccountLibrary: class extends AccountLibrary { constructor() { super({request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
-    DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne,
+    DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne, storyToyRecommendation, channelLabel,
+    DEFAULT_EXPERIENCE, validateExperience, mountExperienceDialog,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,
     innerHeight: 1000, scrollY: 0, console, confirm: () => true, prompt: () => null,

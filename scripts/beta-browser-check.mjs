@@ -52,6 +52,15 @@ async function chooseFlexer(page, { tested = true } = {}) {
   await page.locator("#setup-selection").waitFor({ state: "visible" });
   assert.equal(await page.locator("#setup-devices").inputValue(), "");
   await page.locator("#setup-devices").selectOption("sim-flexer"); await page.locator("#setup-primary").click();
+  if (new URL(page.url()).origin === APP) {
+    await page.locator("#setup-test").waitFor({ state: "visible" });
+    if (!tested) return;
+    await page.locator("#setup-test").click();
+    await page.locator("#setup-response-checked").check();
+    await page.locator("#setup-primary").click();
+    await sidebar(page);
+    await page.locator("#open-calibration").click();
+  }
   await page.locator("#calibration-view").waitFor({ state: "visible" });
   if (!tested) return;
   await page.locator("#calibration-test-vibrate").click();
@@ -126,7 +135,7 @@ try {
       }};` },
     ...await Promise.all(["accounts", "beta-recordings", "feedback"].map(async name => ({ type: "ESModule", path: path.join(ROOT, `deploy/cloudflare/${name}.mjs`), contents: await readFile(path.join(ROOT, `deploy/cloudflare/${name}.mjs`), "utf8") }))),
     { type: "ESModule", path: path.join(ROOT, "app/static/devices/toy-profiles.mjs"), contents: await readFile(path.join(ROOT, "app/static/devices/toy-profiles.mjs"), "utf8") },
-    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity"].map(async name => {
+    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences"].map(async name => {
       const modulePath = path.join(ROOT, `app/static/reader/${name}.mjs`);
       return { type: "ESModule", path: modulePath, contents: await readFile(modulePath, "utf8") };
     })),

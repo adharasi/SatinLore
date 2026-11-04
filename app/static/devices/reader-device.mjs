@@ -3,7 +3,9 @@ import {AsyncPlaybackController} from "../playback/async-controller.mjs";
 import {ProfileSimulator} from "./profile-simulator.mjs";
 import {getToyProfile} from "./toy-profiles.mjs";
 import {BridgeTransport} from "./bridge-transport.mjs";
-import {CALIBRATION_VERSION, DEFAULT_CHANNEL_CALIBRATION, DEFAULT_SIMULATOR_MAXIMUM, normalizeChannelCalibration, normalizeSceneProfiles, clampCalibration, ReadingFeel, CombinedReadingFeel} from "../reader/calibration.mjs";
+import {CALIBRATION_VERSION, DEFAULT_CHANNEL_CALIBRATION, DEFAULT_SIMULATOR_MAXIMUM, RHYTHMS, normalizeChannelCalibration, normalizeSceneProfiles, clampCalibration, ReadingFeel, CombinedReadingFeel} from "../reader/calibration.mjs";
+
+const quietPolicy = quiet => ({mode: quiet === "off" ? "story" : "continuous", quietEdging: quiet === "edging"});
 
 /** Reader-facing facade; physical requests retain the separate asynchronous contract. */
 export class ReaderDeviceController {
@@ -13,12 +15,14 @@ export class ReaderDeviceController {
     bridge = null, simulator = null, storyRhythms = false, allowGuestSimulation = false, ...controllerOptions} = {}) {
     Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator,allowGuestSimulation});
     this.channelDefaults = {...DEFAULT_CHANNEL_CALIBRATION, rhythm: storyRhythms ? "scene" : "steady"};
+    this.factoryRhythm = this.channelDefaults.rhythm;
+    this.readingDefaults = null;
     this.sceneProfiles = undefined;
     this.automaticSceneMovement = false;
     this.preferredSceneMovement = null;
     this.mode = "simulator"; this.model = "lush"; this.channel = "vibrate";
     this.personalRangeChannels=new Set();this.combinedChannels=[];this.calibrations = new Map(); this.verifiedChannels = new Map(); this.manualZeros = new Set();
-    this.operation = 0; this.testSerial = 0; this.testing = false; this.visible = true; this.authorized = true;
+    this.operation = 0; this.testSerial = 0; this.testing = false; this.quickCheck = null; this.visible = true; this.authorized = true;
     this.toys = []; this.selectedId = null; this.connectionState = "disconnected"; this.connectionMessage = "Choose a toy to rehearse or connect.";
     this.liveConfigured = null; this.lastTest = null; this.verifiedTest = null; this.levels = []; this.ready = false; this.bridge = bridge; this.real = null;
     this.simulator = simulator || new ProfileSimulator({now});
@@ -30,6 +34,41 @@ export class ReaderDeviceController {
   get active() { return this.mode === "lovense" && this.real ? this.real : this.sim; }
   get profile() { return getToyProfile(this.model); }
   get playbackAuthorized() { return this.authorized || this.allowGuestSimulation && this.mode === "simulator"; }
+  newReadingFeel(maximum = 20) {
+    const feel = new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum});
+    if (this.readingDefaults) feel.configure({...clampCalibration(this.channelDefaults, maximum), ...quietPolicy(this.readingDefaults.quiet)});
+    return feel;
+  }
+  setReadingDefaults(value) {
+    const previous = this.readingDefaults;
+    if (value && (!["off", "continuous", "edging"].includes(value.quiet) || !RHYTHMS.includes(value.rhythm) ||
+        !Number.isInteger(value.maximum) || value.maximum < 1 || value.maximum > 20)) throw new RangeError("Choose supported reading defaults.");
+    const next = value ? {quiet: value.quiet, maximum: value.maximum, rhythm: value.rhythm} : null;
+    if (previous?.quiet === next?.quiet && previous?.maximum === next?.maximum && previous?.rhythm === next?.rhythm) return this.snapshot();
+    this.pause("Reading preferences changed. Choose Start when ready.");
+    this.readingDefaults = next;
+    this.channelDefaults = clampCalibration({...DEFAULT_CHANNEL_CALIBRATION, maximum: 20, rhythm: next?.rhythm ?? this.factoryRhythm},
+      next?.maximum ?? DEFAULT_CHANNEL_CALIBRATION.maximum);
+    if (previous?.quiet !== next?.quiet) this.active.feel.configure(quietPolicy(next?.quiet ?? "off"));
+    if (previous?.rhythm !== next?.rhythm) this.active.feel.configure({rhythm: this.channelDefaults.rhythm});
+    if (previous?.maximum !== next?.maximum) {
+      const requested = next?.maximum ?? Math.min(this.active.ceiling, this.mode === "simulator" ? DEFAULT_SIMULATOR_MAXIMUM : 5);
+      const cap = Math.min(requested, this.mode === "simulator" ? 20 : this.rangeMaximum());
+      if (this.mode === "lovense") this.sim.setCeilingFromControl(next?.maximum ?? Math.min(this.sim.ceiling, DEFAULT_SIMULATOR_MAXIMUM));
+      const active = this.active.feel.snapshot();
+      for (const id of this.activeChannels()) {
+        const source = active.channels?.[id] ?? active;
+        const settings = Object.fromEntries(Object.keys(DEFAULT_CHANNEL_CALIBRATION).map(key => [key, source[key]]));
+        const saved = this.calibrations.get(this.calibrationKey(id));
+        const levels = saved ? settings : {...settings, preferred: this.channelDefaults.preferred, background: this.channelDefaults.background};
+        const checked = clampCalibration({...levels, maximum: 20}, Math.min(saved?.maximum ?? 20, cap));
+        if (this.active.feel.updateChannel) this.active.feel.updateChannel(id, checked);
+        else this.active.feel.configure(checked);
+      }
+      this.setCeilingFromControl(cap);
+    }
+    return this.notify();
+  }
   snapshot() {
     const state = this.active.snapshot(), simulated = this.mode === "simulator", device = simulated ? this.simulator.snapshot() : null;
     const output = simulated ? device.strength : this.testing ? null : state.output;
@@ -38,7 +77,7 @@ export class ReaderDeviceController {
     return {...state,reason:!simulated && state.connected && !checked ? "Complete the short toy check and confirm its response before Start." : state.reason,output,outputKnown: simulated || !this.testing && state.outputKnown !== false,mode:this.mode,model:this.model,
       channel:this.channel,channels:this.channels(),activeChannels:this.activeChannels(),supportsCombined:this.supportsCombined(),verifiedChannels:this.channels().filter(({id})=>this.channelVerified(id)).map(({id})=>id),calibration:this.calibrationSnapshot(),channelOutputs:simulated ? device.channels : this.combinedChannels.length ? state.outputLevels || Object.fromEntries(this.combinedChannels.map(id=>[id,null])) : {[this.channel]:output},
       deviceLabel:this.selectedToy()?.label || this.profile?.label || "Toy",testing:this.testing,
-      canStart:!this.testing && state.connected && !state.running && state.state === "READY_PAUSED" && this.visible && this.playbackAuthorized && this.levels.length > 0 && (simulated || state.canStart && checked),
+      canStart:!this.testing && !this.quickCheck && state.connected && !state.running && state.state === "READY_PAUSED" && this.visible && this.playbackAuthorized && this.levels.length > 0 && (simulated || state.canStart && checked),
       outputMeaning:simulated ? "simulated" : "requested",maxCeiling:simulated ? 20 : this.rangeMaximum(),personalRangeChannels:[...this.personalRangeChannels],personalRangeEnabled:!simulated&&this.activeChannels().every(channel=>this.personalRangeChannels.has(channel)),
       baseLevel:this.levels[state.position] ?? 0};
   }
@@ -94,7 +133,7 @@ export class ReaderDeviceController {
     };
     this.real = new AsyncPlaybackController({transport:this.bridge,now:this.now,setTimer:this.setTimer,clearTimer:this.clearTimer,
       onChange:()=>this.notify(),getMovement: () => this.channel,heartbeatMs:1100});
-    this.real.feel = new ReadingFeel({rhythm: this.channelDefaults.rhythm});
+    this.real.feel = this.newReadingFeel();
     this.real.setVisible(this.visible); this.real.setAuthorized(this.authorized);
   }
   async beginConnection({mode = "simulator",model = "lush"} = {}) {
@@ -105,7 +144,8 @@ export class ReaderDeviceController {
     this.notifierFailed = false;
     const operation = ++this.operation;
     this.mode = mode; this.model = model; this.channel = profile.simChannels[0];
-    this.combinedChannels=[];this.sim.feel=new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum: this.sim.ceiling});if(this.real)this.real.feel=new ReadingFeel({rhythm: this.channelDefaults.rhythm}); this.lastTest = null; this.verifiedTest = null; this.verifiedChannels.clear();
+    this.combinedChannels=[];
+    this.sim.feel=this.newReadingFeel(this.sim.ceiling);if(this.real)this.real.feel=this.newReadingFeel(); this.lastTest = null; this.verifiedTest = null; this.verifiedChannels.clear();
     this.toys = []; this.selectedId = null; this.connectionState = "connecting";
     if (mode === "simulator") {
       this.simulator.setModel(model); this.simulator.injectFailure("none"); this.simulator.setChannel(this.channel);
@@ -120,7 +160,7 @@ export class ReaderDeviceController {
     try {
       if (!this.visible || !this.authorized || !await this.authorize() || operation !== this.operation) { if(operation===this.operation){this.connectionState="disconnected";this.connectionMessage="Check your sign-in, then reconnect explicitly.";this.notify();} return false;}
       this.real.setStory(this.levels,this.sceneProfiles);this.real.setManualZeros([...this.manualZeros]); if(this.levels.length)this.real.setPosition(Math.min(previous.position,this.levels.length-1));
-      this.real.ceiling=Math.min(previous.ceiling,this.real.ceiling,5);this.bridge.setCeiling(this.real.ceiling);this.real.setStrength(1);
+      this.real.ceiling=Math.min(previous.ceiling,this.real.ceiling,this.readingDefaults?.maximum ?? 5,5);this.bridge.setCeiling(this.real.ceiling);this.real.setStrength(1);
       if (!await this.bridge.begin()) return false;
       if (operation !== this.operation || !this.visible || !this.authorized) {
         if(operation===this.operation)this.bridge.dispose(); return false;
@@ -132,7 +172,7 @@ export class ReaderDeviceController {
     if (typeof id !== "string" || !this.toys.some(toy=>toy.id===id)) throw new Error("Choose one discovered device.");
     this.pause("Device selection changed. Playback stays paused.");
     const operation = ++this.operation;
-    this.combinedChannels=[];this.active.feel=new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum: this.mode === "simulator" ? this.sim.ceiling : 20});
+    this.combinedChannels=[];this.active.feel=this.newReadingFeel(this.mode === "simulator" ? this.sim.ceiling : 20);
     this.lastTest = null; this.verifiedTest = null; this.verifiedChannels.clear();this.personalRangeChannels.clear();
     if(this.mode === "simulator") {
       this.selectedId = id; this.simulator.setChannel(this.channel);
@@ -157,15 +197,16 @@ export class ReaderDeviceController {
     this.toys=[{id:this.selectedId,label:`${this.profile.label} simulator`,model:this.model,capabilities:[...this.profile.simChannels]}];
     const connected=this.sim.connect();this.connectionState=connected?"paused":"disconnected";this.notify();return connected;
   }
-  cancelTest() {
+  cancelTest(keepQuickCheck = false) {
+    if (!keepQuickCheck && this.quickCheck) { this.quickCheck = null; this.lastTest = null; }
     ++this.testSerial;
     if(this.testTimer!==undefined)this.clearTimer(this.testTimer);
     this.testResolve?.();this.testResolve=null;this.testTimer=undefined;
   }
-  async test({channel=this.channel,level=1}={}) {
+  async test({channel=this.channel,level=1}={}, quickCheck = null) {
     if(this.testing || !this.visible || !this.playbackAuthorized || !this.selectedId || !this.snapshot().connected || !Number.isInteger(level) || level<1 || level>5 || !this.channels().some(value=>value.id===channel)) throw new Error("Select a connected toy, movement and a test level from 1 to 5.");
     if(level>this.snapshot().ceiling)throw new Error("Lower the test level to the chosen maximum; a zero maximum prevents output.");
-    this.pause("Preparing a short test. Playback stays paused.");
+    this.pause("Preparing a short test. Playback stays paused.", quickCheck !== null && quickCheck === this.quickCheck);
     const serial=++this.testSerial,operation=this.operation,id=this.selectedId,mode=this.mode;
     let passed=false;this.testing=true;
     this.channel=channel;this.lastTest=null;this.verifiedTest=null;this.verifiedChannels.delete(channel);
@@ -196,12 +237,59 @@ export class ReaderDeviceController {
     return passed && serial===this.testSerial && operation===this.operation && mode===this.mode;
   }
   confirmTest(){
+    if (this.quickCheck) return false;
     if(this.mode==="simulator"){
       if(!this.testing && this.lastTest?.toyId===this.selectedId && this.lastTest?.channel===this.channel && this.lastTest?.operation===this.operation){this.verifiedTest={id:this.selectedId,channel:this.channel,operation:this.operation};this.verifiedChannels.set(this.channel,{...this.verifiedTest});this.notify();}
       return true;
     }
     if(this.testing||!this.lastTest||this.lastTest.toyId!==this.selectedId||this.lastTest.channel!==this.channel||this.lastTest.operation!==this.operation||!this.real?.connected||this.real.errorLatch||this.real.uncertain.size)return false;
     this.verifiedTest={id:this.selectedId,channel:this.channel,operation:this.operation};this.verifiedChannels.set(this.channel,{...this.verifiedTest});this.notify();return true;
+  }
+  async quickTest({onMovement = () => {}} = {}) {
+    const state = this.snapshot(), channels = this.channels().map(({id}) => id);
+    if (this.testing || this.quickCheck || !this.selectedId || !state.connected || !state.outputKnown || state.output !== 0 || state.ceiling < 1 || !channels.length) return false;
+    const check = {id: this.selectedId, operation: this.operation, mode: this.mode, channels, primary: this.channel, complete: false};
+    this.quickCheck = check;
+    this.verifiedChannels.clear(); this.verifiedTest = null;
+    try {
+      for (const [index, channel] of channels.entries()) {
+        if (this.quickCheck !== check || !this.channels().some(item => item.id === channel)) return false;
+        onMovement({channel, index, total: channels.length});
+        if (this.quickCheck !== check || !await this.test({channel, level: 1}, check) || this.quickCheck !== check) return false;
+        if (index + 1 < channels.length) {
+          await new Promise(resolve => {
+            const done = () => {
+              if (this.testResolve === done) { this.testResolve = null; this.testTimer = undefined; }
+              resolve();
+            };
+            this.testResolve = done; this.testTimer = this.setTimer(done, 300);
+          });
+        }
+      }
+      check.complete = true;
+      return true;
+    } finally {
+      if (this.quickCheck === check && !check.complete) { this.quickCheck = null; this.lastTest = null; }
+      this.notify();
+    }
+  }
+  async confirmQuickTest() {
+    const check = this.quickCheck, state = this.snapshot();
+    this.quickCheck = null;
+    if (!check?.complete || check.id !== this.selectedId || check.operation !== this.operation || check.mode !== this.mode ||
+        !this.visible || !this.playbackAuthorized || this.testing || !state.connected || !state.outputKnown || state.output !== 0 ||
+        check.channels.join() !== this.channels().map(({id}) => id).join() ||
+        this.mode === "lovense" && (this.real.errorLatch || this.real.uncertain.size)) {
+      if (check) this.lastTest = null;
+      return false;
+    }
+    for (const channel of check.channels) this.verifiedChannels.set(channel, {id: check.id, channel, operation: check.operation});
+    this.verifiedTest = this.verifiedChannels.get(this.channel) || null;
+    if (!this.supportsCombined() || check.channels.length === 1) return this.applyCalibration(check.primary, undefined, {preserveCeiling: true});
+    const mode = state.feel?.mode || "story";
+    if (!await this.setChannel(check.primary) || check.operation !== this.operation) return false;
+    if (!await this.applyChannels(check.channels, {mode, preserveCeiling: true}) || check.operation !== this.operation) return false;
+    return this.setSceneMovement(true, check.primary);
   }
   refresh(){this.bridge?.refresh();return this.setupSnapshot();}
   simulateFailure(kind="disconnect") {
@@ -211,7 +299,7 @@ export class ReaderDeviceController {
     if(kind==="disconnect"){this.sim.disconnect();this.selectedId=null;this.toys=[];this.connectionState="disconnected";this.connectionMessage="Simulated connection lost. Reconnect and select the toy again; playback remains paused.";}
     return this.notify(),this.setupSnapshot();
   }
-  pause(reason) {this.cancelTest();if(this.mode==="lovense" && this.connectionState==="connecting" && !this.real?.connected){++this.operation;this.bridge?.dispose("Connection setup cancelled. Reconnect explicitly.");}if(this.mode==="lovense")void this.real?.pause(reason);else this.sim.pause(reason);this.notify();return this.snapshot();}
+  pause(reason, keepQuickCheck = false) {this.cancelTest(keepQuickCheck);if(this.mode==="lovense" && this.connectionState==="connecting" && !this.real?.connected){++this.operation;this.bridge?.dispose("Connection setup cancelled. Reconnect explicitly.");}if(this.mode==="lovense")void this.real?.pause(reason);else this.sim.pause(reason);this.notify();return this.snapshot();}
   stop(){return this.pause("Stopped. Confirm Start to continue.");}
   disconnect(){
     this.personalRangeChannels.clear();
@@ -277,6 +365,7 @@ export class ReaderDeviceController {
   movementCalibration(channel) {
     const saved = this.calibrations.get(this.calibrationKey(channel));
     if (saved) return {...saved};
+    if (this.readingDefaults) return clampCalibration(this.channelDefaults, this.mode === "simulator" ? this.sim.ceiling : this.rangeMaximum([channel]));
     return this.mode === "simulator" ?
       clampCalibration({...this.channelDefaults, maximum: 20}, this.sim.ceiling) : {...this.channelDefaults};
   }
@@ -286,13 +375,13 @@ export class ReaderDeviceController {
     if(apply)return this.applyCalibration(channel);
     this.notify();return this.calibrationSnapshot();
   }
-  async applyCalibration(channel=this.channel,value) {
+  async applyCalibration(channel=this.channel,value,{preserveCeiling=false}={}) {
     if(value!==undefined)this.setCalibration(channel,value);
     if(!this.channels().some(item=>item.id===channel))throw new RangeError("Choose an available movement.");
     // Loading a preset is never a Start action. Stop first, then apply the values
     // within the current transport's independent hard cap.
     if(!await this.setChannel(channel))return false;
-    const checked=clampCalibration(this.movementCalibration(channel),this.mode==="lovense"?this.rangeMaximum():20);
+    const checked=clampCalibration(this.movementCalibration(channel),Math.min(preserveCeiling?this.active.ceiling:20,this.mode==="lovense"?this.rangeMaximum():20));
     this.setCeilingFromControl(checked.maximum);
     this.setFeel(checked);
     return this.snapshot();
@@ -307,7 +396,7 @@ export class ReaderDeviceController {
       this.bridge.setChannel(channel);
     }else {this.sim.pause("Movement settings changed. Confirm Start when ready.");this.simulator.setChannel(channel);}
     this.channel=channel;this.lastTest=null;
-    this.combinedChannels=[];this.active.feel=new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum: this.mode === "simulator" ? this.sim.ceiling : 20});
+    this.combinedChannels=[];this.active.feel=this.newReadingFeel(this.mode === "simulator" ? this.sim.ceiling : 20);
     this.setCeilingFromControl(Math.min(this.active.ceiling,this.mode==="lovense"?this.rangeMaximum():20));
     this.verifiedTest=this.verifiedChannels.get(channel) || null;
     this.notify();return true;
@@ -325,7 +414,7 @@ export class ReaderDeviceController {
   }
   activeChannels(){return this.combinedChannels.length?[...this.combinedChannels]:[this.channel];}
   supportsCombined(){return this.mode==="simulator"?this.channels().length>1:this.selectedToy()?.supportsCombined===true && this.selectedToy()?.controlTransport==="standard-socket-v1";}
-  async applyChannels(channels,{mode="story"}={}) {
+  async applyChannels(channels,{mode="story",preserveCeiling=false}={}) {
     if(!Array.isArray(channels)||channels.length<2||channels.length>5||new Set(channels).size!==channels.length||channels.some(id=>!this.channels().some(item=>item.id===id))||!this.supportsCombined())throw new RangeError("This connection does not expose those movements together.");
     if(!["story","continuous"].includes(mode))throw new RangeError("Choose a reading mode.");
     if(this.testing)throw new Error("Stop the short test before combining movements.");
@@ -333,11 +422,13 @@ export class ReaderDeviceController {
     this.cancelTest();
     if(this.mode==="lovense"){if(!await this.real.pause("Combined movements selected. Confirm Start when ready.")||operation!==this.operation)return false;}
     else this.sim.pause("Combined movements selected. Confirm Start when ready.");
-    const cap=this.mode==="lovense"?this.rangeMaximum(channels):20;
+    const cap=Math.min(preserveCeiling?this.active.ceiling:20,this.mode==="lovense"?this.rangeMaximum(channels):20);
     const settings=Object.fromEntries(channels.map(id=>[id,clampCalibration(this.movementCalibration(id),cap)]));
     if(!channels.includes(this.channel))this.channel=channels[0];
     const preferredMovement=channels.includes(this.preferredSceneMovement)?this.preferredSceneMovement:this.channel;
+    const quietEdging=this.active.feel.snapshot().quietEdging;
     this.active.feel=new CombinedReadingFeel(settings,{mode,automaticMovement:this.automaticSceneMovement,preferredMovement});this.combinedChannels=[...channels];
+    if (quietEdging) this.active.feel.configure({quietEdging});
     this.setCeilingFromControl(Math.max(...Object.values(settings).map(value=>value.maximum)));
     this.notify();return this.snapshot();
   }
@@ -366,7 +457,7 @@ export class ReaderDeviceController {
   easeOff(...args){return this.active.easeOff(...args);}
   followStory(){this.active.followStory();return this.snapshot();}
   start(){
-    if(this.testing||!this.visible||!this.playbackAuthorized || this.mode==="lovense" && (this.real?.ceiling>this.rangeMaximum() || !this.activeChannels().every(channel=>this.channelVerified(channel))))return false;
+    if(this.testing||this.quickCheck||!this.visible||!this.playbackAuthorized || this.mode==="lovense" && (this.real?.ceiling>this.rangeMaximum() || !this.activeChannels().every(channel=>this.channelVerified(channel))))return false;
     if(this.mode==="simulator")return this.sim.start();
     const intent=this.real?.prepareStart();return intent?this.real.start(intent):false;
   }

@@ -109,6 +109,9 @@ test("guest simulation, email verification and password sign-in preserve the rea
   assert.equal(node("public-password").value, "");
   assert.equal(node("nocturne-run").hidden, false);
   assert.equal(app.read("hasVerifiedAccess()"), true);
+  assert.equal(node("experience-dialog").open, true);
+  await app.click("experience-later");
+  assert.equal(node("experience-dialog").open, false);
 
   await app.click("public-account");
   await app.click("public-sign-out");
@@ -137,6 +140,7 @@ test("guest simulation, email verification and password sign-in preserve the rea
   await submit("public-login-form");
   await app.settle();
   assert.equal(app.read("hasVerifiedAccess()"), true);
+  assert.equal(node("experience-dialog").open, false, "Deferring the choices does not prompt again in the same reader visit.");
   assert.deepEqual(app.errors, []);
 });
 
