@@ -133,11 +133,13 @@ async function assertFits(page, label, stopSelector = "#stop") {
     }).slice(0, 12).map(element => ({tag: element.tagName, id: element.id, width: Math.round(element.getBoundingClientRect().width)})),
   }));
   assert.ok(overflow.fits, `${label}: no horizontal page overflow. ${JSON.stringify(overflow.elements)}`);
-  assert.ok(await page.locator(stopSelector).evaluate(element => {
-    const box = element.getBoundingClientRect();
-    return box.width >= 44 && box.height >= 44 && box.top >= 0 && box.bottom <= innerHeight + 1 &&
-      box.left >= 0 && box.right <= innerWidth + 1;
-  }), `${label}: Stop must be reachable with a 44px target.`);
+  const stopBounds = await page.locator(stopSelector).evaluate(element => {
+    const {width, height, top, bottom, left, right} = element.getBoundingClientRect();
+    return {width, height, top, bottom, left, right, viewportWidth: innerWidth, viewportHeight: innerHeight};
+  });
+  const {width, height, top, bottom, left, right, viewportWidth, viewportHeight} = stopBounds;
+  assert.ok(width >= 44 && height >= 44 && top >= 0 && bottom <= viewportHeight + 1 && left >= 0 && right <= viewportWidth + 1,
+    `${label}: Stop must be reachable with a 44px target. ${JSON.stringify(stopBounds)}`);
 }
 
 const toyRehearsals = [
