@@ -96,8 +96,7 @@ test("pace and stronger cue matches produce distinct bounded rhythm suggestions"
 
 test("matched scenes expose only distinct, explicitly described movements", () => {
   const cue = "A tender kiss.";
-  const descriptions = ["The rhythm oscillated and moved side to side.", "The motion rotated.",
-    "The movement thrust repeatedly.", "The motion flexed, then flexed again.", "The vibration continued."].join(" ");
+  const descriptions = "The device vibrated, flexed, rotated, thrust, and oscillated together.";
   const result = groupScenes(sceneRows(`${cue} ${descriptions}`, cue, `${cue} A microvibration.`));
   assert.deepEqual(result.map(p => p.movements), [
     ["vibrate", "fingering", "rotate", "thrusting", "oscillate"], [], [],
@@ -105,6 +104,68 @@ test("matched scenes expose only distinct, explicitly described movements", () =
   assert.deepEqual(result.map(p => p.level), [1, 1, 1]);
   assert.deepEqual(groupScenes(sceneRows("A passion for rotating models.", descriptions)).map(p => [p.level, p.movements]),
     [[0, []], [0, []]]);
+});
+
+test("concurrent, sequential, negated, and reported motion yield distinct choices", () => {
+  const result = groupScenes(sceneRows(
+    "They shared a tender kiss. The device vibrated and flexed together.",
+    "They shared a tender kiss. The vibration continued as her fingers flexed.",
+    "They shared a tender kiss. While the vibration continued, her fingers flexed.",
+    "They shared a tender kiss. The device vibrated, then flexed.",
+    "They shared a tender kiss. The device vibrated. Her fingers flexed.",
+    "They shared a tender kiss. Her fingers flexed after the vibration stopped.",
+    "They shared a tender kiss. The device vibrated but did not flex.",
+    "They shared a tender kiss. The device vibrated without flexing.",
+    "They shared a tender kiss. The device vibrated and did not flex.",
+    "They shared a tender kiss. ‘The device vibrated and flexed,’ she read.",
+    'They shared a tender kiss. "The device vibrated and flexed," she read.',
+    "They shared a tender kiss. The fan vibrated and her fingers flexed."
+  ));
+  assert.deepEqual(result.map(p => p.movements), [
+    ["vibrate", "fingering"], ["vibrate", "fingering"], ["vibrate", "fingering"],
+    ["fingering"], ["fingering"], ["fingering"], ["vibrate"], ["vibrate"], ["vibrate"], [], [], ["fingering"],
+  ]);
+});
+
+test("gentle manner must describe the contact, and reported dialogue cannot anchor a scene", () => {
+  assert.equal(scoreParagraph("They kissed gently.").level, 1);
+  assert.equal(scoreParagraph("He kissed her gently.").level, 1);
+  assert.equal(scoreParagraph("They kissed each other softly.").level, 1);
+  assert.equal(scoreParagraph("They shared a gentle kiss.").level, 1);
+  assert.equal(scoreParagraph("They kissed while the rain fell softly.").level, 0);
+  assert.equal(scoreParagraph("They shared a tender kiss without consent.").level, 0);
+  assert.equal(scoreParagraph("“They shared a tender kiss,” she read from the script.").level, 0);
+  assert.equal(scoreParagraph("“Wait for the kettle,” she whispered. Then they shared a tender kiss.").level, 1);
+});
+
+test("a short contact or named continuation carries only within an established scene", () => {
+  const pair = "They shared a tender kiss. The device vibrated and flexed together.";
+  const result = groupScenes(sceneRows("They kissed.", pair, "They kissed.",
+    pair, "Vibration and flexing continued.", "He pulled away from her.", "The vibration continued."));
+  assert.deepEqual(result.map(p => p.level), [0, 1, 1, 1, 1, 0, 0]);
+  assert.deepEqual(result.map(p => p.movements), [
+    [], ["vibrate", "fingering"], ["vibrate", "fingering"], ["vibrate", "fingering"], ["vibrate", "fingering"], [], [],
+  ]);
+  assert.equal(result[5].quiet, true);
+});
+
+test("named recovery eases the relevant movement within a scene", () => {
+  const result = groupScenes(sceneRows("They shared a tender kiss. The device vibrated and flexed together.",
+    "The flexing slowed.", "They set the device down."));
+  assert.deepEqual(result.map(p => p.phase), ["build", "recover", "quiet"]);
+  assert.deepEqual(result.map(p => p.movements), [["vibrate", "fingering"], ["fingering"], []]);
+});
+
+test("an explicit movement stop clears earlier output, while another current action can still qualify", () => {
+  const result = groupScenes(sceneRows(
+    "They shared a tender kiss. The device vibrated and flexed. The vibration stopped.",
+    "They shared a tender kiss. The vibration stopped while her fingers kept flexing.",
+    "They shared a tender kiss. The device stopped vibrating.",
+    "They shared a tender kiss. The device moved side to side."
+  ));
+  assert.deepEqual(result.map(p => [p.level, p.quiet, p.movements]), [
+    [0, true, []], [1, false, ["fingering"]], [0, true, []], [1, false, ["oscillate"]],
+  ]);
 });
 
 test("short context retains a scene's movement, while quiet boundaries clear it", () => {

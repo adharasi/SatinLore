@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
 import {DEFAULT_CHANNEL_CALIBRATION} from "../app/static/reader/calibration.mjs";
 import {SimulationClock} from "../app/static/simulation/clock.mjs";
+import {ReaderModel} from "../app/static/reader/model.mjs";
 
 const settle=async()=>{for(let i=0;i<16;i++)await Promise.resolve();};
 class VectorBridge {
@@ -55,6 +56,43 @@ test("combined live Start requires each action's completed individual check and 
   assert.equal(vectorCalls(f).length,1);f.c.destroy();
   const basic=fixture();basic.bridge.supportsCombined=false;await select(basic);assert.equal(basic.c.snapshot().supportsCombined,false);
   await assert.rejects(basic.c.applyChannels(["vibrate","fingering"]),/does not expose/);basic.c.destroy();
+});
+
+test("an analysed overlap reaches one checked toy as one bounded combined command", async t => {
+  const f = fixture();
+  const {c, clock, bridge} = f;
+  t.after(() => c.destroy());
+  const model = new ReaderModel();
+  model.load([
+    "They shared a tender romantic kiss full of affection. The device vibrated and flexed together.",
+    "Later that evening, they went to sleep.",
+  ].join("\n\n"));
+  assert.deepEqual(model.effectiveProfiles()[0].movements, ["vibrate", "fingering"]);
+  await select(f);
+  c.setStory(model.effectiveLevels(), model.effectiveProfiles());
+  await check(f, "vibrate");
+  c.setCalibration("vibrate", settings({maximum: 4, preferred: 4}));
+  c.setCalibration("fingering", settings({maximum: 2, preferred: 2}));
+  await c.applyChannels(["vibrate", "fingering"]);
+  c.setSceneMovement(true, "vibrate");
+  assert.equal(c.start(), false, "Both movement checks are required before a scene can use both.");
+  assert.equal(vectorCalls(f).length, 0);
+  await check(f, "fingering");
+  await c.applyChannels(["vibrate", "fingering"]);
+  assert.equal(vectorCalls(f).length, 0, "Applying the combination leaves playback paused.");
+  assert.equal(c.start(), true);
+  await settle();
+  const [sent] = vectorCalls(f);
+  assert.deepEqual(sent.levels, {vibrate: 4, fingering: 2});
+  assert.deepEqual(sent.ceilings, {vibrate: 4, fingering: 2});
+  assert.equal(sent.frame.deviceId, "physical-fixture");
+  assert.equal(sent.frame.durationMs, 2000);
+  c.setPosition(1);
+  await settle();
+  assert.deepEqual(bridge.physical, {vibrate: 0, fingering: 0});
+  assert.equal(bridge.stops.at(-1).deviceId, "physical-fixture");
+  await clock.advance(2300);
+  assert.equal(vectorCalls(f).length, 1, "The quiet boundary cannot renew the combination.");
 });
 
 test("a live vector remains singly targeted, finite and bounded by each calibration and the global ceiling",async()=>{

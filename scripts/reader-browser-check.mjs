@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {mkdir, readFile} from "node:fs/promises";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
+import {MOVEMENT_READINGS} from "../tests/scene-evaluation-fixtures.mjs";
 
 const evidence = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../artifacts/frontend");
 const libraryKey = "satinlore.library.v1";
@@ -205,6 +206,68 @@ async function prepareToyRehearsal(page, profile) {
   await page.locator("#setup-primary").click();
   await selectRehearsalDevice(page, profile);
   await testRehearsalDevice(page, profile);
+}
+
+async function combinedSceneChecks(page) {
+  const flexer = toyRehearsals.find(profile => profile.id === "flexer");
+  await openSettings(page);
+  await page.locator("#open-setup").click();
+  await page.locator("#setup-model").selectOption(flexer.id);
+  await page.locator("#setup-mode-simulator").click();
+  await page.locator("#setup-primary").click();
+  await selectRehearsalDevice(page, flexer);
+  await page.locator("#calibration-apply").click();
+  await page.locator("#setup-close").click();
+
+  const paragraphs = [
+    "Their tender romantic kiss expressed affection. The device vibrated and flexed.",
+    ...MOVEMENT_READINGS.flexer.slice(3, 5).map(({text}) => text),
+  ];
+  await add(page, paragraphs.join("\n\n"), "Flexer combination rehearsal");
+  await openSettings(page, "story");
+  await page.locator("#scene-preferred-movement").selectOption("vibrate");
+  const switching = page.locator("#scene-auto-movement");
+  assert.equal(await switching.isChecked(), false, "Story-driven movement switching starts off.");
+
+  const readChannel = async id => Number(await page.locator(`.simulator-channel-row[data-channel="${id}"] [role="meter"]`).getAttribute("aria-valuenow"));
+  await start(page);
+  await page.clock.runFor(1100);
+  await current(page, 0);
+  await output(page, 3);
+  assert.equal(await readChannel("vibrate"), 3);
+  assert.equal(await readChannel("fingering"), 0, "An overlap keeps the preferred movement with switching off.");
+  await page.locator("#stop").click();
+  await output(page, 0);
+  await switching.check();
+  await start(page);
+  await page.clock.runFor(1100);
+  await output(page, 3);
+  assert.ok(await readChannel("vibrate") > 1 && await readChannel("fingering") > 1,
+    "A genuine overlap drives both enabled movements in the same simulator tick.");
+
+  await setRange(page, "cap", 1);
+  await page.clock.runFor(1100);
+  assert.equal(await readChannel("vibrate"), 1);
+  assert.equal(await readChannel("fingering"), 1);
+  await page.locator("#next").click();
+  await current(page, 1);
+  await page.clock.runFor(1100);
+  assert.equal(await readChannel("vibrate"), 0, "Sequential movements do not overlap.");
+  assert.equal(await readChannel("fingering"), 1, "A maximum of one preserves a low positive match.");
+  await page.locator("#next").click();
+  await current(page, 2);
+  await output(page, 0);
+  assert.equal(await readChannel("vibrate"), 0);
+  assert.equal(await readChannel("fingering"), 0);
+
+  await page.locator("#previous").click();
+  await current(page, 1);
+  await page.clock.runFor(1100);
+  assert.equal(await readChannel("fingering"), 1);
+  await page.locator("#stop").click();
+  await output(page, 0);
+  assert.equal(await readChannel("fingering"), 0, "Stop clears the active channel.");
+  await switching.uncheck();
 }
 
 async function toyConnectionChecks(page) {
@@ -633,6 +696,7 @@ async function refinementChecks(page, setPromptReply) {
   await page.emulateMedia({reducedMotion: "no-preference"});
 
   await toyConnectionChecks(page);
+  await combinedSceneChecks(page);
 
   const resourceRequests = [];
   const resourceMonitor = request => {
@@ -969,5 +1033,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

@@ -64,6 +64,77 @@ Both runs returned to zero on **Stop** and reported no browser errors. A second,
 
 These checks cover simulator behaviour in this browser and build. Preference on representative stories and physical device behaviour still need their own checks.
 
+## Compare overlapping movements and broader scene cues
+
+The original corpus in [scene-evaluation-fixtures.mjs](../tests/scene-evaluation-fixtures.mjs) adds four simulator stories and three context stories. The annotations distinguish a missed beat, an unexpected beat, and the wrong set of movements during a beat. They also check when dialogue, a stop, a time jump, or a descriptive gap should stay quiet.
+
+From the repository root, run the current regression and compare against the previous deployed analyser.
+
+```sh
+node --test tests/scene-evaluation.test.mjs
+git worktree add --detach ../satinlore-v3 fbba0cd
+node scripts/compare-scene-analysis.mjs ../satinlore-v3
+```
+
+The comparison uses 43 labelled paragraphs. It checks whether the beat should be active, which movements it should request, and whether a marked boundary stays quiet. The browser read-through checks what actually reaches the simulator.
+
+| Result | Previous `fbba0cd` | Revision 4 |
+| --- | ---: | ---: |
+| Paragraphs matching their annotations | 32 / 43 | 43 / 43 |
+| Missed activations | 2 | 0 |
+| Unexpected activations | 2 | 0 |
+| Wrong movement set during a matched activation | 7 | 0 |
+
+The previous analyser missed a gentle kiss and its lead-in, activated for a line read from a script, and carried activity across “He pulled away from her.” Those were distinct from the movement errors. The test set was developed for this revision, so these counts describe coverage of the chosen cases. They do not estimate accuracy on arbitrary stories.
+
+| Simulator | Text cue | Expected when switching is enabled |
+| --- | --- | --- |
+| Flexer | The device vibrated and flexed | Both movements together |
+| Flexer | The device vibrated, then flexed | Flexing only for the final beat of that paragraph |
+| Nora | A fan rotated while the device vibrated | Vibration only |
+| Nora | The device vibrated and rotated | Vibration and rotation together |
+| Spinel | The device vibrated and began thrusting | Vibration and thrusting together |
+| Osci 3 | The device vibrated and oscillated | Vibration and oscillation together |
+
+Use the same default movement, preferred levels, maximum, and rhythm in both versions. Turn on **Let the story switch movements** and enable both simulator movements. Read each paragraph before advancing and watch both meters. Repeat with switching off, then with one movement disabled. Check a clear stop and a time jump with **Keep a background level** enabled. Each movement remains subject to its own limit and the reader’s maximum. With the default calibration, a gentle active cue should still play at 1 when the reader lowers the maximum to 1. Set the maximum to zero and both meters should go quiet.
+
+### Flexer read-through
+
+Paste this original text with a blank line between paragraphs.
+
+> They drew closer. She held her breath.
+>
+> They kissed gently.
+>
+> They shared a tender kiss. The device vibrated and flexed.
+>
+> They shared a tender kiss. The device vibrated, then flexed.
+>
+> She told him to stop.
+>
+> “The device vibrated and flexed,” she said, recalling the demonstration.
+>
+> Their affectionate embrace continued. The vibration continued as her fingers flexed.
+>
+> Later that evening, they made tea.
+
+In the Chromium simulator, with both movements enabled, switching on and a maximum of 5, these were the observed vibration and flexing levels after each paragraph settled.
+
+| Beat | Previous vibration / flexing | Revised vibration / flexing |
+| --- | --- | --- |
+| Anticipation | 0 / 0 | 1 / 0 |
+| Gentle contact | 0 / 0 | 1 / 0 |
+| Explicit overlap | 1 / 0 | 1 / 1 |
+| Sequential movements | 1 / 0 | 0 / 1 |
+| Spoken stop | 0 / 0 | 0 / 0 |
+| Quoted demonstration | 0 / 0 | 0 / 0 |
+| One movement continues through another | 1 / 1 | 1 / 1 |
+| Time jump | 0 / 0 | 0 / 0 |
+
+Across all four simulator stories, the active movements matched the annotations for 10 of 18 beats in the previous release and 18 of 18 in the revision. With the same maximum of 5 in localhost Chromium 153, Nora went from vibration alone to vibration with rotation on its overlap beat. Spinel added thrusting alongside vibration, and Osci 3 added oscillation alongside vibration. After the Nora sequential cue, only rotation remained active. **Stop** brought both meters to zero on all four simulators. A Flexer maximum of zero also brought both to zero. These checks exercised the browser and simulator. Physical device behaviour is a separate check.
+
+Two cases for the next comparison are less literal movement verbs and pronouns across sentences. “The device pulsed in short bursts as her fingers flexed” selects flexing alone within a matched scene. “She adjusted the device. It vibrated and flexed” falls back to the default movement because the movement sentence names no supported actor. Compare new rules for those cases against incidental pulses and ambiguous pronouns before adding them to the activation rules.
+
 ## Alpha
 
 1. In [Alpha](https://app.satinlore.com/alpha), choose **Allow data collection** for a test session. Connect the simulator or a supported device and complete the movement checks. The minimum, ease-off and rhythm section should start open and close when clicked.

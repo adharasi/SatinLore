@@ -236,6 +236,14 @@ test("automatic levels use the reader's calibration, while explicit corrections 
   assert.equal(feel.desired({base: 5, ceiling: 12, scene, manualZero: true}), 0);
 });
 
+test("a lower session ceiling clamps a gentle cue instead of rounding it away", () => {
+  const feel = new ReadingFeel();
+  const scene = {phase: "build", quiet: false};
+  assert.equal(feel.desired({base: 1, ceiling: 1, scene}), 1);
+  assert.equal(feel.desired({base: 1, ceiling: 0, scene}), 0);
+  assert.equal(feel.desired({base: 1, ceiling: 1, scene, manualZero: true}), 0);
+});
+
 test("scene motion defaults to the selected movement, with opt-in switching and a safe fallback", async t => {
   const {clock} = synchronous();
   const controller = new ReaderDeviceController(clock);

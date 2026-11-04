@@ -102,8 +102,10 @@ export class ReadingFeel {
     const phase = Math.floor(Math.max(0, now - this.startedAt) / 2000) % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
     const modulation = variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
-    const preferred = Math.min(ceiling, this.settings.preferred);
-    const peak = preferred + Math.ceil((ceiling - preferred) / 2);
+    // A temporary ceiling limits the final level without shrinking the
+    // calibrated scale. Otherwise a low cue can round to zero at a cap of 1.
+    const preferred = this.settings.preferred;
+    const peak = preferred + Math.ceil(Math.max(0, ceiling - preferred) / 2);
     const calibrated = scene?.phase && !scene.manual ?
       (base <= 3 ? base * preferred / 3 : preferred + (peak - preferred) * Math.min(1, (base - 3) / 2)) : base;
     const scaled = calibrated * strength * this.settings.gain;

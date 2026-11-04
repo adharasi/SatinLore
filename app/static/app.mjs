@@ -315,8 +315,9 @@ function updateCurrentCorrection(story) {
   const movements = paragraph?.movements?.length ? `Movement cue: ${paragraph.movements.map(channelLabel).join(" + ")}` : "Default movement";
   const stage = {build: "Building", sustain: "Sustaining", peak: "Peak", recover: "Easing off"}[paragraph?.phase];
   text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
-    paragraph.advisory || (paragraph.quiet ? "Quiet section" : paragraph.sceneId && rhythm ?
-      [`Scene ${paragraph.sceneId}`, stage, rhythm, movements].filter(Boolean).join(" · ") : "Using the local suggestion."));
+    paragraph.sceneId && rhythm ?
+      [`Scene ${paragraph.sceneId}`, stage, rhythm, movements, paragraph.advisory].filter(Boolean).join(" · ") :
+      paragraph.advisory || (paragraph.quiet ? "Quiet section" : "Using the local suggestion."));
   text("effective-level", `${latest.target ?? 0} / 20`);
   text("correction-position", paragraph ? `Current section ${latest.position + 1} of ${story.model.paragraphs.length}` : "No section selected");
   const nodes = reviewNodes.get(latest.position);
