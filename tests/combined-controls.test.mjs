@@ -95,6 +95,60 @@ test("an analysed overlap reaches one checked toy as one bounded combined comman
   assert.equal(vectorCalls(f).length, 1, "The quiet boundary cannot renew the combination.");
 });
 
+test("a named stop beats fixed movement and continuous background, while the other automatic movement can continue", async t => {
+  const f = fixture();
+  const {c, clock} = f;
+  t.after(() => c.destroy());
+  await select(f, "simulator");
+  const profiles = [
+    {rhythm: "steady", quiet: false, phase: "sustain", sceneId: 1, movements: ["vibrate", "fingering"]},
+    {rhythm: "steady", quiet: false, phase: "sustain", sceneId: 1, movements: ["fingering"], endedMovements: ["vibrate"]},
+  ];
+  c.setStory([3, 3], profiles);
+  c.setFeel({mode: "continuous", minimum: 2, background: 2});
+  assert.equal(c.start(), true);
+  assert.ok(c.snapshot().output > 0);
+  c.setPosition(1);
+  assert.equal(c.snapshot().output, 0);
+  await clock.advance(2100);
+  assert.equal(c.snapshot().output, 0);
+
+  await c.applyChannels(["vibrate", "fingering"], {mode: "continuous"});
+  assert.equal(c.start(), true);
+  assert.deepEqual(c.snapshot().channelOutputs, {vibrate: 0, fingering: 0});
+  c.setSceneMovement(true, "vibrate");
+  await clock.advance(1100);
+  assert.deepEqual(c.snapshot().channelOutputs, {vibrate: 0, fingering: 3});
+  c.stop();
+  assert.equal(c.snapshot().output, 0);
+});
+
+test("the async bridge stops the selected movement and cannot renew it through background after a named stop", async t => {
+  const f = fixture();
+  const {c, clock, bridge} = f;
+  t.after(() => c.destroy());
+  await select(f);
+  c.setStory([3, 3], [
+    {rhythm: "steady", quiet: false, phase: "sustain", sceneId: 1, movements: ["vibrate", "fingering"]},
+    {rhythm: "steady", quiet: false, phase: "sustain", sceneId: 1, movements: ["fingering"], endedMovements: ["vibrate"]},
+  ]);
+  await settle();
+  await check(f, "vibrate");
+  c.setFeel({mode: "continuous", minimum: 2, background: 2});
+  assert.equal(c.start(), true);
+  await settle();
+  assert.equal(bridge.physical.vibrate, 3);
+  const callsBeforeStop = bridge.calls.length;
+  const before = bridge.stops.length;
+  c.setPosition(1);
+  await settle();
+  assert.ok(bridge.stops.length > before);
+  assert.equal(bridge.stops.at(-1).deviceId, "physical-fixture");
+  assert.equal(bridge.physical.vibrate, 0);
+  await clock.advance(2300);
+  assert.equal(bridge.calls.length, callsBeforeStop);
+});
+
 test("a live vector remains singly targeted, finite and bounded by each calibration and the global ceiling",async()=>{
   const f=fixture();await select(f);await check(f,"vibrate");await check(f,"fingering");
   f.c.setCalibration("vibrate",settings({maximum:20,preferred:12,background:8}));

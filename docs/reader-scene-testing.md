@@ -68,15 +68,17 @@ These checks cover simulator behaviour in this browser and build. Preference on 
 
 The original corpus in [scene-evaluation-fixtures.mjs](../tests/scene-evaluation-fixtures.mjs) adds four simulator stories and three context stories. The annotations distinguish a missed beat, an unexpected beat, and the wrong set of movements during a beat. They also check when dialogue, a stop, a time jump, or a descriptive gap should stay quiet.
 
-From the repository root, run the current regression and compare against the previous deployed analyser.
+From the repository root, run the current regression and compare against the deployed fourth revision.
 
 ```sh
 node --test tests/scene-evaluation.test.mjs
-git worktree add --detach ../satinlore-v3 fbba0cd
-node scripts/compare-scene-analysis.mjs ../satinlore-v3
+git worktree add --detach ../satinlore-v4 1afa415
+node scripts/compare-scene-analysis.mjs ../satinlore-v4
 ```
 
-The comparison uses 43 labelled paragraphs. It checks whether the beat should be active, which movements it should request, and whether a marked boundary stays quiet. The browser read-through checks what actually reaches the simulator.
+The report gives separate counts for the original and contextual suites. It checks whether the beat should be active, which movements it should request, and whether a marked boundary stays quiet. The browser read-through checks what actually reaches the simulator.
+
+The original suite recorded these results when comparing the third and fourth revisions.
 
 | Result | Previous `fbba0cd` | Revision 4 |
 | --- | ---: | ---: |
@@ -133,7 +135,60 @@ In the Chromium simulator, with both movements enabled, switching on and a maxim
 
 Across all four simulator stories, the active movements matched the annotations for 10 of 18 beats in the previous release and 18 of 18 in the revision. With the same maximum of 5 in localhost Chromium 153, Nora went from vibration alone to vibration with rotation on its overlap beat. Spinel added thrusting alongside vibration, and Osci 3 added oscillation alongside vibration. After the Nora sequential cue, only rotation remained active. **Stop** brought both meters to zero on all four simulators. A Flexer maximum of zero also brought both to zero. These checks exercised the browser and simulator. Physical device behaviour is a separate check.
 
-Two cases for the next comparison are less literal movement verbs and pronouns across sentences. “The device pulsed in short bursts as her fingers flexed” selects flexing alone within a matched scene. “She adjusted the device. It vibrated and flexed” falls back to the default movement because the movement sentence names no supported actor. Compare new rules for those cases against incidental pulses and ambiguous pronouns before adding them to the activation rules.
+## Context and implied movements
+
+The added contextual suite uses original prose in five short stories. The annotations cover grounded pulses and buzzing, one short continuation with a clear device reference, movement before and after a stop, overlapping movements, and confounders such as a heart, a phone, a lamp and quoted descriptions. Where two actions happen in sequence within one paragraph, the annotation describes its final beat. The simulator still follows the paragraph the reader is on.
+
+| Result | Deployed fourth revision `1afa415` | Fifth revision |
+| --- | ---: | ---: |
+| Original paragraph annotations matched | 43 / 43 | 43 / 43 |
+| New contextual paragraph annotations matched | 33 / 47 | 47 / 47 |
+| Missed activations | 2 | 0 |
+| Unexpected activations | 2 | 0 |
+| Wrong movement sets during active beats | 8 | 0 |
+| Missed quiet boundary flags | 2 | 0 |
+
+The earlier rules activated on a journal entry and a future plan. They also lost vibration when a device pulsed while flexing and missed the one-paragraph continuation in “It pulsed twice and flexed.” These are targeted regression fixtures. A representative story set is still needed to measure accuracy beyond these passages.
+
+For a quick Flexer replay, paste the guest room fixture from [the test corpus](../tests/scene-evaluation-fixtures.mjs). Keep both movements enabled and use **Let the story switch movements**. Pause over the quiet paragraphs as well as the active ones.
+
+| Text cue | Expected simulator movement |
+| --- | --- |
+| She adjusted the toy. It pulsed in short bursts while her fingers flexed. | Vibration and flexing |
+| The vibration stopped while the device kept flexing. | Flexing |
+| The toy stopped vibrating while it kept flexing. | Flexing |
+| The device stopped flexing. | Quiet |
+| The pipes ticked in the guest-room wall. | Quiet |
+| The device pulsed and flexed again. | Vibration and flexing |
+| The device went still. | Quiet |
+
+Repeat the partial-stop beat with vibration as the only selected movement and **Keep a background level** enabled. Compare the meters with both movements enabled before judging the story's movement choice. Record unexpected activation and the text beat separately from preference for any rhythm.
+
+### Contextual simulator evidence
+
+A separate set of 28 paragraphs was read by scrolling in localhost Chromium 153. Both movements were enabled, story switching was on, the rhythm was steady and the maximum was 5. Three settled samples were taken per paragraph. The fourth revision matched 19 movement sets and the fifth matched all 28 across the Flexer, Nora, Osci 3 and Spinel simulators. Values below are vibration and the simulator’s second movement.
+
+| Beat | Fourth revision | Fifth revision |
+| --- | --- | --- |
+| Flexer pulses while flexing | 0 / 1 | 1 / 1 |
+| Flexer pulses after a clear reference in the previous paragraph | 0 / 0 | 1 / 0 |
+| Nora’s rotation is described in a memory | 0 / 1 | 0 / 0 |
+| Osci 3 movement appears in a quotation | 1 / 0 | 0 / 0 |
+| Osci 3 oscillates without pulsing | 1 / 0 | 0 / 1 |
+| Spinel pulses while thrusting | 1 / 0 | 1 / 1 |
+
+Stop cleared both meters on every simulator. No browser errors or external requests were observed in either run.
+
+A second Flexer scroll read-through matched all 10 movement annotations. These consecutive paragraphs check that a named stop persists through a short descriptive detail and releases when the text explicitly restarts that movement. The same maximum of 5 was used.
+
+| Paragraph | Vibration / flexing |
+| --- | --- |
+| They shared a tender kiss. The toy buzzed while it flexed. | 1 / 1 |
+| The toy stopped buzzing while it kept flexing. | 0 / 1 |
+| Somewhere down the hall the floorboard creaked. | 0 / 1 |
+| They kissed gently. The toy buzzed as its arm flexed. | 1 / 1 |
+
+A whole-device stop, remembered movement and an unrelated display pulse were quiet in that read-through. Both browser checks used simulators.
 
 ## Alpha
 

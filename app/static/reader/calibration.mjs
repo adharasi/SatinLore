@@ -9,15 +9,17 @@ const fields = Object.keys(DEFAULT_CHANNEL_CALIBRATION);
 const whole = value => Number.isInteger(value) && value >= 0 && value <= 20;
 const movementIds = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
 const scenePhases = ["quiet", "build", "sustain", "peak", "recover"];
+const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
+  Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
   if (profiles === undefined) return [];
   if (!Array.isArray(profiles) || profiles.length !== length) throw new RangeError("Use the current paragraph patterns.");
   return Array.from(profiles, profile => {
     if (!profile || !["steady", "gentle", "dynamic"].includes(profile.rhythm) ||
         typeof profile.quiet !== "boolean") throw new RangeError("Use a supported paragraph pattern.");
-    const movements = profile.movements;
-    if (movements !== undefined && (!Array.isArray(movements) || movements.length > movementIds.length ||
-        Array.from(movements).some(id => !movementIds.includes(id)) || new Set(movements).size !== movements.length)) {
+    const {movements, endedMovements} = profile;
+    if (!validMovements(movements) || !validMovements(endedMovements) ||
+        movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
     const {phase, sceneId, manual} = profile;
@@ -25,13 +27,15 @@ export function normalizeSceneProfiles(profiles, length) {
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean") throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
+      ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
 
 export function scenePatternChanged(previous, next, automaticMovement = false) {
   return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
-    next.rhythm !== previous?.rhythm || automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
+    next.rhythm !== previous?.rhythm || (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
+    automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
 
 // A capped beat can hide part of an adjustment. Skip that flat portion so
@@ -91,11 +95,12 @@ export class ReadingFeel {
   get ramping(){return this.followLevel!==null;}
   advanceFollow(from,ceiling=20){if(this.followLevel!==null && whole(from)){this.followLevel=Math.min(20,from+2);if(this.followLevel>=Math.min(ceiling,this.settings.maximum))this.followLevel=null;}}
   capReturn(value){return this.followLevel===null?value:Math.min(value,this.followLevel);}
-  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, levelAdjustment = 0, now = 0} = {}) {
+  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, movement, levelAdjustment = 0, now = 0} = {}) {
     // Deliberate zero and zero gain/strength always outrank any preferred floor.
     if (!whole(base) || !whole(ceiling) || !Number.isFinite(strength) || strength > 2 || manualZero || (base === 0 && scene?.quiet) || strength <= 0 || this.settings.gain === 0 || ceiling === 0) return 0;
     ceiling=Math.min(ceiling,this.settings.maximum);
     if (this.playbackMode !== "story") return Math.min(ceiling, this.heldLevel ?? 0);
+    if (scene?.endedMovements?.includes(movement)) return 0;
     const {mode, minimum, background, rhythm} = this.settings;
     const adjust = target => this.capReturn(Math.max(0, Math.min(ceiling, target + levelAdjustment)));
     if (base === 0) return adjust(mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0);
@@ -160,7 +165,7 @@ export class CombinedReadingFeel {
         Object.hasOwn(this.policies, "vibrate") ? "vibrate" : entries[0][0]];
     }
     return Object.fromEntries(entries.map(([id, policy]) => [
-      id, selected && policy.playbackMode === "story" && !selected.includes(id) ? 0 : policy.desired(context)
+      id, selected && policy.playbackMode === "story" && !selected.includes(id) ? 0 : policy.desired({...context, movement: id})
     ]));
   }
   desired(context){return Math.max(0,...Object.values(this.vector(context)));}

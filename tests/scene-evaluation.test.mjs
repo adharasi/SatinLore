@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {ReaderModel} from "../app/static/reader/model.mjs";
-import {CUE_EDGE_CASES, READING_PASSAGES, SCENE_EVALUATION_STORIES, evaluateSceneStory} from "./scene-evaluation-fixtures.mjs";
+import {
+  CONTEXT_MOVEMENT_STORIES, CUE_EDGE_CASES, READING_PASSAGES, SCENE_EVALUATION_STORIES, evaluateSceneStory,
+} from "./scene-evaluation-fixtures.mjs";
 
 for (const {label, text, level, movements} of CUE_EDGE_CASES) {
   test(`scene evaluation keeps ${label} in context`, () => {
@@ -31,10 +33,12 @@ test("a continuous reading fixture has a bounded build, bridge, stronger beat, r
   assert.equal(boundary.quiet, true);
 });
 
-for (const story of SCENE_EVALUATION_STORIES) {
+for (const story of [...SCENE_EVALUATION_STORIES, ...CONTEXT_MOVEMENT_STORIES]) {
   test(`scene read-through follows the annotated ${story.label} passages`, () => {
-    for (const {label, expected, observed} of evaluateSceneStory(ReaderModel, story)) {
-      assert.deepEqual(observed, expected, label);
-    }
+    const observations = evaluateSceneStory(ReaderModel, story);
+    assert.deepEqual(
+      observations.map(({label, observed}) => ({label, ...observed})),
+      observations.map(({label, expected}) => ({label, ...expected})),
+    );
   });
 }

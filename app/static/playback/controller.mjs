@@ -26,7 +26,7 @@ function strengthTenths(value) {
 }
 
 export class PlaybackController {
-  constructor({device, onChange = () => {}, onInterfaceError = () => {}, now = () => performance.now(),
+  constructor({device, onChange = () => {}, onInterfaceError = () => {}, getMovement = () => undefined, now = () => performance.now(),
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = timer => clearTimeout(timer), inactivityMs = 120_000, heartbeatMs = 1000}) {
     if (!device || !["connect", "disconnect", "command", "stop", "snapshot"].every(name => typeof device[name] === "function")) {
@@ -39,6 +39,7 @@ export class PlaybackController {
     this.device = device;
     this.onChange = onChange;
     this.onInterfaceError = onInterfaceError;
+    this.getMovement = getMovement;
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -283,7 +284,8 @@ export class PlaybackController {
 
   _intent(levelAdjustment = this.levelAdjustment, now = this.now()) {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.readingSeeking || this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],levelAdjustment,now};
+      ceiling:this.ceiling,manualZero:this.readingSeeking || this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],
+      movement:this.getMovement(),levelAdjustment,now};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }

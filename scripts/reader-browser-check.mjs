@@ -222,6 +222,11 @@ async function combinedSceneChecks(page) {
   const paragraphs = [
     "Their tender romantic kiss expressed affection. The device vibrated and flexed.",
     ...MOVEMENT_READINGS.flexer.slice(3, 5).map(({text}) => text),
+    "They shared a tender kiss. She held the device. It pulsed in short bursts as her fingers flexed.",
+    "They shared a tender kiss. She held the device. Her phone lit up. It pulsed in short bursts as her fingers flexed.",
+    "The vibration stopped while her fingers kept flexing.",
+    "They shared a tender kiss. The device flexed.",
+    "It pulsed in short bursts.",
   ];
   await add(page, paragraphs.join("\n\n"), "Flexer combination rehearsal");
   await openSettings(page, "story");
@@ -267,7 +272,64 @@ async function combinedSceneChecks(page) {
   await page.locator("#stop").click();
   await output(page, 0);
   assert.equal(await readChannel("fingering"), 0, "Stop clears the active channel.");
+
+  await page.locator("#next").click();
+  await current(page, 2);
+  await start(page);
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "Simulator running");
+  const expectedMovements = [
+    ["vibrate", "fingering"],
+    ["fingering"],
+    ["fingering"],
+    ["fingering"],
+    ["vibrate"],
+  ];
+  for (const [index, expected] of expectedMovements.entries()) {
+    await page.locator("#next").click();
+    await current(page, index + 3);
+    await page.clock.runFor(1100);
+    const active = [];
+    for (const channel of flexer.channels) if (await readChannel(channel) > 0) active.push(channel);
+    assert.deepEqual(active, expected, paragraphs[index + 3]);
+  }
+  await page.locator("#stop").click();
+  await output(page, 0);
   await switching.uncheck();
+
+  await openSettings(page);
+  await page.locator("#feel-mode").selectOption("continuous");
+  await openSettings(page, "story");
+  for (let index = 7; index > 4; index--) await page.locator("#previous").click();
+  await current(page, 4);
+  await start(page);
+  await page.clock.runFor(1100);
+  await output(page, 1);
+  assert.equal(await readChannel("vibrate"), 1, "The fixed default still plays before the named stop.");
+  await page.locator("#next").click();
+  await current(page, 5);
+  await page.clock.runFor(1100);
+  await output(page, 0);
+  assert.equal(await readChannel("vibrate"), 0, "A named stop overrides the fixed default and its continuous background.");
+  assert.equal(await readChannel("fingering"), 0, "With switching disabled, a named stop does not substitute another movement.");
+  await page.locator("#stop").click();
+
+  await page.locator("#combination-controls > summary").click();
+  await page.locator('#combination-choices input[value="fingering"]').uncheck();
+  await page.locator("#apply-combined").click();
+  await page.locator("#scene-movement-settings").waitFor({state: "hidden"});
+  await setRange(page, "cap", 1);
+  await page.locator("#previous").click();
+  await current(page, 4);
+  await start(page);
+  await page.clock.runFor(1100);
+  await output(page, 1);
+  await page.locator("#next").click();
+  await current(page, 5);
+  await page.clock.runFor(1100);
+  await output(page, 0);
+  await page.locator("#stop").click();
+  await openSettings(page);
+  await page.locator("#feel-mode").selectOption("story");
 }
 
 async function toyConnectionChecks(page) {
@@ -942,6 +1004,8 @@ export async function checkReader(page, context, origin) {
   assert.equal(await page.locator("#story-list button[data-story-id]").getAttribute("data-story-id"), savedId);
   await openReview(page); await setRange(page, "level", 0); await closeSettings(page);
   await page.clock.runFor(500);
+  await page.waitForFunction(({key, position}) => JSON.parse(localStorage.getItem(key)).stories[0].corrections[position] === 0,
+    {key: libraryKey, position: savedPosition});
   await page.reload(); await analysed(page); await openReview(page);
   assert.equal(await page.locator("#level").inputValue(), "0", "Saved manual zero survives reload and reanalysis.");
   assert.match(await page.locator("#level-source").textContent(), /manual|your/i, "Restored zero remains a correction rather than an unset value.");
@@ -1033,5 +1097,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap, grounded pulse, named channel stops and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

@@ -23,7 +23,7 @@ export class ReaderDeviceController {
     this.liveConfigured = null; this.lastTest = null; this.verifiedTest = null; this.levels = []; this.ready = false; this.bridge = bridge; this.real = null;
     this.simulator = simulator || new ProfileSimulator({now});
     this.sim = new PlaybackController({...controllerOptions,device:this.simulator,now,setTimer,clearTimer,
-      onChange: () => this.notify(),onInterfaceError: () => this.onInterfaceError(this.snapshot())});
+      onChange: () => this.notify(),onInterfaceError: () => this.onInterfaceError(this.snapshot()),getMovement: () => this.channel});
     this.sim.feel = new ReadingFeel({rhythm: this.channelDefaults.rhythm});
     this.ready = true;
   }
@@ -92,7 +92,7 @@ export class ReaderDeviceController {
       this.notify();
     };
     this.real = new AsyncPlaybackController({transport:this.bridge,now:this.now,setTimer:this.setTimer,clearTimer:this.clearTimer,
-      onChange:()=>this.notify(),heartbeatMs:1100});
+      onChange:()=>this.notify(),getMovement: () => this.channel,heartbeatMs:1100});
     this.real.feel = new ReadingFeel({rhythm: this.channelDefaults.rhythm});
     this.real.setVisible(this.visible); this.real.setAuthorized(this.authorized);
   }

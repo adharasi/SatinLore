@@ -7,11 +7,11 @@ const level = value => {
 };
 
 export class AsyncPlaybackController {
-  constructor({ transport, now = () => performance.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), onChange = () => {}, onEvent = () => {}, connectTimeout = 3000, requestTimeout = 1800, inactivityMs = 120000, heartbeatMs = 1000 }) {
+  constructor({ transport, now = () => performance.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), onChange = () => {}, onEvent = () => {}, getMovement = () => undefined, connectTimeout = 3000, requestTimeout = 1800, inactivityMs = 120000, heartbeatMs = 1000 }) {
     if (!transport || !["discover", "connect", "command", "stop", "disconnect"].every(key => typeof transport[key] === "function")) throw new TypeError("A targeted asynchronous transport is required.");
     if (![connectTimeout, requestTimeout, inactivityMs].every(value => Number.isFinite(value) && value > 0) || requestTimeout >= ASYNC_COMMAND_MS) throw new RangeError("Use positive timeouts; command acknowledgement must be bounded below two seconds.");
     if (!Number.isFinite(heartbeatMs) || heartbeatMs < 1000 || heartbeatMs > 1500) throw new RangeError("Use a 1000–1500 ms finite renewal cadence.");
-    Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, connectTimeout, requestTimeout, inactivityMs, heartbeatMs });
+    Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, getMovement, connectTimeout, requestTimeout, inactivityMs, heartbeatMs });
     this.state = "DISCONNECTED"; this.connected = false; this.selected = null; this.visible = true; this.authorized = true;
     this.feel = new ReadingFeel(); this.manualZeros = new Set();
     this.levels = []; this.sceneProfiles = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
@@ -37,7 +37,8 @@ export class AsyncPlaybackController {
   }
   intent(levelAdjustment = this.levelAdjustment, now = this.now()) {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.readingSeeking || this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],levelAdjustment,now};
+      ceiling:this.ceiling,manualZero:this.readingSeeking || this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],
+      movement:this.getMovement(),levelAdjustment,now};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }

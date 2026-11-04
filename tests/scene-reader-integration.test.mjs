@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {ReaderModel} from "../app/static/reader/model.mjs";
+import {normalizeSceneProfiles} from "../app/static/reader/calibration.mjs";
 
 const story = [
   "Their tender romantic kiss expressed affection. The motion flexed.",
@@ -45,4 +46,15 @@ test("failed or cancelled analysis cannot leave a scene profile active", async (
   stopped.abort();
   assert.equal(await model.analyse({yieldTask: async () => {}, signal: stopped.signal}), false);
   assert.equal(model.effectiveProfiles(), undefined);
+});
+
+test("a scene profile owns its movement arrays and rejects contradictory or unsupported ends", () => {
+  const profile = {rhythm: "gentle", quiet: false, movements: ["fingering"], endedMovements: ["vibrate"]};
+  const [normalized] = normalizeSceneProfiles([profile], 1);
+  assert.deepEqual(normalized, profile);
+  profile.endedMovements.push("rotate");
+  assert.deepEqual(normalized.endedMovements, ["vibrate"]);
+  for (const endedMovements of [["fingering"], ["heat"], ["vibrate", "vibrate"], "vibrate"]) {
+    assert.throws(() => normalizeSceneProfiles([{...profile, endedMovements}], 1), /supported scene movements/);
+  }
 });

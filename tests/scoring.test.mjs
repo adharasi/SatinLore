@@ -168,6 +168,57 @@ test("an explicit movement stop clears earlier output, while another current act
   ]);
 });
 
+test("pulse and buzz need a grounded device, including immediately referenced motion", () => {
+  const cue = "They shared a tender kiss.";
+  const descriptions = [
+    "She held the device. It pulsed gently and flexed.",
+    "The device rested against her palm. It buzzed while its arm rotated.",
+    "The device sat beside the phone. It pulsed while her fingers flexed.",
+    "The toy manual lay on the nightstand. It pulsed and flexed.",
+    "The toy’s battery was flat. It pulsed and flexed.",
+    "The toy lay across a brass metronome. It pulsed and flexed.",
+    "Her heart pulsed as the toy rotated.",
+    "The device oscillated as the light pulsed.",
+  ];
+  const result = groupScenes(sceneRows(...descriptions.map(text => `${cue} ${text}`)));
+  assert.deepEqual(result.map(row => row.movements), [
+    ["vibrate", "fingering"], ["vibrate", "rotate"], ["fingering"], [], [], [], ["rotate"], ["oscillate"],
+  ]);
+});
+
+test("movement references span at most one anchored paragraph and stop at reported motion", () => {
+  const anchor = "They shared a tender kiss. The toy flexed.";
+  const result = groupScenes(sceneRows(anchor, "It buzzed gently.", "It pulsed gently.",
+    anchor, "Last summer, the device vibrated and flexed on every test.", anchor,
+    "“The toy vibrated and flexed,” she read aloud.", anchor,
+    "The vibration continued. “The toy flexed,” she read aloud."));
+  assert.deepEqual(result.map(row => row.movements), [
+    ["fingering"], ["vibrate"], [], ["fingering"], [], ["fingering"], [], ["fingering"], ["vibrate"],
+  ]);
+  assert.deepEqual(result.map(row => row.level), [1, 1, 0, 1, 0, 1, 0, 1, 1]);
+});
+
+test("a stopped channel stays excluded through the next scene detail and needs a fresh cue", () => {
+  const result = groupScenes(sceneRows(
+    "They shared a tender kiss. The toy buzzed as it flexed.",
+    "The toy stopped buzzing while it kept flexing.",
+    "A floorboard creaked in the hall.",
+    "They kissed gently. The toy buzzed as its arm flexed.",
+    "They shared a tender kiss. The toy flexed, then it stopped flexing. Its light pulsed.",
+    "They shared a tender kiss. The toy flexed. Then it stopped flexing.",
+    "They shared a tender kiss. The toy vibrated and flexed. The vibration and flexing stopped.",
+    "The device went still. Its indicator light pulsed."
+  ));
+  assert.deepEqual(result.map(row => row.movements), [
+    ["vibrate", "fingering"], ["fingering"], ["fingering"], ["vibrate", "fingering"], [], [], [], [],
+  ]);
+  assert.deepEqual(result.map(row => row.endedMovements), [
+    [], ["vibrate"], ["vibrate"], [], ["fingering"], ["fingering"], ["vibrate", "fingering"],
+    ["vibrate", "fingering", "rotate", "thrusting", "oscillate"],
+  ]);
+  assert.deepEqual(result.map(row => row.quiet), [false, false, false, false, true, true, true, true]);
+});
+
 test("short context retains a scene's movement, while quiet boundaries clear it", () => {
   const flex = "A tender kiss. The motion flexed.";
   const vibration = "A tender kiss. The soft vibration continued.";
