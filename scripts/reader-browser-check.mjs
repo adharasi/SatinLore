@@ -67,8 +67,8 @@ async function newDialog(page) {
   await closeAppSettings(page);
   if (await page.locator("#empty-new-story").isVisible()) await page.locator("#empty-new-story").click();
   else {
-    await openSettings(page);
-    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator("#upload-story-trigger").click()]);
+    await openLibrary(page);
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator("#library-import-file").click()]);
     await chooser.setFiles([]);
   }
   await page.locator("#new-story-dialog").waitFor({state: "visible"});
@@ -83,7 +83,9 @@ async function add(page, text, title = "A quiet afternoon", waitForAnalysis = tr
   await page.locator("#open-draft").click();
   await page.locator("#reading-workspace").waitFor({state: "visible"});
   assert.equal(await page.locator("#story-title").textContent(), title);
-  assert.equal(await page.locator("#settings-panel").isHidden(), true, "A new story opens directly into reading with settings closed.");
+  if (page.viewportSize()?.width < 1100) {
+    assert.equal(await page.locator("#settings-panel").isHidden(), true, "Opening a story does not open a mobile settings drawer.");
+  }
   if (waitForAnalysis) await analysed(page);
 }
 async function selectStory(page, title) {
@@ -429,6 +431,20 @@ async function shortStoryStartChecks(page) {
   const viewport = page.viewportSize();
   await page.setViewportSize({width: 1440, height: 1000});
   await add(page, "A quiet first paragraph.\n\nA quiet second paragraph.", "Short start regression");
+  assert.equal(await page.locator("#settings-panel").isVisible(), true, "The first story opens with the desktop Settings sidebar.");
+  assert.equal(await page.locator("#settings-reader-tab").getAttribute("aria-selected"), "true");
+  const layout = await page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    return {
+      left: box("#transport").left - box("#library-panel").right,
+      right: box("#settings-panel").left - box("#transport").right,
+      footer: box(".library-actions").top - box(".library-scroll").bottom,
+      scroll: getComputedStyle(document.querySelector(".library-scroll")).overflowY,
+    };
+  });
+  assert.ok(Math.abs(layout.left) <= 1 && Math.abs(layout.right) <= 1, "The dock fits between the open sidebars.");
+  assert.ok(Math.abs(layout.footer) <= 1 && layout.scroll === "auto", "The library scrolls above a fixed action footer.");
+  await assertFits(page, "desktop with both sidebars");
   await current(page, 0);
   await openReview(page);
   await setRange(page, "level", 3);
@@ -645,8 +661,7 @@ async function refinementChecks(page, setPromptReply) {
   assert.deepEqual(resourceRequests, [], "Downloaded HTML stays inert and loads no remote resources.");
   page.off("request", resourceMonitor);
   await openSettings(page);
-  assert.equal(await page.locator('#reading-model option[value="custom"]').isDisabled(), true,
-    "The future custom model cannot enable unsupported capabilities.");
+  assert.equal(await page.locator("#reading-model").count(), 0, "The placeholder story model selector is removed.");
   await page.locator("#story-url").fill("https://www.literotica.com/s/a-neutral-fixture?private=discarded#discarded");
   const linkRequests = [];
   const linkMonitor = request => { if (request.url().includes("/api/story-import")) linkRequests.push(request.url()); };
@@ -964,5 +979,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Reader/Story settings, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }
