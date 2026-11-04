@@ -253,6 +253,8 @@ test("section levels change by one before and during playback without a maximum 
   const app = workspace(); t.after(() => app.destroy()); await app.settle();
   assert.equal(app.nodes.get("level-up").disabled, true);
   await app.add(); await app.click("connect");
+  assert.equal(app.read("latest.ceiling"), 10);
+  app.nodes.get("cap").value = "5"; await app.nodes.get("cap").dispatch("input");
   app.nodes.get("level").value = "3"; await app.nodes.get("level").dispatch("input");
   await app.click("level-up");
   assert.equal(app.read("latest.target"), 4);

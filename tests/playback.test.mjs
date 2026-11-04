@@ -82,7 +82,7 @@ test("Rapid positions coalesce to the newest level with finite one-second dispat
 test("Ceiling reductions and zero corrections Stop now and never replay stale intensity", () => {
   const {controller, clock, device} = setup();
   controller.connect(); controller.setStory([20]); controller.start();
-  assert.equal(controller.snapshot().output, 5);
+  assert.equal(controller.snapshot().output, 10);
   clock.advance(100); controller.setCeiling(3);
   assert.equal(device.snapshot().strength, 0);
   clock.advance(900);
@@ -259,6 +259,7 @@ test("a separate interface-error notification receives stopped state and can exp
 test("Session strength scales the selected base without rewriting it and rounds down before the ceiling", () => {
   const {controller, clock, device} = setup();
   controller.connect(); controller.setStory([3, 4]);
+  controller.setCeilingFromControl(5);
   controller.setStrength(1.5);
   assert.equal(controller.snapshot().baseLevel, 3);
   assert.equal(controller.snapshot().target, 4, "3 × 1.5 rounds down to 4, never up to 5.");
@@ -315,12 +316,12 @@ test("Strength survives paragraph changes, Pause, Stop and reconnect, but resets
 test("Unconfirmed ceiling increases fail closed and stale confirmation cannot undo a reduction", () => {
   const {controller, clock, device} = setup();
   controller.connect(); controller.setStory([20]); controller.start();
-  assert.throws(() => controller.setCeiling(8), /confirmation/);
-  assert.equal(controller.snapshot().ceiling, 5);
+  assert.throws(() => controller.setCeiling(12), /confirmation/);
+  assert.equal(controller.snapshot().ceiling, 10);
   assert.equal(controller.snapshot().running, false);
   assert.equal(device.snapshot().strength, 0);
   controller.setCeiling(2);
-  assert.equal(controller.confirmCeiling(8, 5), false, "An old dialog cannot restore a superseded maximum.");
+  assert.equal(controller.confirmCeiling(12, 10), false, "An old dialog cannot restore a superseded maximum.");
   assert.equal(controller.snapshot().ceiling, 2);
   assert.equal(controller.confirmCeiling(8, 2), true);
   assert.equal(controller.snapshot().ceiling, 8);
@@ -342,18 +343,18 @@ test("Direct simulator maximum changes keep reading active and coalesce on the e
   const {controller, clock, device} = setup();
   controller.connect(); controller.setStory([20]); controller.start();
   clock.advance(100);
-  controller.setCeilingFromControl(8);
+  controller.setCeilingFromControl(12);
   assert.equal(controller.snapshot().running, true, "An explicit range gesture does not pause for a second confirmation.");
-  assert.equal(controller.snapshot().ceiling, 8);
-  assert.equal(controller.snapshot().target, 8);
-  assert.equal(controller.snapshot().output, 5, "A raise does not dispatch faster than the normal cadence.");
-  clock.advance(100); controller.setCeilingFromControl(12);
-  clock.advance(100); controller.setCeilingFromControl(6);
+  assert.equal(controller.snapshot().ceiling, 12);
+  assert.equal(controller.snapshot().target, 12);
+  assert.equal(controller.snapshot().output, 10, "A raise does not dispatch faster than the normal cadence.");
+  clock.advance(100); controller.setCeilingFromControl(15);
+  clock.advance(100); controller.setCeilingFromControl(11);
   assert.equal(device.commands.length, 1);
   clock.advance(699);
   assert.equal(device.commands.length, 1);
   clock.advance(1);
-  assert.deepEqual(device.commands.at(-1), {strength: 6, seconds: 2, at: 1000});
+  assert.deepEqual(device.commands.at(-1), {strength: 11, seconds: 2, at: 1000});
   assert.equal(device.commands.length, 2, "Intermediate slider values never become a queued command backlog.");
   controller.setCeilingFromControl(2);
   assert.equal(controller.snapshot().running, true);
@@ -406,13 +407,13 @@ test("Invalid direct maximum changes pause without changing accepted limits", ()
   for (const value of [-1, 21, 1.5, NaN, Infinity, "8", null]) {
     controller.start();
     assert.throws(() => controller.setCeilingFromControl(value), RangeError);
-    assert.equal(controller.snapshot().ceiling, 5);
+    assert.equal(controller.snapshot().ceiling, 10);
     assert.equal(controller.snapshot().running, false);
     assert.equal(device.snapshot().strength, 0);
     clock.advance(1000);
   }
   controller.setCeilingFromControl(8);
-  assert.equal(controller.confirmCeiling(12, 5), false, "An older confirmation cannot undo a newer direct choice.");
+  assert.equal(controller.confirmCeiling(12, 10), false, "An older confirmation cannot undo a newer direct choice.");
   assert.equal(controller.snapshot().ceiling, 8);
 });
 
@@ -428,9 +429,9 @@ test("Invalid strength and ceiling confirmations stop output without changing ac
   }
   controller.setStrength(0.1 + 0.2);
   assert.equal(controller.snapshot().strength, 0.3, "Normal decimal arithmetic canonicalizes to integer tenths.");
-  for (const [value, expected] of [[21, 5], [7, undefined], [7, NaN], [Infinity, 5]]) {
+  for (const [value, expected] of [[21, 10], [7, undefined], [7, NaN], [Infinity, 10]]) {
     assert.throws(() => controller.confirmCeiling(value, expected), RangeError);
-    assert.equal(controller.snapshot().ceiling, 5);
+    assert.equal(controller.snapshot().ceiling, 10);
     assert.equal(controller.snapshot().running, false);
   }
 });

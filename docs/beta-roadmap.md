@@ -115,6 +115,8 @@ The fifth rules revision adds grounded pulses and buzzing, short device referenc
 
 The simulator can now play a slow build, a peak with distinct accents and a gradual taper using **Follow scene rhythm**. Each pattern advances once, then holds its last step until the next beat. Compare the shapes against **Steady** under the same settings, then use permission-cleared passages to separate rhythm preference from stage-classification errors. Live device behavior remains a separate qualification milestone. [Simulator rehearsal](reader-scene-testing.md#rehearse-build-peak-and-recovery-patterns)
 
+The sixth local revision broadens tests for unrealised actions, reported movement, quoted time markers and nearby objects that can be mistaken for a movement cue. The deployed fifth revision matched 13 of 29 new annotations and the sixth matched 29. Both matched all 90 earlier annotations. The sixth revision also produces bounded local rhythm categories for advanced analysis. These results describe targeted fixtures. Broader accuracy, model usefulness and physical feel still need separate tests. [Comparison and fixtures](reader-scene-testing.md#expectations-reported-actions-and-competing-movement)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

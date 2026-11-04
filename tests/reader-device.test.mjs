@@ -38,10 +38,30 @@ test("all nine profiles require explicit rehearsal selection and keep chosen cha
     const app=fixture();const c=app.controller;c.setStory([3,0,5]);
     const setup=await c.beginConnection({mode:"simulator",model:profile.id});
     assert.equal(setup.connected,false);assert.equal(setup.selectedId,null);assert.equal(c.start(),false);
+    assert.equal(setup.ceiling,10);
+    assert.ok(profile.simChannels.every(channel=>setup.calibration.channels[channel].maximum===10));
     await c.selectDevice(`sim-${profile.id}`);assert.equal(c.snapshot().connected,true);assert.equal(c.snapshot().running,false);
     for(const channel of profile.simChannels){const result=c.test({channel,level:1});await settle();assert.equal(c.snapshot().testing,true);assert.equal(c.snapshot().channelOutputs[channel],1);assert.equal(c.start(),false);await app.advance(2000);assert.equal(await result,true);assert.equal(c.snapshot().output,0);assert.equal(c.snapshot().lastTest,undefined);assert.equal(c.setupSnapshot().lastTest.channel,channel);}
     assert.equal(c.start(),true);assert.equal(c.snapshot().output,3);c.pause();assert.equal(c.snapshot().output,0);c.destroy();
   }
+});
+
+test("a simulator keeps its chosen maximum when returning from a bounded physical connection",async()=>{
+  const {controller:c}=fixture();c.setStory([20,0]);
+  await c.beginConnection({mode:"simulator",model:"lush"});await c.selectDevice("sim-lush");
+  assert.equal(c.snapshot().ceiling,10);assert.equal(c.snapshot().feel.maximum,10);assert.equal(c.snapshot().output,0);
+  c.setCeilingFromControl(8);c.setChannelFeel("vibrate",{maximum:8});c.setManualZeros([1]);
+  await c.beginConnection({mode:"lovense",model:"lush"});await c.selectDevice("physical-toy");
+  assert.equal(c.snapshot().ceiling,5);assert.equal(c.snapshot().calibration.channels.vibrate.maximum,5);
+  assert.equal(c.snapshot().personalRangeEnabled,false);assert.equal(c.start(),false);
+  c.setCeilingFromControl(0);
+  await c.beginConnection({mode:"simulator",model:"lush"});await c.selectDevice("sim-lush");
+  assert.equal(c.snapshot().ceiling,8);assert.equal(c.snapshot().running,false);
+  await c.applyCalibration("vibrate");assert.equal(c.snapshot().ceiling,8);
+  c.setFeel({mode:"continuous",background:2});c.setPosition(1);c.start();assert.equal(c.snapshot().output,0);
+  await c.beginConnection({mode:"lovense",model:"lush"});await c.selectDevice("physical-toy");
+  assert.equal(c.snapshot().ceiling,0);assert.equal(c.snapshot().running,false);
+  c.destroy();
 });
 
 test("zero ceiling blocks setup output, profile switches preserve current mapping and position paused",async()=>{

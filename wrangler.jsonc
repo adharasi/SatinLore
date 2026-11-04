@@ -23,13 +23,15 @@
       { "name": "PRIVATE_FEEDBACK", "class_name": "PrivateFeedback" },
       { "name": "READER_ACCOUNTS", "class_name": "ReaderAccount" },
       { "name": "BETA_RECORDINGS", "class_name": "BetaRecordings" },
-      { "name": "ALPHA_STUDY", "class_name": "AlphaStudy" }
+      { "name": "ALPHA_STUDY", "class_name": "AlphaStudy" },
+      { "name": "SCENE_ANALYSIS_BUDGET", "class_name": "SceneAnalysisBudget" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["PrivateFeedback"] },
     { "tag": "v2", "new_sqlite_classes": ["ReaderAccount", "BetaRecordings"] },
-    { "tag": "v3", "new_sqlite_classes": ["AlphaStudy"] }
+    { "tag": "v3", "new_sqlite_classes": ["AlphaStudy"] },
+    { "tag": "v4", "new_sqlite_classes": ["SceneAnalysisBudget"] }
   ],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",

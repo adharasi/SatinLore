@@ -1,4 +1,4 @@
-import {RHYTHMS} from "./calibration.mjs";
+import {DEFAULT_SIMULATOR_MAXIMUM, RHYTHMS} from "./calibration.mjs";
 
 /** Drafts and explicit short checks for the movements on the selected toy. */
 export const CALIBRATION_FIELDS = Object.freeze([
@@ -109,6 +109,9 @@ export function createCalibrationView({document = globalThis.document, mount,
   const featureLabel = name => name === "oscillate" && simulator() ? "Oscillation · simulator" : FEATURES[name].label;
   const rangeGranted = name => context.personalRangeChannels?.includes?.(name) === true;
   const limit = name => simulator() || rangeGranted(name) ? 20 : 5;
+  const initialDraft = (name, value) => calibrationDraft({
+    maximum: simulator() ? level(context.ceiling, DEFAULT_SIMULATOR_MAXIMUM) : 5, ...value,
+  }, limit(name));
   const draft = name => calibrationDraft(drafts[name], limit(name));
   const testLimit = name => Math.min(5, level(context.ceiling, 5), draft(name).maximum);
   const ready = () => context.connected === true && typeof context.selectedId === "string" &&
@@ -397,7 +400,7 @@ export function createCalibrationView({document = globalThis.document, mount,
       active = true;
       busy = false;
       lastTest = null;
-      drafts = Object.fromEntries(available().map(name => [name, calibrationDraft(value.settings?.[name], limit(name))]));
+      drafts = Object.fromEntries(available().map(name => [name, initialDraft(name, value.settings?.[name])]));
       checked = checkedFrom(value);
       selected = chooseDefaults();
       readingMode = value.readingMode === "continuous" || value.feel?.mode === "continuous" ? "continuous" : "story";
@@ -419,7 +422,7 @@ export function createCalibrationView({document = globalThis.document, mount,
         checked.clear();
         selected = chooseDefaults();
         if (previousId !== context.selectedId || previousMode !== context.mode) {
-          drafts = Object.fromEntries(names.map(name => [name, calibrationDraft(context.settings?.[name], limit(name))]));
+          drafts = Object.fromEntries(names.map(name => [name, initialDraft(name, context.settings?.[name])]));
         }
         stop();
         status.textContent = "Connection changed. Check the selected toy before continuing.";
