@@ -252,9 +252,9 @@ try {
   const vibration = page.locator('#alpha-movement-cards .alpha-movement[data-channel="vibrate"]');
   const movementDetails = vibration.locator(".alpha-movement-detail");
   assert.equal(await movementDetails.getAttribute("open"), "", "Movement settings open by default.");
-  await movementDetails.locator("summary").click();
+  await movementDetails.locator(":scope > summary").click();
   assert.equal(await movementDetails.getAttribute("open"), null, "Movement settings can be collapsed.");
-  await movementDetails.locator("summary").click();
+  await movementDetails.locator(":scope > summary").click();
   const minimum = vibration.locator('input[data-setting="minimum"]');
   const maximum = vibration.locator('input[data-setting="maximum"]');
   await minimum.press("End");
@@ -328,6 +328,10 @@ try {
   await rows.first().click();
   await admin.locator("#alpha-review-detail").waitFor({ state: "visible" });
   assert.match(await admin.locator("#alpha-detail-meta").textContent(), /Sadie/);
+  await admin.getByRole("heading", { name: "Movement pattern" }).waitFor({ state: "visible" });
+  const patternSummary = await admin.locator("#alpha-review-pattern-summary").textContent();
+  for (const label of ["Total movement", "Vibration", "Flexing"]) assert.ok(patternSummary.includes(label));
+  assert.equal(await admin.locator("#alpha-review-pattern-play").isEnabled(), true, "A captured movement can be played back in the graph.");
   const persisted = await get(admin, `${API}/admin/sessions/${sessionId}`);
   assert.equal(persisted.status, 200);
   const detail = persisted.data;

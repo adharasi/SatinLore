@@ -112,28 +112,65 @@ function screenVisits(events, duration) {
 const normalized = value => Number.isInteger(value) && value >= 0 && value <= 1000;
 const percent = value => `${value / 10}%`;
 const isReplayEvent = event => event.type === "screen" || event.type === "pointer";
-function traceSegments(events, channel, duration) {
-  const lines = [];
-  let previous = null;
-  for (const event of events) {
-    if (!isOutput(event) && !isDiscontinuity(event)) continue;
-    const next = hasKnownOutput(event) ? getLevels(event)[channel] : null;
-    if (previous && event.t > previous.t) {
-      const until = Math.min(event.t, previous.until);
-      if (until > previous.t) lines.push({ start: previous.t, end: until, level: previous.level });
+// Replay the recorded software envelope. Live requests count after submission
+// and expire at their own lease. Simulator samples last until state changes.
+export function deriveAlphaMovementPattern(events, durationMs, mode) {
+  const traceEnd = Math.min(durationMs, events.at(-1)?.t ?? 0);
+  const channels = {};
+  const positive = [];
+  for (const { key } of CHANNELS) {
+    const segments = [];
+    let previous = null, latestRequest = 0;
+    function close(at) {
+      if (!previous) return;
+      const { startMs, level } = previous;
+      const endMs = Math.min(at, previous.endMs, durationMs);
+      if (endMs <= startMs) return;
+      const last = segments.at(-1);
+      if (last?.level === level && last.endMs === startMs) last.endMs = endMs;
+      else segments.push({ startMs, endMs, level });
     }
-    previous = next === null ? null : {
-      t: event.t, level: next,
-      until: event.stage !== "simulated" && isNumber(event.durationMs) && next > 0 ?
-        event.t + event.durationMs : Infinity
-    };
+    for (const event of events) {
+      if (event.t > durationMs) break;
+      if (isDiscontinuity(event) || event.type === "device") {
+        close(event.t);
+        previous = null;
+        continue;
+      }
+      if (!isOutput(event)) continue;
+      if (event.commandId < latestRequest) continue;
+      latestRequest = Math.max(latestRequest, event.commandId ?? 0);
+      if (event.stage === "requested") continue;
+      close(event.t);
+      const level = hasKnownOutput(event) ? getLevels(event)[key] : null;
+      const live = (event.mode ?? mode) === "live" || event.stage === "submitted";
+      previous = level === null || live && level > 0 && !(event.durationMs > 0) ? null : {
+        startMs: event.t, level, endMs: live && level > 0 ? event.t + event.durationMs : durationMs
+      };
+    }
+    close(traceEnd);
+    let activeMs = 0, levelMilliseconds = 0, peakLevel = null;
+    for (const segment of segments) {
+      peakLevel = Math.max(peakLevel ?? 0, segment.level);
+      if (segment.level === 0) continue;
+      const elapsed = segment.endMs - segment.startMs;
+      positive.push(segment);
+      activeMs += elapsed;
+      levelMilliseconds += elapsed * segment.level;
+    }
+    channels[key] = { activeMs, levelSeconds: levelMilliseconds / 1000, peakLevel, segments };
   }
-  if (previous && duration >= previous.t) {
-    const until = Math.min(duration, previous.until);
-    if (until >= previous.t) lines.push({ start: previous.t, end: until, level: previous.level });
+  let activeMs = 0, through = 0;
+  for (const { startMs, endMs } of positive.sort((a, b) => a.startMs - b.startMs)) {
+    activeMs += Math.max(0, endMs - Math.max(through, startMs));
+    through = Math.max(through, endMs);
   }
-  return lines;
+  return {
+    format: "satinlore-alpha-movement-pattern-v1", durationMs, activeMs,
+    levelSeconds: channels.vibrate.levelSeconds + channels.fingering.levelSeconds, channels
+  };
 }
+const seconds = value => (value / 1000).toFixed(1) + " s";
 
 export function initializeAlphaAdmin() {
   const $ = id => document.getElementById(`alpha-review-${id}`);
@@ -157,7 +194,7 @@ export function initializeAlphaAdmin() {
   let sessions = [], current = null, duration = 0, at = 0;
   let listRequest, detailRequest, generation = 0;
   let viewEvents = [], eventStart = 0, seekSync = true, deleteTarget = null, deleting = false;
-  let traces = {};
+  let pattern = null;
   let visits = [], visitIndex = -1, replayAnimation = null, drawnFrame = null;
   const themeKey = "satinlore.alpha.appearance";
   function setTheme(theme, save = false) {
@@ -180,7 +217,7 @@ export function initializeAlphaAdmin() {
   function clearDetail() {
     current = null;
     viewEvents = [];
-    traces = {};
+    pattern = null;
     stopReplay();
     visits = [];
     visitIndex = -1;
@@ -188,7 +225,7 @@ export function initializeAlphaAdmin() {
     clearClip();
     $("detail").hidden = true;
     $("empty").hidden = false;
-    for (const id of ["events", "feedback", "annotations", "markers", "levels", "chart", "replay-screen", "replay-items"]) $(id).replaceChildren();
+    for (const id of ["events", "feedback", "annotations", "markers", "levels", "chart", "pattern-summary", "replay-screen", "replay-items"]) $(id).replaceChildren();
     $("replay-controls").hidden = $("replay-view").hidden = $("replay-pointer").hidden = true;
     $("replay-note").textContent = "";
     for (const id of ["alpha-detail-meta", "alpha-detail-title", "alpha-detail-subtitle", "alpha-review-clip-note"]) {
@@ -283,8 +320,8 @@ export function initializeAlphaAdmin() {
       nodes.push(label);
     }
     for (const { key, className } of CHANNELS) {
-      const path = traces[key].map(({ start, end, level }) =>
-        `M${xFor(start).toFixed(2)},${yFor(level).toFixed(2)}H${xFor(end).toFixed(2)}`
+      const path = pattern.channels[key].segments.map(({ startMs, endMs, level }) =>
+        `M${xFor(startMs).toFixed(2)},${yFor(level).toFixed(2)}H${xFor(endMs).toFixed(2)}`
       ).join("");
       if (path) nodes.push(svg("path", { class: className, d: path }));
     }
@@ -307,6 +344,7 @@ export function initializeAlphaAdmin() {
     if (replayAnimation !== null) cancelAnimationFrame(replayAnimation);
     replayAnimation = null;
     $("replay-play").textContent = "Play screen";
+    $("pattern-play").textContent = "Play movement";
   }
   function showScreenFrame(frame) {
     if (frame === drawnFrame) return;
@@ -380,7 +418,7 @@ export function initializeAlphaAdmin() {
     playhead?.setAttribute("x1", xFor(at));
     playhead?.setAttribute("x2", xFor(at));
     $("levels").replaceChildren(...CHANNELS.map(({ key, label }) => {
-      const segment = traces[key].findLast(entry => entry.start === at || entry.start < at && at < entry.end);
+      const segment = pattern.channels[key].segments.findLast(entry => entry.startMs <= at && at < entry.endMs);
       return el("span", `${label} · ${segment ? `${segment.level}/20` : "No known level"}`);
     }));
     if (moveClip) {
@@ -471,7 +509,19 @@ export function initializeAlphaAdmin() {
       at = 0;
       duration = durationOf(data);
       loadScreenVisits();
-      traces = Object.fromEntries(CHANNELS.map(({ key }) => [key, traceSegments(data.events, key, duration)]));
+      pattern = deriveAlphaMovementPattern(data.events, duration, data.session.mode);
+      const rows = [
+        ["Total movement", pattern.activeMs, pattern.levelSeconds],
+        ...CHANNELS.map(({ key, label }) => [label, pattern.channels[key].activeMs, pattern.channels[key].levelSeconds, pattern.channels[key].peakLevel])
+      ];
+      $("pattern-summary").replaceChildren(...rows.map(([label, activeMs, amount, peak]) => {
+        const row = el("div");
+        const details = [seconds(activeMs) + " active", amount.toFixed(1) + " level × seconds"];
+        if (peak !== undefined) details.push(peak === null ? "No recorded level" : peak + "/20 peak");
+        row.append(el("dt", label), el("dd", details.join(" · ")));
+        return row;
+      }));
+      $("pattern-play").disabled = !CHANNELS.some(({ key }) => pattern.channels[key].segments.length);
       $("empty").hidden = true;
       $("detail").hidden = false;
       document.getElementById("alpha-detail-meta").textContent = `${data.session.username} · ${date(data.session.createdAt)}`;
@@ -528,6 +578,25 @@ export function initializeAlphaAdmin() {
     $("replay-play").textContent = "Pause screen";
     replayAnimation = requestAnimationFrame(tick);
   });
+  $("pattern-play").addEventListener("click", () => {
+    if (replayAnimation !== null) {
+      const wasPlayingMovement = $("pattern-play").textContent === "Pause movement";
+      stopReplay();
+      if (wasPlayingMovement) return;
+    }
+    if (!pattern || !duration) return;
+    clip.pause();
+    const start = at >= duration ? 0 : at;
+    const started = performance.now();
+    const tick = now => {
+      const position = Math.min(duration, Math.round(start + Math.max(0, now - started)));
+      if (position === duration || position - at >= 40 || position < at) setPosition(position);
+      if (position >= duration) stopReplay();
+      else replayAnimation = requestAnimationFrame(tick);
+    };
+    $("pattern-play").textContent = "Pause movement";
+    replayAnimation = requestAnimationFrame(tick);
+  });
   $("event-type").addEventListener("change", filterEvents);
   $("events-before").addEventListener("click", () => { eventStart = Math.max(0, eventStart - EVENT_PAGE); displayEvents(); });
   $("events-after").addEventListener("click", () => { if (eventStart + EVENT_PAGE < viewEvents.length) eventStart += EVENT_PAGE; displayEvents(); });
@@ -556,7 +625,7 @@ export function initializeAlphaAdmin() {
   });
   $("export").addEventListener("click", () => {
     if (!current) return;
-    const url = URL.createObjectURL(new Blob([JSON.stringify(current, null, 2)], { type: "application/json" }));
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ ...current, movementPattern: pattern }, null, 2)], { type: "application/json" }));
     const link = el("a");
     link.href = url;
     link.download = `satinlore-alpha-${current.session.id}.json`;

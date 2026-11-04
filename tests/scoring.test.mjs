@@ -42,13 +42,13 @@ function sceneRows(...paragraphs) {
   });
 }
 
-test("one brief contextual paragraph carries a capped level within a matching scene", () => {
+test("one brief contextual paragraph holds the preceding level and rhythm within a matching scene", () => {
   const rows = sceneRows("A tender and romantic kiss expressed affection.",
     "Rain brushed against the window.", "A gentle romantic embrace expressed affection.");
   const result = groupScenes(rows);
   assert.deepEqual(result.map(paragraph => paragraph.sceneId), [1, 1, 1]);
-  assert.equal(result[1].level, 2);
-  assert.equal(result[1].rhythm, "gentle");
+  assert.equal(result[1].level, result[0].level);
+  assert.equal(result[1].rhythm, result[0].rhythm);
   assert.equal(rows[1].suggestedLevel, 0);
   assert.equal(Object.hasOwn(result[1], "text"), false);
 });

@@ -133,3 +133,15 @@
   .alpha-review-shell { padding: .8rem; }
   .alpha-review-card h2 { font-size: 1.5rem; }
 }
+
+.alpha-pattern-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: .5rem;
+  margin: .5rem 0 .75rem;
+}
+.alpha-pattern-summary div { border: 1px solid var(--separator); border-radius: 8px; padding: .5rem .65rem; }
+.alpha-pattern-summary dt { font-size: .83rem; font-weight: 650; }
+.alpha-pattern-summary dd { margin: .2rem 0 0; color: var(--secondary); font-size: .84rem; }
+.alpha-pattern-play { margin-bottom: .65rem; }
+#alpha-movement-heading { margin: .6rem 0 .4rem; font-size: 1rem; }

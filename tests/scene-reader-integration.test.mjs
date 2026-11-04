@@ -11,7 +11,9 @@ const story = [
 test("immediate and deferred analysis produce the same local scene mapping and preserve corrections", async () => {
   const immediate = new ReaderModel();
   immediate.load(story);
-  assert.ok(immediate.effectiveLevels()[1] > 0, "A brief sensory detail retains low movement.");
+  assert.ok(immediate.effectiveLevels()[0] > 0);
+  assert.equal(immediate.effectiveLevels()[1], immediate.effectiveLevels()[0], "A brief sensory detail retains the preceding level.");
+  assert.equal(immediate.effectiveProfiles()[1].rhythm, immediate.effectiveProfiles()[0].rhythm);
   assert.equal(immediate.paragraphs[0].sceneId, immediate.paragraphs[2].sceneId);
   const deferred = new ReaderModel();
   deferred.load(story, {deferAnalysis: true});

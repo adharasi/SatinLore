@@ -24,7 +24,7 @@ Paste the paragraphs below with one blank line between them. You can also save t
 >
 > They made tea and read the paper.
 
-1. Wait for **Scene patterns ready**, then open the section review in **Advanced**. The brief rain detail should retain a lower level inside the scene. The later time transition should break it.
+1. Wait for **Scene patterns ready**, then open the section review in **Advanced**. The brief rain detail should retain the preceding level and rhythm inside the scene. The later time transition should break it.
 2. Select **Follow scene rhythm**, connect the simulator and explicitly confirm **Start**. Compare the result with **Steady**. Try **Gentle variation** and **More variation** to check that your selection takes precedence over the scene pattern. Move to the rain paragraph and stay there briefly.
 3. Set a lower personal maximum and change strength or movement gain. Check the result stays within your limits. Set a section correction to zero and verify it stays quiet with continuous background enabled. Test **Hold**, **Ease off**, **Follow story**, **Pause** and **Stop**.
 4. Open a different story during analysis or retry the analysis after changing a correction. Playback should stay paused until a new Start, and deliberate corrections should remain in place.

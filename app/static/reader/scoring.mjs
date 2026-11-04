@@ -92,9 +92,11 @@ export function groupScenes(paragraphs) {
     }
     if (activeScene === null) activeScene = ++nextScene;
     if (carriesThrough) {
-      const level = Math.min(before.result.level, after.result.level, 2);
-      Object.assign(candidate.result, {level, band: SUGGESTION_LEVELS.indexOf(level),
-        reason: "Brief context within a matching scene; kept a low level.", rhythm: level > 1 ? "gentle" : "steady"});
+      // Keep the preceding cadence for this brief detail. Changing to a lower
+      // level here would send Stop before the next finite device renewal.
+      const {band, level, rhythm} = before.result;
+      Object.assign(candidate.result, {band, level, rhythm,
+        reason: "Brief detail within the same scene; kept the preceding rhythm."});
     }
     candidate.result.sceneId = activeScene;
   }
