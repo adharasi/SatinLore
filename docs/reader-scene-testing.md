@@ -38,6 +38,38 @@ Paste this original test story with a blank line between paragraphs. For the com
 
 The rules still work from English cues and can miss an implied event, mistake a quoted action for a current one, or infer an incorrect reading position. Section review is optional and lets you correct the suggested level. The separate device controls still determine what can play.
 
+## Rehearse build, peak and recovery patterns
+
+In simulator mode, **Follow scene rhythm** uses a different shape for each of these stages. A peak describes the writing. Each stage step lasts about two seconds and the final level holds until the next beat. The current movement maximum, minimum, enabled movements and Stop continue to apply. **Steady**, **Gentle variation** and **More variation** give you a fixed alternative for the selected movement.
+
+1. Choose **Set up a toy → Lush → Simulate**, select the Lush simulator in the device list, then choose **Use these settings**. Close setup, open a new story and paste the five paragraphs below, keeping the blank lines.
+2. Open **Advanced → Movement tuning → Tune this movement** and set **Variation** to **Follow scene rhythm**. For this simulator rehearsal, set the playback **Maximum** and the **Preferred level** to 18. Leave **Minimum** at 0 and the section adjustment unchanged. The wide simulator range makes each step visible on the meter.
+3. For each row below, pause on its paragraph, press **Start**, confirm, then watch the meter at the indicated times. Press **Stop** and check the meter returns to zero before advancing. Use **Advanced → Adjust story sections** to inspect the suggested stage.
+
+```text
+They drew closer. She held her breath.
+
+Their slow tender kiss expressed affection.
+
+Their passionate, tender kiss and romantic embrace expressed affection.
+
+They slowed and relaxed.
+
+***
+```
+
+| Paragraph | Stage | Approximate meter levels after Start, sampled every two seconds |
+| --- | --- | --- |
+| 1 | Slow build | 3 → 5 → 6, then steady at 6 |
+| 2 | Sustaining | The passage’s gentle rhythm applies |
+| 3 | Peak accents | 13 → 18 → 11 → 16 → 9, then steady at 9 |
+| 4 | Gradual taper | 6 → 4 → 3 → 2, then steady at 2 |
+| 5 | Quiet boundary | 0 |
+
+The Chromium 153 simulator rehearsal matched the three stage sequences, the final held steps and zero on Stop.
+
+Repeat the peak with a lower **Maximum** to check that it bounds every accent. For a preference comparison, replay the same passage and settings with **Steady** and record which rhythm fits better, any uncomfortable change and whether you wanted to reduce the level. Compare preferred timing and rhythm separately from the accuracy of the detected stage.
+
 ## Compare with the previous analyser
 
 - Use version `caadcd1` as the baseline. Run the same passages, viewport, movement setup, rhythm setting and ceiling in both versions. The baseline switches automatically on a movement cue, so enable switching in the revised version for that comparison and separately test the revised default.

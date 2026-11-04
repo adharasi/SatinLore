@@ -1,4 +1,4 @@
-import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged, stepSectionLevel} from "../reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged, sceneStagePatternLabel, stepSectionLevel} from "../reader/calibration.mjs";
 // Continuous reading playback for the synchronous simulator only.
 // A real asynchronous transport needs a separately qualified controller/adapter.
 export const COMMAND_SECONDS = 2;
@@ -189,7 +189,12 @@ export class PlaybackController {
     const seeking = active === true && this.state === "PLAYING";
     if (seeking === this.readingSeeking) return this.snapshot();
     this.readingSeeking = seeking;
-    if (!seeking && this.state === "PLAYING") this.feel.reanchor(this.now());
+    if (seeking) this.seekStartPosition = this.position;
+    else if (this.state === "PLAYING") {
+      const profile = this.sceneProfiles[this.position];
+      const sameStage = this.position === this.seekStartPosition && !profile?.manual && !!sceneStagePatternLabel(profile?.phase);
+      this.feel.reanchor(this.now(), undefined, sameStage);
+    }
     return this._desiredChanged();
   }
 
@@ -285,7 +290,7 @@ export class PlaybackController {
   _intent(levelAdjustment = this.levelAdjustment, now = this.now()) {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
       ceiling:this.ceiling,manualZero:this.readingSeeking || this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],
-      movement:this.getMovement(),levelAdjustment,now};
+      movement:this.getMovement(),levelAdjustment,now,simulatorStagePatterns:true,preview:this.state !== "PLAYING"};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }

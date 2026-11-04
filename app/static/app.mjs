@@ -16,7 +16,7 @@ import {createSetupFlow, PRACTICE_STORY} from "./reader/setup-flow.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
-import {clampCalibration} from "./reader/calibration.mjs";
+import {clampCalibration, sceneStagePatternLabel} from "./reader/calibration.mjs";
 
 const $ = id => document.getElementById(id);
 const importer = new TextImporter();
@@ -311,7 +311,8 @@ function updateCurrentCorrection(story) {
   $("level").setAttribute("aria-valuetext", `${base} out of 20`);
   $("level").disabled = !paragraph || libraryMutation || story?.deleting;
   $("reset-level").disabled = !paragraph || paragraph.override === null || libraryMutation || story?.deleting;
-  const rhythm = {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
+  const stagePattern = latest.mode === "simulator" ? sceneStagePatternLabel(paragraph?.phase) : null;
+  const rhythm = stagePattern ?? {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
   const endedMovements = paragraph?.endedMovements?.length ? `${paragraph.endedMovements.map(channelLabel).join(" + ")} paused in this scene` : null;
   const movements = paragraph?.movements?.length ? `Movement cue: ${paragraph.movements.map(channelLabel).join(" + ")}` :
     endedMovements ? null : "Default movement";

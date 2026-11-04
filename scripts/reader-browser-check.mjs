@@ -332,6 +332,60 @@ async function combinedSceneChecks(page) {
   await page.locator("#feel-mode").selectOption("story");
 }
 
+async function sceneStagePatternChecks(page) {
+  const lush = toyRehearsals[0];
+  await openSettings(page);
+  await page.locator("#open-setup").click();
+  await page.locator("#setup-model").selectOption(lush.id);
+  await page.locator("#setup-mode-simulator").click();
+  await page.locator("#setup-primary").click();
+  await selectRehearsalDevice(page, lush);
+  await page.locator("#calibration-apply").click();
+  await page.locator("#setup-close").click();
+
+  await add(page, [
+    "They drew closer. She held her breath.",
+    "Their slow tender kiss expressed affection.",
+    "Their passionate, tender kiss and romantic embrace expressed affection.",
+    "They slowed and relaxed.",
+    "***",
+  ].join("\n\n"), "Scene variation rehearsal");
+  await openSettings(page, "story");
+  const tune = page.getByText("Tune this movement", {exact: true});
+  if (!await tune.evaluate(summary => summary.parentElement.open)) await tune.click();
+  await setRange(page, "cap", 18);
+  await setRange(page, "feel-preferred", 18);
+  await page.locator("#feel-rhythm").selectOption("scene");
+
+  const watch = async (levels, description) => {
+    await start(page);
+    await output(page, levels[0]);
+    for (const level of levels.slice(1)) {
+      await page.clock.runFor(2100);
+      await output(page, level);
+    }
+    await page.clock.runFor(2200);
+    assert.equal(await page.locator("#output").textContent(), `${levels.at(-1)} / 20`, description);
+    await page.locator("#stop").click();
+    await output(page, 0);
+  };
+  await watch([3, 5, 6], "The build rises to a steady level.");
+  await page.locator("#next").click();
+  await current(page, 1);
+  await page.locator("#next").click();
+  await current(page, 2);
+  await watch([13, 18, 11, 16, 9], "Peak accents hold the final level without looping.");
+  await page.locator("#next").click();
+  await current(page, 3);
+  await watch([6, 4, 3, 2], "The taper holds its final lower level.");
+  await page.locator("#next").click();
+  await current(page, 4);
+  await start(page);
+  await page.clock.runFor(2200);
+  await output(page, 0);
+  await page.locator("#stop").click();
+}
+
 async function toyConnectionChecks(page) {
   const vendorRequests = [], leakedText = [], liveRequests = [];
   const monitor = request => {
@@ -759,6 +813,7 @@ async function refinementChecks(page, setPromptReply) {
 
   await toyConnectionChecks(page);
   await combinedSceneChecks(page);
+  await sceneStagePatternChecks(page);
 
   const resourceRequests = [];
   const resourceMonitor = request => {

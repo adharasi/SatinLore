@@ -9,6 +9,12 @@ const fields = Object.keys(DEFAULT_CHANNEL_CALIBRATION);
 const whole = value => Number.isInteger(value) && value >= 0 && value <= 20;
 const movementIds = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
 const scenePhases = ["quiet", "build", "sustain", "peak", "recover"];
+const stagePatterns = {
+  build: {label: "Slow build", levels: [.65, .85, 1]},
+  peak: {label: "Peak accents", levels: [.75, 1, .65, .9, .55]},
+  recover: {label: "Gradual taper", levels: [1, .75, .5, .35]},
+};
+export const sceneStagePatternLabel = phase => stagePatterns[phase]?.label;
 const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
   Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
@@ -77,9 +83,9 @@ export class ReadingFeel {
   snapshot() { return {...this.settings, playbackMode: this.playbackMode, heldLevel: this.heldLevel,returningToStory:this.ramping}; }
   reset() { this.playbackMode = "story"; this.heldLevel = null; this.startedAt = 0;this.followLevel=null; }
   start(now = 0) { this.startedAt = now;this.followLevel=null; }
-  reanchor(now, level = 0) {
+  reanchor(now, level = 0, keepStageTime = false) {
     if (this.playbackMode !== "story") return;
-    this.startedAt = now;
+    if (!keepStageTime || this.settings.rhythm !== "scene") this.startedAt = now;
     this.followLevel = whole(level) ? level : 0;
   }
   configure(value) {
@@ -95,7 +101,8 @@ export class ReadingFeel {
   get ramping(){return this.followLevel!==null;}
   advanceFollow(from,ceiling=20){if(this.followLevel!==null && whole(from)){this.followLevel=Math.min(20,from+2);if(this.followLevel>=Math.min(ceiling,this.settings.maximum))this.followLevel=null;}}
   capReturn(value){return this.followLevel===null?value:Math.min(value,this.followLevel);}
-  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, movement, levelAdjustment = 0, now = 0} = {}) {
+  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, movement, levelAdjustment = 0,
+    now = 0, simulatorStagePatterns = false, preview = false} = {}) {
     // Deliberate zero and zero gain/strength always outrank any preferred floor.
     if (!whole(base) || !whole(ceiling) || !Number.isFinite(strength) || strength > 2 || manualZero || (base === 0 && scene?.quiet) || strength <= 0 || this.settings.gain === 0 || ceiling === 0) return 0;
     ceiling=Math.min(ceiling,this.settings.maximum);
@@ -104,9 +111,13 @@ export class ReadingFeel {
     const {mode, minimum, background, rhythm} = this.settings;
     const adjust = target => this.capReturn(Math.max(0, Math.min(ceiling, target + levelAdjustment)));
     if (base === 0) return adjust(mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0);
-    const phase = Math.floor(Math.max(0, now - this.startedAt) / 2000) % 4;
+    const step = Math.floor(Math.max(0, now - this.startedAt) / 2000);
+    const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
-    const modulation = variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
+    const stages = simulatorStagePatterns && rhythm === "scene" && !scene?.manual ? stagePatterns[scene?.phase]?.levels : undefined;
+    // A stage plays through once, then holds its last step until a new beat.
+    const modulation = stages ? stages[Math.min(preview ? 0 : step, stages.length - 1)] :
+      variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
     // A temporary ceiling limits the final level without shrinking the
     // calibrated scale. Otherwise a low cue can round to zero at a cap of 1.
     const preferred = this.settings.preferred;
@@ -114,8 +125,9 @@ export class ReadingFeel {
     const calibrated = scene?.phase && !scene.manual ?
       (base <= 3 ? base * preferred / 3 : preferred + (peak - preferred) * Math.min(1, (base - 3) / 2)) : base;
     const scaled = calibrated * strength * this.settings.gain;
+    const amplitude = stages ? Math.min(ceiling, scaled) : scaled;
     // A softer beat must not round an otherwise active scene down to a stop.
-    const target = Math.max(rhythm === "scene" && scaled >= 1 ? 1 : 0, Math.floor(scaled * modulation));
+    const target = Math.max(rhythm === "scene" && scaled >= 1 ? 1 : 0, Math.floor(amplitude * modulation));
     return adjust(Math.min(ceiling, Math.max(minimum, target)));
   }
 }
@@ -139,7 +151,9 @@ export class CombinedReadingFeel {
   }
   reset(){for(const policy of Object.values(this.policies))policy.reset();}
   start(now){for(const policy of Object.values(this.policies))policy.start(now);}
-  reanchor(now, levels) { for (const [id, policy] of Object.entries(this.policies)) policy.reanchor(now, levels?.[id]); }
+  reanchor(now, levels, keepStageTime) {
+    for (const [id, policy] of Object.entries(this.policies)) policy.reanchor(now, levels?.[id], keepStageTime);
+  }
   setSceneMovement(automatic, preferred) {
     if (!Object.hasOwn(this.channels, preferred)) throw new RangeError("Choose an active default movement.");
     this.automaticMovement = automatic === true;

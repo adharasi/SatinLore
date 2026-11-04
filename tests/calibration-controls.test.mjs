@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {ReadingFeel, normalizeChannelCalibration, clampCalibration} from "../app/static/reader/calibration.mjs";
+import {CombinedReadingFeel, ReadingFeel, normalizeChannelCalibration, clampCalibration} from "../app/static/reader/calibration.mjs";
 import {PlaybackController} from "../app/static/playback/controller.mjs";
 import {AsyncPlaybackController} from "../app/static/playback/async-controller.mjs";
 import {MockDevice} from "../app/static/devices/mock.mjs";
@@ -121,6 +121,59 @@ test("scene rhythms apply within the user's gain, strength, maximum and quiet ch
   assert.equal(feel.desired({base: 0, scene: {rhythm: "steady", quiet: true}}), 0);
   assert.equal(feel.desired({base: 0, scene: {rhythm: "steady", quiet: false}}), 2);
   assert.equal(feel.desired({base: 4, scene: dynamic, manualZero: true}), 0);
+});
+
+test("simulator stage rhythms rise, accent, and taper once within the chosen range", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({preferred: 9, maximum: 12});
+  feel.start(100);
+  const samples = (phase, base, more = {}) => [0, 2000, 4000, 6000, 8000, 16000].map(offset =>
+    feel.desired({base, scene: {phase, rhythm: "dynamic"}, ceiling: 12, now: 100 + offset,
+      simulatorStagePatterns: true, ...more}));
+  assert.deepEqual(samples("build", 3), [5, 7, 9, 9, 9, 9]);
+  assert.deepEqual(samples("peak", 5), [8, 11, 7, 9, 6, 6]);
+  assert.deepEqual(samples("recover", 2), [6, 4, 3, 2, 2, 2]);
+  assert.deepEqual(samples("peak", 5, {preview: true}), [8, 8, 8, 8, 8, 8]);
+  assert.deepEqual(samples("peak", 5, {ceiling: 1}), [1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(samples("peak", 5, {ceiling: 0}), [0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(samples("peak", 5, {manualZero: true}), [0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(samples("peak", 5, {simulatorStagePatterns: false}), [11, 6, 11, 3, 11, 11]);
+  assert.deepEqual(samples("peak", 5, {scene: {phase: "peak", rhythm: "dynamic", manual: true}}), [5, 3, 5, 1, 5, 5]);
+  feel.configure({rhythm: "steady"});
+  assert.deepEqual(samples("peak", 5), [11, 11, 11, 11, 11, 11]);
+});
+
+test("a combined stage rhythm respects separate movement limits, floors, and a stopped channel", () => {
+  const feel = new CombinedReadingFeel({
+    vibrate: {preferred: 6, maximum: 8, rhythm: "scene"},
+    fingering: {preferred: 4, maximum: 4, minimum: 2, background: 2, rhythm: "scene"},
+  }, {automaticMovement: true});
+  const context = {base: 5, ceiling: 8, strength: 2, simulatorStagePatterns: true,
+    scene: {phase: "peak", movements: ["vibrate", "fingering"]}};
+  assert.deepEqual(feel.vector({...context, now: 0}), {vibrate: 6, fingering: 3});
+  assert.deepEqual(feel.vector({...context, now: 2000}), {vibrate: 8, fingering: 4});
+  assert.deepEqual(feel.vector({...context, now: 12000}), {vibrate: 4, fingering: 2});
+  const scene = {...context.scene, movements: ["fingering"], endedMovements: ["vibrate"]};
+  assert.deepEqual(feel.vector({...context, now: 2000, scene}), {vibrate: 0, fingering: 4});
+});
+
+test("a seek within the same simulator peak does not replay its accents", () => {
+  const {controller, clock, device} = synchronous();
+  controller.connect();
+  controller.setStory([5], [{phase: "peak", sceneId: 1, rhythm: "dynamic", quiet: false}]);
+  controller.setFeel({rhythm: "scene"});
+  controller.start();
+  assert.equal(device.snapshot().strength, 3);
+  clock.advance(9000);
+  assert.equal(device.snapshot().strength, 2);
+  controller.setReadingSeeking(true);
+  assert.equal(device.snapshot().strength, 0);
+  controller.setReadingSeeking(false);
+  clock.advance(2000);
+  assert.equal(device.snapshot().strength, 2);
+  controller.pause();
+  clock.advance(4000);
+  assert.equal(device.snapshot().strength, 0);
 });
 
 test("scene profiles follow the current paragraph and a malformed replacement pauses", () => {
