@@ -179,7 +179,9 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const signal = AbortSignal.any([request.signal, timeout]);
   try {
     const response = await analysisFetcher(API_URL, {
-      method: "POST", signal, redirect: "error",
+      // Workers supports manual redirects. Non-2xx responses are rejected below
+      // without forwarding the project credential to a redirect destination.
+      method: "POST", signal, redirect: "manual",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify({
         model: MODEL, instructions: INSTRUCTIONS, input: JSON.stringify({ cues }), text: { format: FORMAT },

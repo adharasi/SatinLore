@@ -96,7 +96,7 @@ test("Nocturne sends only bounded cue data to Luna and returns typed, ordered la
   const [{ url, options }] = f.calls;
   assert.equal(url, "https://api.openai.com/v1/responses");
   assert.deepEqual(options.headers, { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json", "Cache-Control": "no-store" });
-  assert.equal(options.redirect, "error");
+  assert.equal(options.redirect, "manual");
   const provider = JSON.parse(options.body);
   assert.deepEqual(JSON.parse(provider.input), { cues: CUES });
   assert.equal(provider.model, "gpt-6-luna");
@@ -108,6 +108,51 @@ test("Nocturne sends only bounded cue data to Luna and returns typed, ordered la
   assert.equal(f.reservations[0].name, "scene-analysis:v1");
   assert.deepEqual(Object.keys(f.reservations[0].body), ["reader"]);
   assert.match(f.reservations[0].body.reader, /^[a-f0-9]{64}$/);
+});
+
+test("native Workers fetch accepts a Nocturne response and never forwards credentials on redirects", async t => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const source = "deploy/cloudflare/scene-analysis.mjs";
+  const upstreamURL = "https://api.openai.com/v1/responses";
+  const outbound = [];
+  let redirect = false;
+  const mf = new Miniflare({ modulesRoot: root, modules: [
+    { type: "ESModule", path: root + "scene-analysis-runtime-fixture.mjs", contents: `
+      import { handleSceneAnalysis } from "./${source}";
+      export { SceneAnalysisBudget } from "./${source}";
+      export default { fetch(request, env) {
+        const session = { subject: "synthetic-subject", expiresAt: Date.now() + 60_000, isFounder: true };
+        return handleSceneAnalysis(request, env, {
+          config: { origin: "${ORIGIN}", issuer: "https://fixture.cloudflareaccess.com" },
+          session, reverify: () => session,
+        });
+      } };` },
+    { type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8") },
+  ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
+  bindings: { OPENAI_API_KEY: KEY },
+  durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } },
+  async outboundService(request) {
+    outbound.push({ url: request.url, method: request.method, authorization: request.headers.get("Authorization") });
+    if (request.url !== upstreamURL) return Response.json({ error: "unexpected destination" }, { status: 400 });
+    assert.deepEqual(JSON.parse((await request.json()).input), { cues: CUES });
+    return redirect ? Response.redirect("https://redirect.example.test/", 302) : upstream();
+  } });
+  t.after(() => mf.dispose());
+  const analyse = () => mf.dispatchFetch(`${ORIGIN}/api/scene-analysis`, {
+    method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify({ cues: CUES }),
+  });
+  const success = await analyse();
+  assert.equal(success.status, 200);
+  assert.deepEqual(await success.json(), { labels: LABELS });
+
+  redirect = true;
+  const rejected = await analyse();
+  assert.equal(rejected.status, 503);
+  assert.equal(rejected.headers.get("Location"), null);
+  const result = await rejected.json();
+  assert.ok(!JSON.stringify(result).includes(KEY));
+  const expected = { url: upstreamURL, method: "POST", authorization: `Bearer ${KEY}` };
+  assert.deepEqual(outbound, [expected, expected], "The redirect destination receives no request or credential.");
 });
 
 test("Nocturne maps unavailable, rejected, and malformed upstream results without leaking provider data", async () => {
