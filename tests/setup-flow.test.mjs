@@ -250,6 +250,27 @@ test("an accepted test cannot continue while output is active; selection loss in
   assert.equal(app.calls.includes("start"), false);
 });
 
+test("live setup treats unknown output as unconfirmed and requires a fresh stopped check", async () => {
+  const app = harness({onTest: () => ({output: null, outputKnown: false})});
+  app.flow.open({mode: "lovense"});
+  await app.click("setup-primary");
+  await app.selectDevice();
+  await app.click("setup-test");
+  assert.equal(app.nodes.get("setup-live-output").textContent, "Requested output unconfirmed");
+  assert.equal(app.nodes.get("setup-response-checked").disabled, true);
+  assert.equal(app.nodes.get("setup-primary").disabled, true);
+  app.flow.update({output: 0, outputKnown: false});
+  assert.equal(app.nodes.get("setup-live-output").textContent, "Requested output unconfirmed");
+  assert.equal(app.nodes.get("setup-response-checked").disabled, true);
+  app.flow.update({output: 0, outputKnown: true});
+  assert.equal(app.nodes.get("setup-response-checked").disabled, false);
+  assert.equal(app.nodes.get("setup-primary").disabled, true);
+  app.nodes.get("setup-response-checked").checked = true;
+  await app.nodes.get("setup-response-checked").dispatch("change");
+  await app.click("setup-primary");
+  assert.equal(app.flow.snapshot().phase, "practice");
+});
+
 test("late test acknowledgement after Stop cannot enable confirmation or advance setup", async () => {
   let settle;
   const app = harness({onTest: () => new Promise(resolve => { settle = resolve; })});
