@@ -878,6 +878,7 @@ export async function checkReader(page, context, origin) {
   };
   page.on("request", monitor);
   await page.goto(origin);
+  assert.equal(await page.locator("#capValue").textContent(), "10", "A fresh simulator starts with a maximum of 10.");
   await appearanceChecks(page);
   await shortStoryStartChecks(page);
   assert.equal(await page.locator("body").getAttribute("data-reading-width"), "wide");
@@ -929,7 +930,7 @@ export async function checkReader(page, context, origin) {
   assert.equal(await page.locator("#target-output").textContent(), "4 / 20");
   await page.clock.runFor(1100);
   await output(page, 4);
-  assert.equal(await page.locator("#capValue").textContent(), "5");
+  assert.equal(await page.locator("#capValue").textContent(), "10");
   await page.locator("#level-down").click();
   assert.equal(await page.locator("#target-output").textContent(), "3 / 20");
   await output(page, 0); // A lower resulting command stops the old one immediately.

@@ -22,7 +22,9 @@ const META_CONTEXT = /\b(?:definition|dictionary|terminology|review(?:s|ed)?|tit
 const SPECULATION = /\b(?:imagin(?:e|es|ed|ing)|dream(?:ed|t|ing)|remember(?:s|ed|ing)?|recall(?:s|ed|ing)?|pretend(?:s|ed|ing)?|if)\b/u;
 const NON_ACTUAL = /\b(?:hop(?:e|es|ed|ing)|wish(?:es|ed|ing)?|wanted|would|could|might|describ(?:e|es|ed|ing)|mention(?:s|ed|ing)?|discuss(?:es|ed|ing)?|(?:she|he|they|we|i|you) (?:(?:was|were|is|are) )?plan(?:s|ned|ning)?|talked about|read about|(?:wrote|written|writ(?:e|es|ing)) about)\b/u;
 const DETACHED_PAST = /^\s*(?:last (?:summer|winter|spring|autumn|fall|year|month|week)|(?:\d+|a|one|two|many|several) (?:years?|months?|weeks?|days?) ago|back then|earlier that (?:day|evening|night))\b/u;
-const REPORTED_SPEECH = /\b(?:said|whispered|asked|told|read)\s*,?\s*(?:["“]|that\b|about\b)/u;
+const REPORTED_SPEECH = /\b(?:said|says|whisper(?:s|ed)|ask(?:s|ed)|told|tells|read|reads)\s*,?\s*(?:["“]|that\b|about\b)/u;
+const UNREALISED = /\b(?:expect(?:s|ed|ing)?|intend(?:s|ed|ing)?|consider(?:s|ed|ing)?|planned|planning|about to|almost|nearly|seem(?:s|ed)? to)\b/u;
+const LINKED_CLAUSE = new Set(["and", "and then", "then", "as", "while", "after", "before", "followed by"]);
 const CLAUSE_BREAK = /([.!?;\n]+|\b(?:and then|then|followed by|afterwards?|after|before|instead of|rather than|but|yet|whereas|although)\b|(?:,|\b(?:and|as|while)\b)(?=\s+(?:she|he|they|we|i|you|it|the|a|an|his|her|their|my|our|your)\b))/u;
 const EXPLICIT_STOP = /(?:^|[.!?;“"\n]\s*)(?:no|stop)(?:[,.!?;”"\n]|$)|(?:^|[.!?;\n]\s*)(?:he|she|they|we) (?:stopped|refused|(?:pulled|backed) away(?: from (?:her|him|them|each other))?)(?=[.!?;\n]|$)|\b(?:asked|told)\b[^.!?;]{0,36}\bto stop\b|\b(?:said|whispered|shouted)\s*,?\s*["“'](?:no|stop)\b/u;
 const normalized = text => text.toLowerCase().replace(/’/g, "'").trim();
@@ -43,21 +45,31 @@ function gentleContact(clause, cues) {
 function clauseEvidence(value) {
   const contacts = new Set(), context = new Set(), active = [], actual = [];
   const parts = value.split(CLAUSE_BREAK);
-  let uncertain = false, nonPresentMotion = false, speculative = false, detached = false, ordinal = -2;
+  let uncertain = false, nonPresentMotion = false, cloudExcluded = false;
+  let speculative = false, reported = false, detached = false, ordinal = -2;
   for (let index = 0; index < parts.length; index += 2) {
     const clause = parts[index];
     const before = parts[index - 1];
     if (clause.trim()) ordinal += 2;
     detached = DETACHED_PAST.test(clause) || detached && before === ",";
     speculative = SPECULATION.test(clause) || detached ||
-      speculative && ["and", "and then", "then", "as", "while", "after", "before", "followed by"].includes(before) ||
+      speculative && LINKED_CLAUSE.has(before) ||
       before === "before" && UNCERTAIN_CONTEXT.test(parts[index - 2]);
+    reported = REPORTED_SPEECH.test(clause) || reported && (LINKED_CLAUSE.has(before) || before === ",");
     const contactMatches = CONTACT_CUES.filter(cue => cue.test(clause));
     const contextMatches = CONTEXT_CUES.filter(cue => cue.test(clause));
     if (!contextMatches.length && gentleContact(clause, contactMatches)) contextMatches.push(GENTLE_CONTACT);
-    const speculativeOrReported = speculative || META_CONTEXT.test(clause) || NON_ACTUAL.test(clause) || REPORTED_SPEECH.test(clause);
+    // An unrealised cue applies when it introduces the action, rather than
+    // when it describes a later consequence of an action that already happened.
+    const unrealised = UNREALISED.exec(clause);
+    const unrealisedAction = unrealised && [...contactMatches, MOTION_MATCH].map(cue => clause.search(cue))
+      .filter(position => position >= 0).reduce((first, position) => Math.min(first, position), Infinity);
+    const speculativeOrReported = speculative || reported || META_CONTEXT.test(clause) || NON_ACTUAL.test(clause) ||
+      !!unrealised && Number.isFinite(unrealisedAction) && unrealised.index < unrealisedAction;
     if (speculativeOrReported || UNCERTAIN_CONTEXT.test(clause)) {
-      nonPresentMotion ||= speculativeOrReported && hasMotionCue(clause);
+      const motion = hasMotionCue(clause);
+      nonPresentMotion ||= speculativeOrReported && motion;
+      cloudExcluded ||= motion || contactMatches.length > 0 || contextMatches.length > 0;
       if (!speculativeOrReported) {
         const earlier = MOTION_NEGATION.exec(clause.trim())?.[1];
         if (MOTION_ENDED.test(clause.trim())) actual.push({clause, index: ordinal, before});
@@ -72,7 +84,7 @@ function clauseEvidence(value) {
     for (const cue of contactMatches) contacts.add(cue);
     for (const cue of contextMatches) context.add(cue);
   }
-  return {band: active.length ? Math.min(4, contacts.size + context.size - 1) : 0, active, actual, uncertain, nonPresentMotion};
+  return {band: active.length ? Math.min(4, contacts.size + context.size - 1) : 0, active, actual, uncertain, nonPresentMotion, cloudExcluded};
 }
 
 export function scoreParagraph(text) {
@@ -86,8 +98,8 @@ export function scoreParagraph(text) {
 
 const SCENE_SEPARATOR = /^(?:[\s*#~_—–-]{3,}|(?:chapter|part|book|scene)\s+(?:\d+|[ivxlcdm]{1,8}|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[:.\-–—].*)?)$/u;
 const REST_BOUNDARY = /\b(?:fell asleep|went to sleep|(?:settled|lay) down to rest|(?:need(?:ed)?|take|took) (?:a |some )?(?:break|rest)|paus(?:e|ed) (?:for breath|to rest)|a (?:long|quiet) pause|slowed to a stop|quiet (?:interlude|break))\b/u;
-const TIME_BOUNDARY = /\b(?:(?:the )?(?:next|following) (?:day|morning|night)|(?:hours?|days?|weeks?|months?|years?) later|later that (?:evening|night))\b/u;
-const SENSITIVE_CUE = /\b(?:non[ -]consensual|coerc(?:e|ed|es|ing|ion)|forced|unwanted|underage|child(?:ren)?|rape|assault(?:ed)?)\b/u;
+const TIME_BOUNDARY = /\b(?:(?:the )?(?:next|following) (?:day|morning|afternoon|evening|night|week|month|year)|(?:hours?|days?|weeks?|months?|years?) later|later that (?:evening|night))\b/u;
+const SENSITIVE_CUE = /\b(?:non[ -]?consent(?:ual)?|coerc(?:e|ed|es|ing|ion)|forced|unwanted|under[ -]?age|child(?:ren)?|(?:1[0-7]|[1-9])[ -]year[ -]olds?|incest|bestiality|rape|assault(?:ed)?)\b/u;
 const SOFT_PACE = /\b(?:slow(?:ly)?|unhurried|gentl(?:e|y)|gradual(?:ly)?|softly)\b/u;
 const VARIABLE_PACE = /\b(?:quick(?:ly)?|sudden(?:ly)?|urgent(?:ly)?|abrupt(?:ly)?|rapid(?:ly)?)\b/u;
 const MOVEMENT_CUES = [
@@ -105,6 +117,7 @@ const RELEASE = /\b(?:slowed|softened|eased|relaxed|settled)\b/u;
 const PEAK = /\b(?:intensifi(?:ed|es)|crescendo|overwhelming|surge(?:d|s)?|reached (?:a|its|their) peak)\b/u;
 const MOTION_LINK = /\b(?:hands?|fingers?|palms?|hips?|arms?|touch|contact|motion|movement|rhythm|device|flexer|toy)\s+(?:(?:was|were|is|are|kept|continued|started|began|slowly|quickly|gently|steadily|softly)(?: to)?\s+){0,3}$/u;
 const OTHER_MOVER = /\b(?:fan|phone|watch|table|floor|walls?|window|bell|engine|train|car|clock|wheel|key(?:s|board)?|camera|motor|appliance|machine|speaker)\b/u;
+const SOURCE_LINK = /\b(?:from|inside|in)\s+(?:(?:a|an|the|his|her|their|my|our|your|ceiling)\s+){0,2}$/u;
 const DEVICE_NAME = "(?:(?:the|her|his|their|my|our|your)\\s+)?(?:device|flexer|toy)";
 const DEVICE_LINK = new RegExp(`^\\s*${DEVICE_NAME}\\s+(?:(?:was|is|kept|continued|started|began|slowly|quickly|gently|steadily|softly)(?: to)?\\s+){0,3}$`, "u");
 const DEVICE_REFERENT = new RegExp(`^(?:(?:she|he|they|we)\\s+(?:held|lifted|adjusted|picked up|turned on)\\s+${DEVICE_NAME}|${DEVICE_NAME}\\s+(?:lay|sat|rested|was)\\s+(?:still|warm|ready|(?:in|against) (?:her|his|their) (?:hand|palm|lap)|on the cushion))\\s*$`, "u");
@@ -129,9 +142,20 @@ const DIRECT_CONTACT = /^\s*(?:she|he|they|we)\s+(?:kissed|embraced|caressed)(?:
 const MOVEMENT_IDS = MOVEMENT_CUES.map(([movement]) => movement);
 const movementId = word => MOVEMENT_CUES.find(([, cue]) => cue.test(word))[0];
 const orderedMovements = ids => MOVEMENT_IDS.filter(id => ids.has(id));
+const SHAPE_CUES = [
+  ["accented", /^(?:in (?:short|quick|brief|sharp) (?:bursts?|beats?)|in (?:one|two|three) (?:short )?(?:bursts?|beats?)|staccato)\b/u],
+  ["sustained", /^(?:steadily|continuously|in (?:a |one )?(?:long|steady|sustained|unbroken) (?:wave|hum|pulse))\b/u],
+  ["alternating", /^(?:alternat(?:es?|ed|ing) between (?:strong(?:er)? and soft(?:er)?|soft(?:er)? and strong(?:er)?)|in (?:stronger and softer|softer and stronger) (?:beats|pulses|waves))\b/u],
+];
+
+function recordShapes(shapes, before, after) {
+  const manner = after.trimStart().replace(/^(?:her|him|them|each other)\s+/u, "");
+  for (const [shape, cue] of SHAPE_CUES) if (cue.test(manner)) shapes.add(shape);
+  if (/\b(?:steadily|continuously)\s+$/u.test(before)) shapes.add("sustained");
+}
 
 function clauseMovements(clause, inheritsSubject, priorDevice) {
-  const movements = [];
+  const movements = [], shapes = new Set();
   const trimmed = clause.trim();
   const continuous = MOTION_CONTINUES.test(trimmed);
   const unambiguous = !OTHER_MOVER.test(trimmed) && !DEVICE_DISTRACTOR.test(trimmed);
@@ -152,18 +176,21 @@ function clauseMovements(clause, inheritsSubject, priorDevice) {
     if (!linked && !joined && !shared && !referring) continue;
     const deviceAlias = /^(?:puls|buzz)/u.test(match[0]);
     if (OTHER_MOVER.test(before) || !byDevice && deviceAlias) continue;
-    if (MOTION_OBJECT.test(clause.slice(end))) continue;
+    const after = clause.slice(end);
+    const other = continuous ? OTHER_MOVER.exec(after) : null;
+    if (MOTION_OBJECT.test(after) || other && SOURCE_LINK.test(after.slice(0, other.index))) continue;
     movements.push(movementId(match[0]));
+    recordShapes(shapes, before, after);
     continuation ||= referring || deviceAlias || continuous || CONTINUING_ACTION.test(before);
     deviceActor = byDevice;
     previousEnd = end;
   }
-  return {movements, continuation, unresolved, deviceReference: unambiguous && (deviceActor || DEVICE_REFERENT.test(trimmed))};
+  return {movements, continuation, unresolved, shapes, deviceReference: unambiguous && (deviceActor || DEVICE_REFERENT.test(trimmed))};
 }
 
 function sceneMovements(actual, incomingDevice) {
   let previous, lastIndex = -2, deviceReference = incomingDevice, continuation = false, ended = false, unresolved = false;
-  const selected = new Set(), endedMovements = new Set();
+  const selected = new Set(), endedMovements = new Set(), shapes = new Set();
   for (const {clause, index, before} of actual) {
     if (!clause.trim()) continue;
     // An omitted clause (for example speculation) invalidates the antecedent.
@@ -178,7 +205,10 @@ function sceneMovements(actual, incomingDevice) {
     if (stop) {
       const named = [...trimmed.matchAll(MOTION_MATCH)].map(([word]) => movementId(word));
       const stopped = named.length ? named : MOVEMENT_IDS;
-      if (!overlaps && before !== "after" || !named.length) selected.clear();
+      if (!overlaps && before !== "after" || !named.length) {
+        selected.clear();
+        shapes.clear();
+      }
       for (const movement of stopped) {
         selected.delete(movement);
         endedMovements.add(movement);
@@ -200,8 +230,10 @@ function sceneMovements(actual, incomingDevice) {
     if (!movements.length) continue;
     if (!adjacent || !overlaps) {
       selected.clear();
+      shapes.clear();
       continuation = false;
     }
+    for (const shape of motion.shapes) shapes.add(shape);
     for (const movement of movements) {
       selected.add(movement);
       endedMovements.delete(movement);
@@ -210,7 +242,7 @@ function sceneMovements(actual, incomingDevice) {
     continuation ||= motion.continuation;
     previous = {index, before};
   }
-  return {movements: orderedMovements(selected), endedMovements, ended, continuation, deviceReference, unresolved};
+  return {movements: orderedMovements(selected), endedMovements, ended, continuation, deviceReference, unresolved, shapes};
 }
 
 function sceneCandidate(paragraph, incomingDevice) {
@@ -221,20 +253,27 @@ function sceneCandidate(paragraph, incomingDevice) {
   const value = normalized(paragraph.text);
   const narrated = narration(paragraph.text);
   const evidence = clauseEvidence(narrated);
-  const rest = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim()) || REST_BOUNDARY.test(value) || TIME_BOUNDARY.test(value);
+  const rest = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim()) || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
   const stopped = EXPLICIT_STOP.test(value);
   const sensitive = SENSITIVE_CUE.test(value);
   const motion = sceneMovements(evidence.actual, incomingDevice && !/^["'“‘]/u.test(value));
   const {movements: describedMovements, ended} = motion;
-  const quotedMotion = narrated !== value && [...value.matchAll(QUOTED_TEXT)].some(([quote]) => hasMotionCue(quote));
+  const quotes = narrated !== value ? [...value.matchAll(QUOTED_TEXT)].map(([quote]) => quote) : [];
+  const quotedMotion = quotes.some(hasMotionCue);
+  const quotedContact = quotes.some(quote => CONTACT_CUES.some(cue => cue.test(quote)));
   const uncertain = !evidence.active.length && (evidence.uncertain ||
-    !describedMovements.length && (motion.unresolved || evidence.nonPresentMotion || quotedMotion) ||
-    narrated !== value && CONTACT_CUES.some(cue => cue.test(value)));
+    !describedMovements.length && (motion.unresolved || evidence.nonPresentMotion || quotedMotion) || quotedContact);
   const quiet = rest || stopped || uncertain || sensitive || ended;
+  const cloudExcluded = sensitive || uncertain || motion.unresolved || evidence.cloudExcluded || quotedMotion || quotedContact;
   const band = quiet ? 0 : paragraph.band;
   const actual = evidence.actual.map(({clause}) => clause).join(" ");
   const movementHints = quiet ? [] : describedMovements;
   const pace = evidence.active.join(" ");
+  for (const clause of evidence.active) for (const cue of CONTACT_CUES) {
+    const contact = cue.exec(clause);
+    if (contact) recordShapes(motion.shapes, clause.slice(0, contact.index), clause.slice(contact.index + contact[0].length));
+  }
+  const shape = !quiet && !cloudExcluded && motion.shapes.size === 1 ? motion.shapes.values().next().value : "unspecified";
   const short = value.length > 0 && value.length <= 180 && value.split(/\s+/u).length <= 24;
   const advisory = sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
     uncertain ? "The wording is ambiguous or speculative. This suggestion stays at zero." : null;
@@ -257,8 +296,10 @@ function sceneCandidate(paragraph, incomingDevice) {
       ended ? "The described movement stopped; left at zero." :
       sensitive ? "Sensitive wording; left at zero for review." :
         uncertain ? "Context is uncertain or speculative; left at zero." : paragraph.reason,
-      sceneId: null, phase: "quiet", rhythm: "steady", quiet, advisory, movements: band > 0 ? movementHints : [],
+      sceneId: null, phase: "quiet", rhythm: "steady", quiet, advisory, shape: "unspecified", cloudExcluded,
+      movements: band > 0 ? movementHints : [],
       endedMovements: orderedMovements(motion.endedMovements)},
+    shape,
   };
 }
 
@@ -325,6 +366,7 @@ export function groupScenes(paragraphs) {
     result.movements = result.movements.filter(movement => !endedMovements.has(movement));
     if (activeScene === null) activeScene = ++nextScene;
     result.sceneId = activeScene;
+    result.shape = candidate.shape;
   }
   return candidates.map(candidate => candidate.result);
 }

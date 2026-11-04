@@ -5,7 +5,7 @@ import {createSetupFlow, SETUP_STORIES} from "../app/static/reader/setup-flow.mj
 import {setupDOM} from "./helpers/setup-dom.mjs";
 
 const context = overrides => ({model: "flexer", mode: "simulator", connected: true, selectedId: "sim-flexer",
-  channels: ["vibrate", "fingering"], ceiling: 5, output: 0, supportsCombined: true, ...overrides});
+  channels: ["vibrate", "fingering"], ceiling: 10, output: 0, supportsCombined: true, ...overrides});
 
 function viewHarness(options = {}) {
   const dom = setupDOM(), changes = [], events = [], tests = [], applied = [], complete = [], stops = [];
@@ -35,6 +35,7 @@ test("one panel shows every offered movement and defaults supported combinations
   assert.equal(app.node("calibration-movements").children.length, 2);
   for (const channel of ["vibrate", "fingering"]) {
     assert.equal(app.node("calibration-use-" + channel).checked, true);
+    assert.equal(app.node("calibration-maximum-" + channel).value, "10");
     assert.ok(CALIBRATION_FIELDS.every(({key}) => app.node("calibration-" + key + "-" + channel)));
   }
   assert.equal(calibrationFeature("unknown"), null);
@@ -61,6 +62,7 @@ test("a live combination cannot apply until every selected movement has a separa
   const app = viewHarness();
   app.view.open(context({mode: "lovense", verifiedChannels: ["vibrate"]}));
   assert.deepEqual(app.view.snapshot().selectedChannels, ["vibrate", "fingering"]);
+  assert.equal(app.view.snapshot().settings.vibrate.maximum, 5);
   assert.deepEqual(app.view.snapshot().checkedMovements, ["vibrate"]);
   assert.equal(app.node("calibration-apply").disabled, true);
   assert.match(app.node("calibration-apply-note").textContent, /Check each selected movement/);

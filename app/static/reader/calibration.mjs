@@ -1,6 +1,7 @@
 // User-selected control preferences only. No story text, identity, transport token
 // or playback arming is part of this schema. Persistence is a separate explicit action.
 export const CALIBRATION_VERSION = 1;
+export const DEFAULT_SIMULATOR_MAXIMUM = 10;
 export const RHYTHMS = Object.freeze(["steady", "gentle", "dynamic", "scene"]);
 export const DEFAULT_CHANNEL_CALIBRATION = Object.freeze({
   minimum: 0, background: 1, preferred: 3, maximum: 5, recovery: 0, gain: 1, rhythm: "steady",
@@ -9,12 +10,24 @@ const fields = Object.keys(DEFAULT_CHANNEL_CALIBRATION);
 const whole = value => Number.isInteger(value) && value >= 0 && value <= 20;
 const movementIds = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
 const scenePhases = ["quiet", "build", "sustain", "peak", "recover"];
+export const NOCTURNE_LABELS = Object.freeze({
+  build: Object.freeze(["build", "abstain"]),
+  sustain: Object.freeze(["steady", "wave", "abstain"]),
+  peak: Object.freeze(["crest", "accents", "abstain"]),
+  recover: Object.freeze(["taper", "abstain"]),
+});
 const stagePatterns = {
   build: {label: "Slow build", levels: [.65, .85, 1]},
   peak: {label: "Peak accents", levels: [.75, 1, .65, .9, .55]},
   recover: {label: "Gradual taper", levels: [1, .75, .5, .35]},
 };
-export const sceneStagePatternLabel = phase => stagePatterns[phase]?.label;
+const nocturnePatterns = {
+  crest: {label: "Sustained crest", levels: [.75, .9, 1, 1, .55]},
+  wave: {label: "Rolling wave", levels: [.8, 1, .75, .9]},
+  steady: {label: "Steady hold", levels: [1]},
+};
+const scenePattern = (phase, pattern) => nocturnePatterns[pattern] ?? stagePatterns[phase];
+export const sceneStagePatternLabel = (phase, pattern) => scenePattern(phase, pattern)?.label;
 const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
   Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
@@ -28,19 +41,22 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual} = profile;
+    const {phase, sceneId, manual, pattern} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
-        manual !== undefined && typeof manual !== "boolean") throw new RangeError("Use a supported scene stage.");
+        manual !== undefined && typeof manual !== "boolean" ||
+        pattern !== undefined && (profile.quiet || pattern === "abstain" || !NOCTURNE_LABELS[phase]?.includes(pattern))) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
+      ...(pattern === undefined ? {} : {pattern}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
 
-export function scenePatternChanged(previous, next, automaticMovement = false) {
+export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
   return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
-    next.rhythm !== previous?.rhythm || (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
+    next.rhythm !== previous?.rhythm || simulatorStagePatterns && next.pattern !== previous?.pattern ||
+    (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
     automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
 
@@ -76,8 +92,8 @@ export function clampCalibration(value, maximum = 20) {
 
 /** Shared output policy. All callers must still enforce their armed/visible/connection state. */
 export class ReadingFeel {
-  constructor({rhythm = "steady"} = {}) {
-    this.settings = {mode: "story", minimum: 0, background: 1, preferred: 3, maximum:20, recovery: 0, gain: 1, rhythm};
+  constructor({rhythm = "steady", maximum = 20} = {}) {
+    this.settings = {mode: "story", minimum: 0, background: 1, preferred: 3, maximum, recovery: 0, gain: 1, rhythm};
     this.reset();
   }
   snapshot() { return {...this.settings, playbackMode: this.playbackMode, heldLevel: this.heldLevel,returningToStory:this.ramping}; }
@@ -114,7 +130,7 @@ export class ReadingFeel {
     const step = Math.floor(Math.max(0, now - this.startedAt) / 2000);
     const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
-    const stages = simulatorStagePatterns && rhythm === "scene" && !scene?.manual ? stagePatterns[scene?.phase]?.levels : undefined;
+    const stages = simulatorStagePatterns && rhythm === "scene" && !scene?.manual ? scenePattern(scene?.phase, scene?.pattern)?.levels : undefined;
     // A stage plays through once, then holds its last step until a new beat.
     const modulation = stages ? stages[Math.min(preview ? 0 : step, stages.length - 1)] :
       variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;

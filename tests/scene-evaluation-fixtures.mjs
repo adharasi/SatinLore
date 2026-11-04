@@ -219,6 +219,60 @@ export const CONTEXT_MOVEMENT_STORIES = Object.freeze([
   },
 ]);
 
+// Original cases for ambiguity and scene-boundary regression. A nearby
+// grounded movement can continue while a different source is described.
+export const AMBIGUITY_STORIES = Object.freeze([
+  {
+    label: "the station platform",
+    paragraphs: [
+      observation("expected contact", "She expected a tender kiss at the station.", still),
+      observation("interrupted intention", "She was about to share a tender kiss, but the train whistle blew.", still),
+      observation("a quiet interlude", "A fresh breeze moved the curtains.", still),
+      observation("almost applies to the effect", "Their tender kiss nearly made her drop the book.", active()),
+      observation("a named person's intention", "Mara intended to share a tender kiss before dinner.", still),
+      observation("steady actual movement", "They shared a tender kiss and the toy buzzed steadily.", active("vibrate")),
+      observation("next-week time jump", "The following week they met on the platform.", stopped),
+    ],
+  },
+  {
+    label: "the reading room",
+    paragraphs: [
+      observation("quoted time marker", "“Hours later,” she read aloud. They shared a tender kiss.", active()),
+      observation("quoted rest", "“They fell asleep,” he read from the book. They shared an affectionate embrace.", active()),
+      observation("reported coordination", "She said that the toy vibrated and the toy flexed. They shared a tender kiss.", active()),
+      observation("reported overlap", "He whispered that the toy pulsed while the device rotated. They shared a tender kiss.", active()),
+      observation("affirmative movement after unrelated dialogue", "“Wait for the kettle,” she said. They shared a tender kiss. The toy buzzed and flexed.", active("vibrate", "fingering")),
+      observation("grounded stop", "The toy went still.", stopped),
+      observation("new afternoon", "The next afternoon they turned on the kettle.", stopped),
+    ],
+  },
+  {
+    label: "the house with the blue windows",
+    paragraphs: [
+      observation("vibration from a named competing source", "They shared a tender kiss. The vibration continued from her phone.", active()),
+      observation("rotation from a named competing source", "Their affectionate embrace continued. The rotation continued in the ceiling fan.", active()),
+      observation("a toy near a window", "They shared a tender kiss. The toy rotated near the window.", active("rotate")),
+      observation("competing movement during a room detail", "The vibration continued from a phone.", active("rotate")),
+      observation("grounded short bursts", "They shared a tender kiss. The toy vibrated in short bursts.", active("vibrate")),
+      observation("a stop followed by a lamp pulse", "The vibration stopped. The light pulsed.", stopped),
+      observation("intended movement and present contact", "She intended to watch the toy rotate. They shared a tender kiss.", active()),
+      observation("affirmative sequential movement", "They shared a tender kiss. The toy vibrated, then rotated.", active("rotate")),
+    ],
+  },
+  {
+    label: "the apartment above the orchestra",
+    paragraphs: [
+      observation("almost contact", "Mara nearly kissed him tenderly, but the lift arrived.", still),
+      observation("considered contact", "A stranger considered a tender kiss while the orchestra played.", still),
+      observation("a named actor begins motion", "They shared a tender kiss. The toy buzzed near the lamp.", active("vibrate")),
+      observation("a stronger crest with overlapping movements", "Their passionate, tender kiss and romantic embrace expressed affection. The toy vibrated in short bursts while her fingers flexed.", active("vibrate", "fingering")),
+      observation("recovery continues both movements", "They slowed and relaxed.", active("vibrate", "fingering")),
+      observation("following-evening time jump", "The following evening they opened the windows.", stopped),
+      observation("new overlap after the boundary", "They shared a tender kiss. The toy buzzed and oscillated.", active("vibrate", "oscillate")),
+    ],
+  },
+]);
+
 export function evaluateSceneStory(ReaderModel, {label, paragraphs}) {
   const analysed = new ReaderModel().load(paragraphs.map(({text}) => text).join("\n\n"));
   return paragraphs.map(({label: passage, expected}, index) => {

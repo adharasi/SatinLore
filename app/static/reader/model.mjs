@@ -3,7 +3,7 @@ import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v5";
+export const ANALYSIS_VERSION = "scene-rules-v6";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
@@ -14,8 +14,8 @@ function applySceneSuggestions(paragraphs) {
   const scenes = groupScenes(paragraphs.map(paragraph => ({...paragraph, override: null})));
   if (scenes.length !== paragraphs.length || !scenes.every(validScore)) throw new Error("Invalid scene analysis.");
   for (let index = 0; index < scenes.length; index++) {
-    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements} = scenes[index];
-    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements});
+    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape} = scenes[index];
+    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape});
   }
 }
 
@@ -27,6 +27,7 @@ export class ReaderModel {
     this.analysisStatus = "pending";
     this.analysisVersion = ANALYSIS_VERSION;
     this.analysisGeneration = 0;
+    this.nocturneLabels = new Map();
   }
 
   load(text, {deferAnalysis = false, documentId = null} = {}) {
@@ -48,6 +49,7 @@ export class ReaderModel {
     ++this.analysisGeneration;
     this.documentId = id;
     this.paragraphs = paragraphs;
+    this.nocturneLabels.clear();
     this.analysisStatus = deferAnalysis ? "pending" : "ready";
     this.analysisVersion = ANALYSIS_VERSION;
     return this.paragraphs;
@@ -59,6 +61,7 @@ export class ReaderModel {
   }
 
   _zeroSuggestions(reason) {
+    this.nocturneLabels.clear();
     for (const paragraph of this.paragraphs) {
       paragraph.suggestedLevel = 0;
       paragraph.band = 0;
@@ -71,6 +74,8 @@ export class ReaderModel {
       paragraph.advisory = null;
       paragraph.movements = [];
       paragraph.endedMovements = [];
+      paragraph.cloudExcluded = false;
+      paragraph.shape = "unspecified";
     }
   }
 
@@ -132,6 +137,7 @@ export class ReaderModel {
     ++this.analysisGeneration;
     this.documentId = null;
     this.paragraphs = [];
+    this.nocturneLabels.clear();
     this.analysisStatus = "pending";
   }
 
@@ -151,10 +157,13 @@ export class ReaderModel {
 
   resetOverride(index) { this.paragraph(index).override = null; }
 
-  effectiveProfiles() {
+  effectiveProfiles({nocturne = false} = {}) {
     if (!this.analysisReady) return undefined;
-    return this.paragraphs.map(({rhythm, quiet, phase, sceneId, override, movements = [], endedMovements = []}) =>
-      ({rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements]}));
+    return this.paragraphs.map(({rhythm, quiet, phase, sceneId, override, movements = [], endedMovements = []}, index) => {
+      const pattern = nocturne ? this.nocturneLabels.get(index) : undefined;
+      return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
+        ...(pattern === undefined ? {} : {pattern})};
+    });
   }
 
   effectiveLevels() {

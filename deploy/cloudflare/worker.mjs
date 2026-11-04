@@ -6,10 +6,12 @@ import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseRe
 import { handleAccount } from "./accounts.mjs";
 import { handleBetaRecordings } from "./beta-recordings.mjs";
 import { alphaConfigured, handleAlphaApi, verifyAlphaSession } from "./alpha-study.mjs";
+import { handleSceneAnalysis } from "./scene-analysis.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
 export { AlphaStudy } from "./alpha-study.mjs";
+export { SceneAnalysisBudget } from "./scene-analysis.mjs";
 
 const APP_ORIGIN = "https://app.satinlore.com";
 export const BETA_ORIGIN = "https://beta.satinlore.com";
@@ -217,7 +219,7 @@ async function handleAlphaSurface(request, env, url, lovenseFetcher) {
     config: { origin: APP_ORIGIN, audience: "satinlore-alpha-v1" }, reverify: () => verifyAlphaSession(request, env) });
 }
 
-export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher } = {}) {
+export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher, analysisFetcher } = {}) {
   return {
     async fetch(request, env) {
       const head = request.method === "HEAD";
@@ -247,6 +249,10 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       if (["/api/lovense/status", "/api/lovense/session"].includes(url.pathname)) {
         return handleLovense(request, env, { config, session, lovenseFetcher,
           reverify: () => verifyFounder(request, config, keyResolver) });
+      }
+      if (url.pathname === "/api/scene-analysis") {
+        return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher,
+          reverify: () => verifyFounder(request, config, keyResolver) }));
       }
       if (url.pathname === "/api/story-import") {
         if (request.method !== "POST") {

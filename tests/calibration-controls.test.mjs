@@ -160,6 +160,7 @@ test("a combined stage rhythm respects separate movement limits, floors, and a s
 test("a seek within the same simulator peak does not replay its accents", () => {
   const {controller, clock, device} = synchronous();
   controller.connect();
+  controller.setCeilingFromControl(5);
   controller.setStory([5], [{phase: "peak", sceneId: 1, rhythm: "dynamic", quiet: false}]);
   controller.setFeel({rhythm: "scene"});
   controller.start();
@@ -207,6 +208,7 @@ test("asynchronous playback shares scene quiet and pattern selection with the si
 test("section steps move one level through caps and leave corrections and neighboring sections alone", () => {
   const {controller, device, clock} = synchronous();
   controller.connect();
+  controller.setCeilingFromControl(5);
   controller.setStory([9, 2, 0]);
   controller.setManualZeros([2]);
   assert.equal(controller.snapshot().target, 5);

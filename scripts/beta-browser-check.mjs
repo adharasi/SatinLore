@@ -1,6 +1,7 @@
 // CI-only real UI, real Worker authorization and real Durable Object storage.
 // All identities, preferences and content are synthetic. No vendor calls or hardware.
 import assert from "node:assert/strict";
+import {execFileSync} from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -301,3 +302,7 @@ try {
 } finally {
   clearTimeout(watchdog); await browser?.close(); await mf?.dispose();
 }
+
+execFileSync(process.execPath, [fileURLToPath(new URL("./nocturne-browser-check.mjs", import.meta.url))], {
+  stdio: "inherit", timeout: 90_000,
+});

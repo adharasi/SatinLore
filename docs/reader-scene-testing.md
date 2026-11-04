@@ -222,6 +222,28 @@ A second Flexer scroll read-through matched all 10 movement annotations. These c
 
 A whole-device stop, remembered movement and an unrelated display pulse were quiet in that read-through. Both browser checks used simulators.
 
+## Expectations, reported actions and competing movement
+
+The sixth local revision was compared with the deployed fifth revision in commit e0483c3. The original and contextual suites matched all 90 previous annotations in both versions. Four new original stories add 29 paragraph annotations for unrealised actions, quoted boundaries, reported movement, competing sources and time jumps.
+
+| Targeted regression check | Fifth revision | Sixth revision |
+| --- | ---: | ---: |
+| All annotations matched | 103 / 119 | 119 / 119 |
+| New annotations matched | 13 / 29 | 29 / 29 |
+| New missed activations | 2 | 0 |
+| New unexpected activations | 6 | 0 |
+| New wrong movement sets | 5 | 0 |
+| New missed quiet boundaries | 3 | 0 |
+
+The new examples cover a kiss someone expected but never shared, real contact after someone reads a time jump aloud, and a continuing vibration attributed to a phone. The new cases were chosen to exercise these changes. This comparison measures local rules against the fixture annotations. Broader accuracy and live model performance require separate tests.
+
+~~~sh
+git worktree add --detach ../satinlore-scenes-v5 e0483c3
+node scripts/compare-scene-analysis.mjs ../satinlore-scenes-v5
+~~~
+
+The same suite tests the categorical rhythm hints used by Advanced analysis. A current, grounded movement can suggest accents, a sustained shape or alternation. If several different shapes match, the rules leave the shape unspecified. Ambiguous references and relevant sensitive, negated, quoted or speculative cues can exclude a paragraph from the remote analysis step. Explicit sensitive cue matches also stay quiet locally. These are conservative English cue checks with limited coverage, so the result cannot establish whether a passage is suitable.
+
 ## Alpha
 
 1. In [Alpha](https://app.satinlore.com/alpha), choose **Allow data collection** for a test session. Connect the simulator or a supported device and complete the movement checks. The minimum, ease-off and rhythm section should start open and close when clicked.

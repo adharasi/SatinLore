@@ -4,7 +4,7 @@ import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {isDeepStrictEqual} from "node:util";
 import * as current from "../app/static/reader/model.mjs";
-import {CONTEXT_MOVEMENT_STORIES, SCENE_EVALUATION_STORIES, evaluateSceneStory} from "../tests/scene-evaluation-fixtures.mjs";
+import {AMBIGUITY_STORIES, CONTEXT_MOVEMENT_STORIES, SCENE_EVALUATION_STORIES, evaluateSceneStory} from "../tests/scene-evaluation-fixtures.mjs";
 
 const [baselineDirectory] = process.argv.slice(2);
 if (!baselineDirectory || process.argv.length !== 3) {
@@ -32,11 +32,12 @@ function summarize(passages) {
 function report({ReaderModel, ANALYSIS_VERSION}) {
   const original = SCENE_EVALUATION_STORIES.flatMap(story => evaluateSceneStory(ReaderModel, story));
   const contextual = CONTEXT_MOVEMENT_STORIES.flatMap(story => evaluateSceneStory(ReaderModel, story));
-  const passages = [...original, ...contextual];
+  const ambiguity = AMBIGUITY_STORIES.flatMap(story => evaluateSceneStory(ReaderModel, story));
+  const passages = [...original, ...contextual, ...ambiguity];
   return {
     version: ANALYSIS_VERSION,
     ...summarize(passages),
-    suites: {original: summarize(original), contextual: summarize(contextual)},
+    suites: {original: summarize(original), contextual: summarize(contextual), ambiguity: summarize(ambiguity)},
     mismatches: passages.filter(differs),
   };
 }

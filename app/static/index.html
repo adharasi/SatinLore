@@ -82,6 +82,17 @@
     </div>
     <div id="settings-scroll" class="settings-scroll">
       <section id="reader-settings" role="tabpanel" aria-labelledby="settings-reader-tab" tabindex="0">
+        <section class="sidebar-section" aria-labelledby="scene-model-heading">
+          <h3 id="scene-model-heading">Story model</h3>
+          <label class="visually-hidden" for="scene-model">Story model</label>
+          <select id="scene-model" aria-describedby="scene-model-help"><option value="loom">Loom · On-device</option><option value="nocturne">Nocturne · Advanced beta</option></select>
+          <p id="scene-model-help" class="note">Loom follows the story on this device. Nocturne adds rolling waves and sustained crests that follow the scene’s pacing in the simulator.</p>
+          <div id="nocturne-panel" hidden>
+            <p class="note">Running Nocturne sends up to 16 sets of scene labels and section numbers to OpenAI. The story’s words, title and toy settings stay on this device.</p>
+            <button id="nocturne-run" type="button" class="setup-button" disabled>Send cues and analyse</button>
+            <p id="nocturne-status" class="note" role="status"></p>
+          </div>
+        </section>
         <section class="sidebar-section simulator-section" aria-labelledby="simulator-preview-heading">
           <div class="section-title-row"><h3 id="simulator-preview-heading">Toy preview</h3><span id="connection-badge" class="simulation-label">SIMULATED</span></div>
           <div id="simulator-visual"></div>
@@ -155,7 +166,7 @@
             <p class="note">The story can use several movements together when it detects an overlap. It uses only the movements you enabled.</p>
           </div>
           <details><summary>Tune this movement</summary>
-            <label for="feel-maximum">Movement maximum <output id="feel-maximum-value">5</output></label><input id="feel-maximum" type="range" min="0" max="20" step="1" value="5">
+            <label for="feel-maximum">Movement maximum <output id="feel-maximum-value">10</output></label><input id="feel-maximum" type="range" min="0" max="20" step="1" value="10">
             <label for="feel-minimum">Minimum <output id="feel-minimum-value">0</output></label><input id="feel-minimum" type="range" min="0" max="20" step="1" value="0">
             <label for="feel-background">Background <output id="feel-background-value">1</output></label><input id="feel-background" type="range" min="0" max="20" step="1" value="1">
             <label for="feel-preferred">Preferred level <output id="feel-preferred-value">3</output></label><input id="feel-preferred" type="range" min="0" max="20" step="1" value="3">
@@ -175,7 +186,7 @@
       <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong id="device-label">Lush simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line"><span id="output-label">Level</span> <output id="output">0 / 20</output></div><meter id="meter" min="0" max="20" value="0" aria-label="Requested intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
       <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
       <div class="level-step-control"><span id="section-level-label" class="control-caption">Section level</span><div class="level-step-buttons" role="group" aria-labelledby="section-level-label"><button id="level-down" class="icon-button" aria-label="Lower section level by one" disabled>−</button><output id="target-output" aria-live="polite">0 / 20</output><button id="level-up" class="icon-button" aria-label="Raise section level by one" disabled>+</button></div></div>
-      <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
+      <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">10</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="10" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
       <div class="transport-navigation"><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div><button id="sync-here" class="quiet-button" type="button" aria-describedby="position" title="Follow the paragraph at your current view" hidden disabled>Sync here</button></div>
     </div>
   </aside>

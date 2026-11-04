@@ -219,10 +219,10 @@ test("saved high settings do not unlock a range; permissions are per action and 
 test("inline edits affect only the chosen combined action and its own maximum",async()=>{
   const f=fixture();await select(f,"simulator");await f.c.applyChannels(["vibrate","fingering"],{mode:"continuous"});f.c.start();
   f.c.setChannelFeel("fingering",{maximum:2,minimum:1,background:2,recovery:0,rhythm:"dynamic"});
-  assert.equal(f.c.snapshot().running,true);assert.equal(f.c.snapshot().feel.channels.vibrate.maximum,5);
+  assert.equal(f.c.snapshot().running,true);assert.equal(f.c.snapshot().feel.channels.vibrate.maximum,10);
   assert.equal(f.c.snapshot().feel.channels.vibrate.rhythm,"steady");assert.equal(f.c.snapshot().feel.channels.fingering.maximum,2);
   await f.clock.advance(1000);assert.deepEqual(f.c.snapshot().channelOutputs,{vibrate:5,fingering:2});
-  assert.equal(f.c.snapshot().ceiling,5,"A movement maximum is independent of the global ceiling.");
+  assert.equal(f.c.snapshot().ceiling,10,"A movement maximum is independent of the global ceiling.");
   f.c.setPosition(1);await f.clock.advance(1000);assert.deepEqual(f.c.snapshot().channelOutputs,{vibrate:1,fingering:2});f.c.destroy();
 });
 

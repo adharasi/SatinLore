@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {ReaderModel} from "../app/static/reader/model.mjs";
-import {normalizeSceneProfiles} from "../app/static/reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged} from "../app/static/reader/calibration.mjs";
 
 const story = [
   "Their tender romantic kiss expressed affection. The motion flexed.",
@@ -57,4 +57,33 @@ test("a scene profile owns its movement arrays and rejects contradictory or unsu
   for (const endedMovements of [["fingering"], ["heat"], ["vibrate", "vibrate"], "vibrate"]) {
     assert.throws(() => normalizeSceneProfiles([{...profile, endedMovements}], 1), /supported scene movements/);
   }
+});
+
+test("Nocturne picks a local simulator shape without changing levels, movements or live variation", async () => {
+  const model = new ReaderModel();
+  model.load([
+    "They kissed gently.",
+    "Their passionate, tender kiss and romantic embrace expressed affection.",
+  ].join("\n\n"));
+  assert.equal(model.paragraph(1).phase, "peak");
+  const before = model.effectiveLevels();
+  const loom = model.effectiveProfiles()[1];
+  model.nocturneLabels.set(1, "crest");
+  const [profile] = normalizeSceneProfiles([model.effectiveProfiles({nocturne: true})[1]], 1);
+  assert.deepEqual(profile, {...loom, pattern: "crest"});
+  assert.deepEqual(model.effectiveLevels(), before);
+  assert.deepEqual(model.effectiveProfiles()[1], loom);
+  assert.equal(scenePatternChanged(loom, profile, false, true), true);
+  assert.equal(scenePatternChanged(loom, profile), false);
+
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({preferred: 7, maximum: 10});
+  const context = {base: before[1], ceiling: 10, now: 6000};
+  assert.equal(feel.desired({...context, scene: profile, simulatorStagePatterns: true}), 9);
+  assert.equal(feel.desired({...context, scene: loom, simulatorStagePatterns: true}), 8);
+  assert.equal(feel.desired({...context, scene: profile}), feel.desired({...context, scene: loom}));
+  assert.equal(feel.desired({...context, scene: profile, simulatorStagePatterns: true, manualZero: true}), 0);
+  assert.throws(() => normalizeSceneProfiles([{...profile, phase: "sustain"}], 1), /supported scene stage/);
+  await model.analyse({yieldTask: async () => {}});
+  assert.equal(model.effectiveProfiles({nocturne: true})[1].pattern, undefined);
 });
