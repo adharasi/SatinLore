@@ -153,6 +153,34 @@ test("Alpha enables the full range for checked live movements without starting t
   assert.ok(bridge.stops.every(frame => frame.deviceId === "one-flexer"));
 });
 
+test("Alpha Variation renews vibration without interrupting steady flexing", async t => {
+  const bridge = new FakeBridge(), {device, advance, checkMovement} = fixture({bridge});
+  t.after(() => device.destroy());
+  await device.connect("live");
+  await device.select("one-flexer");
+  await checkMovement("vibrate");
+  await checkMovement("fingering");
+  assert.equal(await device.choose(["vibrate", "fingering"]), true);
+  device.set("vibrate", "level", 8);
+  device.set("fingering", "level", 4);
+  assert.equal(await device.start(), true);
+  await advance(2200);
+  const stopCount = bridge.stops.length;
+  device.set("vibrate", "rhythm", "dynamic");
+  await advance(6600);
+  const vectors = bridge.commands.filter(frame => frame.levels);
+  assert.deepEqual(new Set(vectors.map(frame => frame.levels.vibrate)), new Set([8, 4, 2]));
+  assert.ok(vectors.every(frame => frame.levels.fingering === 4 && frame.deviceId === "one-flexer" && frame.durationMs === 2000));
+  assert.equal(device.snapshot().settings.fingering.rhythm, "steady");
+  assert.equal(bridge.stops.length, stopCount);
+  device.set("fingering", "maximum", 0);
+  await settle();
+  assert.equal(bridge.stops.length, stopCount + 1, "A lower safety limit still issues Stop immediately.");
+  device.stop();
+  await settle();
+  assert.equal(device.snapshot().running, false);
+});
+
 test("Alpha stays paused if a range grant fails and retries only the missing grant", async t => {
   const bridge = new FakeBridge(), {device, checkMovement} = fixture({bridge});
   t.after(() => device.destroy());

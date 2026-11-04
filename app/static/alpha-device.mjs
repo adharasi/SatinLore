@@ -154,7 +154,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
   }
 
   controller = new ReaderDeviceController({document, window, navigator, now, setTimer, clearTimer,
-    authorize: () => checkAuthorization(epoch), bridge: trackedBridge, simulator,
+    authorize: () => checkAuthorization(epoch), bridge: trackedBridge, simulator, independentRhythms: true,
     onSetupChange: notify, onInterfaceError: () => { interfaceFailed = true; disconnect(); }});
   // A single fixed input lets the existing guarded controller apply independent
   // levels and its validated rhythm/hold/recovery policies without a story UI.
@@ -278,7 +278,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
     if (activeChannels.includes(channel)) {
       const master = Math.max(...activeChannels.map(id => calibration(id).maximum));
       if (master > controller.snapshot().ceiling) controller.setCeilingFromControl(master);
-      controller.setChannelFeel(channel, effective);
+      controller.setChannelFeel(channel, effective, {rhythmOnly: field === "rhythm"});
       if (master < controller.snapshot().ceiling) controller.setCeilingFromControl(master);
       controller.activity();
     } else {

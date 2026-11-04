@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
 import { chromium } from "playwright";
+import { expect } from "playwright/test";
 import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -466,7 +467,12 @@ try {
   await pairingPage.waitForFunction(() => document.querySelector('[data-channel="vibrate"] .alpha-output output')?.textContent === "20 / 20");
   assert.ok(physicalCommands.some(command => command.action === "Fingering:1,Vibrate:20" &&
     command.toy === fixtureToy && command.timeSec === 2), "The opaque bridge accepts a bounded level-20 command for the checked Flexer.");
+  await expect.poll(() => physicalCommands.filter(command => command.action === "Fingering:1,Vibrate:20")
+    .slice(0, 2).map(command => [command.stopPrevious, command.timeSec, command.toy])).toEqual([
+    [1, 2, fixtureToy], [0, 2, fixtureToy],
+  ]);
   await pairingPage.locator("#alpha-device-stop").click();
+  await expect.poll(() => physicalCommands.at(-1)?.action).toBe("Stop");
   await pairingPage.locator("#alpha-back-to-checks").click();
   await pairingPage.locator("#alpha-device-disconnect").click();
   await connect.waitFor({state: "visible"});

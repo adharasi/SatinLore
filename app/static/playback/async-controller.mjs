@@ -7,11 +7,12 @@ const level = value => {
 };
 
 export class AsyncPlaybackController {
-  constructor({ transport, now = () => performance.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), onChange = () => {}, onEvent = () => {}, getMovement = () => undefined, connectTimeout = 3000, requestTimeout = 1800, inactivityMs = 120000, heartbeatMs = 1000 }) {
+  constructor({ transport, now = () => performance.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), onChange = () => {}, onEvent = () => {}, getMovement = () => undefined, connectTimeout = 3000, requestTimeout = 1800, inactivityMs = 120000, heartbeatMs = 1000, independentRhythms = false }) {
     if (!transport || !["discover", "connect", "command", "stop", "disconnect"].every(key => typeof transport[key] === "function")) throw new TypeError("A targeted asynchronous transport is required.");
     if (![connectTimeout, requestTimeout, inactivityMs].every(value => Number.isFinite(value) && value > 0) || requestTimeout >= ASYNC_COMMAND_MS) throw new RangeError("Use positive timeouts; command acknowledgement must be bounded below two seconds.");
     if (!Number.isFinite(heartbeatMs) || heartbeatMs < 1000 || heartbeatMs > 1500) throw new RangeError("Use a 1000–1500 ms finite renewal cadence.");
     Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, getMovement, connectTimeout, requestTimeout, inactivityMs, heartbeatMs });
+    this.independentRhythms = independentRhythms === true;
     this.state = "DISCONNECTED"; this.connected = false; this.selected = null; this.visible = true; this.authorized = true;
     this.feel = new ReadingFeel(); this.manualZeros = new Set();
     this.levels = []; this.sceneProfiles = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
@@ -44,6 +45,9 @@ export class AsyncPlaybackController {
   }
   desired() {return this.intent().level;}
   vectorReduction(prior,next=this.intent().levels){return !!prior && !!next && Object.keys(prior).some(id=>prior[id]>(next[id]??0));}
+  canReplaceRhythmVector(intent) {
+    return this.independentRhythms && !!intent.levels && intent.level > 0;
+  }
   setFeel(value) {
     try {this.feel.configure(value);} catch(error) {void this.pause("Invalid reading controls.");throw error;}
     return this.changed();
@@ -224,11 +228,12 @@ export class AsyncPlaybackController {
     void this.pause("Story changed. Confirm a new Start.");
     this.levels = checked; this.sceneProfiles = sceneProfiles; this.manualZeros.clear(); this.position = 0; this.strengthTenths = 10; this.levelAdjustment = 0; return this.notify();
   }
-  changed() {
+  changed({rhythmOnly = false} = {}) {
     ++this.revision; this.startIntent = null;
-    const target = this.desired();
-    const excessivePending = [...this.requests.values()].some(value => !value.rawSettled && value.frame.kind === "command" && (value.frame.level > target || this.vectorReduction(value.levels)));
-    if (this.state === "PLAYING" && (excessivePending || this.vectorReduction(this.outputLevels) || (this.output !== null && this.output > target))) void this.reduce();
+    const intent = this.intent(), target = intent.level;
+    if (rhythmOnly && this.canReplaceRhythmVector(intent)) return this.notify();
+    const excessivePending = [...this.requests.values()].some(value => !value.rawSettled && value.frame.kind === "command" && (value.frame.level > target || this.vectorReduction(value.levels, intent.levels)));
+    if (this.state === "PLAYING" && (excessivePending || this.vectorReduction(this.outputLevels, intent.levels) || (this.output !== null && this.output > target))) void this.reduce();
     return this.notify();
   }
   setPosition(index) {
@@ -316,16 +321,23 @@ export class AsyncPlaybackController {
     if (this.state !== "PLAYING") return;
     if (!this.visible || !this.authorized || this.now() - this.lastActivity >= this.inactivityMs || this.now() - this.lastTick >= 2000) { void this.pause("Playback was interrupted or idle. Confirm a new Start."); return; }
     this.lastTick = this.now();
-    const excessivePending=[...this.requests.values()].some(value=>!value.rawSettled && value.frame.kind==="command" && this.vectorReduction(value.levels));
-    if(excessivePending || this.vectorReduction(this.outputLevels) || this.output!==null && this.output>this.desired()){void this.reduce();return;}
+    const desired = this.intent();
+    // Alpha's bounded combined command replaces all movement levels together.
+    // A rhythm dip can therefore retain other active movements without a toy-wide Stop.
+    if (!this.canReplaceRhythmVector(desired)) {
+      const excessivePending = [...this.requests.values()].some(value => !value.rawSettled && value.frame.kind === "command" && this.vectorReduction(value.levels, desired.levels));
+      if (excessivePending || this.vectorReduction(this.outputLevels, desired.levels) || this.output !== null && this.output > desired.level) { void this.reduce(); return; }
+    }
     if (!this.outstanding(this.selected) && !this.stopTasks.has(this.selected) && !this.uncertain.size && this.now() - this.lastDispatch >= this.heartbeatMs && (this.desired() > 0 || this.feel.ramping)) {
       this.feel.advanceFollow?.(this.feel.vector?this.outputLevels:this.output,this.ceiling);
-      const generation = this.generation, deviceId = this.selected, intent=this.intent(),target = intent.level;
+      const generation = this.generation, revision = this.revision, deviceId = this.selected, intent=this.intent(),target = intent.level;
       if(target===0){this.schedule();this.notify();return;}
       this.lastDispatch = this.now(); this.output = null;this.outputLevels=null;
       void this.request("command", deviceId, { level: target, durationMs: ASYNC_COMMAND_MS,...(intent.levels?{levels:intent.levels,ceilings:intent.ceilings}:{}) }).then(() => {
         if (generation !== this.generation || this.state !== "PLAYING") return;
-        if (target > this.desired() || this.vectorReduction(intent.levels)) { void this.reduce(); return; }
+        const current = this.intent();
+        const replacingRhythm = revision === this.revision && this.canReplaceRhythmVector(current);
+        if (!replacingRhythm && (target > current.level || this.vectorReduction(intent.levels, current.levels))) { void this.reduce(); return; }
         this.output = target;this.outputLevels=intent.levels?{...intent.levels}:null; this.notify();
       }, () => { if (generation === this.generation) { this.errorLatch = true; void this.pause("The command failed or timed out. Reconnect explicitly."); } });
     }

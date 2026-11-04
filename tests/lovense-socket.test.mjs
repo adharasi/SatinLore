@@ -4,14 +4,14 @@ import {LovenseSocket,SOCKET_AUTH_URL,socketAddress,remoteCommandAddress} from "
 import {LovenseCheck} from "../app/static/devices/lovense.mjs";
 
 const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
-function fixture({authentication,metadata,socketPath="/fixture/socket"}={}){
+function fixture({authentication,metadata,socketPath="/fixture/socket",preserveFlexerRenewals=false}={}){
   const outgoing=[],requests=[],listeners=new Map();let time=0;
   const socket={connected:false,on(name,callback){if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(callback);},
     emit(name,value){outgoing.push({name,value});},connect(){queueMicrotask(()=>{this.connected=true;incoming("connect");});},
     disconnect(){this.connected=false;},removeAllListeners(){listeners.clear();}};
   const incoming=(name,value)=>{for(const callback of listeners.get(name)||[])callback(value);};
   const fetcher=async(url,options)=>{requests.push({url,options});return url===SOCKET_AUTH_URL?authentication?authentication():Response.json({code:0,data:{socketIoUrl:"https://apps.lovense-api.com",socketIoPath:socketPath}}):metadata?metadata():Response.json({code:200,data:{toys:"{}"}});};
-  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
+  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,preserveFlexerRenewals,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
   const toys=(list,extras={})=>incoming("basicapi_update_device_info_tc",JSON.stringify({online:true,toyList:list,...extras}));
   const raw=(model,id=model)=>({id,toyType:model,connected:true,battery:71});
   return{sdk,socket,incoming,outgoing,requests,toys,raw,advance(ms){time+=ms;}};
@@ -74,6 +74,36 @@ test("extended Function relay sends one finite selected-device vector and target
   for(const command of [{vibrate:6,time:2,toyId:"flexer"},{vibrate:1,time:0,toyId:"flexer"},{vibrate:1,time:2},{vibrate1:2,time:2,toyId:"osci3"},{heat:1,time:2,toyId:"osci3"},{rotate:1,time:2,toyId:"flexer"}])assert.throws(()=>f.sdk.sendToyCommand(command));
   assert.equal(f.sdk.stopToyAction("never-discovered"),false);f.sdk.destroy();
 });
+test("only an unexpired identical Alpha Flexer command renews without stopping its predecessor", async t => {
+  for (const enabled of [true, false]) {
+    const f = fixture({preserveFlexerRenewals: enabled});
+    t.after(() => f.sdk.destroy());
+    await f.sdk.prepared;
+    f.toys([f.raw("flexer"), f.raw("flexer", "second"), f.raw("lush")]);
+    const send = (values = {vibrate: 3, fingering: 4}, toyId = "flexer") => {
+      f.sdk.sendToyCommand({...values, time: 2, toyId});
+      return f.outgoing.at(-1).value;
+    };
+    assert.equal(send().stopPrevious, 1);
+    f.advance(1100);
+    assert.deepEqual(send({fingering: 4, vibrate: 3}), {command: "Function", action: "Fingering:4,Vibrate:3", timeSec: 2, toy: "flexer", stopPrevious: enabled ? 0 : 1, apiVer: 1});
+    f.advance(1100);
+    assert.equal(send({vibrate: 2, fingering: 4}).stopPrevious, 1, "A reduction replaces the old level.");
+    f.advance(1100);
+    assert.equal(send({vibrate: 2, fingering: 4}, "second").stopPrevious, 1, "A different toy never inherits renewal state.");
+    f.sdk.stopToyAction("second");
+    assert.equal(f.outgoing.at(-1).value.action, "Stop");
+    f.advance(1100);
+    assert.equal(send({vibrate: 2, fingering: 4}, "second").stopPrevious, 1);
+    f.advance(2000);
+    assert.equal(send({vibrate: 2, fingering: 4}, "second").stopPrevious, 1, "An expired command is a fresh start.");
+    f.advance(1100);
+    assert.equal(send({vibrate: 2}, "lush").stopPrevious, 1);
+    f.advance(1100);
+    assert.equal(send({vibrate: 2}, "lush").stopPrevious, 1, "Only Flexer uses the Alpha renewal behavior.");
+  }
+});
+
 test("fresh capability metadata restricts commands and stale enrichment cannot revive a lost connection",async()=>{
   let release;
   const f=fixture({metadata:()=>new Promise(resolve=>{release=resolve;})});await f.sdk.prepared;

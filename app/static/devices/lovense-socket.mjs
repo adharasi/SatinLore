@@ -51,13 +51,15 @@ async function boundedJson(response, maximum = 65_536) {
 export class LovenseSocket {
   constructor(options, {fetcher = (...args) => globalThis.fetch(...args), socketFactory = io, now = Date.now,
     setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
-    clearTimer = timer => globalThis.clearTimeout(timer), randomId = () => crypto.randomUUID()} = {}) {
+    clearTimer = timer => globalThis.clearTimeout(timer), randomId = () => crypto.randomUUID(), preserveFlexerRenewals = false} = {}) {
     Object.assign(this,{fetcher,socketFactory,now,setTimer,clearTimer,randomId});
     this.platform = options?.platform;
     this.controlTransport = SOCKET_TRANSPORT;
     this.handlers = new Map(); this.toys = []; this.knownIds = new Set();
     this.destroyed = false; this.socket = null; this.online = false; this.ready = false;
     this.qr = null; this.pendingQr = null; this.metadataEpoch = 0; this.lastCommand = -Infinity;
+    this.preserveFlexerRenewals = preserveFlexerRenewals === true;
+    this.lastFunction = null;
     this.personalRanges = new Map();
     this.prepared = this.prepare(options);
     // A caller may subscribe before awaiting readiness. Errors remain generic.
@@ -189,13 +191,22 @@ export class LovenseSocket {
     const toy=supportedToys(this.toys,{transport:SOCKET_TRANSPORT}).find(toy=>toy.id===command.toyId);
     if(!toy||!keys.length||keys.length>5||keys.some(key=>!Object.hasOwn(ACTIONS,key)||!toy.capabilities.includes(key)||!level(command[key])||command[key]>5&&!this.personalRanges.get(toy.id)?.has(key)))throw Error("The requested movement is unavailable or outside its enabled range.");
     if(keys.every(key=>command[key]===0))return this.stopToyAction(command.toyId);
-    if(this.now()-this.lastCommand<1000)throw Error("Wait for the next device tick.");
-    this.lastCommand=this.now();
-    this.socket.emit("basicapi_send_toy_command_ts",{command:"Function",action:keys.sort().map(key=>`${ACTIONS[key]}:${command[key]}`).join(","),timeSec:2,toy:command.toyId,stopPrevious:1,apiVer:1});
+    const now = this.now();
+    if (now - this.lastCommand < 1000) throw Error("Wait for the next device tick.");
+    const action = keys.sort().map(key => `${ACTIONS[key]}:${command[key]}`).join(",");
+    const previous = this.lastFunction;
+    // A still-active identical Alpha Flexer renewal can keep the same movement
+    // running. Any change replaces the old command, including any higher level.
+    const preserve = this.preserveFlexerRenewals && toy.model === "flexer" && previous?.toyId === toy.id &&
+      previous.action === action && now < previous.expiresAt;
+    this.lastCommand = now;
+    this.socket.emit("basicapi_send_toy_command_ts",{command:"Function",action,timeSec:2,toy:toy.id,stopPrevious:preserve?0:1,apiVer:1});
+    this.lastFunction = {toyId: toy.id, action, expiresAt: now + 2000};
     // Socket relay documents submission, not a physical acknowledgement.
     return {status:"submitted"};
   }
   stopToyAction(id) {
+    this.lastFunction = null;
     if(this.destroyed||!this.socket?.connected||!ID.test(id||"")||!this.knownIds.has(id))return false;
     this.socket.emit("basicapi_send_toy_command_ts",{command:"Function",action:"Stop",timeSec:0,toy:id,stopPrevious:1,apiVer:1});
     return {status:"submitted"};
@@ -205,7 +216,7 @@ export class LovenseSocket {
     if(!this.getAppStatus()||!toy||!Array.isArray(channels)||!channels.length||channels.some(channel=>!toy.capabilities.includes(channel)))throw Error("The selected movement is unavailable.");
     this.personalRanges.set(id,new Set(channels));
   }
-  clearPersonalRange(){this.personalRanges.clear();}
+  clearPersonalRange(){this.personalRanges.clear();this.lastFunction=null;}
   destroy() {
     if(this.destroyed)return;
     this.destroyed=true;this.online=false;this.ready=false;++this.metadataEpoch;
