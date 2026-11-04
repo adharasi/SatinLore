@@ -59,7 +59,9 @@ async function onCommand(event) {
         // Build-free local development retains the documented Basic SDK route.
         if(!document.querySelector('meta[name="satinlore-hosted-access"][content="true"]'))throw Error();
         const {LovenseSocket}=await import("./devices/lovense-socket.mjs");
-        extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken});
+        extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken}, {
+          preserveFlexerRenewals: location.pathname === "/alpha/device-bridge",
+        });
         preparingAdapter = extended;
         await extended.prepared;
       } catch (error) {
