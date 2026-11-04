@@ -40,9 +40,9 @@
         <select id="folder-filter"><option value="all">All stories</option><option value="unfiled">Unfiled</option></select>
         <details class="folder-tools"><summary>Manage shelf</summary><div class="folder-tool-actions"><button id="rename-folder" disabled>Rename</button><button id="delete-folder" disabled>Remove shelf</button></div></details>
         <p id="folder-status" class="note" role="status" aria-live="polite"></p>
-        <div class="library-sort-row"><label for="library-sort">Sort</label><select id="library-sort"><option value="updated">Recently read</option><option value="title">Title A–Z</option><option value="progress">Reading progress</option></select></div>
+        <div class="library-sort-row"><label for="library-sort">Sort</label><select id="library-sort"><option value="updated">Recently read</option><option value="title">Title A–Z</option><option value="progress">Reading progress</option><option value="favorites">Favourites first</option></select></div>
       </div>
-      <p id="library-status" class="note" role="status" aria-live="polite">Your stories will appear here.</p><p id="library-results" class="note" role="status" aria-live="polite"></p>
+      <p id="library-status" class="note" role="status" aria-live="polite">Your stories will appear here.</p><p id="library-results" class="note" role="status" aria-live="polite"></p><p id="story-action-status" class="note" role="status"></p>
       <div id="story-list" class="story-list" aria-label="Stories"></div>
     </div>
     <div class="library-actions" role="group" aria-label="Add to your library">
@@ -131,7 +131,7 @@
       <section id="story-settings" role="tabpanel" aria-labelledby="settings-story-tab" tabindex="0" hidden>
         <h3>Current story</h3>
         <dl class="story-statistics"><div><dt>Words</dt><dd id="story-word-count">—</dd></div><div><dt>Progress</dt><dd id="story-progress">—</dd></div></dl>
-        <div id="story-actions" class="story-actions" hidden><label for="story-folder">Shelf</label><select id="story-folder"><option value="">Unfiled</option></select><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Rename</button><button id="delete-story" class="quiet-control">Delete story</button></div></div>
+        <div id="story-actions" class="story-actions" hidden><label for="story-folder">Shelf</label><select id="story-folder"><option value="">Unfiled</option></select><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Story settings</button><button id="delete-story" class="quiet-control">Delete story</button></div></div>
         <details id="review-settings" class="review-settings">
           <summary>Adjust story sections <span class="optional-tag">Optional</span></summary>
           <div class="review-content"><p class="note">Keep the suggestions, or change a section to suit you.</p>
@@ -203,6 +203,15 @@
     </div>
     <div class="dialog-actions"><button id="app-settings-close" type="button" class="primary">Close</button></div>
   </dialog>
+  <dialog id="practice-story-dialog" class="story-dialog" aria-labelledby="practice-story-heading">
+    <div class="dialog-heading"><h2 id="practice-story-heading">Practice stories</h2><button id="practice-story-close" class="icon-button" aria-label="Close practice stories">×</button></div>
+    <p class="note">Use a simulator to check the controls or compare Loom and Nocturne. Every practice story opens paused for this visit.</p>
+    <label for="practice-story-choice">Choose a practice story</label><select id="practice-story-choice" aria-describedby="practice-story-description"></select>
+    <p id="practice-story-description" class="note"></p>
+    <ul id="practice-story-checkpoints" class="note"></ul>
+    <p id="practice-story-status" class="note" role="status"></p>
+    <div class="dialog-actions"><button id="practice-story-stop" class="stop">Stop</button><button id="practice-story-open" class="primary">Open practice story</button></div>
+  </dialog>
   <dialog id="new-story-dialog" class="story-dialog" aria-labelledby="new-story-heading">
     <div class="dialog-heading"><div><h2 id="new-story-heading">Import a story</h2></div><button id="cancel-import" class="icon-button" aria-label="Close new story">×</button></div>
     <p class="note">Choose a story file, or paste a copy below.</p>
@@ -212,6 +221,16 @@
     <div class="file-divider"><span>or choose a story file</span></div><label for="file" class="visually-hidden">Choose a story file</label><input id="file" type="file" accept=".txt,.html,.htm,text/plain,text/html">
     <p id="import-status" class="note" role="status" aria-live="polite"></p><p class="privacy-note">Open for this visit. Save on this browser whenever you want to keep it.</p>
     <div class="dialog-actions"><button id="import-stop" class="stop">Stop</button><button id="load" class="primary">Open story <span aria-hidden="true">→</span></button></div>
+  </dialog>
+  <dialog id="story-details-dialog" class="story-dialog story-details-dialog" aria-labelledby="story-details-heading">
+    <div class="dialog-heading"><h2 id="story-details-heading">Story settings</h2><button id="story-details-close" type="button" class="icon-button" aria-label="Close story settings">×</button></div>
+    <form id="story-details-form">
+      <label for="story-details-title">Story title</label><input id="story-details-title" type="text" maxlength="120" required autocomplete="off">
+      <label for="story-details-description">Description <span class="optional-tag">Optional</span></label><textarea id="story-details-description" rows="5" maxlength="1000"></textarea>
+      <label for="story-details-shelf">Shelf</label><select id="story-details-shelf"><option value="">Unfiled</option></select>
+      <p id="story-details-status" class="note" role="status"></p>
+      <div class="dialog-actions"><button id="story-details-stop" type="button" class="stop">Stop</button><button id="story-details-cancel" type="button">Cancel</button><button id="story-details-save" type="submit" class="primary">Save settings</button></div>
+    </form>
   </dialog>
   <dialog id="start-dialog" class="confirmation-dialog" aria-labelledby="start-heading"><h2 id="start-heading">Ready to start?</h2><p id="start-summary">Simulator · maximum 5/20 · current level 0/20</p><p class="note">You can adjust the controls or stop at any time.</p><div class="dialog-actions"><button id="start-stop" class="stop">Stop</button><button id="cancel-start">Keep reading</button><button id="confirm-start" class="primary">Start with maximum 5/20</button></div></dialog>
   <dialog id="ceiling-dialog" class="confirmation-dialog" aria-labelledby="ceiling-heading"><h2 id="ceiling-heading">Raise the maximum?</h2><p id="ceiling-summary">Confirm the new maximum before it can take effect.</p><div class="dialog-actions"><button id="ceiling-stop" class="stop">Stop</button><button id="cancel-ceiling">Keep current maximum</button><button id="confirm-ceiling" class="primary">Confirm maximum</button></div></dialog>

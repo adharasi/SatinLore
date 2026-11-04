@@ -4,14 +4,17 @@ import {validateStoryRecord, MAX_SAVED_STORIES, MAX_LIBRARY_BYTES} from "./stora
 export const BACKUP_FORMAT = "satinlore-story-backup";
 const encoder = new TextEncoder();
 const recordKeys = ["title", "text", "corrections", "position", "analysisVersion"];
+const portableKeys = [...recordKeys, "description", "favorite"];
 const fail = () => new Error("This backup could not be opened. Use a SatinLore JSON backup with up to 20 stories and 2 MB total. Your existing stories are unchanged.");
 const bounded = raw => typeof raw === "string" && raw.length <= MAX_LIBRARY_BYTES && encoder.encode(raw).length <= MAX_LIBRARY_BYTES;
 const plainObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 function portableRecord(value, id = "backup-validation") {
   const safe = validateStoryRecord({...value, id}, {stored: false});
-  return {title: safe.title, text: safe.text, corrections: [...safe.corrections], position: safe.position, analysisVersion: safe.analysisVersion};
+  return {title: safe.title, text: safe.text, corrections: safe.corrections, position: safe.position, analysisVersion: safe.analysisVersion,
+    ...(safe.description ? {description: safe.description} : {}),
+    ...(safe.favorite ? {favorite: true} : {})};
 }
-/** Export only story text, title, manual corrections and place. Never export retained IDs or playback/session secrets. */
+/** Export story text, title, optional description and favorite, manual corrections and place. Never export retained IDs or playback/session secrets. */
 export function serializeBackup(stories) {
   try {
     if (!Array.isArray(stories) || stories.length < 1 || stories.length > MAX_SAVED_STORIES) throw fail();
@@ -30,8 +33,8 @@ export function parseBackup(raw, {existingIds = [], createId = createStoryId} = 
         Object.keys(envelope).some(key => !["format", "schemaVersion", "stories"].includes(key)) ||
         !Array.isArray(envelope.stories) || envelope.stories.length < 1 || envelope.stories.length > MAX_SAVED_STORIES) throw fail();
     const records = envelope.stories.map(value => {
-      if (!plainObject(value) || Object.keys(value).length !== recordKeys.length ||
-          Object.keys(value).some(key => !recordKeys.includes(key))) throw fail();
+      if (!plainObject(value) || recordKeys.some(key => !Object.hasOwn(value, key)) ||
+          Object.keys(value).some(key => !portableKeys.includes(key))) throw fail();
       return portableRecord(value);
     });
     const used = new Set(existingIds);

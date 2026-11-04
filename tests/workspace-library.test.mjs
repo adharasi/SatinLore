@@ -73,6 +73,66 @@ test("actual export controls initiate current/all backups and restore fresh paus
   assert.deepEqual(app.errors, []);
 });
 
+test("the selected story card edits details, favourites, downloads, duplicates and deletes locally", async t => {
+  const app = await ready(t);
+  await app.add();
+  const originalId = app.read("activeId");
+  const action = name => descendants(app.nodes.get("story-list")).find(node => node.dataset?.storyAction === name);
+  await app.read('changeFolder("create", "Fixture shelf")');
+  const shelf = app.read("folders[0].id");
+  await change(app, "folder-filter", "all");
+  await action("edit").click();
+  assert.equal(app.nodes.get("story-details-dialog").open, true);
+  app.nodes.get("story-details-title").value = "A card with details";
+  app.nodes.get("story-details-description").value = "A neutral summary.";
+  app.nodes.get("story-details-shelf").value = shelf;
+  await app.nodes.get("story-details-form").dispatch("submit");
+  assert.equal(app.nodes.get("story-details-dialog").open, false);
+  assert.equal(app.read("currentStory().description"), "A neutral summary.");
+  assert.equal(app.read("currentStory().folderId"), shelf);
+  await action("favorite").click();
+  assert.equal(action("favorite").getAttribute("aria-pressed"), "true");
+  assert.equal(app.document.activeElement, action("favorite"));
+  assert.doesNotMatch([...app.libraryValues.values()].join(""), /A neutral summary|A card with details/);
+  await app.click("save-story"); await app.click("confirm-save"); await app.settle();
+  assert.equal(app.read("store._read().stories[0].favorite"), true);
+  assert.equal(app.read("store._read().stories[0].description"), "A neutral summary.");
+  app.nodes.get("level").value = "0"; await app.nodes.get("level").dispatch("input");
+  await action("download").click();
+  assert.equal(app.downloads[0].records[0].title, "A card with details");
+  assert.match(app.nodes.get("story-action-status").textContent, /download started/);
+  await action("duplicate").click(); await app.settle();
+  const copyId = app.read("activeId");
+  assert.notEqual(copyId, originalId);
+  assert.equal(app.read("currentStory().title"), "A card with details (copy)");
+  assert.equal(app.read("currentStory().description"), "A neutral summary.");
+  assert.equal(app.read("currentStory().folderId"), shelf);
+  assert.equal(app.read("currentStory().model.paragraphs[0].override"), 0);
+  assert.equal(app.read("currentStory().favorite"), false);
+  assert.equal(app.read("currentStory().saved"), false);
+  assert.equal(app.read("latest.running"), false);
+  await change(app, "library-sort", "favorites");
+  assert.deepEqual(listedIds(app), [originalId, copyId]);
+  await action("delete").click(); await app.settle();
+  assert.deepEqual(listedIds(app), [originalId]);
+  assert.equal(app.read("currentStory().id"), originalId);
+  assert.equal(app.read("store._read().stories.length"), 1);
+  assert.deepEqual(app.errors, []);
+});
+
+test("first story opens the responsive reading controls once", async t => {
+  const app = await ready(t);
+  await app.resize(true);
+  assert.equal(app.nodes.get("settings-panel").hidden, true);
+  await app.add();
+  assert.equal(app.nodes.get("settings-panel").hidden, false);
+  assert.equal(app.nodes.get("library-panel").hidden, true);
+  await app.click("close-settings");
+  await app.add("Another quiet paragraph.");
+  assert.equal(app.nodes.get("settings-panel").hidden, true);
+  assert.equal(app.read("latest.running"), false);
+});
+
 test("five visible story tabs keep insertion order when selected and arrow focus does not switch stories", async t => {
   const app = await ready(t);
   for (let index = 0; index < 5; index++) await app.add(`An ordinary section ${index + 1}.`);

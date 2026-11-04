@@ -22,8 +22,8 @@ const META_CONTEXT = /\b(?:definition|dictionary|terminology|review(?:s|ed)?|tit
 const SPECULATION = /\b(?:imagin(?:e|es|ed|ing)|dream(?:ed|t|ing)|remember(?:s|ed|ing)?|recall(?:s|ed|ing)?|pretend(?:s|ed|ing)?|if)\b/u;
 const NON_ACTUAL = /\b(?:hop(?:e|es|ed|ing)|wish(?:es|ed|ing)?|wanted|would|could|might|describ(?:e|es|ed|ing)|mention(?:s|ed|ing)?|discuss(?:es|ed|ing)?|(?:she|he|they|we|i|you) (?:(?:was|were|is|are) )?plan(?:s|ned|ning)?|talked about|read about|(?:wrote|written|writ(?:e|es|ing)) about)\b/u;
 const DETACHED_PAST = /^\s*(?:last (?:summer|winter|spring|autumn|fall|year|month|week)|(?:\d+|a|one|two|many|several) (?:years?|months?|weeks?|days?) ago|back then|earlier that (?:day|evening|night))\b/u;
-const REPORTED_SPEECH = /\b(?:said|says|whisper(?:s|ed)|ask(?:s|ed)|told|tells|read|reads)\s*,?\s*(?:["“]|that\b|about\b)/u;
-const UNREALISED = /\b(?:expect(?:s|ed|ing)?|intend(?:s|ed|ing)?|consider(?:s|ed|ing)?|planned|planning|about to|almost|nearly|seem(?:s|ed)? to)\b/u;
+const REPORTED_SPEECH = /\b(?:(?:said|says|whisper(?:s|ed)|ask(?:s|ed)|told|tells|read|reads)\s*,?\s*(?:["“]|that\b|about\b)|(?:told|tells|ask(?:s|ed))\s+(?:me|you|him|her|us|them)\s+(?:that|about)\b)/u;
+const UNREALISED = /\b(?:expect(?:s|ed|ing)?|intend(?:s|ed|ing)?|consider(?:s|ed|ing)?|planned|planning|(?:was|were) going to|about to|almost|nearly|seem(?:s|ed)? to)\b/u;
 const LINKED_CLAUSE = new Set(["and", "and then", "then", "as", "while", "after", "before", "followed by"]);
 const CLAUSE_BREAK = /([.!?;\n]+|\b(?:and then|then|followed by|afterwards?|after|before|instead of|rather than|but|yet|whereas|although)\b|(?:,|\b(?:and|as|while)\b)(?=\s+(?:she|he|they|we|i|you|it|the|a|an|his|her|their|my|our|your)\b))/u;
 const EXPLICIT_STOP = /(?:^|[.!?;“"\n]\s*)(?:no|stop)(?:[,.!?;”"\n]|$)|(?:^|[.!?;\n]\s*)(?:he|she|they|we) (?:stopped|refused|(?:pulled|backed) away(?: from (?:her|him|them|each other))?)(?=[.!?;\n]|$)|\b(?:asked|told)\b[^.!?;]{0,36}\bto stop\b|\b(?:said|whispered|shouted)\s*,?\s*["“'](?:no|stop)\b/u;

@@ -8,7 +8,8 @@ import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
 
 const ORIGIN = "https://app.satinlore.com";
 const BETA = "https://beta.satinlore.com";
-const CONFIG = { PUBLIC_APP_ORIGIN: ORIGIN, PRIVATE_APP_ENABLED: "true", ACCESS_TEAM_DOMAIN: "fixture.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64), FOUNDER_EMAIL: "founder@example.test" };
+const TESTER_EMAIL = "reader@example.test";
+const CONFIG = { PUBLIC_APP_ORIGIN: ORIGIN, PRIVATE_APP_ENABLED: "true", ACCESS_TEAM_DOMAIN: "fixture.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64), FOUNDER_EMAIL: "founder@example.test", BETA_TESTER_EMAILS: TESTER_EMAIL };
 const KEY = "sk-proj-synthetic_credential_for_tests";
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
@@ -17,9 +18,9 @@ const CUES = [
 const LABELS = [{ id: 2, label: "accents" }, { id: 9, label: "steady" }];
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const localKeys = createLocalJWKSet({ keys: [{ ...await exportJWK(publicKey), kid: "fixture", alg: "RS256" }] });
-async function token() {
+async function token(email = CONFIG.FOUNDER_EMAIL) {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ iss: `https://${CONFIG.ACCESS_TEAM_DOMAIN}`, aud: CONFIG.ACCESS_AUD, sub: "synthetic-subject", email: CONFIG.FOUNDER_EMAIL,
+  return new SignJWT({ iss: `https://${CONFIG.ACCESS_TEAM_DOMAIN}`, aud: CONFIG.ACCESS_AUD, sub: "synthetic-subject", email,
     type: "app", iat: now, exp: now + 3600 }).setProtectedHeader({ alg: "RS256", kid: "fixture" }).sign(privateKey);
 }
 function request(jwt, { host = ORIGIN, origin = host, path = "/api/scene-analysis", body = { cues: CUES }, headers = {}, method = "POST" } = {}) {
@@ -110,7 +111,7 @@ test("Nocturne sends only bounded cue data to Luna and returns typed, ordered la
 });
 
 test("Nocturne maps unavailable, rejected, and malformed upstream results without leaking provider data", async () => {
-  const jwt = await token();
+  const jwt = await token(TESTER_EMAIL);
   for (const [provider, status, code] of [
     [() => Response.json({ error: KEY }, { status: 401 }), 503, "provider_unavailable"],
     [() => Response.json({ error: KEY }, { status: 429 }), 503, "provider_unavailable"],
@@ -134,6 +135,44 @@ test("Nocturne maps unavailable, rejected, and malformed upstream results withou
     assert.ok(!JSON.stringify(result).includes(KEY));
     assert.equal(f.calls.length, 1, "No failure is retried automatically.");
   }
+});
+
+test("Nocturne gives only the founder fixed diagnostics for upstream and budget failures", async () => {
+  const founder = await token(), tester = await token(TESTER_EMAIL);
+  const error = (status, code, param) => Response.json({ error: { code, param, message: KEY }, request_id: KEY }, { status });
+  for (const [provider, status, founderCode, testerCode = "provider_unavailable"] of [
+    [() => error(400, KEY, KEY), 503, "provider_request_rejected"],
+    [() => error(400, "unsupported_parameter", "prompt_cache_options.mode"), 503, "provider_cache_option"],
+    [() => error(401, KEY), 503, "provider_key_rejected"],
+    [() => error(403, KEY), 503, "provider_model_access"],
+    [() => error(404, KEY), 503, "provider_model_access"],
+    [() => error(429, "insufficient_quota"), 503, "provider_billing_limit"],
+    [() => error(429, KEY), 503, "provider_rate_limit"],
+    [() => { throw new DOMException(KEY, "TimeoutError"); }, 503, "provider_timeout"],
+    [() => { throw new Error(KEY); }, 503, "provider_connection"],
+    [() => error(500, KEY), 503, "provider_service_error"],
+    [() => new Response(KEY), 502, "provider_response_invalid", "invalid_result"],
+    [() => upstream([{ id: 2, label: KEY }, LABELS[1]]), 502, "provider_response_invalid", "invalid_result"],
+  ]) {
+    const f = fixture({ provider });
+    for (const [jwt, code] of [[founder, founderCode], [tester, testerCode]]) {
+      const response = await f.worker.fetch(request(jwt), f.env);
+      assert.equal(response.status, status);
+      const result = await response.json();
+      assert.equal(result.code, code);
+      assert.deepEqual(Object.keys(result).sort(), ["code", "error"]);
+      assert.ok(!JSON.stringify(result).includes(KEY));
+    }
+    assert.equal(f.calls.length, 2);
+  }
+
+  const f = fixture({ quotaStatus: 503 });
+  for (const [jwt, code] of [[founder, "budget_unavailable"], [tester, "provider_unavailable"]]) {
+    const response = await f.worker.fetch(request(jwt), f.env);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, code);
+  }
+  assert.deepEqual(f.calls, []);
 });
 
 test("Nocturne fails closed on quota errors and rechecks the Access session after OpenAI", async () => {

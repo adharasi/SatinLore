@@ -89,26 +89,46 @@ function normalizeCues(value) {
 function failure(code, status, error, headers) {
   return Response.json({ error, code }, { status, headers });
 }
-const providerUnavailable = () => failure("provider_unavailable", 503, "Nocturne is temporarily unavailable. The local analysis is still available.");
-const invalidResult = () => failure("invalid_result", 502, "Nocturne did not return usable labels. The local analysis is still available.");
+const providerUnavailable = (session, diagnostic) => failure(session?.isFounder && diagnostic ? diagnostic : "provider_unavailable", 503,
+  "Nocturne is temporarily unavailable. The local analysis is still available.");
+const invalidResult = session => failure(session.isFounder ? "provider_response_invalid" : "invalid_result", 502,
+  "Nocturne did not return usable labels. The local analysis is still available.");
 const declined = () => failure("refused", 422, "Nocturne declined this analysis. The local analysis is still available.");
 
-function checkedLabels(response, cues) {
+async function rejectedProviderResponse(response, session, signal) {
+  const { status } = response;
+  // Only known codes/fields can become a fixed diagnostic. Never relay the body.
+  const body = session.isFounder && [400, 429].includes(status)
+    ? await readBoundedJson(response, 4096, signal).catch(() => null) : null;
+  await response.body?.cancel().catch(() => {});
+  const { code, param } = body?.error ?? {};
+  if (status === 401) return providerUnavailable(session, "provider_key_rejected");
+  if (status === 403 || status === 404 || code === "model_not_found") return providerUnavailable(session, "provider_model_access");
+  if (status === 429) return providerUnavailable(session, ["insufficient_quota", "billing_hard_limit_reached"].includes(code)
+    ? "provider_billing_limit" : "provider_rate_limit");
+  if (status === 400 || status === 422) return providerUnavailable(session,
+    param === "prompt_cache_options" || param === "prompt_cache_options.mode" ? "provider_cache_option" : "provider_request_rejected");
+  if (status === 408 || status === 504) return providerUnavailable(session, "provider_timeout");
+  return providerUnavailable(session, "provider_service_error");
+}
+
+function checkedLabels(response, cues, session) {
+  const invalid = () => ({ error: invalidResult(session) });
   if (response?.incomplete_details?.reason === "content_filter") return { error: declined() };
-  if (!Array.isArray(response?.output)) return { error: invalidResult() };
+  if (!Array.isArray(response?.output)) return invalid();
   const parts = response.output.filter(item => item?.type === "message" && item.role === "assistant")
     .flatMap(item => Array.isArray(item.content) ? item.content : []);
   if (parts.some(part => part?.type === "refusal")) return { error: declined() };
   if (response.status !== "completed" || parts.length !== 1 || parts[0]?.type !== "output_text" || typeof parts[0].text !== "string") {
-    return { error: invalidResult() };
+    return invalid();
   }
   let result;
-  try { result = JSON.parse(parts[0].text); } catch { return { error: invalidResult() }; }
-  if (!exactObject(result, ["labels"]) || !Array.isArray(result.labels) || result.labels.length !== cues.length) return { error: invalidResult() };
+  try { result = JSON.parse(parts[0].text); } catch { return invalid(); }
+  if (!exactObject(result, ["labels"]) || !Array.isArray(result.labels) || result.labels.length !== cues.length) return invalid();
   const candidates = new Map(cues.map(cue => [cue.id, PHASE_LABELS[cue.phase]]));
   const labels = new Map();
   for (const item of result.labels) {
-    if (!exactObject(item, ["id", "label"]) || !candidates.get(item.id)?.includes(item.label) || labels.has(item.id)) return { error: invalidResult() };
+    if (!exactObject(item, ["id", "label"]) || !candidates.get(item.id)?.includes(item.label) || labels.has(item.id)) return invalid();
     labels.set(item.id, item.label);
   }
   return { labels: cues.map(({ id }) => ({ id, label: labels.get(id) })) };
@@ -145,16 +165,19 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   }
   if (!cues) return failure("invalid_request", 400, "Send only the supported scene cues.");
   if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
+  let permission;
+  try { permission = await reserveBudget(budget, config, session); }
+  catch { return providerUnavailable(session, "budget_unavailable"); }
+  if (permission.status === 429) {
+    const retry = permission.headers.get("Retry-After");
+    return failure("rate_limited", 429, "Nocturne has reached the beta usage limit. The local analysis is still available.",
+      { "Retry-After": retry && /^\d{1,7}$/.test(retry) ? retry : "60" });
+  }
+  if (permission.status !== 204) return providerUnavailable(session, "budget_unavailable");
+  if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
+  const timeout = AbortSignal.timeout(9000);
+  const signal = AbortSignal.any([request.signal, timeout]);
   try {
-    const permission = await reserveBudget(budget, config, session);
-    if (permission.status === 429) {
-      const retry = permission.headers.get("Retry-After");
-      return failure("rate_limited", 429, "Nocturne has reached the beta usage limit. The local analysis is still available.",
-        { "Retry-After": retry && /^\d{1,7}$/.test(retry) ? retry : "60" });
-    }
-    if (permission.status !== 204) return providerUnavailable();
-    if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
-    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(9000)]);
     const response = await analysisFetcher(API_URL, {
       method: "POST", signal, redirect: "error",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
@@ -163,22 +186,19 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
         store: false, prompt_cache_options: { mode: "explicit" }, reasoning: { effort: "none" }, max_output_tokens: 600,
       }),
     });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return providerUnavailable();
-    }
+    if (!response.ok) return await rejectedProviderResponse(response, session, signal);
     let parsed;
     try { parsed = await readBoundedJson(response, 24_576, signal); }
-    catch { return signal.aborted ? providerUnavailable() : invalidResult(); }
+    catch { return signal.aborted ? providerUnavailable(session, timeout.aborted ? "provider_timeout" : undefined) : invalidResult(session); }
     const renewed = await reverify();
     if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt || request.signal.aborted) {
       return failure("invalid_session", 403, "Your app session has ended.");
     }
-    const result = checkedLabels(parsed, cues);
+    const result = checkedLabels(parsed, cues, session);
     return result.error ?? Response.json({ labels: result.labels });
-  } catch {
+  } catch (error) {
     // Provider errors, internal responses and secrets never enter UI or logs.
-    return providerUnavailable();
+    return providerUnavailable(session, timeout.aborted || error?.name === "TimeoutError" ? "provider_timeout" : "provider_connection");
   }
 }
 

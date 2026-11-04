@@ -6,9 +6,22 @@ Open [SatinLore](https://app.satinlore.com/) and sign in to the private reader. 
 
 ## Reader layout and connection
 
-1. On desktop, create or open a story. The right sidebar should open with the first story. Switch between **Settings** and **Advanced**, and close the sidebar when you want more reading room. On a narrow screen, open it from the drawer control.
+1. Create or open the first story. Reading controls should open on the right, or as a drawer on a narrow screen. Switch between **Settings** and **Advanced**. Close and reopen the panel from the reader toolbar when you want more reading room.
 2. Add enough library entries to scroll the list. **New Story**, **New Shelf** and **Import File** should remain reachable at the bottom of the library. Open and close both sidebars and check that the playback bar follows the reading column.
 3. Choose the Flexer simulator and pick its device. On the calibration screen, check that both movements start selected, try their sliders and apply the settings. Uncheck a movement to test a one-movement setup. If testing hardware, begin with the gentle check and confirm the movement and that it stopped before continuing. Keep the separate physical qualification steps in [the hardware test record](hardware-test-record.md).
+
+## Compare the practice stories
+
+Open **Reading controls → Settings → Try a practice story**. Pick one of the three control rehearsals with authored levels, or select an original story under **Compare story models**. The picker lists the sections to check. Each opens as a new, paused copy for this visit. Choose **Save on this browser** if you want to keep a copy.
+
+| Story | Sections to check |
+| --- | --- |
+| After the screening | 1 stays quiet, 2 builds, 3 sustains, 4 peaks, 5 recovers, and 6–7 stay quiet. Section 4 has a sustained cue that Nocturne can map to a crest. |
+| The rooftop greenhouse | 2 sustains with an alternating cue and 3 peaks with accents. A rolling wave on 2 is the Nocturne comparison. |
+| The workshop after hours | 1 vibrates, 2 adds flexing, 3–4 keep flexing after vibration stops, and 5 stops both. Use the Flexer simulator with both movements enabled and **Let the story switch movements** selected. |
+| The radio studio | 1–2 and 4 stay quiet when an event is quoted, almost happens, or is reported. The current action in 3 and 5–6 has a positive suggestion. 7 stays quiet after a time jump. |
+
+For a model comparison, use the simulator and **Follow scene rhythm**. Keep the same movement settings and maximum between runs. In **Settings → Story model**, start with Loom. Select Nocturne and choose **Send cues and analyse** when it is available. Use **Advanced → Adjust story sections** to review the stage or rhythm, then start playback explicitly and compare the simulator trace at the same section. Hold a section for several seconds to observe its shape. Watch the limits and Stop as well as the meter. The catalog regression covers all 24 annotated sections in the four model-practice stories and checks which cues are eligible for Nocturne. [Enable Nocturne on the hosted reader](../deploy/cloudflare/README.md#enable-nocturne-for-the-private-beta)
 
 ## Scene patterns and controls
 

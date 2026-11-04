@@ -63,6 +63,8 @@ test("backup parsing rejects malformed/future schemas, extra state and invalid r
     JSON.stringify({...base, stories: [{...base.stories[0], corrections: [null]}]}),
     JSON.stringify({...base, stories: [{...base.stories[0], position: 99}]}),
     JSON.stringify({...base, stories: [{...base.stories[0], title: "x".repeat(121)}]}),
+    JSON.stringify({...base, stories: [{...base.stories[0], description: []}]}),
+    JSON.stringify({...base, stories: [{...base.stories[0], favorite: 1}]}),
     JSON.stringify({...base, stories: [{...base.stories[0], text: ""}]}),
     JSON.stringify({...base, stories: Array.from({length: 21}, () => base.stories[0])}),
   ];
@@ -72,6 +74,14 @@ test("backup parsing rejects malformed/future schemas, extra state and invalid r
     return /existing stories are unchanged/.test(error.message);
   });
   assert.equal(generated, 0);
+});
+
+test("portable backups keep optional story details but omit local shelf and playback data", () => {
+  const source = record({description: "A private <note>", favorite: true, folderId: "folder-local", playing: true});
+  const raw = serializeBackup([source]);
+  assert.doesNotMatch(raw, /folder-local|original-local-id|playing/);
+  const restored = parseBackup(raw, {createId: makeIds()})[0];
+  assert.deepEqual(restored, record({id: "restored-copy-1", description: source.description, favorite: true}));
 });
 
 test("portable backup bounds apply to UTF-8 bytes, paragraph count, story count and combined library size", () => {

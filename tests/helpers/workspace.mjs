@@ -13,10 +13,10 @@ import {HostedAccessGuard} from "../../app/static/access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "../../app/static/reader/library-view.mjs";
 import {BackupImporter, serializeBackup} from "../../app/static/reader/backup.mjs";
 import {ReaderPreferences} from "../../app/static/reader/preferences.mjs";
-import {StoryStore} from "../../app/static/reader/storage.mjs";
+import {StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "../../app/static/reader/storage.mjs";
 import {FolderStore, selectFolderStories} from "../../app/static/reader/folders.mjs";
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "../../app/static/reader/web-import.mjs";
-import {PRACTICE_STORY} from "../../app/static/reader/setup-flow.mjs";
+import {PRACTICE_STORIES} from "../../app/static/reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "../../app/static/reader/account-workspace.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel} from "../../app/static/reader/calibration.mjs";
@@ -137,12 +137,12 @@ export function workspace({hosted = false, locks = true} = {}) {
   const source = readFileSync(new URL("../../app/static/app.mjs", import.meta.url), "utf8").replace(/^import .+;\s*$/gm, "");
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
-    MockDevice: TestDevice, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore,
+    MockDevice: TestDevice, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE,
     isReadingJump, selectReadingParagraph, PlaybackController, ReaderDeviceController: TestController, HostedAccessGuard: TestGuard,
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
-    WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORY,
+    WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORIES,
     ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, sceneStagePatternLabel,
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),

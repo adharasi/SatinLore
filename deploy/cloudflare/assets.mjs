@@ -32,6 +32,7 @@ export const READER_ASSETS = Object.freeze([
   ["reader/calibration.mjs", "/static/reader/calibration.mjs"],
   ["reader/calibration-view.mjs", "/static/reader/calibration-view.mjs"],
   ["reader/beta-stories.mjs", "/static/reader/beta-stories.mjs"],
+  ["reader/practice-stories.mjs", "/static/reader/practice-stories.mjs"],
   ["reader/account-workspace.mjs", "/static/reader/account-workspace.mjs"],
   ["reader/account-workspace.css", "/static/reader/account-workspace.css"],
   ["reader/beta-recording.mjs", "/static/reader/beta-recording.mjs"],

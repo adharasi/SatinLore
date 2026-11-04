@@ -6,6 +6,8 @@ export const LIBRARY_KEY = "satinlore.library.v1";
 export const LIBRARY_LOCK = "satinlore-local-library";
 export const MAX_SAVED_STORIES = 20;
 export const MAX_LIBRARY_BYTES = 2_000_000;
+export const MAX_STORY_TITLE = 120;
+export const MAX_STORY_DESCRIPTION = 1000;
 const encoder = new TextEncoder();
 
 export class StoryStorageError extends Error {
@@ -17,7 +19,9 @@ const isId = id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.
 // Never hydrate playback/session state or trust saved automatic predictions.
 export function validateStoryRecord(value, {stored = true} = {}) {
   if (!value || typeof value !== "object" || !isId(value.id) || typeof value.title !== "string" ||
-      !value.title.trim() || value.title.length > 120 || typeof value.text !== "string") throw invalid();
+      !value.title.trim() || value.title.length > MAX_STORY_TITLE || typeof value.text !== "string") throw invalid();
+  if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > MAX_STORY_DESCRIPTION) ||
+      value.favorite !== undefined && typeof value.favorite !== "boolean") throw invalid();
   let paragraphs;
   try { paragraphs = splitText(value.text); } catch { throw invalid(); }
   if (!paragraphs.length || paragraphs.length > MAX_PARAGRAPHS || !Array.isArray(value.corrections) ||
@@ -28,7 +32,10 @@ export function validateStoryRecord(value, {stored = true} = {}) {
   if (stored && (!Number.isSafeInteger(value.revision) || value.revision < 1 ||
       !Number.isSafeInteger(value.updatedAt) || value.updatedAt < 0)) throw invalid();
   if (value.folderId !== undefined && value.folderId !== null && !isFolderId(value.folderId)) throw invalid();
+  const description = value.description?.trim();
   return {id: value.id, title: value.title.trim(), text: value.text,
+    ...(description ? {description} : {}),
+    ...(value.favorite ? {favorite: true} : {}),
     ...(value.folderId ? {folderId: value.folderId} : {}),
     corrections: [...value.corrections], position: value.position,
     analysisVersion: value.analysisVersion,
