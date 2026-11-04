@@ -93,7 +93,10 @@ button,input,textarea,select{border-radius:6px}
 @media(max-width:699px){.workspace-header{padding:6px 8px;gap:6px}.header-actions{gap:0}.header-actions button{font-size:.6875rem;padding-inline:6px}.header-actions .header-icon,#toggle-library{width:44px;min-width:44px;padding:8px}.header-story{display:block;min-width:0}.story-tabs>button{min-width:55px;max-width:140px;font-size:.6875rem;padding-inline:9px}.reading-canvas{padding:23px 17px calc(var(--dock-space) + 30px)}.story-heading{gap:8px;margin-bottom:24px;padding-bottom:16px}.story-heading h1{font-size:1.4rem;flex-basis:100%}.story-meta{font-size:.625rem}.story-paragraph{padding-inline:8px}#reader{font-size:1.1875rem}.empty-workspace{margin-top:5px}.draft-heading{margin-bottom:24px}.empty-workspace .draft-title{font-size:1.65rem}.empty-workspace .draft-story{font-size:1.1875rem;min-height:290px}.draft-actions{gap:4px}.draft-actions .quiet-control{font-size:.6875rem;padding-inline:8px}.draft-help{font-size:.625rem}.dialog-heading h2,.confirmation-dialog h2{font-size:1.6rem}.app-settings-dialog{padding:20px}.app-settings-section{padding:18px 0}}
 /* Landscape and large text can scroll the dock without hiding its Stop row. */
 @media(max-height:640px){
-  .playback-buttons{position:sticky;top:0;z-index:2;background:var(--surface);padding-block:3px}
+  .playback-buttons{position:sticky;bottom:0;z-index:2;background:var(--surface);padding-block:3px}
+}
+@container (max-width: 24rem){
+  .playback-buttons{bottom:auto}
 }
 @media(max-height:430px){
   .workspace-panel{display:block;overflow-y:auto}
