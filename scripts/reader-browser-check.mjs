@@ -624,7 +624,7 @@ async function refinementChecks(page, setPromptReply) {
   await page.locator("#strength-minus").click();
   await setRange(page, "cap", 6);
   assert.equal(await page.locator("#ceiling-dialog").isVisible(), false);
-  assert.match(await page.locator("#status").textContent(), /Playing/);
+  assert.equal(await page.locator("#status").textContent(), "Simulator running");
   await page.emulateMedia({reducedMotion: "reduce"});
   await page.clock.runFor(150);
   assert.equal(await page.locator(".simulator-device-body").getAttribute("transform"), "translate(0.00 0)",
@@ -767,7 +767,7 @@ export async function checkReader(page, context, origin) {
   await setRange(page, "cap", 5);
   assert.equal(await page.locator("#ceiling-dialog").isVisible(), false, "A deliberate maximum change has no second popup.");
   assert.equal(await page.locator("#capValue").textContent(), "5");
-  assert.match(await page.locator("#status").textContent(), /Playing/, "A direct maximum change does not interrupt a running simulation.");
+  assert.equal(await page.locator("#status").textContent(), "Simulator running", "A direct maximum change does not interrupt a running simulation.");
   await page.clock.runFor(1100); await output(page, 3);
   await page.locator("#pause").click(); await output(page, 0);
   await page.locator("#strength-plus").click();

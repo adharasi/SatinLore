@@ -27,8 +27,11 @@ async function output(page, expected) {
   await page.waitForFunction(value => document.querySelector("#output").textContent === `${value} / 20`, expected);
 }
 async function stopped(page) { await page.locator("#stop").click(); await output(page, 0); }
-async function sidebar(page) {
+async function sidebar(page, section = "reader") {
   if (await page.locator("#settings-panel").isHidden()) await page.getByRole("button", { name: "Reading controls", exact: true }).click();
+  const tab = page.locator(`#settings-${section}-tab`);
+  if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
+  await page.locator(`#${section}-settings`).waitFor({ state: "visible" });
 }
 async function closeSidebar(page) {
   if (await page.locator("#settings-panel").isVisible()) await page.locator("#close-settings").click();
@@ -98,7 +101,7 @@ async function exploreCalibration(page) {
   await output(page, 0);
 }
 async function savePreset(page, name, scope) {
-  await sidebar(page); await disclosure(page, "#preset-mount details");
+  await sidebar(page, "story"); await disclosure(page, "#preset-mount details");
   await page.locator("#account-preset-name").fill(name); await page.locator("#account-preset-scope").selectOption(scope);
   const saved = page.waitForResponse(response => new URL(response.url()).pathname === "/api/presets" && response.request().method() === "POST");
   await page.getByRole("button", { name: "Save current settings", exact: true }).click();
@@ -201,8 +204,10 @@ try {
   log("checking continuity Hold Ease off and zero maximum");
   await sidebar(page); await page.locator("#follow-scroll").uncheck();
   await page.locator("#feel-mode").selectOption("continuous");
+  await sidebar(page, "story");
   await disclosure(page, ".feel-adjustments details:has(#feel-minimum)"); await range(page, "feel-minimum", 1); await range(page, "feel-background", 1);
   await range(page, "feel-recovery", 0);
+  await sidebar(page);
   // Opening or closing the reading sidebar deliberately pauses playback.
   // Keep its controls available before Start while checking live adjustments.
   await start(page); await output(page, 1);
@@ -218,13 +223,13 @@ try {
   const storyPreset = await savePreset(page, "Synthetic story settings", "story");
   assert.equal(globalPreset.toy, "flexer"); assert.equal(storyPreset.scope, "story");
   assert.ok(/^[a-f\d-]{36}$/.test(storyPreset.storyId));
-  await page.locator("#settings-story-tab").click(); await page.locator("#save-story").click();
+  await sidebar(page, "story"); await page.locator("#save-story").click();
   await page.locator("#confirm-save").click(); await page.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
   await page.reload(); await output(page, 0);
   await page.locator("#account-welcome").waitFor({ state: "hidden" });
   await page.waitForFunction(() => document.querySelector("#story-title").textContent === "The evening train" && document.querySelector("#analysis-status").dataset.state === "ready");
   await chooseFlexer(page, { tested: false }); await page.locator("#setup-close").click();
-  await sidebar(page); await page.locator("#account-preset-picker").selectOption(globalPreset.id);
+  await sidebar(page, "story"); await page.locator("#account-preset-picker").selectOption(globalPreset.id);
   await page.getByRole("button", { name: "Apply preset", exact: true }).click(); await output(page, 0);
   await page.locator("#account-preset-picker").selectOption(storyPreset.id);
   await page.getByRole("button", { name: "Apply preset", exact: true }).click(); await output(page, 0);
@@ -241,7 +246,7 @@ try {
   await beta.waitForFunction(() => document.querySelector("#beta-recording").dataset.state === "recording");
   await beta.locator("#draft-story").fill(privateCanary);
   await chooseFlexer(beta); await beta.locator("#setup-close").click();
-  await sidebar(beta); await disclosure(beta, "#preset-mount details");
+  await sidebar(beta, "story"); await disclosure(beta, "#preset-mount details");
   await beta.locator("#account-preset-name").fill(privateName); // Never saved, never a recording field.
   await disclosure(beta, ".feel-adjustments details:has(#feel-minimum)"); await range(beta, "feel-background", 2);
   await beta.locator("#beta-recording-pause").click();
