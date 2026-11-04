@@ -62,9 +62,9 @@ The same-origin `appearance.js` runs before styles paint, sets the resolved them
 
 | Surface | Behaviour |
 | --- | --- |
-| Library | New/open, title search/sort, folders and active selection; explicit saved/session-only state; saved stories are real browser data |
+| Library | New/open, title search, favourites-first sorting and shelves; the selected card offers edit, favourite, duplicate, local download and delete |
 | Reading canvas | Direct typing/paste on a blank page; stories open into continuous document scrolling; Wide by default with Comfortable/Full choices |
-| Reading controls | Optional right panel, initially closed; import/upload, baseline model, text/width controls, current story actions and optional corrections |
+| Reading controls | Right panel opens on the first story; import/upload, story model, text/width controls, current story actions and optional corrections |
 | Global gear menu | Appearance, account status, backup/restore, about, help and support; Stop remains accessible |
 | Setup and device preview | Nine model profiles; separate simulator/Remote journeys; explicit device/action/test/Start; honest unavailable/error/unknown state and neutral practice |
 | Optional review | Current/already-read sections first; future passages require deliberate reveal; manual zero, reset and reanalysis preserve deliberate edits |
@@ -73,7 +73,9 @@ The same-origin `appearance.js` runs before styles paint, sets the resolved them
 
 At 1100 px and above, the library can sit left and settings right. The story expands when either closes. Wide has an approximately 900–1040 px maximum; Comfortable is about 620–720 px; Full uses the remaining canvas with gutters. These are maximum widths, never minimum phone widths. **Focus** closes both sidebars and preserves the dock; leaving Focus restores the prior arrangement.
 
-Below desktop width, use drawers or sheets instead of squeezing the reader into three columns. Phone reading starts with both panels closed. Reserve dock/safe-area space so the last paragraph and focused controls remain reachable. Avoid a fixed-height nested story scrollbar. Panel, width, type, theme and viewport changes preserve the selected paragraph and never resume playback.
+Below desktop width, use drawers or sheets instead of squeezing the reader into three columns. The first story opens the dismissible reading-controls drawer and leaves the dock available. Closing it keeps it closed for later story switches. Reserve dock/safe-area space so the last paragraph and focused controls remain reachable. Avoid a fixed-height nested story scrollbar. Panel, width, type, theme and viewport changes preserve the selected paragraph and never resume playback.
+
+The selected story's pencil opens **Story settings** for title, description and shelf. The heart toggles the favourite flag. Editing or favouriting a session-only story does not save its text. Duplicate opens a fresh session-only copy with its description, shelf and corrections, starting at the first section. Download creates the portable local JSON backup. Deleting a story uses the same confirmation and local storage handling as the right sidebar.
 
 Use native controls, logical focus order and at least 44 × 44 px primary targets. Escape closes noncritical dialogs/panels and focus returns to the opener. A modal must expose a usable Stop action; nonmodal settings must leave the persistent Stop operable. Status is readable text, not colour alone. No image texture belongs behind story text.
 
@@ -92,7 +94,7 @@ Use the neutral [sample](test-sample.txt), the [test guide](test-today.md) and e
 | Check | Required observation |
 | --- | --- |
 | Light/Dark, 1440 × 1000 | Library/settings can independently open/close; Wide is the default; Full expands into available space; readable status/focus |
-| Light/Dark, 390 × 844 | Closed panels while reading, usable drawers/sheets, persistent −/+/Start/Pause/Stop; last paragraph clears dock |
+| Light/Dark, 390 × 844 | Dismissible reading-controls drawer on the first story, persistent −/+/Start/Pause/Stop; last paragraph clears dock |
 | 320 CSS px / landscape / 200% text | No horizontal page overflow or hidden Stop; enlarged labels and dialogs fit; controls remain reachable |
 | Focus / reading widths | Both sidebars close in Focus and restore on exit; Comfortable/Wide/Full preserve position and stay paused after reflow |
 | System and storage denied | System follows OS; explicit Light/Dark wins; blocked preference storage does not stop use |

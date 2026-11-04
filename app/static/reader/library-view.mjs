@@ -1,5 +1,5 @@
 // Library discovery uses titles and local metadata only; it never searches future story text.
-export const LIBRARY_SORTS = Object.freeze(["updated", "title", "progress"]);
+export const LIBRARY_SORTS = Object.freeze(["updated", "title", "progress", "favorites"]);
 const title = story => typeof story?.title === "string" ? story.title : "Untitled story";
 const wordTotals = new WeakMap();
 function paragraphCount(story) {
@@ -26,8 +26,11 @@ export function selectLibraryStories(stories, {query = "", sort = "updated"} = {
   const selected = Array.from(stories ?? []).filter(story => !needle || title(story).normalize("NFKC").toLocaleLowerCase("en").includes(needle));
   const kind = LIBRARY_SORTS.includes(sort) ? sort : "updated";
   // Stable original order breaks ties; do not change the caller's library or selection.
-  return selected.sort((a, b) => kind === "title" ? compareTitles(a, b) :
-    (kind === "progress" ? progress(b) - progress(a) : recent(b) - recent(a)) || compareTitles(a, b));
+  return selected.sort((a, b) => {
+    if (kind === "title") return compareTitles(a, b);
+    if (kind === "favorites" && Boolean(a.favorite) !== Boolean(b.favorite)) return a.favorite ? -1 : 1;
+    return (kind === "progress" ? progress(b) - progress(a) : recent(b) - recent(a)) || compareTitles(a, b);
+  });
 }
 export function storyMetadata(story) {
   const paragraphs = paragraphCount(story);

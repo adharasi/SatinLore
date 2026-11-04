@@ -138,6 +138,19 @@ test("gentle manner must describe the contact, and reported dialogue cannot anch
   assert.equal(scoreParagraph("“Wait for the kettle,” she whispered. Then they shared a tender kiss.").level, 1);
 });
 
+test("indirect reports and unrealised plans stay quiet, while later actions can start a beat", () => {
+  const result = groupScenes(sceneRows(
+    "She tells him that the toy vibrated steadily as they shared a tender kiss.",
+    "They were going to share a tender kiss, but the phone rang.",
+    "They were going to leave. Then they shared a tender kiss. The device vibrated steadily.",
+  ));
+  assert.deepEqual(result.map(({phase, level, movements}) => ({phase, level, movements})), [
+    {phase: "quiet", level: 0, movements: []}, {phase: "quiet", level: 0, movements: []},
+    {phase: "build", level: 1, movements: ["vibrate"]},
+  ]);
+  assert.ok(result.slice(0, 2).every(section => section.quiet && section.cloudExcluded));
+});
+
 test("a short contact or named continuation carries only within an established scene", () => {
   const pair = "They shared a tender kiss. The device vibrated and flexed together.";
   const result = groupScenes(sceneRows("They kissed.", pair, "They kissed.",

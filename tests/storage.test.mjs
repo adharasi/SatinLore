@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {StoryStore, LIBRARY_KEY, MAX_LIBRARY_BYTES, validateStoryRecord, withBrowserLibraryLock} from "../app/static/reader/storage.mjs";
+import {StoryStore, LIBRARY_KEY, MAX_LIBRARY_BYTES, MAX_STORY_DESCRIPTION, validateStoryRecord, withBrowserLibraryLock} from "../app/static/reader/storage.mjs";
 
 function memoryStorage() {
   const values = new Map();
@@ -47,6 +47,24 @@ test("quota and denied storage cannot report saved or delete unchanged data", as
   assert.deepEqual(unavailable.stories, []);
 });
 
+test("optional story details persist with the story revision and can be cleared", async () => {
+  const memory = memoryStorage(), local = store(memory);
+  const old = await local.saveStory(record());
+  const details = {description: "A private <note>\nfor a later reading.", favorite: true};
+  const saved = await local.saveStory({...old, title: "A renamed story", ...details, tags: ["excluded"]}, {expectedRevision: old.revision});
+  assert.equal(saved.revision, 2);
+  assert.deepEqual((await store(memory).loadAll()).stories, [saved]);
+  assert.equal(saved.title, "A renamed story");
+  assert.equal(saved.description, details.description);
+  assert.equal(saved.favorite, true);
+  assert.equal(saved.tags, undefined);
+  await assert.rejects(local.saveStory({...old, favorite: false}, {expectedRevision: old.revision}), {code: "conflict"});
+  const cleared = await local.saveStory({...saved, description: "  ", favorite: false}, {expectedRevision: saved.revision});
+  assert.equal(cleared.description, undefined);
+  assert.equal(cleared.favorite, undefined);
+  assert.deepEqual((await store(memory).loadAll()).stories, [cleared]);
+});
+
 test("corrupt records are reported and retained until explicit Delete All", async () => {
   const memory = memoryStorage(), local = store(memory);
   await local.saveStory(record());
@@ -84,6 +102,7 @@ test("stored text, title, position and corrections are strictly bounded", () => 
     {id: "../bad"}, {title: "x".repeat(121)}, {position: -1}, {position: 2},
     {corrections: [0]}, {corrections: [null, 1.5]}, {corrections: [null, "2"]},
     {text: "é".repeat(250001)}, {text: ""}, {revision: 0}, {analysisVersion: ""},
+    {description: "x".repeat(MAX_STORY_DESCRIPTION + 1)}, {description: {}}, {favorite: "false"},
   ]) assert.throws(() => validateStoryRecord({...saved, ...change}), {code: "corrupt"});
   assert.deepEqual(validateStoryRecord({...saved, intensity: 20}).corrections, [0, null]);
 });

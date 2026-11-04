@@ -84,9 +84,6 @@ async function add(page, text, title = "A quiet afternoon", waitForAnalysis = tr
   await page.locator("#open-draft").click();
   await page.locator("#reading-workspace").waitFor({state: "visible"});
   assert.equal(await page.locator("#story-title").textContent(), title);
-  if (page.viewportSize()?.width < 1100) {
-    assert.equal(await page.locator("#settings-panel").isHidden(), true, "Opening a story does not open a mobile settings drawer.");
-  }
   if (waitForAnalysis) await analysed(page);
 }
 async function selectStory(page, title) {
@@ -650,6 +647,42 @@ async function shortStoryStartChecks(page) {
   if (viewport) await page.setViewportSize(viewport);
 }
 
+async function practiceLibraryChecks(context, origin) {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({width: 390, height: 844});
+    await page.goto(origin);
+    await openSettings(page);
+    const launch = page.locator("#control-playground"), dialog = page.locator("#practice-story-dialog");
+    const picker = page.locator("#practice-story-choice");
+    await launch.click();
+    await dialog.waitFor({state: "visible"});
+    assert.deepEqual(await picker.locator("optgroup").evaluateAll(groups => groups.map(group => [group.label, group.children.length])),
+      [["Controls with known levels", 3], ["Compare story models", 4]]);
+    await assertFits(page, "Mobile practice story chooser", "#practice-story-stop");
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({state: "hidden"});
+    assert.equal(await launch.evaluate(button => document.activeElement === button), true);
+
+    await launch.click();
+    await picker.selectOption("after-the-screening");
+    assert.match(await page.locator("#practice-story-checkpoints").textContent(), /Section 4 peaks/);
+    await page.locator("#practice-story-open").click();
+    await analysed(page); await output(page, 0);
+    assert.equal(await page.locator("#story-title").textContent(), "After the screening");
+    assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
+    assert.equal(await page.locator("#settings-panel").isVisible(), true, "The first practice story opens the reading controls.");
+    assert.equal(await page.locator("#start").isDisabled(), true, "Opening a practice story never connects the device.");
+    await openSettings(page);
+    assert.equal(await page.locator("#scene-model").isEnabled(), true);
+    await launch.click(); await picker.selectOption("control-check-v1");
+    await page.locator("#practice-story-open").click();
+    await analysed(page); await output(page, 0);
+    assert.equal(await page.locator("#story-title").textContent(), "Find your rhythm");
+    assert.equal(await page.locator("#scene-model").isDisabled(), true);
+  } finally { await page.close(); }
+}
+
 async function storageFailureChecks(context, origin) {
   const restricted = await context.newPage();
   const errors = [];
@@ -695,6 +728,36 @@ async function libraryDiscoveryChecks(page) {
   await page.locator("#story-tabs [role=tab]").filter({hasText: title}).click();
   await page.waitForFunction(value => document.querySelector("#story-title").textContent === value, title);
   await analysed(page); await output(page, 0);
+}
+
+async function storyCardChecks(page) {
+  const title = await page.locator("#story-title").textContent();
+  await openLibrary(page);
+  const card = page.locator("#story-list .story-card");
+  const action = name => card.locator(`[data-story-action="${name}"]`);
+  await action("edit").click();
+  await page.locator("#story-details-dialog").waitFor({state: "visible"});
+  assert.equal(await page.locator("#story-details-title").inputValue(), title);
+  await page.locator("#story-details-description").fill("A neutral summary for the selected card.");
+  await page.locator("#story-details-save").click();
+  await page.locator("#story-details-dialog").waitFor({state: "hidden"});
+  assert.equal(await card.locator(".story-card-description").textContent(), "A neutral summary for the selected card.");
+  assert.equal(await action("edit").evaluate(node => node === document.activeElement), true);
+  await action("favorite").click();
+  assert.equal(await action("favorite").getAttribute("aria-pressed"), "true");
+  const [download] = await Promise.all([page.waitForEvent("download"), action("download").click()]);
+  const backup = JSON.parse(await readFile(await download.path(), "utf8"));
+  assert.equal(download.suggestedFilename(), "satinlore-story-backup.json");
+  assert.equal(backup.stories[0].description, "A neutral summary for the selected card.");
+  assert.equal(backup.stories[0].favorite, true);
+  await action("duplicate").click(); await analysed(page); await output(page, 0);
+  assert.equal(await page.locator("#story-title").textContent(), `${title} (copy)`);
+  assert.equal(await action("favorite").getAttribute("aria-pressed"), "false");
+  await action("delete").click();
+  await page.waitForFunction(copy => ![...document.querySelectorAll("#story-list .story-item-title")].some(node => node.textContent === copy), `${title} (copy)`);
+  await selectStory(page, title);
+  await action("favorite").click();
+  assert.equal(await action("favorite").getAttribute("aria-pressed"), "false");
 }
 
 async function backupAndPreferenceChecks(page) {
@@ -903,6 +966,7 @@ export async function checkReader(page, context, origin) {
 
   await add(page, neutralStory, "The afternoon walk");
   await libraryDiscoveryChecks(page);
+  await storyCardChecks(page);
   await openSettings(page); await page.locator("#follow-scroll").uncheck();
   await openReview(page);
   await setRange(page, "level", 3);
@@ -1035,6 +1099,8 @@ export async function checkReader(page, context, origin) {
   await captureLayouts(page);
   await openSettings(page); await page.locator("#follow-scroll").uncheck(); await closeSettings(page);
   await openSettings(page, "story"); await page.locator("#rename-story").click();
+  await page.locator("#story-details-title").fill(promptReply);
+  await page.locator("#story-details-save").click();
   assert.equal(await page.locator("#story-title").textContent(), promptReply);
   await save(page);
   await page.locator("#next").evaluate(element => { if (!element.disabled) element.click(); });
@@ -1147,6 +1213,7 @@ export async function checkReader(page, context, origin) {
   await page.clock.runFor(300);
   assert.equal(await page.locator("#story-title").textContent(), "Literal text", "Closing import invalidates its delayed completion.");
   await storageFailureChecks(context, origin);
+  await practiceLibraryChecks(context, origin);
   await page.bringToFront();
   await refinementChecks(page, value => { promptReply = value; });
   assert.deepEqual(await page.evaluate(() => ({local: Object.keys(localStorage).sort(), session: sessionStorage.length})),

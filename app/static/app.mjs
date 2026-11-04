@@ -3,7 +3,7 @@ import {channelLabel} from "./devices/toy-profiles.mjs";
 import {TextImporter} from "./reader/import.mjs";
 import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
-import {StoryStore} from "./reader/storage.mjs";
+import {StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "./reader/storage.mjs";
 import {isReadingJump, selectReadingParagraph} from "./reader/position.mjs";
 import {HostedAccessGuard} from "./access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "./reader/library-view.mjs";
@@ -12,7 +12,8 @@ import {ReaderPreferences} from "./reader/preferences.mjs";
 import {FolderStore, selectFolderStories} from "./reader/folders.mjs";
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "./reader/web-import.mjs";
 import {createSimulatorView} from "./reader/simulator-view.mjs";
-import {createSetupFlow, PRACTICE_STORY} from "./reader/setup-flow.mjs";
+import {createSetupFlow} from "./reader/setup-flow.mjs";
+import {PRACTICE_STORIES} from "./reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
@@ -279,24 +280,69 @@ function renderLibrary() {
   renderFolders();
   const fragment = document.createDocumentFragment();
   const visible = selectLibraryStories(selectFolderStories(stories, folderFilter), {query: libraryQuery, sort: librarySort});
+  const focused = document.activeElement?.dataset;
+  let nextFocus;
   for (const story of visible) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "story-item";
     button.dataset.storyId = story.id;
     button.disabled = libraryMutation || story.deleting;
-    if (story.id === activeId) button.setAttribute("aria-current", "true");
     const title = document.createElement("span");
     title.className = "story-item-title";
     title.textContent = story.title;
     const meta = document.createElement("span");
     meta.className = "story-meta";
     meta.textContent = `${story.saved ? "Saved here" : "Session only"} · ${story.position + 1} / ${story.model.paragraphs.length}`;
-    button.append(title, meta);
+    button.append(title);
     button.addEventListener("click", () => selectStory(story.id));
-    fragment.append(button);
+    if (focused?.storyId === story.id) nextFocus = button;
+    if (story.id !== activeId) {
+      if (story.favorite) {
+        const badge = document.createElement("span");
+        badge.className = "story-favorite-badge";
+        badge.textContent = "♥";
+        badge.setAttribute("aria-label", "Favourite");
+        title.append(badge);
+      }
+      button.append(meta);
+      fragment.append(button);
+      continue;
+    }
+    button.setAttribute("aria-current", "true");
+    const card = document.createElement("div");
+    card.className = "story-card";
+    const heading = document.createElement("div");
+    heading.className = "story-card-heading";
+    const footer = document.createElement("div");
+    footer.className = "story-card-footer";
+    const controls = document.createElement("div");
+    controls.className = "story-card-controls";
+    const action = (name, label, onClick, pressed) => {
+      const control = storyCardAction(story, name, label, onClick, pressed);
+      if (focused?.storyActionId === story.id && focused.storyAction === name) nextFocus = control;
+      return control;
+    };
+    heading.append(button, action("edit", "Edit story settings", opener => openStoryDetails(story, opener)),
+      action("favorite", "Favourite story", () => { story.favorite = !story.favorite; markDirty(story); renderLibrary(); }, story.favorite));
+    controls.append(action("duplicate", "Duplicate story", () => duplicateStory(story)),
+      action("download", "Download story", () => exportStories([storyRecord(story)], "satinlore-story-backup.json", "story-action-status")),
+      action("delete", "Delete story", () => deleteStory(story)));
+    footer.append(meta, controls);
+    card.append(heading);
+    if (story.description) {
+      const description = document.createElement("p");
+      description.className = "story-card-description";
+      description.textContent = story.description;
+      card.append(description);
+    }
+    card.append(footer);
+    fragment.append(card);
   }
   $("story-list").replaceChildren(fragment);
+  if (!$("library-panel").hidden && (focused?.storyId || focused?.storyActionId)) {
+    (nextFocus && !nextFocus.disabled ? nextFocus : $("library-search")).focus({preventScroll: true});
+  }
   text("library-results", libraryQuery && !visible.length ? "No story titles match your search." :
     `${visible.length} of ${stories.length} ${stories.length === 1 ? "story" : "stories"}`);
   const nextTabs = JSON.stringify(stories.map(story => [story.id, story.title, story.lastOpenedAt, story.deleting]).concat([[activeId, libraryMutation]]));
@@ -308,6 +354,39 @@ function renderLibrary() {
   text("library-status", libraryLoading ? "Opening your local library…" : libraryError || (stories.length ?
     "Saved stories stay on this browser. Session-only stories clear on reload." : "No stories yet. Add one to start reading."));
   $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.length && !folders.length && !libraryError);
+}
+
+const storyCardIcons = {
+  edit: ["m4 20 4.5-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L4 20ZM14 8l3 3", "✎"],
+  favorite: ["M12 20.5 4.6 13a4.8 4.8 0 0 1 6.8-6.8l.6.7.6-.7a4.8 4.8 0 0 1 6.8 6.8Z", "♡"],
+  duplicate: ["M8 8h12v12H8zM16 8V4H4v12h4", "⧉"],
+  download: ["M4 16v4h16v-4M12 4v11m-4-4 4 4 4-4", "↓"],
+  delete: ["M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5", "×"],
+};
+function storyCardAction(story, name, label, onClick, pressed) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "story-card-button";
+  button.dataset.storyAction = name;
+  button.dataset.storyActionId = story.id;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  if (pressed !== undefined) button.setAttribute("aria-pressed", String(pressed));
+  button.disabled = libraryMutation || story.deleting;
+  const [path, fallback] = storyCardIcons[name];
+  if (document.createElementNS) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    shape.setAttribute("d", path);
+    svg.append(shape);
+    button.append(svg);
+  } else button.textContent = fallback;
+  button.addEventListener("click", () => {
+    if (story === currentStory() && !libraryMutation && !story.deleting) onClick(button);
+  });
+  return button;
 }
 
 function updateCurrentCorrection(story) {
@@ -521,7 +600,22 @@ async function runNocturne() {
       syncReaderMapping(story);
       story.nocturneMessage = `Nocturne applied to ${labels.size} ${labels.size === 1 ? "section" : "sections"}. ${kept}`.trim();
     } else {
-      const reason = code === "refused" ? "Nocturne couldn’t process these cues." : code === "rate_limited" ? "Nocturne’s beta limit has been reached." :
+      const messages = {
+        refused: "Nocturne couldn’t process these cues.",
+        rate_limited: "Nocturne’s beta limit has been reached.",
+        budget_unavailable: "Nocturne’s usage counter is unavailable. Check the Worker’s scene-analysis budget binding.",
+        provider_key_rejected: "OpenAI rejected the project key. Check the Worker’s OPENAI_API_KEY secret.",
+        provider_model_access: "OpenAI denied model access. Check the API project’s GPT-6 Luna and Responses permissions.",
+        provider_billing_limit: "OpenAI reported a quota or billing limit. Check API credits and the project spend limit.",
+        provider_rate_limit: "OpenAI reported a rate limit. Check the API project limits before trying again.",
+        provider_cache_option: "OpenAI rejected Nocturne’s prompt-cache option.",
+        provider_request_rejected: "OpenAI rejected Nocturne’s request format. Check the Responses API contract.",
+        provider_timeout: "Nocturne’s request to OpenAI timed out.",
+        provider_connection: "Nocturne couldn’t connect to OpenAI. Check the Worker’s outbound request and service status.",
+        provider_service_error: "OpenAI returned a service error. Check the provider status before trying again.",
+        provider_response_invalid: "OpenAI returned a result that didn’t match Nocturne’s scene-label format.",
+      };
+      const reason = Object.hasOwn(messages, code) ? messages[code] :
         labels ? "Nocturne left these cues as they were." : "Nocturne is temporarily unavailable.";
       story.nocturneMessage = `${reason} Loom patterns are ready. ${kept}`.trim();
     }
@@ -539,7 +633,8 @@ async function runNocturne() {
 function storyRecord(story) {
   return {id: story.id, title: story.title, text: story.model.paragraphs.map(paragraph => paragraph.text).join("\n\n"),
     corrections: story.model.paragraphs.map(paragraph => paragraph.override), position: story.position,
-    analysisVersion: story.model.analysisVersion, ...(story.folderId ? {folderId: story.folderId} : {})};
+    analysisVersion: story.model.analysisVersion, description: story.description, favorite: story.favorite,
+    ...(story.folderId ? {folderId: story.folderId} : {})};
 }
 function markDirty(story) {
   ++story.changeVersion;
@@ -584,12 +679,13 @@ function persistStory(story, {explicit = false} = {}) {
   return story.saveChain;
 }
 function makeStory({id = createStoryId(), title = "Untitled story", text: source, corrections = [],
-  position = 0, revision = null, updatedAt = Date.now(), folderId = null, betaId = null, controlled = false}) {
+  position = 0, revision = null, updatedAt = Date.now(), folderId = null, betaId = null, controlled = false,
+  description = "", favorite = false}) {
   const model = new ReaderModel();
   model.load(source, {deferAnalysis: true, documentId: id});
   corrections.forEach((level, index) => { if (level !== null) model.setOverride(index, level); });
   const safePosition = Math.max(0, Math.min(model.paragraphs.length - 1, position));
-  return {id, title, model, folderId, betaId, controlled, explicitCorrections:new Set(), position: safePosition, furthest: safePosition, saved: revision !== null, revision,
+  return {id, title, description, favorite, model, folderId, betaId, controlled, explicitCorrections:new Set(), position: safePosition, furthest: safePosition, saved: revision !== null, revision,
     dirty: false, saving: false, saveError: "", changeVersion: 0, saveTimer: null, saveChain: Promise.resolve(),
     deleting: false, analysisPromise: null, sceneModel: "loom", nocturneMessage: "", updatedAt, lastOpenedAt: 0};
 }
@@ -719,7 +815,7 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   if (previous && previous !== story) previous.model.cancelAnalysis();
   ++selectionEpoch;
   activeId = id;
-  if (!openedFirstStory && !isNarrow() && !focusArrangement) setPanel("settings", true, {restore: false});
+  if (!openedFirstStory && !focusArrangement) setPanel("settings", true, {restore: false});
   openedFirstStory = true;
   revealUpcoming = false;
   $("review-settings").open = false;
@@ -858,7 +954,7 @@ function closeDialog(id, {restore = true} = {}) {
   dialogOpeners.delete(id);
 }
 function closeDialogs() {
-  for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog"]) closeDialog(id, {restore: false});
+  for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog", "story-details-dialog", "practice-story-dialog"]) closeDialog(id, {restore: false});
   startIntent = ceilingIntent = saveIntent = null;
 }
 function stopEverything() {
@@ -919,6 +1015,88 @@ function addPreparedStory(record, {folderId = null} = {}) {
   return story;
 }
 
+function duplicateStory(story) {
+  const {title, text: source, description, corrections} = storyRecord(story);
+  const suffix = " (copy)";
+  try {
+    addPreparedStory({title: title.slice(0, MAX_STORY_TITLE - suffix.length).replace(/[\uD800-\uDBFF]$/u, "").trimEnd() + suffix, text: source,
+      description, corrections}, {folderId: story.folderId});
+    text("story-action-status", "Copy opened for this visit. Choose Save on this browser to keep it.");
+  } catch (error) { text("story-action-status", error.message); }
+}
+
+function openStoryDetails(story, opener) {
+  if (!story || story.deleting || libraryMutation) return;
+  $("story-details-title").value = story.title;
+  $("story-details-description").value = story.description;
+  const options = [null, ...folders].map(folder => {
+    const option = document.createElement("option");
+    option.value = folder?.id ?? "";
+    option.textContent = folder?.name ?? "Unfiled";
+    return option;
+  });
+  $("story-details-shelf").replaceChildren(...options);
+  $("story-details-shelf").value = story.folderId ?? "";
+  text("story-details-status", "");
+  openDialog("story-details-dialog", opener);
+  $("story-details-title").focus({preventScroll: true});
+}
+
+function deleteStory(story) {
+  if (!story || story.deleting || libraryMutation) return;
+  pause("Paused before deleting a story.");
+  if (confirm("Delete this story, including its saved text, corrections and reading position?")) void removeStory(story);
+}
+
+function selectedPracticeStory() {
+  return PRACTICE_STORIES.find(story => story.id === $("practice-story-choice").value);
+}
+function updatePracticeChoice() {
+  const story = selectedPracticeStory();
+  text("practice-story-description", story?.description ?? "");
+  const notes = (story?.checkpoints ?? ["Follow the story’s instructions and compare what you see with the simulator output."]).map(checkpoint => {
+    const item = document.createElement("li"); item.textContent = checkpoint; return item;
+  });
+  $("practice-story-checkpoints").replaceChildren(...notes);
+  $("practice-story-open").disabled = !story;
+  text("practice-story-status", "");
+}
+function openPracticePicker() {
+  if (libraryLoading || libraryMutation || $("practice-story-dialog").open) return;
+  setupFlow?.cancel();
+  cancelImport();
+  const picker = $("practice-story-choice");
+  const selected = picker.value || PRACTICE_STORIES[0].id;
+  picker.replaceChildren(...[[true, "Controls with known levels"], [false, "Compare story models"]].map(([controlled, label]) => {
+    const group = document.createElement("optgroup"); group.label = label;
+    for (const story of PRACTICE_STORIES.filter(story => Boolean(story.controlled) === controlled)) {
+      const option = document.createElement("option"); option.value = story.id; option.textContent = story.title;
+      group.append(option);
+    }
+    return group;
+  }));
+  picker.value = selected;
+  updatePracticeChoice();
+  openDialog("practice-story-dialog");
+  picker.focus();
+}
+function openSelectedPracticeStory() {
+  if (libraryLoading || libraryMutation || !$("practice-story-dialog").open) return;
+  const story = selectedPracticeStory();
+  if (!story) return;
+  const {title, text: source, description, corrections, betaId, controlled} = story;
+  const firstStory = !openedFirstStory;
+  try {
+    addPreparedStory({title, text: source, description, corrections, betaId, controlled});
+    closeDialog("practice-story-dialog", {restore: false});
+    if (!firstStory && isNarrow()) setPanel("settings", false, {restore: false});
+    show(controlled ? "This practice story uses known levels. Choose Start when you’re ready." :
+      "Loom analyses this practice story. To compare rhythms, choose Nocturne under Story model. Start when you’re ready.");
+  } catch (error) {
+    text("practice-story-status", error.message || "The practice story could not open. Try again.");
+  }
+}
+
 async function openDraftText() {
   if (libraryLoading || libraryMutation || importing) return;
   const source = $("draft-story").value;
@@ -958,10 +1136,11 @@ async function importStoryUrl() {
   try {
     const record = await webImporter.read(plan.url);
     if (!record || operation !== importEpoch || document.hidden || libraryMutation) return;
+    const firstStory = !openedFirstStory;
     addPreparedStory(record, {folderId: folders.some(folder => folder.id === folderFilter) ? folderFilter : null});
     text("url-import-status", `${record.scope || "Story"} imported. You can read now.`);
     $("story-url").value = "";
-    if (isNarrow()) setPanel("settings", false, {restore: false});
+    if (isNarrow() && !firstStory) setPanel("settings", false, {restore: false});
   } catch (error) {
     if (operation === importEpoch) text("url-import-status", error.message || "This page could not be imported. Open the source and paste text you have permission to use.");
   } finally { if (operation === importEpoch) { linkBusy = false; setImporting(false); display(); } }
@@ -1032,8 +1211,8 @@ async function removeStory(story, {keepSession = false} = {}) {
       if (story.id === activeId) {
         activeId = null;
         ++selectionEpoch;
-        if (stories.length) selectStory(stories[0].id);
-        else { renderStory(); controller.setStory([]); display(); }
+        if (stories.length) selectStory(stories[0].id, {focusReader: true});
+        else { renderStory(); controller.setStory([]); display(); $("draft-story").focus({preventScroll: true}); }
       }
       show("Story and its saved corrections and progress deleted.");
     }
@@ -1088,10 +1267,10 @@ async function restoreBackup(file) {
     if (operation === importEpoch) { backupBusy = false; setImporting(false); if ($("import-backup")) $("import-backup").value = ""; display(); }
   }
 }
-function exportStories(records, filename) {
+function exportStories(records, filename, status = "library-transfer-status") {
   pause("Paused while you export a local backup.");
-  try { text("library-transfer-status", downloadBackup(records, {filename}).message); }
-  catch (error) { text("library-transfer-status", error.message); }
+  try { text(status, downloadBackup(records, {filename}).message); }
+  catch (error) { text(status, error.message); }
 }
 $("new-story").addEventListener("click", openDraft);
 $("empty-new-story").addEventListener("click", openNewStory);
@@ -1145,7 +1324,12 @@ for(const[id,value]of[["mark-good",5],["mark-uncomfortable",1]])$(id)?.addEventL
   text("beta-feedback-status","Marked in this beta recording. Your controls are unchanged.");
 });
 $("apply-combined")?.addEventListener("click",async()=>{try{const channels=Array.from($("combination-choices").querySelectorAll('input:checked')).map(input=>input.value);if(!channels.length)throw Error("Choose at least one movement.");const mode=latest.feel?.mode||"story";pause("Applying movement choices.");if(channels.length===1){await controller.applyCalibration(channels[0]);controller.setFeel({mode});}else await controller.applyChannels(channels,{mode});display(controller.snapshot());}catch(error){show(error.message||"The movements could not be combined.");}});
-$("control-playground")?.addEventListener("click",()=>{setupFlow?.cancel();addPreparedStory({...PRACTICE_STORY,controlled:true,betaId:"control-check-v1"});setPanel("settings",true);show("Choose Start, then try Hold, Ease off and the movement settings. Everything opens paused.");});
+$("control-playground")?.addEventListener("click", openPracticePicker);
+$("practice-story-choice").addEventListener("change", updatePracticeChoice);
+$("practice-story-open").addEventListener("click", openSelectedPracticeStory);
+$("practice-story-close").addEventListener("click", () => closeDialog("practice-story-dialog"));
+$("practice-story-stop").addEventListener("click", stopEverything);
+$("practice-story-dialog").addEventListener("cancel", event => { event.preventDefault(); closeDialog("practice-story-dialog"); });
 for(const[id,action]of[["feel-hold","hold"],["feel-easeoff","easeoff"],["feel-follow","follow"]])$(id)?.addEventListener("click",()=>{
   cancelStart();if(action==="hold")controller.hold();else if(action==="easeoff")controller.easeOff();else controller.followStory();
   recordAllowedEvent({type:"control",control:action,channel:latest.channel});display(controller.snapshot());
@@ -1189,8 +1373,8 @@ $("load").addEventListener("click", () => {
 });
 $("file").addEventListener("change", event => { const file = event.target.files[0]; if (file) void prepareText(async () => { const record = await readStoryFile(file); if (record.title && !$("story-title-input").value.trim()) $("story-title-input").value = record.title; return record.text; }); });
 $("cancel-import").addEventListener("click", () => { cancelImport(); closeDialog("new-story-dialog"); });
-for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop"]) $(id)?.addEventListener("click", stopEverything);
-for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog"]) $(id).addEventListener("cancel", event => {
+for (const id of ["stop", "start-stop", "ceiling-stop", "save-stop", "import-stop", "story-details-stop"]) $(id)?.addEventListener("click", stopEverything);
+for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-dialog", "app-settings-dialog", "story-details-dialog"]) $(id).addEventListener("cancel", event => {
   event.preventDefault(); cancelImport(); cancelStart(); ceilingIntent = saveIntent = null; closeDialog(id); display();
 });
 $("start").addEventListener("click", () => {
@@ -1281,20 +1465,32 @@ $("session-only").addEventListener("click", () => {
   pause("Paused while you choose how to keep this story.");
   if (confirm("Remove this story's saved copy from this browser and keep it only for this tab session?")) void removeStory(story, {keepSession: true});
 });
-$("rename-story").addEventListener("click", () => {
-  const story = currentStory(); if (!story) return;
-  pause("Paused while you rename this story.");
-  const title = prompt("Story title (up to 120 characters)", story.title);
-  if (title === null) return;
-  const value = title.trim();
-  if (!value || value.length > 120) { show("Use a title between 1 and 120 characters."); return; }
-  story.title = value; markDirty(story); display(); renderLibrary();
+$("rename-story").addEventListener("click", () => openStoryDetails(currentStory(), $("rename-story")));
+for (const id of ["story-details-close", "story-details-cancel"]) $(id).addEventListener("click", () => closeDialog("story-details-dialog"));
+$("story-details-form").addEventListener("submit", event => {
+  event.preventDefault();
+  const story = currentStory();
+  if (!$("story-details-dialog").open || !story || story.deleting || libraryMutation) return;
+  const title = $("story-details-title").value.trim();
+  const description = $("story-details-description").value.trim();
+  if (!title || title.length > MAX_STORY_TITLE) {
+    text("story-details-status", `Use a title between 1 and ${MAX_STORY_TITLE} characters.`);
+    $("story-details-title").focus();
+    return;
+  }
+  if (description.length > MAX_STORY_DESCRIPTION) {
+    text("story-details-status", `Use a description up to ${MAX_STORY_DESCRIPTION} characters.`);
+    $("story-details-description").focus();
+    return;
+  }
+  const folderId = folders.find(folder => folder.id === $("story-details-shelf").value)?.id ?? null;
+  Object.assign(story, {title, description, folderId});
+  markDirty(story);
+  closeDialog("story-details-dialog");
+  display(); renderLibrary();
+  text("story-action-status", story.saved ? "Story settings updated." : "Story settings updated for this visit.");
 });
-$("delete-story").addEventListener("click", () => {
-  const story = currentStory(); if (!story) return;
-  pause("Paused before deleting a story.");
-  if (confirm("Delete this story, including its saved text, corrections and reading position?")) void removeStory(story);
-});
+$("delete-story").addEventListener("click", () => deleteStory(currentStory()));
 $("delete-all").addEventListener("click", async () => {
   if (libraryMutation || libraryLoading) return;
   pause("Paused before clearing the local library.");
