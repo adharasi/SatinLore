@@ -250,7 +250,11 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await captureNeutral(page, "alpha-control-lab.png");
   const vibration = page.locator('#alpha-movement-cards .alpha-movement[data-channel="vibrate"]');
-  await vibration.locator(".alpha-movement-detail > summary").click();
+  const movementDetails = vibration.locator(".alpha-movement-detail");
+  assert.equal(await movementDetails.getAttribute("open"), "", "Movement settings open by default.");
+  await movementDetails.locator("summary").click();
+  assert.equal(await movementDetails.getAttribute("open"), null, "Movement settings can be collapsed.");
+  await movementDetails.locator("summary").click();
   const minimum = vibration.locator('input[data-setting="minimum"]');
   const maximum = vibration.locator('input[data-setting="maximum"]');
   await minimum.press("End");

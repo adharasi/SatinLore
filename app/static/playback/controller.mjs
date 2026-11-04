@@ -1,4 +1,4 @@
-import {ReadingFeel} from "../reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel} from "../reader/calibration.mjs";
 // Continuous reading playback for the synchronous simulator only.
 // A real asynchronous transport needs a separately qualified controller/adapter.
 export const COMMAND_SECONDS = 2;
@@ -46,6 +46,7 @@ export class PlaybackController {
     this.heartbeatMs = heartbeatMs;
     this.feel = new ReadingFeel(); this.manualZeros = new Set();
     this.levels = [];
+    this.sceneProfiles = [];
     this.position = 0;
     this.ceiling = 5;
     this.strengthTenths = 10;
@@ -141,10 +142,11 @@ export class PlaybackController {
     return this._notify();
   }
 
-  setStory(levels) {
+  setStory(levels, profiles) {
     this.pause("Story changed. Press Start to continue.");
     if (!Array.isArray(levels)) throw new TypeError("Paragraph levels must be an array.");
     const checked = Array.from(levels,validLevel);
+    this.sceneProfiles = normalizeSceneProfiles(profiles, checked.length);
     this.levels = checked;
     this.manualZeros.clear();
     this.position = 0;
@@ -175,17 +177,19 @@ export class PlaybackController {
     return this._desiredChanged();
   }
 
-  updateLevels(levels) {
-    let checked;
+  updateLevels(levels, profiles) {
+    let checked, sceneProfiles;
     try {
       if (!Array.isArray(levels)) throw new TypeError("Paragraph levels must be an array.");
       if (levels.length !== this.levels.length) throw new RangeError("Use the current story's paragraph mapping.");
       // Array.from visits missing elements too, so a sparse array cannot bypass validation.
       checked = Array.from(levels, validLevel);
+      sceneProfiles = normalizeSceneProfiles(profiles, checked.length);
     } catch (error) {
       this.pause("Invalid paragraph mapping.");
       throw error;
     }
+    this.sceneProfiles = sceneProfiles;
     // Commit the complete mapping once. Background analysis must not reset the
     // reading position, session strength, ceiling or explicit playback state.
     this.levels = checked;
@@ -246,7 +250,7 @@ export class PlaybackController {
 
   _intent() {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),now:this.now()};
+      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],now:this.now()};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }

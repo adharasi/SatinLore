@@ -1,4 +1,4 @@
-import {ReadingFeel} from "../reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel} from "../reader/calibration.mjs";
 /** Experimental async contract for the deterministic lab only; not a qualified hardware adapter. */
 export const ASYNC_COMMAND_MS = 2000;
 const level = value => {
@@ -14,7 +14,7 @@ export class AsyncPlaybackController {
     Object.assign(this, { transport, now, setTimer, clearTimer, onChange, onEvent, connectTimeout, requestTimeout, inactivityMs, heartbeatMs });
     this.state = "DISCONNECTED"; this.connected = false; this.selected = null; this.visible = true; this.authorized = true;
     this.feel = new ReadingFeel(); this.manualZeros = new Set();
-    this.levels = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
+    this.levels = []; this.sceneProfiles = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
     this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose a simulated device explicitly.";
     this.requests = new Map(); this.stopTasks = new Map(); this.uncertain = new Set(); this.errorLatch = false;
     this.commandSettlements = new Map(); this.needsFreshStop = new Set();
@@ -31,7 +31,7 @@ export class AsyncPlaybackController {
   }
   intent() {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),now:this.now()};
+      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],now:this.now()};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }
@@ -205,12 +205,16 @@ export class AsyncPlaybackController {
     if (generation !== this.generation || this.disposed) return;
     this.state = this.errorLatch ? "ERROR_PAUSED" : "DISCONNECTED"; this.reason = reason; this.notify();
   }
-  setStory(values) {
-    let checked;
-    try { if (!Array.isArray(values) || values.length > 2000) throw new RangeError("Use at most 2000 section levels."); checked = Array.from(values, level); }
+  setStory(values, profiles) {
+    let checked, sceneProfiles;
+    try {
+      if (!Array.isArray(values) || values.length > 2000) throw new RangeError("Use at most 2000 section levels.");
+      checked = Array.from(values, level);
+      sceneProfiles = normalizeSceneProfiles(profiles, checked.length);
+    }
     catch (error) { void this.pause("Invalid mapping. Playback is paused."); throw error; }
     void this.pause("Story changed. Confirm a new Start.");
-    this.levels = checked; this.manualZeros.clear(); this.position = 0; this.strengthTenths = 10; return this.notify();
+    this.levels = checked; this.sceneProfiles = sceneProfiles; this.manualZeros.clear(); this.position = 0; this.strengthTenths = 10; return this.notify();
   }
   changed() {
     ++this.revision; this.startIntent = null;

@@ -33,18 +33,23 @@
 
   <aside id="library-panel" class="workspace-panel library-panel" aria-label="Your story library">
     <div class="panel-heading"><h2>Library</h2><button id="close-library" class="icon-button" aria-label="Close story library">×</button></div>
-    <button id="new-story" class="primary new-story-button"><span aria-hidden="true">+</span> New story</button>
-    <div class="library-filter">
-      <label class="visually-hidden" for="library-search">Search story titles</label><input id="library-search" type="search" placeholder="Search your stories" autocomplete="off" maxlength="120" aria-describedby="library-search-help"><span id="library-search-help" class="visually-hidden">Search only titles in this browser library.</span>
-      <div class="folder-heading"><label for="folder-filter">Folders</label><button id="create-folder" class="icon-button" aria-label="New folder" title="New folder">+</button></div>
-      <select id="folder-filter" aria-label="Show folder"><option value="all">All stories</option><option value="unfiled">Unfiled</option></select>
-      <details class="folder-tools"><summary>Manage folder</summary><div class="folder-tool-actions"><button id="rename-folder" disabled>Rename</button><button id="delete-folder" disabled>Remove folder</button></div></details>
-      <p id="folder-status" class="note" role="status" aria-live="polite"></p>
-      <div class="library-sort-row"><label for="library-sort">Sort</label><select id="library-sort"><option value="updated">Recently read</option><option value="title">Title A–Z</option><option value="progress">Reading progress</option></select></div>
+    <div class="library-scroll">
+      <div class="library-filter">
+        <label class="visually-hidden" for="library-search">Search story titles</label><input id="library-search" type="search" placeholder="Search your stories" autocomplete="off" maxlength="120" aria-describedby="library-search-help"><span id="library-search-help" class="visually-hidden">Search only titles in this browser library.</span>
+        <label for="folder-filter">Shelves</label>
+        <select id="folder-filter"><option value="all">All stories</option><option value="unfiled">Unfiled</option></select>
+        <details class="folder-tools"><summary>Manage shelf</summary><div class="folder-tool-actions"><button id="rename-folder" disabled>Rename</button><button id="delete-folder" disabled>Remove shelf</button></div></details>
+        <p id="folder-status" class="note" role="status" aria-live="polite"></p>
+        <div class="library-sort-row"><label for="library-sort">Sort</label><select id="library-sort"><option value="updated">Recently read</option><option value="title">Title A–Z</option><option value="progress">Reading progress</option></select></div>
+      </div>
+      <p id="library-status" class="note" role="status" aria-live="polite">Your stories will appear here.</p><p id="library-results" class="note" role="status" aria-live="polite"></p>
+      <div id="story-list" class="story-list" aria-label="Stories"></div>
     </div>
-    <p id="library-status" class="note" role="status" aria-live="polite">Your stories will appear here.</p><p id="library-results" class="note" role="status" aria-live="polite"></p>
-    <div id="story-list" class="story-list" aria-label="Stories"></div>
-    <p class="library-private-note"><span class="private-dot" aria-hidden="true"></span> Your library, on this browser.</p>
+    <div class="library-actions" role="group" aria-label="Add to your library">
+      <button id="new-story" class="primary new-story-button"><span aria-hidden="true">+</span> New Story</button>
+      <button id="create-folder" class="library-action">New Shelf</button>
+      <button id="library-import-file" class="library-action">Import file</button>
+    </div>
   </aside>
 
   <main id="main-content" class="reading-canvas" tabindex="-1">
@@ -71,80 +76,85 @@
 
   <aside id="settings-panel" class="workspace-panel settings-panel" aria-label="Reading settings" hidden>
     <div class="panel-heading"><h2>Reading controls</h2><button id="close-settings" class="icon-button" aria-label="Close reading settings">×</button></div>
-    <section class="sidebar-section simulator-section" aria-labelledby="simulator-preview-heading">
-      <div class="section-title-row"><h3 id="simulator-preview-heading">Toy preview</h3><span id="connection-badge" class="simulation-label">SIMULATED</span></div>
-      <div id="simulator-visual"></div>
-      <div id="setup-coach-mount"></div>
-      <button id="open-setup" class="setup-button">Choose a toy &amp; test the connection <span aria-hidden="true">→</span></button>
-      <button id="open-calibration" class="setup-button">Tune this toy <span aria-hidden="true">→</span></button>
-      <button id="control-playground" class="setup-button">Explore the controls <span aria-hidden="true">→</span></button>
-      <p class="note">Lush · Flexer · Nora · Domi · Velvo · Spinel · Dolce · Hush · Osci 3. Rehearse without hardware, or pair through Lovense Remote.</p>
-    </section>
-    <section class="sidebar-section feel-adjustments" aria-labelledby="feel-heading">
-      <h3 id="feel-heading">How it feels</h3>
-      <p id="available-features" class="note">Choose a toy to see its available movements.</p>
-      <label for="feel-channel">Movement</label><select id="feel-channel" aria-describedby="feel-channel-help"></select>
-      <p id="feel-channel-help" class="note">Changing movements pauses playback. Each live movement needs its own short test.</p>
-      <button id="enable-personal-range" class="quiet-control" hidden>Enable personal range for this movement</button>
-      <p id="personal-range-status" class="note" role="status"></p>
-      <details id="combination-controls" hidden><summary>Use movements together</summary><div id="combination-choices"></div><button id="apply-combined">Apply selected movements</button><p class="note">Test each movement first. Applying pauses output; Start still asks you to confirm. Use the movement menu to tune each one.</p></details>
-      <label for="feel-mode">Quiet passages</label><select id="feel-mode"><option value="story">Follow the story, including pauses</option><option value="continuous">Keep a background level</option></select>
-      <p id="feel-status" class="feel-status" role="status" aria-live="polite">Following the story</p>
-      <div class="feel-actions"><button id="feel-hold" disabled>Hold this level</button><button id="feel-easeoff" disabled>Ease off</button><button id="feel-follow" disabled>Follow story</button></div>
-      <label for="manual-level">Manual level <output id="manual-level-value">0</output></label><input id="manual-level" type="range" min="0" max="5" step="1" value="0" disabled><p class="note">While playing, move this slider to hold a level for the selected movement. Other active movements keep their own levels.</p>
-      <div id="beta-feedback-controls" hidden><p class="note">Optional beta feedback: mark a moment you would like us to review.</p><div class="feel-actions"><button id="mark-good" disabled>Good for me</button><button id="mark-uncomfortable" disabled>Uncomfortable</button></div><p id="beta-feedback-status" class="note" role="status"></p></div>
-      <details><summary>Tune this movement</summary>
-        <label for="feel-maximum">Movement maximum <output id="feel-maximum-value">5</output></label><input id="feel-maximum" type="range" min="0" max="20" step="1" value="5">
-        <label for="feel-minimum">Minimum <output id="feel-minimum-value">0</output></label><input id="feel-minimum" type="range" min="0" max="20" step="1" value="0">
-        <label for="feel-background">Background <output id="feel-background-value">1</output></label><input id="feel-background" type="range" min="0" max="20" step="1" value="1">
-        <label for="feel-preferred">Preferred level <output id="feel-preferred-value">3</output></label><input id="feel-preferred" type="range" min="0" max="20" step="1" value="3">
-        <label for="feel-recovery">Ease off level <output id="feel-recovery-value">0</output></label><input id="feel-recovery" type="range" min="0" max="20" step="1" value="0">
-        <label for="feel-rhythm">Variation</label><select id="feel-rhythm"><option value="steady">Steady</option><option value="gentle">Gentle variation</option><option value="dynamic">More variation</option></select>
-        <p class="note">Your maximum always applies. Stop, Pause and a maximum of zero always turn output off. These choices stay in this visit until you save a preset.</p>
-      </details>
-    </section>
-    <section id="preset-mount" class="sidebar-section preset-section" aria-label="Saved toy presets"></section>
-    <section class="sidebar-section story-import" aria-labelledby="import-link-heading">
-      <div class="section-title-row"><h3 id="import-link-heading">Import a story</h3><span class="sidebar-kicker">IMPORT</span></div>
-      <label class="visually-hidden" for="story-url">Story link</label><input id="story-url" type="url" maxlength="2048" placeholder="AO3 or another story link" autocomplete="off" spellcheck="false" aria-describedby="url-import-help">
-      <div class="import-button-row"><button id="import-url" class="primary">Import link</button><button id="upload-story-trigger">Upload a story</button></div>
-      <p id="url-import-help" class="note">Import public AO3 stories where available. For other sites, open the source and paste a permitted copy. Link imports fetch public text through SatinLore; files and pasted text stay on your device.</p><p id="url-source-help" class="note" hidden></p><a id="open-source-link" class="source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open story source ↗</a><button id="paste-source-trigger" class="quiet-control" hidden>Paste permitted text</button><p id="url-import-status" class="note" role="status" aria-live="polite"></p>
-    </section>
-    <section class="sidebar-section model-section" aria-labelledby="model-heading">
-      <div class="section-title-row"><h3 id="model-heading">Story model</h3><span class="model-badge">LOCAL</span></div>
-      <label class="visually-hidden" for="reading-model">Story model</label><select id="reading-model" aria-describedby="model-help"><option value="standard">SatinLore Standard · experimental</option><option value="custom" disabled>SatinLore Custom · coming later</option></select>
-      <p id="model-help" class="note">Standard analyses locally. You can test qualified movements separately or together on one toy. Custom is a future model for richer story interpretation and multiple toys.</p>
-    </section>
-    <div class="settings-tabs" role="tablist" aria-label="Settings sections"><button id="settings-reader-tab" role="tab" aria-selected="true" aria-controls="reader-settings" tabindex="0">Reader</button><button id="settings-story-tab" role="tab" aria-selected="false" aria-controls="story-settings" tabindex="-1">Story</button></div>
-    <section id="reader-settings" role="tabpanel" aria-labelledby="settings-reader-tab" tabindex="0">
-      <div class="settings-section">
-        <label for="reading-width">Reading width</label><select id="reading-width"><option value="comfortable">Comfortable</option><option value="wide" selected>Wide</option><option value="full">Full</option></select>
-        <label for="font-size">Text size</label><select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select>
-        <label for="reading-spacing">Line spacing</label><select id="reading-spacing"><option value="compact">Compact</option><option value="normal" selected>Normal</option><option value="relaxed">Relaxed</option></select>
-        <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow my reading position</label>
-        <p id="reader-preferences-note" class="note" role="status" aria-live="polite"></p>
-      </div>
-    </section>
-    <section id="story-settings" role="tabpanel" aria-labelledby="settings-story-tab" tabindex="0" hidden>
-      <dl class="story-statistics"><div><dt>Words</dt><dd id="story-word-count">—</dd></div><div><dt>Progress</dt><dd id="story-progress">—</dd></div></dl>
-      <div id="story-actions" class="story-actions" hidden><label for="story-folder">Folder</label><select id="story-folder"><option value="">Unfiled</option></select><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Rename</button><button id="delete-story" class="quiet-control">Delete story</button></div></div>
-      <details id="review-settings" class="review-settings">
-        <summary>Adjust story sections <span class="optional-tag">Optional</span></summary>
-        <div class="review-content"><p class="note">Keep the suggestions, or change a section to suit you.</p>
-          <div class="paragraph-controls"><p id="correction-position" class="small-label">Current section</p><p>Suggested <output id="suggested-level">0 / 20</output></p><p id="level-source" class="note">No section selected.</p><label for="level">Your correction <span class="numeric"><output id="levelValue">0</output> / 20</span></label><input id="level" type="range" min="0" max="20" value="0" disabled><button id="reset-level" disabled>Use suggestion</button><p class="note">After strength and maximum <output id="effective-level">0 / 20</output></p></div>
-          <div id="review-list" class="review-list" aria-label="Read sections and corrections"></div>
-          <button id="show-upcoming" class="quiet-button" disabled>Show upcoming sections</button><p class="note">Future passages stay hidden until you choose to reveal them.</p><button id="reanalyze" disabled>Analyse again</button><p class="note">Your corrections are kept.</p>
+    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button id="settings-reader-tab" role="tab" aria-selected="true" aria-controls="reader-settings" tabindex="0">Settings</button>
+      <button id="settings-story-tab" role="tab" aria-selected="false" aria-controls="story-settings" tabindex="-1">Advanced</button>
+    </div>
+    <div id="settings-scroll" class="settings-scroll">
+      <section id="reader-settings" role="tabpanel" aria-labelledby="settings-reader-tab" tabindex="0">
+        <section class="sidebar-section simulator-section" aria-labelledby="simulator-preview-heading">
+          <div class="section-title-row"><h3 id="simulator-preview-heading">Toy preview</h3><span id="connection-badge" class="simulation-label">SIMULATED</span></div>
+          <div id="simulator-visual"></div>
+          <div id="setup-coach-mount"></div>
+          <button id="open-setup" class="setup-button">Set up a toy <span aria-hidden="true">→</span></button>
+          <button id="open-calibration" class="setup-button">Calibrate <span aria-hidden="true">→</span></button>
+          <button id="control-playground" class="setup-button">Try a practice story <span aria-hidden="true">→</span></button>
+        </section>
+        <section class="sidebar-section feel-adjustments" aria-labelledby="feel-heading">
+          <h3 id="feel-heading">How it feels</h3>
+          <p id="available-features" class="note">Choose a toy to see its available movements.</p>
+          <label for="feel-channel">Movement</label><select id="feel-channel" aria-describedby="feel-channel-help"></select>
+          <p id="feel-channel-help" class="note">Changing movements pauses playback. Each live movement needs its own short test.</p>
+          <button id="enable-personal-range" class="quiet-control" hidden>Enable personal range for this movement</button>
+          <p id="personal-range-status" class="note" role="status"></p>
+          <label for="feel-mode">Quiet passages</label><select id="feel-mode"><option value="story">Follow the story, including pauses</option><option value="continuous">Keep a background level</option></select>
+          <p id="feel-status" class="feel-status" role="status" aria-live="polite">Following the story</p>
+          <div class="feel-actions"><button id="feel-hold" disabled>Hold this level</button><button id="feel-easeoff" disabled>Ease off</button><button id="feel-follow" disabled>Follow story</button></div>
+          <label for="manual-level">Manual level <output id="manual-level-value">0</output></label><input id="manual-level" type="range" min="0" max="5" step="1" value="0" disabled><p class="note">While playing, move this slider to hold a level for the selected movement. Other active movements keep their own levels.</p>
+          <div id="beta-feedback-controls" hidden><p class="note">Optional beta feedback: mark a moment you would like us to review.</p><div class="feel-actions"><button id="mark-good" disabled>Good for me</button><button id="mark-uncomfortable" disabled>Uncomfortable</button></div><p id="beta-feedback-status" class="note" role="status"></p></div>
+        </section>
+        <div class="settings-section"><h3>Reading layout</h3>
+          <label for="reading-width">Reading width</label><select id="reading-width"><option value="comfortable">Comfortable</option><option value="wide" selected>Wide</option><option value="full">Full</option></select>
+          <label for="font-size">Text size</label><select id="font-size"><option value="small">Small</option><option value="normal" selected>Normal</option><option value="large">Large</option></select>
+          <label for="reading-spacing">Line spacing</label><select id="reading-spacing"><option value="compact">Compact</option><option value="normal" selected>Normal</option><option value="relaxed">Relaxed</option></select>
+          <label class="check-label"><input id="follow-scroll" type="checkbox" checked> Follow my reading position</label>
+          <p id="reader-preferences-note" class="note" role="status" aria-live="polite"></p>
         </div>
-      </details>
-    </section>
+        <section class="sidebar-section story-import" aria-labelledby="import-link-heading">
+          <h3 id="import-link-heading">Import a story</h3>
+          <label class="visually-hidden" for="story-url">Story link</label><input id="story-url" type="url" maxlength="2048" placeholder="AO3 or another story link" autocomplete="off" spellcheck="false" aria-describedby="url-import-help">
+          <div class="import-button-row"><button id="import-url" class="primary">Import link</button><button id="upload-story-trigger">Upload a story</button></div>
+          <p id="url-import-help" class="note">Import public AO3 stories where available. For other sites, open the source and paste a permitted copy. Link imports fetch public text through SatinLore; files and pasted text stay on your device.</p><p id="url-source-help" class="note" hidden></p><a id="open-source-link" class="source-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open story source ↗</a><button id="paste-source-trigger" class="quiet-control" hidden>Paste permitted text</button><p id="url-import-status" class="note" role="status" aria-live="polite"></p>
+        </section>
+      </section>
+      <section id="story-settings" role="tabpanel" aria-labelledby="settings-story-tab" tabindex="0" hidden>
+        <h3>Current story</h3>
+        <dl class="story-statistics"><div><dt>Words</dt><dd id="story-word-count">—</dd></div><div><dt>Progress</dt><dd id="story-progress">—</dd></div></dl>
+        <div id="story-actions" class="story-actions" hidden><label for="story-folder">Shelf</label><select id="story-folder"><option value="">Unfiled</option></select><p id="library-save-status" class="note" role="status" aria-live="polite">Session only</p><div class="story-action-buttons"><button id="save-story" class="quiet-control">Save on this browser</button><button id="session-only" class="quiet-control">Session only</button><button id="rename-story" class="quiet-control">Rename</button><button id="delete-story" class="quiet-control">Delete story</button></div></div>
+        <details id="review-settings" class="review-settings">
+          <summary>Adjust story sections <span class="optional-tag">Optional</span></summary>
+          <div class="review-content"><p class="note">Keep the suggestions, or change a section to suit you.</p>
+            <div class="paragraph-controls"><p id="correction-position" class="small-label">Current section</p><p>Suggested <output id="suggested-level">0 / 20</output></p><p id="level-source" class="note">No section selected.</p><label for="level">Your correction <span class="numeric"><output id="levelValue">0</output> / 20</span></label><input id="level" type="range" min="0" max="20" value="0" disabled><button id="reset-level" disabled>Use suggestion</button><p class="note">After strength and maximum <output id="effective-level">0 / 20</output></p></div>
+            <div id="review-list" class="review-list" aria-label="Read sections and corrections"></div>
+            <button id="show-upcoming" class="quiet-button" disabled>Show upcoming sections</button><p class="note">Future passages stay hidden until you choose to reveal them.</p><button id="reanalyze" disabled>Analyse again</button><p class="note">Your corrections are kept.</p>
+          </div>
+        </details>
+        <section class="sidebar-section feel-adjustments" aria-labelledby="movement-tuning-heading">
+          <h3 id="movement-tuning-heading">Movement tuning</h3>
+          <details id="combination-controls" hidden><summary>Use movements together</summary><div id="combination-choices"></div><button id="apply-combined">Apply selected movements</button><p class="note">Test each movement first. Applying pauses output; Start still asks you to confirm. Use the movement menu to tune each one.</p></details>
+          <details><summary>Tune this movement</summary>
+            <label for="feel-maximum">Movement maximum <output id="feel-maximum-value">5</output></label><input id="feel-maximum" type="range" min="0" max="20" step="1" value="5">
+            <label for="feel-minimum">Minimum <output id="feel-minimum-value">0</output></label><input id="feel-minimum" type="range" min="0" max="20" step="1" value="0">
+            <label for="feel-background">Background <output id="feel-background-value">1</output></label><input id="feel-background" type="range" min="0" max="20" step="1" value="1">
+            <label for="feel-preferred">Preferred level <output id="feel-preferred-value">3</output></label><input id="feel-preferred" type="range" min="0" max="20" step="1" value="3">
+            <label for="feel-recovery">Ease off level <output id="feel-recovery-value">0</output></label><input id="feel-recovery" type="range" min="0" max="20" step="1" value="0">
+            <label for="feel-rhythm">Variation</label><select id="feel-rhythm"><option value="scene">Follow scene rhythm</option><option value="steady">Steady</option><option value="gentle">Gentle variation</option><option value="dynamic">More variation</option></select>
+            <p class="note">Your maximum always applies. Stop, Pause and a maximum of zero always turn output off. These choices stay in this visit until you save a preset.</p>
+          </details>
+        </section>
+        <section id="preset-mount" class="sidebar-section preset-section" aria-label="Saved toy presets"></section>
+      </section>
+    </div>
   </aside>
 
   <aside id="transport" class="transport" aria-label="Simulator playback controls">
-    <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong id="device-label">Lush simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line"><span id="output-label">Output</span> <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Requested intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
-    <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
-    <div class="strength-control"><span id="strength-label" class="control-caption">Strength</span><div class="strength-buttons" role="group" aria-labelledby="strength-label"><button id="strength-minus" class="icon-button" aria-label="Decrease session strength">−</button><output id="strength-value" aria-live="polite">1.0×</output><button id="strength-plus" class="icon-button" aria-label="Increase session strength">+</button><button id="strength-reset" class="reset-button">Reset</button></div></div>
-    <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
-    <div class="transport-navigation"><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div></div>
+    <div class="transport-layout">
+      <div class="transport-state"><div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong id="device-label">Lush simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div><div class="output-line"><span id="output-label">Output</span> <output id="output">0 / 20</output><span class="target-output-label"> · Target <output id="target-output">0 / 20</output></span></div><meter id="meter" min="0" max="20" value="0" aria-label="Requested intensity">0</meter><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
+      <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
+      <div class="strength-control"><span id="strength-label" class="control-caption">Strength</span><div class="strength-buttons" role="group" aria-labelledby="strength-label"><button id="strength-minus" class="icon-button" aria-label="Decrease session strength">−</button><output id="strength-value" aria-live="polite">1.0×</output><button id="strength-plus" class="icon-button" aria-label="Increase session strength">+</button><button id="strength-reset" class="reset-button">Reset</button></div></div>
+      <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">5</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="5" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
+      <div class="transport-navigation"><div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div></div>
+    </div>
   </aside>
 
   <dialog id="app-settings-dialog" class="app-settings-dialog" aria-labelledby="app-settings-heading">
@@ -152,7 +162,7 @@
     <section class="app-settings-section"><h3>Appearance</h3><label for="reading-appearance">Colour theme</label><select id="reading-appearance"><option value="system">Use device setting</option><option value="light">Satin Editorial · light</option><option value="dark">Midnight Ink · dark</option></select><p id="appearance-note" class="note" role="status" aria-live="polite"></p></section>
     <section class="app-settings-section"><h3>Account &amp; storage</h3><p>Your email sign-in protects your private account. Toy presets can be saved to your account; story text stays on this browser.</p><div id="account-settings-mount" class="account-data-controls"></div><button id="open-account-welcome" class="quiet-control">Open account setup</button></section>
     <div class="library-footer">
-      <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit, in Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
+      <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit under Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
       <details class="about-preview"><summary>About SatinLore</summary><p class="note">Try nine toy simulators or connect through Lovense Remote. Physical connections are a limited beta and still need model-by-model testing.</p><a href="/device-check" target="_blank" rel="noopener">Local device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
       <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Support <span aria-hidden="true">↗</span></a></nav>
       <button id="delete-all" class="quiet-button" disabled>Delete all stories</button>

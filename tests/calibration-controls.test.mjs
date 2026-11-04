@@ -110,3 +110,43 @@ test("unknown asynchronous output causes Ease off to request Stop instead of gue
   await clock.advance(1200);assert.equal(c.snapshot().running,false);assert.ok(transport.requests.some(frame=>frame.kind==="stop"));
   assert.equal(transport.requests.filter(frame=>frame.kind==="command").length,1);c.destroy();
 });
+
+test("scene rhythms apply within the user's gain, strength, maximum and quiet choices", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  const dynamic = {rhythm: "dynamic", quiet: false};
+  assert.equal(feel.desired({base: 5, scene: dynamic, ceiling: 2, now: 0}), 2);
+  assert.equal(feel.desired({base: 4, scene: dynamic, strength: 0.5, now: 6000}), 1);
+  feel.configure({rhythm: "steady", mode: "continuous", minimum: 1, background: 2, gain: 0.5});
+  assert.equal(feel.desired({base: 4, scene: dynamic, now: 6000}), 2);
+  assert.equal(feel.desired({base: 0, scene: {rhythm: "steady", quiet: true}}), 0);
+  assert.equal(feel.desired({base: 0, scene: {rhythm: "steady", quiet: false}}), 2);
+  assert.equal(feel.desired({base: 4, scene: dynamic, manualZero: true}), 0);
+});
+
+test("scene profiles follow the current paragraph and a malformed replacement pauses", () => {
+  const {controller, clock} = synchronous();
+  const profiles = [{rhythm: "dynamic", quiet: false}, {rhythm: "steady", quiet: true}];
+  controller.connect();
+  controller.setStory([4, 0], profiles);
+  controller.setFeel({rhythm: "scene", mode: "continuous", background: 2});
+  assert.equal(controller.snapshot().running, false);
+  controller.start();
+  clock.advance(6000);
+  assert.equal(controller.snapshot().target, 1);
+  controller.setPosition(1);
+  assert.equal(controller.snapshot().target, 0);
+  assert.throws(() => controller.updateLevels([4, 0], [{rhythm: "unknown", quiet: false}]), RangeError);
+  assert.equal(controller.snapshot().running, false);
+});
+
+test("asynchronous playback shares scene quiet and pattern selection with the simulator", () => {
+  const clock = new SimulationClock();
+  const transport = new ScenarioTransport({clock});
+  const controller = new AsyncPlaybackController({transport, now: () => 6000});
+  controller.setStory([4, 0], [{rhythm: "dynamic", quiet: false}, {rhythm: "steady", quiet: true}]);
+  controller.setFeel({rhythm: "scene", mode: "continuous", background: 2});
+  assert.equal(controller.desired(), 1);
+  controller.setPosition(1);
+  assert.equal(controller.desired(), 0);
+  assert.equal(controller.snapshot().running, false);
+});

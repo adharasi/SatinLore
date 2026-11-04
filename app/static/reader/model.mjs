@@ -1,13 +1,23 @@
 import {splitText} from "./import.mjs";
-import {scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
+import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "rules-v1";
+export const ANALYSIS_VERSION = "scene-rules-v1";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
   typeof score.reason === "string" && score.reason.length <= 200;
+
+function applySceneSuggestions(paragraphs) {
+  // A correction controls playback at its paragraph without rewriting the analysis.
+  const scenes = groupScenes(paragraphs.map(paragraph => ({...paragraph, override: null})));
+  if (scenes.length !== paragraphs.length || !scenes.every(validScore)) throw new Error("Invalid scene analysis.");
+  for (let index = 0; index < scenes.length; index++) {
+    const {band, level, reason, rhythm, quiet, sceneId, advisory} = scenes[index];
+    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, advisory});
+  }
+}
 
 // The model is memory-only. StoryStore persists an explicit, separate allowlist.
 export class ReaderModel {
@@ -33,6 +43,7 @@ export class ReaderModel {
       return {id: `${id}-p${index + 1}`, text: value, suggestedLevel: score.level,
         band: score.band, reason: score.reason, override: null, analysed: !deferAnalysis};
     });
+    if (!deferAnalysis) applySceneSuggestions(paragraphs);
     // Validate first: failed replacement must leave the previous model intact.
     ++this.analysisGeneration;
     this.documentId = id;
@@ -53,6 +64,10 @@ export class ReaderModel {
       paragraph.band = 0;
       paragraph.reason = reason;
       paragraph.analysed = false;
+      paragraph.rhythm = "steady";
+      paragraph.quiet = false;
+      paragraph.sceneId = null;
+      paragraph.advisory = null;
     }
   }
 
@@ -97,6 +112,7 @@ export class ReaderModel {
         if (end < this.paragraphs.length) await yieldTask();
       }
       if (cancelled()) return false;
+      applySceneSuggestions(this.paragraphs);
       this.analysisStatus = "ready";
       onProgress(this);
       return current() && this.analysisReady;
@@ -131,6 +147,11 @@ export class ReaderModel {
   }
 
   resetOverride(index) { this.paragraph(index).override = null; }
+
+  effectiveProfiles() {
+    if (!this.analysisReady) return undefined;
+    return this.paragraphs.map(({rhythm, quiet}) => ({rhythm, quiet}));
+  }
 
   effectiveLevels() {
     if (!this.analysisReady) return this.paragraphs.map(() => 0);

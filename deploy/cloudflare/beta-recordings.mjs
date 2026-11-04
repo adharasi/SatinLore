@@ -10,7 +10,7 @@ const OWNER = /^[a-f0-9]{64}$/;
 const MODES = ["simulator", "live"];
 const STEPS = ["account", "choose", "connect", "features", "calibration", "playground", "practice", "story", "complete", "presets"];
 const CONTROLS = ["minimum", "background", "preferred", "maximum", "recovery", "gain", "rhythm", "continuity", "strength", "action", "mode", "start", "pause", "stop", "hold", "easeoff", "follow", "test"];
-const VALUES = ["story", "continuous", "steady", "gentle", "dynamic", "off", "on", "simulator", "live", ...BETA_CHANNELS];
+const VALUES = ["story", "continuous", "steady", "gentle", "dynamic", "scene", "off", "on", "simulator", "live", ...BETA_CHANNELS];
 const STATES = ["paused", "playing", "testing", "stopped", "connected", "disconnected", "error"];
 const encoder = new TextEncoder();
 

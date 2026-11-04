@@ -1,12 +1,22 @@
 // User-selected control preferences only. No story text, identity, transport token
 // or playback arming is part of this schema. Persistence is a separate explicit action.
 export const CALIBRATION_VERSION = 1;
-export const RHYTHMS = Object.freeze(["steady", "gentle", "dynamic"]);
+export const RHYTHMS = Object.freeze(["steady", "gentle", "dynamic", "scene"]);
 export const DEFAULT_CHANNEL_CALIBRATION = Object.freeze({
   minimum: 0, background: 1, preferred: 3, maximum: 5, recovery: 0, gain: 1, rhythm: "steady",
 });
 const fields = Object.keys(DEFAULT_CHANNEL_CALIBRATION);
 const whole = value => Number.isInteger(value) && value >= 0 && value <= 20;
+export function normalizeSceneProfiles(profiles, length) {
+  if (profiles === undefined) return [];
+  if (!Array.isArray(profiles) || profiles.length !== length) throw new RangeError("Use the current paragraph patterns.");
+  return Array.from(profiles, profile => {
+    if (!profile || !["steady", "gentle", "dynamic"].includes(profile.rhythm) ||
+        typeof profile.quiet !== "boolean") throw new RangeError("Use a supported paragraph pattern.");
+    return {rhythm: profile.rhythm, quiet: profile.quiet};
+  });
+}
+
 const gain = value => Number.isFinite(value) && value >= 0 && value <= 2 && Math.abs(value * 10 - Math.round(value * 10)) < 1e-9;
 
 export function normalizeChannelCalibration(value) {
@@ -28,8 +38,8 @@ export function clampCalibration(value, maximum = 20) {
 
 /** Shared output policy. All callers must still enforce their armed/visible/connection state. */
 export class ReadingFeel {
-  constructor() {
-    this.settings = {mode: "story", minimum: 0, background: 1, preferred: 3, maximum:20, recovery: 0, gain: 1, rhythm: "steady"};
+  constructor({rhythm = "steady"} = {}) {
+    this.settings = {mode: "story", minimum: 0, background: 1, preferred: 3, maximum:20, recovery: 0, gain: 1, rhythm};
     this.reset();
   }
   snapshot() { return {...this.settings, playbackMode: this.playbackMode, heldLevel: this.heldLevel,returningToStory:this.ramping}; }
@@ -48,16 +58,19 @@ export class ReadingFeel {
   get ramping(){return this.followLevel!==null;}
   advanceFollow(from,ceiling=20){if(this.followLevel!==null && whole(from)){this.followLevel=Math.min(20,from+2);if(this.followLevel>=Math.min(ceiling,this.settings.maximum))this.followLevel=null;}}
   capReturn(value){return this.followLevel===null?value:Math.min(value,this.followLevel);}
-  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, now = 0} = {}) {
+  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, now = 0} = {}) {
     // Deliberate zero and zero gain/strength always outrank any preferred floor.
-    if (!whole(base) || !whole(ceiling) || !Number.isFinite(strength) || strength > 2 || manualZero || strength <= 0 || this.settings.gain === 0 || ceiling === 0) return 0;
+    if (!whole(base) || !whole(ceiling) || !Number.isFinite(strength) || strength > 2 || manualZero || (base === 0 && scene?.quiet) || strength <= 0 || this.settings.gain === 0 || ceiling === 0) return 0;
     ceiling=Math.min(ceiling,this.settings.maximum);
     if (this.playbackMode !== "story") return Math.min(ceiling, this.heldLevel ?? 0);
     const {mode, minimum, background, rhythm} = this.settings;
     if (base === 0) return this.capReturn(mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0);
     const phase = Math.floor(Math.max(0, now - this.startedAt) / 2000) % 4;
-    const modulation = rhythm === "gentle" ? [1, 1, .8, .8][phase] : rhythm === "dynamic" ? [1, .6, 1, .35][phase] : 1;
-    const target = Math.floor(base * strength * this.settings.gain * modulation);
+    const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
+    const modulation = variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
+    const scaled = base * strength * this.settings.gain;
+    // A softer beat must not round an otherwise active scene down to a stop.
+    const target = Math.max(rhythm === "scene" && scaled >= 1 ? 1 : 0, Math.floor(scaled * modulation));
     return this.capReturn(Math.min(ceiling, Math.max(minimum, target)));
   }
 }

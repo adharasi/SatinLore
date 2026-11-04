@@ -35,3 +35,68 @@ export function scoreParagraph(text) {
   const band = Math.min(4, contacts + context - 1);
   return {band, level: SUGGESTION_LEVELS[band], reason: "Experimental local cue match; review this suggestion."};
 }
+
+const SCENE_SEPARATOR = /^(?:[\s*#~_—–-]{3,}|(?:chapter|part|book|scene)\s+(?:\d+|[ivxlcdm]{1,8}|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[:.\-–—].*)?)$/u;
+const REST_BOUNDARY = /\b(?:fell asleep|went to sleep|(?:settled|lay) down to rest|(?:need(?:ed)?|take|took) (?:a |some )?(?:break|rest)|paus(?:e|ed) (?:for breath|to rest)|a (?:long|quiet) pause|slowed to a stop|quiet (?:interlude|break))\b/u;
+const TIME_BOUNDARY = /\b(?:(?:the )?(?:next|following) (?:day|morning|night)|(?:hours?|days?|weeks?|months?|years?) later|later that (?:evening|night))\b/u;
+const SENSITIVE_CUE = /\b(?:non[ -]consensual|coerc(?:e|ed|es|ing|ion)|forced|unwanted|underage|child(?:ren)?|rape|assault(?:ed)?)\b/u;
+const SOFT_PACE = /\b(?:slow(?:ly)?|unhurried|gentl(?:e|y)|gradual(?:ly)?|softly)\b/u;
+const VARIABLE_PACE = /\b(?:quick(?:ly)?|sudden(?:ly)?|urgent(?:ly)?|abrupt(?:ly)?|rapid(?:ly)?)\b/u;
+
+function sceneCandidate(paragraph) {
+  if (!paragraph || typeof paragraph.text !== "string" || !Number.isInteger(paragraph.band) ||
+      paragraph.band < 0 || paragraph.band >= SUGGESTION_LEVELS.length || SUGGESTION_LEVELS[paragraph.band] !== paragraph.suggestedLevel || typeof paragraph.reason !== "string") {
+    throw new TypeError("Use analysed paragraph results for scene suggestions.");
+  }
+  const value = paragraph.text.toLowerCase().replace(/’/g, "'").trim();
+  const heading = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim());
+  const rest = heading || REST_BOUNDARY.test(value) || TIME_BOUNDARY.test(value);
+  const uncertain = UNCERTAIN_CONTEXT.test(value) || META_CONTEXT.test(value);
+  const sensitive = SENSITIVE_CUE.test(value);
+  const quiet = rest || uncertain || sensitive;
+  const band = quiet ? 0 : paragraph.band;
+  const level = SUGGESTION_LEVELS[band];
+  const hasContact = CONTACT_CUES.some(cue => cue.test(value));
+  const hasContext = CONTEXT_CUES.some(cue => cue.test(value));
+  const advisory = sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
+    uncertain && (hasContact || hasContext) ? "The wording is ambiguous. Review this zero suggestion if needed." :
+      band === 4 ? "Review this stronger local suggestion if needed." : null;
+  const rhythm = level >= 3 && (band === 4 || VARIABLE_PACE.test(value)) ? "dynamic" :
+    level >= 2 && SOFT_PACE.test(value) ? "gentle" : "steady";
+  const short = value.length > 0 && value.length <= 180 && value.split(/\s+/u).length <= 24;
+  return {
+    anchor: level > 0 && paragraph.override !== 0,
+    connective: level === 0 && !quiet && !hasContact && short && paragraph.override == null,
+    result: {band, level, reason: rest ? "Rest or scene boundary; left at zero." :
+      sensitive ? "Sensitive wording; left at zero for review." :
+        uncertain ? "Context is uncertain; left at zero." : paragraph.reason,
+      sceneId: null, rhythm, quiet, advisory},
+  };
+}
+
+// Group the complete raw cue pass, never an already grouped result. The scene
+// information is advisory metadata. The reader still owns explicit overrides,
+// quiet enforcement, device arming and ceilings.
+export function groupScenes(paragraphs) {
+  if (!Array.isArray(paragraphs)) throw new TypeError("Use an array of analysed paragraphs.");
+  const candidates = paragraphs.map(sceneCandidate);
+  let nextScene = 0;
+  let activeScene = null;
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
+    const before = candidates[index - 1], after = candidates[index + 1];
+    const carriesThrough = candidate.connective && before?.anchor && after?.anchor;
+    if (!candidate.anchor && !carriesThrough) {
+      activeScene = null;
+      continue;
+    }
+    if (activeScene === null) activeScene = ++nextScene;
+    if (carriesThrough) {
+      const level = Math.min(before.result.level, after.result.level, 2);
+      Object.assign(candidate.result, {level, band: SUGGESTION_LEVELS.indexOf(level),
+        reason: "Brief context within a matching scene; kept a low level.", rhythm: level > 1 ? "gentle" : "steady"});
+    }
+    candidate.result.sceneId = activeScene;
+  }
+  return candidates.map(candidate => candidate.result);
+}

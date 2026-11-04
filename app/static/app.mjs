@@ -36,6 +36,7 @@ let libraryQuery = "";
 let librarySort = "updated";
 let backupBusy = false;
 let settingsTab = "reader";
+let openedFirstStory = false;
 let tabSignature = "";
 let activeId = null;
 let paragraphNodes = [];
@@ -96,7 +97,7 @@ function syncManualZeros(story) {
   controller.setManualZeros(story.model.paragraphs.flatMap((p,index) => !p.analysed || p.override === 0 &&
     (!story.controlled || story.explicitCorrections.has(index)) ? [index] : []));
 }
-function syncReaderMapping(story) { controller.updateLevels(story.model.effectiveLevels()); syncManualZeros(story); }
+function syncReaderMapping(story) { controller.updateLevels(story.model.effectiveLevels(), story.controlled ? undefined : story.model.effectiveProfiles()); syncManualZeros(story); }
 function selectedSettings(state = latest,channel = feelEditingChannel || state.channel) {
   const stored = state.calibration?.channels?.[channel] || {minimum:0,background:1,preferred:3,maximum:5,recovery:0,gain:1,rhythm:"steady"};
   const source=state.feel?.channels?.[channel] || (channel===state.channel ? state.feel : {}) || {};
@@ -215,7 +216,7 @@ async function changeFolder(action, name) {
   if (libraryLoading || libraryMutation) return;
   const folder = folders.find(value => value.id === folderFilter);
   if (action !== "create" && !folder) return;
-  pause("Updating your folders.");
+  pause("Updating your shelves.");
   libraryMutation = true;
   stories.forEach(story => { clearTimeout(story.saveTimer); story.saveTimer = null; });
   display(); renderLibrary();
@@ -236,8 +237,8 @@ async function changeFolder(action, name) {
       }
       folderFilter = "unfiled";
     }
-    text("folder-status", action === "delete" ? "Folder removed. Its stories are in Unfiled." : "Folder updated on this browser.");
-  } catch (error) { text("folder-status", error.message || "Could not update this folder. Your stories are unchanged."); }
+    text("folder-status", action === "delete" ? "Shelf removed. Its stories are in Unfiled." : "Shelf saved on this browser.");
+  } catch (error) { text("folder-status", error.message || "Could not update this shelf. Your stories are unchanged."); }
   finally {
     libraryMutation = false; display(); renderLibrary();
     // A pending autosave cleared above must not lose the user's latest changes.
@@ -289,8 +290,9 @@ function updateCurrentCorrection(story) {
   $("level").setAttribute("aria-valuetext", `${base} out of 20`);
   $("level").disabled = !paragraph || libraryMutation || story?.deleting;
   $("reset-level").disabled = !paragraph || paragraph.override === null || libraryMutation || story?.deleting;
-  text("level-source", !paragraph ? "No section selected." : paragraph.override === null ?
-    "Using the experimental suggestion." : "Using your correction.");
+  const rhythm = {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
+  text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
+    paragraph.advisory || (paragraph.quiet ? "Quiet section" : paragraph.sceneId && rhythm ? `Scene ${paragraph.sceneId} · ${rhythm}` : "Using the local suggestion."));
   text("effective-level", `${latest.target ?? 0} / 20`);
   text("correction-position", paragraph ? `Current section ${latest.position + 1} of ${story.model.paragraphs.length}` : "No section selected");
   const nodes = reviewNodes.get(latest.position);
@@ -303,7 +305,7 @@ function display(state = latest) {
   accountWorkspace?.update();
   recordControlSnapshot(state);
   const story = currentStory();
-  for (const id of ["new-story", "empty-new-story"]) $(id).disabled = libraryLoading || libraryMutation;
+  for (const id of ["new-story", "empty-new-story", "library-import-file", "upload-story-trigger"]) $(id).disabled = libraryLoading || libraryMutation;
   if ($("story-actions")) $("story-actions").hidden = !story;
   if (story && !synchronizing && story.position !== state.position) {
     story.position = state.position;
@@ -312,10 +314,10 @@ function display(state = latest) {
     renderLibrary();
   }
   text("status", ({DISCONNECTED: "Disconnected", READY_PAUSED: "Connected · paused",
-    PLAYING: state.mode === "lovense" ? "Sending commands" : "Playing simulation", CONNECTING: "Connecting…", STOPPING: "Stopping…", ERROR_PAUSED: "Error · paused"})[state.state] || "Paused");
+    PLAYING: state.mode === "lovense" ? "Toy playback" : "Simulator running", CONNECTING: "Connecting…", STOPPING: "Stopping…", ERROR_PAUSED: "Error · paused"})[state.state] || "Paused");
   text("device-label", state.deviceLabel ?? "Lush simulator");
   text("connection-badge", state.mode === "lovense" ? "LIVE · BETA" : "SIMULATED");
-  text("output-label", state.mode === "lovense" ? "Requested" : "Output");
+  text("output-label", state.mode === "lovense" ? "Level sent to toy" : "Simulator level");
   $("transport").setAttribute("aria-label", state.mode === "lovense" ? "Toy playback controls" : "Simulator playback controls");
   text("output", state.outputKnown === false ? "Unconfirmed" : `${state.output ?? 0} / 20`);
   text("target-output", `${state.target ?? 0} / 20`);
@@ -349,7 +351,7 @@ function display(state = latest) {
   else if (importing) readiness = "Opening your text. Start will be available after analysis and connection.";
   else if (libraryMutation || story?.deleting) readiness = "Finishing the library change. Playback stays paused.";
   else if (!story) readiness = "Add a story, or choose Set up a toy for a guided test read.";
-  else if (!story.model.analysisReady) readiness = story.model.analysisStatus === "error" ? "Analysis needs attention. Open Story settings and choose Analyse again." : "Preparing story suggestions. You can keep reading while you wait.";
+  else if (!story.model.analysisReady) readiness = story.model.analysisStatus === "error" ? "Analysis needs attention. Open Advanced in Reading controls and choose Analyse again." : "Preparing story suggestions. You can keep reading while you wait.";
   else if (!state.connected) readiness = "Connect the simulator or set up a toy, then choose Start.";
   else if (!navigator.locks) readiness = "Start needs browser Web Locks. Use a current browser over HTTPS or localhost; reading still works here.";
   else if (state.mode === "lovense" && state.canStart === false) readiness = state.reason || "Complete Toy setup and confirm the short connection test before Start.";
@@ -376,7 +378,7 @@ function display(state = latest) {
   text("story-progress", story ? `${metadata.progressPercent}% · ${metadata.positionLabel}` : "");
   const analysis = story?.model.analysisStatus ?? "pending";
   $("analysis-status").dataset.state = analysis;
-  text("analysis-status", !story ? "" : analysis === "ready" ? "Suggestions ready · review is optional" :
+  text("analysis-status", !story ? "" : analysis === "ready" ? "Scene patterns ready · review is optional" :
     analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Analysing quietly on this page… You can read now.");
   const saved = saveState(story);
   $("save-status").dataset.state = saved.state;
@@ -405,7 +407,7 @@ function controlRecovery(state) {
   text("start-help", "The controls could not update. Stop was requested. Check your toy and reconnect before continuing.");
   show("The controls could not update. Reconnect; your story remains readable.");
 }
-const controller = new ReaderDeviceController({document, window, navigator,
+const controller = new ReaderDeviceController({document, window, navigator, storyRhythms: true,
   authorize: async () => !hostedMode || Boolean(await hostedAccess?.check({fresh: true}) && canStartHere()),
   onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
   onInterfaceError: controlRecovery, onChange: state => {
@@ -504,7 +506,7 @@ function updateReviewRow(story, index, nodes) {
   nodes.output.textContent = `${base} / 20`;
   nodes.input.setAttribute("aria-valuetext", `${base} out of 20`);
   nodes.source.textContent = paragraph.override === null ? "Using suggestion" : "Your correction";
-  nodes.suggestion.textContent = `Experimental suggestion: ${paragraph.suggestedLevel} / 20`;
+  nodes.suggestion.textContent = `Suggested level: ${paragraph.suggestedLevel} / 20`;
   nodes.reset.disabled = paragraph.override === null;
 }
 function renderReview() {
@@ -603,13 +605,15 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   if (previous && previous !== story) previous.model.cancelAnalysis();
   ++selectionEpoch;
   activeId = id;
+  if (!openedFirstStory && !isNarrow() && !focusArrangement) setPanel("settings", true, {restore: false});
+  openedFirstStory = true;
   revealUpcoming = false;
   $("review-settings").open = false;
   selectSettingsTab("reader");
   renderStory();
   synchronizing = true;
   const position = story.position;
-  controller.setStory(story.model.effectiveLevels());
+  controller.setStory(story.model.effectiveLevels(), story.controlled ? undefined : story.model.effectiveProfiles());
   syncManualZeros(story);
   controller.setPosition(position);
   synchronizing = false;
@@ -782,7 +786,7 @@ async function openDraftText() {
 function showImportPanel() {
   if (anyDialog()) closeDialogs();
   setPanel("settings", true, {restore: false}); selectSettingsTab("reader");
-  $("story-url")?.focus({preventScroll: true});
+  $("story-url")?.focus();
 }
 
 async function importStoryUrl() {
@@ -896,7 +900,9 @@ function openNewStory() {
   cancelImport(); text("import-status", ""); openDialog("new-story-dialog"); $("story-title-input").focus();
 }
 function selectSettingsTab(name, {focus = false} = {}) {
-  settingsTab = name === "story" ? "story" : "reader";
+  const nextTab = name === "story" ? "story" : "reader";
+  if (nextTab !== settingsTab) $("settings-scroll").scrollTop = 0;
+  settingsTab = nextTab;
   for (const value of ["reader", "story"]) {
     const tab = $(`settings-${value}-tab`), panel = $(`${value}-settings`);
     if (tab) { tab.setAttribute("aria-selected", String(settingsTab === value)); tab.tabIndex = settingsTab === value ? 0 : -1; }
@@ -943,7 +949,11 @@ $("empty-new-story").addEventListener("click", openNewStory);
 $("open-draft")?.addEventListener("click", () => void openDraftText());
 $("draft-story")?.addEventListener("keydown", event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void openDraftText(); } });
 $("empty-link-import")?.addEventListener("click", showImportPanel);
-$("upload-story-trigger")?.addEventListener("click", () => { openNewStory(); $("file").click(); });
+for (const id of ["library-import-file", "upload-story-trigger"]) $(id)?.addEventListener("click", () => {
+  if (libraryMutation || libraryLoading) return;
+  openNewStory();
+  $("file").click();
+});
 $("paste-source-trigger")?.addEventListener("click", () => { openDraft(); if (isNarrow()) setPanel("settings", false, {restore: false}); $("draft-story").focus(); });
 $("import-url")?.addEventListener("click", () => void importStoryUrl());
 $("story-url")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void importStoryUrl(); } });
@@ -951,7 +961,7 @@ $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings
 for (const id of ["close-app-settings", "app-settings-close"]) $(id)?.addEventListener("click", () => closeDialog("app-settings-dialog"));
 for (const id of ["open-setup", "empty-setup", "choose-toy"]) $(id)?.addEventListener("click", () => {recordAllowedEvent({type:"step",step:"choose"});setupFlow?.open();});
 $("open-calibration")?.addEventListener("click",()=>{recordAllowedEvent({type:"step",step:"calibration"});setupFlow?.openCalibration();});
-$("open-account-welcome")?.addEventListener("click",()=>{closeDialog("app-settings-dialog");if(accountClient?.snapshot().registered){setPanel("settings",true);$("account-preset-picker")?.focus();}else accountWorkspace?.focus();});
+$("open-account-welcome")?.addEventListener("click",()=>{closeDialog("app-settings-dialog");if(accountClient?.snapshot().registered){setPanel("settings",true);selectSettingsTab("story");$("account-preset-picker")?.focus();}else accountWorkspace?.focus();});
 $("feel-channel")?.addEventListener("change",async()=>{
   const channel=$("feel-channel").value, mode=latest.feel?.mode || "story";
   feelEditingChannel=channel;
@@ -973,7 +983,7 @@ for(const key of ["minimum","background","preferred","recovery","maximum"])$("fe
 });
 $("feel-rhythm")?.addEventListener("change",()=>{try{const settings={...selectedSettings(),rhythm:$("feel-rhythm").value};controller.setChannelFeel(feelEditingChannel || latest.channel,settings);recordAllowedEvent({type:"control",control:"rhythm",channel:feelEditingChannel || latest.channel,value:settings.rhythm});}catch(error){show(error.message);} });
 $("enable-personal-range")?.addEventListener("click",async()=>{try{pause("Paused while you choose this movement's personal range.");await controller.enablePersonalRange({channel:feelEditingChannel || latest.channel});display(controller.snapshot());}catch(error){show(error.message||"Complete the gentle movement and Stop check first.");}});
-$("manual-level")?.addEventListener("input",()=>{try{const channel=feelEditingChannel || latest.channel,value=Number($("manual-level").value);if((latest.activeChannels || []).length>1){const levels={...latest.channelOutputs,[channel]:value};controller.holdChannels(levels);}else controller.hold(value);recordAllowedEvent({type:"control",control:"hold",channel,value});display(controller.snapshot());}catch(error){show(error.message||"Check the current output before changing it.");}});
+$("manual-level")?.addEventListener("input",()=>{try{const channel=feelEditingChannel || latest.channel,value=Number($("manual-level").value);if((latest.activeChannels || []).length>1){const levels={...latest.channelOutputs,[channel]:value};controller.holdChannels(levels);}else controller.hold(value);recordAllowedEvent({type:"control",control:"hold",channel,value});display(controller.snapshot());}catch(error){show(error.message||"Check the current level before changing it.");}});
 for(const[id,value]of[["mark-good",5],["mark-uncomfortable",1]])$(id)?.addEventListener("click",()=>{
   if(betaRecorder?.snapshot().recording!==true)return;
   recordAllowedEvent({type:"rating",question:"comfort",value,channel:feelEditingChannel || latest.channel});
@@ -986,9 +996,9 @@ for(const[id,action]of[["feel-hold","hold"],["feel-easeoff","easeoff"],["feel-fo
   recordAllowedEvent({type:"control",control:action,channel:latest.channel});display(controller.snapshot());
 });
 $("folder-filter")?.addEventListener("change", event => { folderFilter = event.target.value; renderLibrary(); });
-$("create-folder")?.addEventListener("click", () => { pause("Choose a folder name."); const name = prompt("Folder name"); if (name?.trim()) void changeFolder("create", name.trim()); });
-$("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Rename this folder."); const name = prompt("Folder name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
-$("delete-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Choose whether to remove this folder."); if (confirm(`Remove the folder “${folder.name}”? Its stories will move to Unfiled.`)) void changeFolder("delete"); });
+$("create-folder")?.addEventListener("click", () => { pause("Choose a shelf name."); const name = prompt("Shelf name"); if (name?.trim()) void changeFolder("create", name.trim()); });
+$("rename-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Rename this shelf."); const name = prompt("Shelf name", folder.name); if (name?.trim()) void changeFolder("rename", name.trim()); });
+$("delete-folder")?.addEventListener("click", () => { const folder = folders.find(value => value.id === folderFilter); if (!folder) return; pause("Choose whether to remove this shelf."); if (confirm(`Remove the shelf “${folder.name}”? Its stories will move to Unfiled.`)) void changeFolder("delete"); });
 $("story-folder")?.addEventListener("change", event => { const story = currentStory(); if (!story || libraryMutation || story.deleting) return; story.folderId = folders.some(folder => folder.id === event.target.value) ? event.target.value : null; markDirty(story); renderLibrary(); display(); });
 $("library-search")?.addEventListener("input", event => { libraryQuery = event.target.value; renderLibrary(); });
 $("library-sort")?.addEventListener("change", event => { librarySort = event.target.value; renderLibrary(); });
@@ -1162,7 +1172,13 @@ $("reading-spacing").addEventListener("change", () => {
   savePreferences({spacing: $("reading-spacing").value});
 });
 window.addEventListener("satinlore:appearance", () => reflow("Appearance changed. Confirm Start to continue."));
-window.addEventListener("resize", () => reflow("Reading layout changed. Confirm Start to continue."));
+window.addEventListener("resize", () => {
+  const library = $("library-panel");
+  if (isNarrow() && !library.hidden && !$("settings-panel").hidden) {
+    setPanel("library", false, {restore: library.contains?.(document.activeElement) === true});
+  }
+  reflow("Reading layout changed. Confirm Start to continue.");
+});
 window.addEventListener("scroll", () => {
   if (programmaticScrollTop !== null && Math.abs(scrollY - programmaticScrollTop) < 1) { programmaticScrollTop = null; return; }
   programmaticScrollTop = null; settlePosition();

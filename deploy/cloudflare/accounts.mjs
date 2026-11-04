@@ -17,7 +17,7 @@ const PRESET_ACTIONS = Object.freeze({
 });
 const CHANNEL_FIELDS = ["minimum", "background", "preferred", "maximum", "recovery", "gain", "rhythm"];
 const MODES = new Set(["story", "continuous"]);
-const RHYTHMS = new Set(["steady", "gentle", "dynamic"]);
+const RHYTHMS = new Set(["steady", "gentle", "dynamic", "scene"]);
 
 export class AccountError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }

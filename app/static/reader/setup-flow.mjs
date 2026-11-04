@@ -2,7 +2,7 @@ import {TOY_PROFILES, getToyProfile} from "../devices/toy-profiles.mjs";
 import {createCalibrationView} from "./calibration-view.mjs";
 import {CONTROLLED_BETA_STORIES} from "./beta-stories.mjs";
 
-// Software setup only. Device transport remains disconnected from the reader.
+// The application adapter owns device connection and safety checks.
 // Practice opens a session-only story through the application's normal loader;
 // it never starts playback or persists controls on the reader's behalf.
 export const PRACTICE_STORY = Object.freeze({
@@ -61,11 +61,11 @@ export function createSetupFlow({document = globalThis.document, window = global
   const header = make("div", {className: "setup-dialog-heading"});
   const headingBlock = make("div");
   const step = make("span", {id: "setup-step-label", className: "setup-step-label", value: "01 / Choose your toy"});
-  const heading = make("h2", {id: "setup-heading", value: "Your toy. Your rhythm."});
+  const heading = make("h2", {id: "setup-heading", value: "Set up your toy"});
   headingBlock.append(step, heading);
   const close = button("setup-close", "×", "icon-button"); close.setAttribute("aria-label", "Close setup");
   header.append(headingBlock, close);
-  const intro = make("p", {id: "setup-intro", value: "Connect one toy, or rehearse every step with its simulator."});
+  const intro = make("p", {id: "setup-intro", value: "Connect a toy through Lovense Remote or try the controls with a simulator."});
   const chooser = make("section", {id: "setup-choices", className: "setup-choices"});
   const model = make("select", {id: "setup-model"});
   for (const toy of SETUP_MODELS) model.append(option(toy.id, toy.label));
@@ -73,8 +73,8 @@ export function createSetupFlow({document = globalThis.document, window = global
   const modeGroup = make("div", {className: "setup-mode-options", attrs: {role: "group", "aria-label": "Connection type"}});
   const simMode = button("setup-mode-simulator", "Try a simulator", "setup-mode");
   const liveMode = button("setup-mode-lovense", "Connect my toy", "setup-mode");
-  simMode.append(make("span", {className: "setup-mode-note", value: "No hardware needed. Nothing moves outside this screen."}));
-  liveMode.append(make("span", {className: "setup-mode-note", value: "Pair in Lovense Remote, then connect here."}));
+  simMode.append(make("span", {className: "setup-mode-note", value: "Try the controls on this screen without a physical toy."}));
+  liveMode.append(make("span", {className: "setup-mode-note", value: "Use Lovense Remote on your phone and open this page on another screen."}));
   modeGroup.append(simMode, liveMode);
   chooser.append(field("Which toy?", model), modeGroup);
   const connection = make("section", {id: "setup-pairing", className: "setup-pairing"});
@@ -87,7 +87,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const selection = make("section", {id: "setup-selection", className: "setup-selection"});
   const device = make("select", {id: "setup-devices"});
   const discoveryNote = make("p", {id: "setup-discovery-note", className: "note"});
-  selection.append(field("Select the connected toy", device), discoveryNote);
+  selection.append(field("Choose the toy to use", device), discoveryNote);
   const testPanel = make("section", {id: "setup-test-panel", className: "setup-test-panel"});
   const channel = make("select", {id: "setup-channel"});
   const testLevel = make("input", {id: "setup-test-level", attrs: {type: "range", min: 1, max: 5, step: 1, value: 1}}); testLevel.value = "1";
@@ -96,7 +96,8 @@ export function createSetupFlow({document = globalThis.document, window = global
   const testButton = button("setup-test", "Test for 2 seconds", "primary");
   const confirmation = make("input", {id: "setup-response-checked", attrs: {type: "checkbox"}});
   const confirmationLabel = make("label", {className: "setup-confirmation", attrs: {for: "setup-response-checked"}});
-  confirmationLabel.append(confirmation, make("span", {value: "I checked the response and the output is stopped."}));
+  const confirmationText = make("span");
+  confirmationLabel.append(confirmation, confirmationText);
   const testNote = make("p", {id: "setup-test-note", className: "note"});
   const testMaximumNote = make("p", {id: "setup-test-maximum", className: "note setup-test-maximum"});
   const capabilityNote = make("p", {id: "setup-capability-note", className: "note setup-capability-note"});
@@ -160,6 +161,7 @@ export function createSetupFlow({document = globalThis.document, window = global
     return Array.isArray(value) ? value.map(item => typeof item === "string" ? item : item?.id).filter(name => Object.hasOwn(CHANNEL_LABELS, name)) : [];
   };
   const effectiveConnected = () => current.connected === true;
+  const testOutputStopped = () => current.output === 0 && current.outputKnown !== false;
   const needsReconnect = () => ["error", "disconnected", "expired"].includes(current.connectionState);
   const discovered = () => !needsReconnect() && onlineToys().length > 0;
   const testMaximum = () => Number.isInteger(current.ceiling) && current.ceiling >= 0 && current.ceiling <= 20 ? Math.min(5, current.ceiling) : 0;
@@ -214,8 +216,8 @@ export function createSetupFlow({document = globalThis.document, window = global
     device.replaceChildren(option("", "Choose one toy…"));
     for (const toy of onlineToys()) device.append(option(toy.id, String(toy.label || toy.model || "Connected toy").slice(0, 80)));
     device.value = onlineToys().some(toy => toy.id === previous) ? previous : "";
-    discoveryNote.textContent = mode === "simulator" ? "This is a simulated device. Select it exactly as you would select a connected toy." :
-      "Only this selected toy will receive commands. Your model choice is a guide; the detected device and its reported movements determine what is available.";
+    discoveryNote.textContent = mode === "simulator" ? "Select the simulator to practise a movement check." :
+      "Choose the toy you connected in Lovense Remote. The next step shows the movements available on that toy.";
   };
   function render() {
     chooser.hidden = phase !== "connect"; connection.hidden = phase !== "pair"; selection.hidden = phase !== "select";
@@ -232,43 +234,55 @@ export function createSetupFlow({document = globalThis.document, window = global
     if (maximum > 0 && Number(testLevel.value) > maximum) { testLevel.value = String(maximum); testReadout.textContent = String(maximum) + " / 20"; tested = false; confirmation.checked = false; }
     testButton.disabled = busy || maximum === 0 || !effectiveConnected() || !selected() || !channels().length;
     simFailure.disabled = busy || !effectiveConnected() || needsReconnect(); simError.disabled = busy || !effectiveConnected() || needsReconnect(); retry.disabled = busy;
-    primary.disabled = busy || (phase === "select" && !device.value) || (phase === "test" && (!tested || !confirmation.checked || !effectiveConnected() || !selected() || current.output > 0 || maximum === 0));
-    confirmation.disabled = busy || !tested || current.output > 0 || maximum === 0;
+    primary.disabled = busy || (phase === "select" && !device.value) || (phase === "test" &&
+      (!tested || !confirmation.checked || !effectiveConnected() || !selected() || !testOutputStopped() || maximum === 0));
+    confirmation.disabled = busy || !tested || !testOutputStopped() || maximum === 0;
     const simulator = mode === "simulator";
+    if (phase !== "pair" || simulator) {
+      qr.hidden = true;
+      qr.removeAttribute?.("src");
+    }
     if (phase === "connect") {
-      step.textContent = "01 / Choose your toy"; heading.textContent = "Your toy. Your rhythm.";
-      intro.textContent = "Connect one toy, or rehearse every step with its simulator.";
+      step.textContent = "01 / Choose your toy"; heading.textContent = "Set up your toy";
+      intro.textContent = "Connect a toy through Lovense Remote or try the controls with a simulator.";
       primary.textContent = simulator ? "Connect " + label() + " simulator" : "Connect " + label();
     } else if (phase === "pair") {
-      step.textContent = "02 / Pair and connect"; heading.textContent = simulator ? "Rehearse the connection." : "Pair in Lovense Remote.";
-      intro.textContent = simulator ? "The simulator follows the same selection, test and practice steps. No physical device is connected." :
-        "Keep your toy and phone nearby. SatinLore connects through Lovense Remote; you do not pair Bluetooth in this browser.";
-      connectionBadge.textContent = simulator ? "SIMULATED · " + label() : "LOVENSE REMOTE";
-      instructions.replaceChildren();
-      for (const text of simulator ? ["A simulated " + label() + " is created on this screen.", "Choose it from the detected-device list.", "Try a short test, then a guided practice read."] :
-        ["Turn on your toy and enable Bluetooth on your phone.", "Open Lovense Remote and pair the toy until it shows as connected.", "Open the QR scanner in Lovense Remote and scan this private code.", "Return here and select the toy you want to use."]) instructions.append(make("li", {value: text}));
+      step.textContent = "02 / Connect"; heading.textContent = simulator ? "Connect the simulator" : "Pair your toy in Lovense Remote";
+      intro.textContent = simulator ? "Reconnect to practise selecting a toy, checking a movement and trying the reader controls." :
+        "Keep this page open on one screen while you use Lovense Remote on your phone.";
       const source = simulator ? null : qrSource(current.qrUrl);
-      qr.hidden = !source; if (source) qr.src = source;
+      connectionBadge.textContent = simulator ? "SIMULATED · " + label() :
+        current.liveConfigured === false ? "CONNECTION UNAVAILABLE" : source ? "SCAN THE CODE" : "GETTING YOUR CODE";
+      instructions.replaceChildren();
+      for (const text of simulator ? ["Choose the simulator when it appears in the device list.", "Run a short movement check, then try the practice read."] :
+        ["Turn on your toy and enable Bluetooth on your phone.", "Open Lovense Remote and check that the toy shows as connected.", "Open the QR scanner in Lovense Remote and scan the code on this page.", "Keep Lovense Remote open. When your toy appears here, select it."]) instructions.append(make("li", {value: text}));
+      qr.hidden = !source;
+      if (source) qr.src = source;
+      else qr.removeAttribute?.("src");
       qrPlaceholder.hidden = Boolean(source); qrPlaceholder.textContent = simulator ? "SIMULATION · No QR scan needed" :
         current.liveConfigured === false ? "Live connection is not configured yet." : "Waiting for your private pairing code…";
       pairingNote.textContent = current.liveConfigured === false && !simulator ?
-        "The site owner needs to finish Lovense developer setup. You can rehearse all the steps with a simulator now." :
-        simulator ? "You will never be asked to scan a simulated code." : "Keep the code private. If you are using only one phone, open Lovense Remote on a second screen or use a supported Remote connection code where provided.";
-      primary.textContent = needsReconnect() ? "Reconnect" : "Check for toys"; primary.disabled = busy || (!simulator && current.liveConfigured === false);
+        "The site owner needs to finish the Lovense setup. You can go back and try a simulator." :
+        simulator ? "Choose Reconnect to load the simulator again." : "Keep the code private. If the toy does not appear after scanning, choose Refresh device list.";
+      primary.textContent = needsReconnect() ? "Reconnect" : "Refresh device list";
+      primary.disabled = busy || (!simulator && current.liveConfigured === false);
     } else if (phase === "select") {
-      step.textContent = "03 / Choose one device"; heading.textContent = "Which toy should respond?";
-      intro.textContent = simulator ? "Select the simulated toy to continue the rehearsal." : "Choose one connected device. Nothing starts when you select it.";
-      primary.textContent = "Use selected toy";
+      step.textContent = "03 / Choose your toy"; heading.textContent = "Choose the toy to use";
+      intro.textContent = simulator ? "Select the simulator to continue." : "Select one connected toy. It stays paused until you run the movement check.";
+      primary.textContent = "Use this toy";
     } else if (phase === "test") {
-      step.textContent = "04 / Check the response"; heading.textContent = "Try a gentle test.";
-      intro.textContent = "Start with level 1. Each test requests two seconds on one movement, followed by a targeted Stop.";
+      step.textContent = "04 / Check a movement"; heading.textContent = "Try a two-second test";
+      intro.textContent = "Choose a movement and start at level 1. Watch for the movement and check that it stops.";
       testMaximumNote.textContent = maximum === 0 ? "Testing is off at maximum 0. Close setup, adjust Maximum in the playback bar, then reopen setup." :
-        "Current maximum: " + current.ceiling + "/20. Test levels stay within your maximum and never exceed 5/20.";
-      testNote.textContent = simulator ? "SIMULATED: watch the output readout. Check that it returns to zero before continuing." :
-        "Live beta: check the toy actually responds and stops. An on-screen timer cannot prove a physical stop. Keep Lovense Remote and the toy’s own Stop within reach.";
+        "Current maximum: " + current.ceiling + "/20. This short test can use levels 1 to " + maximum + ".";
+      testNote.textContent = simulator ? "Watch the simulated level return to zero before confirming." :
+        "Place the toy somewhere you can check its response. Keep Lovense Remote or the toy’s Stop control within reach.";
+      const movement = CHANNEL_LABELS[channel.value]?.toLowerCase() || "the selected movement";
+      confirmationText.textContent = simulator ? "I saw the simulated level return to zero." :
+        "I saw or felt " + movement + " and checked that the toy stopped.";
       capabilityNote.textContent = getToyProfile(selected()?.model || preferredModel)?.physicalNotes || "";
       capabilityNote.hidden = !capabilityNote.textContent;
-      primary.textContent = "Continue to test read";
+      primary.textContent = enableCalibration ? "Set my movement preferences" : "Continue to practice";
     } else if (phase === "practice") {
       step.textContent = enableCalibration ? "06 / Controlled story tests" : "05 / A short practice read"; heading.textContent = "Make it feel like you.";
       intro.textContent = "Try scrolling, strength, maximum and Stop with a short neutral story before importing your own.";
@@ -279,8 +293,9 @@ export function createSetupFlow({document = globalThis.document, window = global
       step.textContent = "05 / Your movement settings"; heading.textContent = "Explore. Compare. Make it yours.";
       intro.textContent = "Tune each available movement, then compare it in a controlled story.";
     }
-    const output = Number.isInteger(current.output) ? Math.min(20, Math.max(0, current.output)) : 0;
-    liveLevel.textContent = (simulator ? "Simulated output " : "Requested output ") + output + " / 20";
+    const output = Number.isInteger(current.output) && current.outputKnown !== false ?
+      Math.min(20, Math.max(0, current.output)) + " / 20" : "unconfirmed";
+    liveLevel.textContent = (simulator ? "Simulated output " : "Requested output ") + output;
   }
   const enterPairOrSelect = () => {
     phase = discovered() ? "select" : "pair";
@@ -311,7 +326,7 @@ export function createSetupFlow({document = globalThis.document, window = global
         const result = await onRefresh();
         if (activeEpoch !== epoch || disposed || !dialog.open) return;
         safeSnapshot(result); enterPairOrSelect();
-        status.textContent = phase === "select" ? "Connected. Select one toy to continue." : "No connected toy yet. Follow the pairing steps, then check again.";
+        status.textContent = phase === "select" ? "Toy found. Select it to continue." : "Your toy hasn’t appeared yet. Check Lovense Remote, then refresh this list.";
       } catch { if (activeEpoch === epoch) status.textContent = "Could not refresh. Check Lovense Remote and try again."; }
       finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
       return;
@@ -332,7 +347,7 @@ export function createSetupFlow({document = globalThis.document, window = global
       return;
     }
     if (phase === "test") {
-      if (!tested || !confirmation.checked || !effectiveConnected() || !selected() || current.output > 0 || testMaximum() === 0) return;
+      if (!tested || !confirmation.checked || !effectiveConnected() || !selected() || !testOutputStopped() || testMaximum() === 0) return;
       let confirmed = false;
       try { confirmed = onConfirmTest() === true; } catch { /* Connection may have changed while confirming. */ }
       if (!confirmed) {
@@ -360,15 +375,15 @@ export function createSetupFlow({document = globalThis.document, window = global
     const level = Number(testLevel.value);
     if (!Number.isInteger(level) || level < 1 || level > testMaximum()) return;
     const activeEpoch = ++epoch; setBusy(true); tested = false; confirmation.checked = false;
-    status.textContent = mode === "simulator" ? "Requesting a simulated two-second test…" : "Requesting a two-second test. Check the physical response and Stop.";
+    status.textContent = mode === "simulator" ? "Running the simulated test…" : "Running the short test. Watch for movement and check that it stops.";
     try {
       const result = await onTest({channel: channel.value, level});
       if (activeEpoch !== epoch || disposed || phase !== "test") return;
       safeSnapshot(result);
       if (result === false || !effectiveConnected() || !selected()) throw new Error();
       tested = true;
-      status.textContent = mode === "simulator" ? "Simulated test finished. Check that output is zero, then confirm below." :
-        "The timed test and Stop request completed. Check that the toy responded and stopped, then confirm below.";
+      status.textContent = mode === "simulator" ? "Test complete. Check the simulated level and confirm below." :
+        "Test complete. Confirm below once you have checked the movement and the physical stop.";
     } catch { if (activeEpoch === epoch && !disposed) status.textContent = "The test was not confirmed. Stop, check the connection and retry. Nothing will restart automatically."; }
     finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
   });
