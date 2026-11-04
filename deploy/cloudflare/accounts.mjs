@@ -1,17 +1,28 @@
-/** Account presets only. Authenticated identity is selected by the outer Worker. */
+/** Account data. Authenticated identity is selected by the outer Worker. */
 import {TOY_PROFILES} from "../../app/static/devices/toy-profiles.mjs";
+import {MAX_SAVED_STORIES, validateStoryRecord} from "../../app/static/reader/storage.mjs";
 
+const LIBRARY_ROUTE = "/api/account/library";
 export const ACCOUNT_ROUTES = Object.freeze([
-  "/api/account", "/api/presets", "/api/presets/delete", "/api/account/data", "/api/account/delete",
+  "/api/account", "/api/presets", "/api/presets/delete", "/api/account/data", "/api/account/delete", LIBRARY_ROUTE,
 ]);
 export const ACCOUNT_SCHEMA_VERSION = 1;
 export const ACCOUNT_PRESET_LIMIT = 50;
 export const ACCOUNT_BODY_BYTES = 16_384;
-const ALLOWED_ORIGINS = new Set(["https://app.satinlore.com", "https://beta.satinlore.com"]);
+const APP_ORIGIN = "https://app.satinlore.com";
+const ALLOWED_ORIGINS = new Set([APP_ORIGIN, "https://beta.satinlore.com"]);
 const INTERNAL_ORIGIN = "https://accounts.internal";
 const ENSURE_EMAIL_ACCOUNT = "/internal/ensure-email-account";
+const LIBRARY_KEY = "cloud-library:v1";
+const LIBRARY_MAX_BYTES = 1_900_000;
+const LIBRARY_BODY_BYTES = LIBRARY_MAX_BYTES + 512;
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i;
+const STORY_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
 const ENCODER = new TextEncoder();
+const DECODER = new TextDecoder("utf-8", { fatal: true });
+const STORY_UPDATES = ["title", "description", "favorite", "corrections", "position"];
+const STORY_FIELDS = ["id", "text", "analysisVersion", ...STORY_UPDATES];
+const PREFERENCE_FIELDS = ["appearance", "width", "fontSize", "spacing", "follow"];
 // Presets may store simulator movements and never authorise live support.
 const PRESET_ACTIONS = Object.fromEntries(TOY_PROFILES.map(profile => [profile.id, profile.simChannels]));
 const CHANNEL_FIELDS = ["minimum", "background", "preferred", "maximum", "recovery", "gain", "rhythm"];
@@ -27,13 +38,17 @@ const fields = (value, allowed) => object(value) && Object.keys(value).every(key
 const exact = (value, allowed) => fields(value, allowed) && allowed.every(key => Object.hasOwn(value, key));
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 const result = (body, status = 200, headers = {}) => Response.json(body, { status, headers: {
-  "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", ...headers,
+  "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+  "Cross-Origin-Resource-Policy": "same-origin", ...headers,
 } });
 
 /** Cloudflare identities are stable across the private hosts; app email identities are separate. */
-export async function accountIdentity(config, session) {
-  const emailIdentity = config?.issuer === "https://app.satinlore.com" && session?.authMode === "email" &&
+function isEmailAccount(config, session) {
+  return config?.origin === APP_ORIGIN && config.issuer === APP_ORIGIN && session?.authMode === "email" &&
     /^email-v1:[a-f0-9]{64}$/.test(session.subject);
+}
+export async function accountIdentity(config, session) {
+  const emailIdentity = isEmailAccount(config, session);
   const accessIdentity = typeof config?.issuer === "string" && /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(config.issuer);
   if ((!emailIdentity && !accessIdentity) ||
       typeof session?.subject !== "string" || !session.subject || session.subject.length > 512) fail("Sign in again to use your account.", 403);
@@ -77,11 +92,15 @@ export function normalizePreset(value) {
     ...(value.ceiling === undefined ? {} : { ceiling: value.ceiling }) };
 }
 
-export async function accountJson(request, expectedOrigin = request.headers.get("Origin")) {
+function requireAccountJsonHeaders(request, expectedOrigin, maxBytes) {
   if (!ALLOWED_ORIGINS.has(expectedOrigin) || request.headers.get("Origin") !== expectedOrigin ||
       !/^application\/json(?:\s*;|$)/i.test(request.headers.get("Content-Type") || "")) fail("Use the account controls on SatinLore.");
   const length = request.headers.get("Content-Length");
-  if (length && (!/^\d+$/.test(length) || Number(length) > ACCOUNT_BODY_BYTES)) fail("The preset request is too large.", 413);
+  if (length && (!/^\d+$/.test(length) || Number(length) > maxBytes)) fail("The account request is too large.", 413);
+}
+
+export async function accountJson(request, expectedOrigin = request.headers.get("Origin"), maxBytes = ACCOUNT_BODY_BYTES) {
+  requireAccountJsonHeaders(request, expectedOrigin, maxBytes);
   const reader = request.body?.getReader();
   if (!reader) fail();
   const chunks = []; let size = 0, timedOut = false;
@@ -89,15 +108,15 @@ export async function accountJson(request, expectedOrigin = request.headers.get(
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (timedOut) fail("The preset request timed out. Please try again.", 408);
+      if (timedOut) fail("The account request timed out. Please try again.", 408);
       if (done) break;
       size += value.byteLength;
-      if (size > ACCOUNT_BODY_BYTES) { await reader.cancel(); fail("The preset request is too large.", 413); }
+      if (size > maxBytes) { await reader.cancel(); fail("The account request is too large.", 413); }
       chunks.push(value);
     }
     const bytes = new Uint8Array(size); let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+    try { return JSON.parse(DECODER.decode(bytes)); }
     catch { fail(); }
   } finally { clearTimeout(timeout); }
 }
@@ -107,25 +126,129 @@ function snapshot(state) {
   return { registered: state.account !== null, account: state.account, revision: state.revision, presets: state.presets,
     version: ACCOUNT_SCHEMA_VERSION, playback: "paused" };
 }
-function allowRate(state, now) {
+function allowRate(state, now, minuteLimit = 30, dayLimit = 1000) {
   const minute = Math.floor(now / 60_000), day = Math.floor(now / 86_400_000);
   const old = state.rates || {};
   const next = { minute, minuteCount: old.minute === minute ? old.minuteCount : 0, day, dayCount: old.day === day ? old.dayCount : 0 };
-  if (next.minuteCount >= 30 || next.dayCount >= 1000) fail("You have saved several changes recently. Please try again shortly.", 429);
+  if (next.minuteCount >= minuteLimit || next.dayCount >= dayLimit) fail("You have saved several changes recently. Please try again shortly.", 429);
   next.minuteCount++; next.dayCount++; state.rates = next;
 }
 
-/** SQLite-backed Durable Object KV is sufficient for the bounded per-user preset document. */
+const storyKey = id => `cloud-story:v1:${id}`;
+const emptyLibrary = () => ({ revision: 0, entries: [], preferences: null });
+const libraryConflict = () => fail("Your saved library changed. Reload it before saving again.", 409);
+const accountChanged = () => fail("Your signed-in account changed. Reload before saving again.", 409);
+
+function normalizeLibraryMutation(body) {
+  const common = ["action", "expectedOwner", "expectedRevision"];
+  if (!object(body) || typeof body.expectedOwner !== "string" || !UUID.test(body.expectedOwner)) fail();
+  if (body.action === "savePreferences") {
+    if (!exact(body, [...common, "preferences"]) || (body.expectedRevision !== null && !revision(body.expectedRevision))) fail();
+    const value = body.preferences;
+    if (!exact(value, PREFERENCE_FIELDS) || !["dark", "light", "system"].includes(value.appearance) ||
+        !["comfortable", "wide", "full"].includes(value.width) || !["small", "normal", "large"].includes(value.fontSize) ||
+        !["compact", "normal", "relaxed"].includes(value.spacing) || typeof value.follow !== "boolean") fail("Check your reading preferences and try again.");
+    return { ...body, preferences: Object.fromEntries(PREFERENCE_FIELDS.map(key => [key, value[key]])) };
+  }
+  if (!revision(body.expectedRevision)) fail();
+  if (body.action === "saveStory" && exact(body, [...common, "story"]) && fields(body.story, STORY_FIELDS)) {
+    return { ...body, story: normalizeCloudStory(body.story) };
+  }
+  if (typeof body.id !== "string" || !STORY_ID.test(body.id)) fail();
+  if (body.action === "updateStory" && exact(body, [...common, "id", "changes"]) &&
+      fields(body.changes, STORY_UPDATES) && Object.keys(body.changes).length) return body;
+  if (body.action === "deleteStory" && exact(body, [...common, "id"])) return body;
+  fail();
+}
+
+function normalizeCloudStory(value) {
+  try { return validateStoryRecord(value, { stored: false }); }
+  catch { fail("Check the story and reading position before saving."); }
+}
+
+function storedStory(entry, textBytes) {
+  const { bytes: _bytes, ...metadata } = entry;
+  return { ...metadata, text: JSON.parse(DECODER.decode(textBytes)) };
+}
+
+async function librarySnapshot(storage) {
+  const library = await storage.get(LIBRARY_KEY) || emptyLibrary();
+  const textByKey = library.entries.length ? await storage.get(library.entries.map(entry => storyKey(entry.id))) : new Map();
+  return { revision: library.revision, preferences: library.preferences,
+    stories: library.entries.map(entry => storedStory(entry, textByKey.get(storyKey(entry.id)))) };
+}
+
+/** SQLite-backed Durable Object KV keeps each private text separate from frequently changed metadata. */
 export class ReaderAccount {
   constructor(ctx, _env) { this.storage = ctx.storage; this.queue = Promise.resolve(); }
   exclusive(task) { const pending = this.queue.then(task, task); this.queue = pending.catch(() => {}); return pending; }
+  async handleLibrary(request) {
+    if (request.headers.get("Origin") !== APP_ORIGIN || request.headers.get("X-SatinLore-Account-Mode") !== "email") {
+      return result({ error: "Sign in with your SatinLore account to use cloud saving." }, 403);
+    }
+    const expiresAt = Number(request.headers.get("X-SatinLore-Account-Expires-At"));
+    const ensureFresh = () => {
+      if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) fail("Sign in again to use your account.", 403);
+    };
+    ensureFresh();
+    if (request.method === "GET") {
+      const state = await this.storage.get("state") || emptyState();
+      if (!state.account) accountChanged();
+      return result({ owner: state.account.id, ...await librarySnapshot(this.storage) });
+    }
+    if (request.method !== "POST") return result({ error: "Use the account controls on SatinLore." }, 405, { Allow: "GET, POST" });
+    const mutation = normalizeLibraryMutation(await accountJson(request, APP_ORIGIN, LIBRARY_BODY_BYTES));
+    const now = Date.now();
+    return this.storage.transaction(async txn => {
+      ensureFresh();
+      const state = await txn.get("state") || emptyState();
+      if (state.account?.id !== mutation.expectedOwner) accountChanged();
+      const library = await txn.get(LIBRARY_KEY) || emptyLibrary();
+      if (mutation.action === "savePreferences") {
+        const current = library.preferences?.revision ?? null;
+        if (current !== mutation.expectedRevision) fail("Your reading preferences changed. Reload before saving again.", 409);
+        const preferences = { ...mutation.preferences, revision: (current ?? 0) + 1 };
+        allowRate(library, now, 60, 3000);
+        library.preferences = preferences;
+        await txn.put(LIBRARY_KEY, library);
+        return result({ preferences });
+      }
+      if (library.revision !== mutation.expectedRevision) libraryConflict();
+      const id = mutation.story?.id ?? mutation.id;
+      const key = storyKey(id);
+      const index = library.entries.findIndex(entry => entry.id === id);
+      const prior = library.entries[index];
+      if (mutation.action !== "saveStory" && !prior) fail("This story is no longer saved to your account.", 404);
+      library.revision++;
+      if (mutation.action === "deleteStory") {
+        library.entries.splice(index, 1);
+        await txn.delete(key);
+        await txn.put(LIBRARY_KEY, library);
+        return result({ revision: library.revision, deleted: true });
+      }
+      if (!prior && library.entries.length >= MAX_SAVED_STORIES) fail(`Your account can save up to ${MAX_SAVED_STORIES} stories.`, 429);
+      const record = mutation.story ?? normalizeCloudStory({ ...storedStory(prior, await txn.get(key)), ...mutation.changes });
+      const next = { ...record, updatedAt: now, revision: library.revision };
+      const bytes = ENCODER.encode(JSON.stringify(next)).byteLength;
+      const used = library.entries.reduce((total, entry) => total + entry.bytes, 0) - (prior?.bytes ?? 0);
+      if (used + bytes > LIBRARY_MAX_BYTES) fail("Your account story library is full. Delete a saved story or use browser saving.", 413);
+      allowRate(library, now, 60, 3000);
+      const { text, ...metadata } = next;
+      const entry = { ...metadata, bytes };
+      if (prior) library.entries[index] = entry; else library.entries.push(entry);
+      if (mutation.action === "saveStory") await txn.put(key, ENCODER.encode(JSON.stringify(text)));
+      await txn.put(LIBRARY_KEY, library);
+      return result(mutation.action === "updateStory" ? { revision: library.revision, updatedAt: now, storyRevision: next.revision } :
+        { revision: library.revision, story: next });
+    });
+  }
   async handle(request) {
     const url = new URL(request.url);
     if (url.origin !== INTERNAL_ORIGIN || url.search || !ALLOWED_ORIGINS.has(request.headers.get("Origin"))) {
       return result({ error: "Not found." }, 404);
     }
     if (url.pathname === ENSURE_EMAIL_ACCOUNT) {
-      if (request.method !== "POST" || request.headers.get("Origin") !== "https://app.satinlore.com") return result({ error: "Not found." }, 404);
+      if (request.method !== "POST" || request.headers.get("Origin") !== APP_ORIGIN) return result({ error: "Not found." }, 404);
       const body = await accountJson(request);
       const now = Date.now();
       if (!exact(body, ["issuedAt"]) || !Number.isSafeInteger(body.issuedAt) || body.issuedAt <= 0 || body.issuedAt > now) fail();
@@ -141,11 +264,16 @@ export class ReaderAccount {
       });
     }
     if (!ACCOUNT_ROUTES.includes(url.pathname)) return result({ error: "Not found." }, 404);
+    if (url.pathname === LIBRARY_ROUTE) return this.handleLibrary(request);
     const methods = ["/api/account", "/api/presets"].includes(url.pathname) ? ["GET", "POST"] : url.pathname === "/api/account/data" ? ["GET"] : ["POST"];
     if (!methods.includes(request.method)) return result({ error: "Use the account controls on SatinLore." }, 405, { Allow: methods.join(", ") });
     if (request.method === "GET") {
       const state = await this.storage.get("state") || emptyState();
-      if (url.pathname === "/api/account/data") return result({ format: "satinlore-account-v1", exportedAt: Date.now(), ...snapshot(state) });
+      if (url.pathname === "/api/account/data") {
+        const emailMode = request.headers.get("Origin") === APP_ORIGIN && request.headers.get("X-SatinLore-Account-Mode") === "email";
+        return result({ format: "satinlore-account-v1", exportedAt: Date.now(), ...snapshot(state),
+          ...(emailMode ? { library: await librarySnapshot(this.storage) } : {}) });
+      }
       return result(snapshot(state));
     }
     const body = await accountJson(request);
@@ -158,7 +286,7 @@ export class ReaderAccount {
       preset = normalizePreset(body.preset);
     } else if (url.pathname === "/api/presets/delete") {
       if (!exact(body, ["id", "expectedRevision"]) || typeof body.id !== "string" || !UUID.test(body.id)) fail();
-    } else if (!exact(body, ["confirm", "expectedRevision"]) || body.confirm !== true) fail("Confirm deletion before removing your account and presets.");
+    } else if (!exact(body, ["confirm", "expectedRevision"]) || body.confirm !== true) fail("Confirm deletion before removing your account data.");
     const now = Date.now();
     const updated = await this.storage.transaction(async txn => {
       const state = await txn.get("state") || emptyState();
@@ -170,6 +298,8 @@ export class ReaderAccount {
         // Retain stale-write guards and rate counters after removing the account and presets.
         state.account = null; state.presets = [];
         state.deletedAt = now;
+        const library = await txn.get(LIBRARY_KEY);
+        if (library) await txn.delete([LIBRARY_KEY, ...library.entries.map(entry => storyKey(entry.id))]);
       } else {
         if (!state.account) fail("Create your account before saving presets.", 409);
         if (url.pathname === "/api/presets") {
@@ -219,6 +349,10 @@ export async function handleAccount(request, env, { config, session } = {}) {
   try {
     if (!ALLOWED_ORIGINS.has(config?.origin) || url.origin !== config.origin || url.search ||
         !Number.isSafeInteger(session?.expiresAt) || session.expiresAt <= Date.now()) return result({ error: "Sign in again to use your account." }, 403);
+    const emailMode = isEmailAccount(config, session);
+    if (url.pathname === LIBRARY_ROUTE && (!emailMode || ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site")))) {
+      return result({ error: "Sign in with your SatinLore account to use cloud saving." }, 403);
+    }
     if (request.method === "POST" && (request.headers.get("Origin") !== config.origin ||
         ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site")))) return result({ error: "Use the account controls on SatinLore." }, 403);
     if (session.authMode === "email" && url.pathname === "/api/account" && request.method === "POST") {
@@ -226,13 +360,19 @@ export async function handleAccount(request, env, { config, session } = {}) {
     }
     if (!env.READER_ACCOUNTS || typeof env.READER_ACCOUNTS.idFromName !== "function" || typeof env.READER_ACCOUNTS.get !== "function") return result({ error: "Account storage is temporarily unavailable. Your changes have not been saved." }, 503);
     const identity = await accountIdentity(config, session);
-    const body = request.method === "POST" ? await accountJson(request, config.origin) : undefined;
+    const libraryRequest = url.pathname === LIBRARY_ROUTE;
+    const stream = libraryRequest && request.method === "POST";
+    if (stream) requireAccountJsonHeaders(request, config.origin, LIBRARY_BODY_BYTES);
+    const body = request.method === "POST" && !stream ? await accountJson(request, config.origin) : undefined;
     if (session.expiresAt <= Date.now()) return result({ error: "Sign in again to use your account." }, 403);
     // Do not forward cookies, JWTs, email, user-supplied account identifiers or URLs.
     const headers = new Headers({ Origin: config.origin });
-    if (body !== undefined) headers.set("Content-Type", "application/json");
+    if (emailMode) headers.set("X-SatinLore-Account-Mode", "email");
+    if (libraryRequest) headers.set("X-SatinLore-Account-Expires-At", String(session.expiresAt));
+    if (stream || body !== undefined) headers.set("Content-Type", "application/json");
+    // The DO reads and validates bounded library JSON. Avoid parsing private, potentially large text twice.
     const response = await env.READER_ACCOUNTS.get(env.READER_ACCOUNTS.idFromName(identity)).fetch(new Request(INTERNAL_ORIGIN + url.pathname, {
-      method: request.method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      method: request.method, headers, ...(stream ? { body: request.body, duplex: "half" } : body !== undefined ? { body: JSON.stringify(body) } : {}),
     }));
     if (session.expiresAt <= Date.now()) return result({ error: "Sign in again to view your account. Reload after signing in to check any pending save." }, 403);
     return response;

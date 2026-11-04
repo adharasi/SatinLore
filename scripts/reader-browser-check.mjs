@@ -474,7 +474,7 @@ async function appearanceChecks(page) {
   assert.equal(await page.getByRole("switch", {name: "Dark mode"}).getAttribute("aria-checked"), "true");
   assert.equal(await page.evaluate(() => localStorage.length), 0, "Default appearance and library do not write storage.");
   await openAppSettings(page);
-  assert.equal(await page.locator("#reading-appearance").inputValue(), "system");
+  assert.equal(await page.locator("#reading-appearance").inputValue(), "dark");
   await page.locator("#reading-appearance").selectOption("light");
   await page.emulateMedia({colorScheme: "light"});
   await page.emulateMedia({colorScheme: "dark"});
@@ -657,6 +657,10 @@ async function practiceLibraryChecks(context, origin) {
     await openSettings(page);
     const launch = page.locator("#control-playground"), dialog = page.locator("#practice-story-dialog");
     const picker = page.locator("#practice-story-choice");
+    const sceneModel = page.locator("#scene-model");
+    await sceneModel.selectOption("nocturne");
+    assert.equal(await sceneModel.inputValue(), "nocturne");
+    assert.equal(await page.locator("#nocturne-panel").isVisible(), false);
     await launch.click();
     await dialog.waitFor({state: "visible"});
     assert.deepEqual(await picker.locator("optgroup").evaluateAll(groups => groups.map(group => [group.label, group.children.length])),
@@ -676,12 +680,16 @@ async function practiceLibraryChecks(context, origin) {
     assert.equal(await page.locator("#settings-panel").isVisible(), true, "The first practice story opens the reading controls.");
     assert.equal(await page.locator("#start").isDisabled(), true, "Opening a practice story never connects the device.");
     await openSettings(page);
-    assert.equal(await page.locator("#scene-model").isEnabled(), true);
+    assert.equal(await sceneModel.inputValue(), "nocturne");
     await launch.click(); await picker.selectOption("control-check-v1");
     await page.locator("#practice-story-open").click();
     await analysed(page); await output(page, 0);
     assert.equal(await page.locator("#story-title").textContent(), "Find your rhythm");
-    assert.equal(await page.locator("#scene-model").isDisabled(), true);
+    await openSettings(page);
+    await sceneModel.selectOption("loom");
+    assert.equal(await sceneModel.inputValue(), "loom");
+    assert.match(await page.locator("#scene-model-help").textContent(), /fixed levels/);
+    assert.equal(await page.locator("#nocturne-panel").isVisible(), false);
   } finally { await page.close(); }
 }
 
@@ -915,7 +923,7 @@ async function refinementChecks(page, setPromptReply) {
   await openAppSettings(page);
   assert.equal(await page.locator('#app-settings-dialog a[href="/help"]').isVisible(), true);
   assert.equal(await page.locator('#app-settings-dialog a[href="/support"]').isVisible(), true);
-  assert.match(await page.locator("#app-settings-dialog").textContent(), /Toy presets can be saved to your account; story text stays on this browser\./,
+  assert.match(await page.locator("#account-storage-description").textContent(), /Stories can be kept for this visit or saved on this browser\./,
     "The account section distinguishes durable toy presets from browser-local story text.");
   assert.match(await page.locator("#account-settings-mount").textContent(), /Account presets are available in the signed-in hosted app\./,
     "The local reader reports the real hosted-account requirement instead of a planned or simulated account.");

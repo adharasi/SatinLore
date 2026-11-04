@@ -3,11 +3,12 @@
 .header-actions .public-account-button{display:inline-flex;width:auto;gap:6px;align-items:center;white-space:nowrap}
 .header-actions .public-account-button[hidden]{display:none}
 .public-account-dialog{width:min(450px,calc(100vw - 24px))}
-.public-account-dialog form>input{display:block;width:100%;margin:.4rem 0 1rem}
+.public-account-dialog form>input{display:block;width:100%;min-height:44px;margin:.4rem 0 1rem;padding:10px 12px;border:1px solid var(--secondary);border-radius:8px;background:var(--surface);color:var(--text);font:inherit}
 .public-account-dialog .dialog-actions{margin:.8rem 0}
 .public-account-dialog .dialog-actions[hidden]{display:none}
-.public-account-dialog .public-account-age{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0}
-.public-account-dialog .public-account-age input{margin:0}
+.public-account-dialog .public-account-check{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0}
+.public-account-dialog .public-account-check input{margin:0}
+.public-account-dialog form>input[aria-describedby]{margin-bottom:.35rem}
 .public-account-links{display:flex;gap:.5rem;flex-wrap:wrap}
 #public-account-status:empty{display:none}
 @media(max-width:699px){.header-actions .public-account-button{width:44px}.public-account-button span{display:none}}

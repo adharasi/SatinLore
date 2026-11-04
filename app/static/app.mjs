@@ -15,6 +15,7 @@ import {createSimulatorView} from "./reader/simulator-view.mjs";
 import {createSetupFlow} from "./reader/setup-flow.mjs";
 import {PRACTICE_STORIES} from "./reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
+import {AccountLibrary} from "./reader/account-library.mjs";
 import {mountPublicAccount} from "./reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
@@ -71,8 +72,13 @@ let libraryMutation = false;
 let focusArrangement = null;
 const dialogOpeners = new Map();
 const publicMode = document.querySelector('meta[name="satinlore-public-auth"]')?.content === "true";
+const accountLibrary = publicMode ? new AccountLibrary() : null;
+const sessionChangeKey = "satinlore.public-session-change";
+let pendingAccountLibrary = null, localLibraryReady = Promise.resolve();
+let accountPreferences = null;
 const hostedMode = publicMode || document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
 let nocturneReady = null, checkingNocturne = false, nocturneOperation = null;
+let nextStoryModel = "loom";
 let hostedAccess = null;
 let hostedAccessReady = !hostedMode;
 const hasVerifiedAccess = () => !hostedMode || Boolean(hostedAccessReady && hostedAccess?.isAuthorized());
@@ -220,16 +226,16 @@ function cancelImport() {
 function saveState(story) {
   if (!story) return {state: "session", label: "Session only"};
   if (story.saveError) return {state: "error", label: story.saveError};
-  if (story.saving) return {state: "saving", label: "Saving on this browser…"};
+  if (story.saving) return {state: "saving", label: story.accountOwner ? "Saving to your account…" : "Saving story…"};
   if (!story.saved) return {state: "session", label: "Session only · not saved"};
   if (story.dirty) return {state: "dirty", label: "Unsaved changes · retry Save"};
-  return {state: "saved", label: "Saved on this browser"};
+  return {state: "saved", label: story.accountOwner ? "Saved to your account" : "Saved on this browser"};
 }
 
 function renderFolders() {
   if (!$("folder-filter") || !$("story-folder")) return;
   const story = currentStory();
-  const signature = JSON.stringify([folders, folderFilter, story?.id, story?.folderId, story?.deleting, libraryLoading, libraryMutation]);
+  const signature = JSON.stringify([folders, folderFilter, story?.id, story?.folderId, story?.accountOwner, story?.deleting, libraryLoading, libraryMutation]);
   if (signature === folderSignature) return;
   folderSignature = signature;
   const option = (value, label) => {
@@ -240,7 +246,7 @@ function renderFolders() {
   $("folder-filter").value = folderFilter;
   $("story-folder").replaceChildren(option("", "Unfiled"), ...folders.map(folder => option(folder.id, folder.name)));
   $("story-folder").value = story?.folderId ?? "";
-  $("story-folder").disabled = !story || libraryMutation || story.deleting;
+  $("story-folder").disabled = !story || libraryMutation || story.deleting || Boolean(story.accountOwner);
   $("create-folder").disabled = libraryLoading || libraryMutation;
   $("folder-filter").disabled = libraryLoading || libraryMutation;
   for (const id of ["rename-folder", "delete-folder"]) $(id).disabled = libraryLoading || libraryMutation || !folders.some(folder => folder.id === folderFilter);
@@ -297,7 +303,7 @@ function renderLibrary() {
     title.textContent = story.title;
     const meta = document.createElement("span");
     meta.className = "story-meta";
-    meta.textContent = `${story.saved ? "Saved here" : "Session only"} · ${story.position + 1} / ${story.model.paragraphs.length}`;
+    meta.textContent = `${story.accountOwner ? "Saved to account" : story.saved ? "Saved here" : "Session only"} · ${story.position + 1} / ${story.model.paragraphs.length}`;
     button.append(title);
     button.addEventListener("click", () => selectStory(story.id));
     if (focused?.storyId === story.id) nextFocus = button;
@@ -356,8 +362,9 @@ function renderLibrary() {
       onSelect: id => selectStory(id, {focusReader: true})});
   }
   text("library-status", libraryLoading ? "Opening your local library…" : libraryError || (stories.length ?
-    "Saved stories stay on this browser. Session-only stories clear on reload." : "No stories yet. Add one to start reading."));
-  $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.length && !folders.length && !libraryError);
+    (publicMode ? "Save a story to your account to read it across devices. Session-only stories clear on reload." :
+      "Saved stories stay on this browser. Session-only stories clear on reload.") : "No stories yet. Add one to start reading."));
+  $("delete-all").disabled = libraryLoading || libraryMutation || (!stories.some(story => !story.accountOwner) && !folders.length && !libraryError);
 }
 
 const storyCardIcons = {
@@ -492,7 +499,11 @@ function display(state = latest) {
   for (const id of ["save-story", "session-only", "rename-story", "delete-story", "reanalyze"]) {
     $(id).disabled = libraryMutation || !story || story.deleting || story.saving;
   }
-  for (const id of ["export-library", "import-backup-trigger", "import-backup"]) if ($(id)) $(id).disabled = libraryLoading || libraryMutation || backupBusy || !stories.length && id === "export-library";
+  $("save-story").hidden = Boolean(story?.accountOwner);
+  $("save-account-story").hidden = !publicMode || Boolean(story?.controlled);
+  $("save-account-story").disabled = libraryMutation || !story || story.deleting || story.saving;
+  text("save-account-story", story?.accountOwner ? "Save account changes" : story?.saved ? "Copy to my account" : "Save to my account");
+  for (const id of ["export-library", "import-backup-trigger", "import-backup"]) if ($(id)) $(id).disabled = libraryLoading || libraryMutation || backupBusy || !stories.some(value => !value.accountOwner) && id === "export-library";
   if ($("export-story")) $("export-story").disabled = libraryMutation || !story || story.deleting || backupBusy;
   $("session-only").disabled ||= !story?.saved;
   text("story-title", story?.title ?? "Your reading space");
@@ -554,16 +565,18 @@ function pause(reason) {
 }
 
 function renderStoryModel(story) {
-  const selected = story?.sceneModel ?? "loom";
+  const analysedStory = story && !story.controlled;
+  const selected = analysedStory ? story.sceneModel : nextStoryModel;
   const busy = Boolean(nocturneOperation);
   const signInNeeded = publicMode && !hasVerifiedAccess();
   $("scene-model").value = selected;
-  $("scene-model").disabled = !story || story.controlled || story.deleting || libraryMutation;
-  text("scene-model-help", story?.controlled ? "This practice story uses fixed levels so you can check your controls. Open a model practice story to try both Loom and Nocturne." :
-    "Loom follows the story on this device. Nocturne adds rolling waves and sustained crests that follow the scene’s pacing in the simulator.");
+  $("scene-model").disabled = Boolean(story?.deleting || libraryMutation);
+  text("scene-model-help", story?.controlled ? "This calibration story keeps its fixed levels. Choose a model for your next story, or open a model practice story to try it now." :
+    analysedStory ? "Loom follows the story on this device. Nocturne adds rolling waves and sustained crests in the simulator." :
+    "Choose a model for your next story. Loom runs on this device. Nocturne adds rolling waves and sustained crests in the simulator.");
   $("model-practice-shortcut").hidden = !story?.controlled;
   $("model-practice-shortcut").disabled = libraryMutation || story?.deleting;
-  $("nocturne-panel").hidden = selected !== "nocturne";
+  $("nocturne-panel").hidden = selected !== "nocturne" || !analysedStory;
   $("nocturne-sign-in").hidden = !signInNeeded;
   $("nocturne-run").hidden = signInNeeded;
   $("nocturne-run").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
@@ -650,6 +663,9 @@ function storyRecord(story) {
     analysisVersion: story.model.analysisVersion, description: story.description, favorite: story.favorite,
     ...(story.folderId ? {folderId: story.folderId} : {})};
 }
+const accountStoryChanges = ({position, corrections, title, description, favorite}) =>
+  ({position, corrections, title, description, favorite});
+
 function markDirty(story) {
   ++story.changeVersion;
   if (!story.saved || story.deleting) return;
@@ -658,27 +674,57 @@ function markDirty(story) {
   story.saveTimer = setTimeout(() => {
     story.saveTimer = null;
     void persistStory(story);
-  }, 350);
+  }, story.accountOwner ? 1_000 : 350);
 }
-function persistStory(story, {explicit = false} = {}) {
+function persistStory(story, {explicit = false, accountOwner = story.accountOwner} = {}) {
   if (libraryMutation || story.deleting || !stories.includes(story) || (!story.saved && !explicit)) return Promise.resolve(false);
   clearTimeout(story.saveTimer); story.saveTimer = null;
   const task = async () => {
     if (libraryMutation || story.deleting || !stories.includes(story) || (!story.saved && !explicit)) return false;
+    if (accountOwner && accountLibrary.owner !== accountOwner) return false;
     const version = story.changeVersion;
     story.saving = true;
     story.saveError = "";
     if (story.id === activeId) display();
     try {
-      const saved = await store.saveStory(storyRecord(story), {expectedRevision: story.revision});
+      let saved;
+      if (accountOwner && !story.accountOwner) {
+        // A browser copy retains its own ID and storage lifecycle after upload.
+        const copyId = story.saved ? createStoryId() : story.id;
+        const record = {...storyRecord(story), id: copyId};
+        saved = await accountLibrary.saveStory(accountOwner, record);
+        if (!publicSignedIn || accountLibrary.owner !== accountOwner || !stories.includes(story)) return false;
+        if (story.saved) {
+          const accountStory = makeStory({...saved, accountOwner});
+          stories.push(accountStory);
+          if (story.id === activeId) selectStory(accountStory.id, {focusReader: true});
+          show("A copy was saved to your account. The browser copy is still here.");
+          return true;
+        }
+        story.accountOwner = accountOwner;
+        story.accountId = saved.id;
+        story.folderId = null;
+        story.lastAccountChanges = JSON.stringify(accountStoryChanges(record));
+      } else if (accountOwner) {
+        const record = storyRecord(story);
+        const changes = JSON.stringify(accountStoryChanges(record));
+        if (changes !== story.lastAccountChanges) {
+          saved = await accountLibrary.updateStory(accountOwner, {...record, id: story.accountId});
+          if (!publicSignedIn || accountLibrary.owner !== accountOwner || !stories.includes(story)) return false;
+          story.lastAccountChanges = changes;
+        } else saved = {revision: story.revision, updatedAt: story.updatedAt};
+      } else {
+        saved = await store.saveStory(storyRecord(story), {expectedRevision: story.revision});
+      }
       story.saved = true;
       story.revision = saved.revision;
       story.updatedAt = saved.updatedAt ?? Date.now();
       story.dirty = story.changeVersion !== version;
-      if (explicit) show("Saved on this browser. There is no cloud backup or sync.");
+      if (explicit) show(accountOwner ? "Saved to your account." : "Saved on this browser. This copy is available here.");
       if (story.dirty && !story.deleting) markDirty(story);
       return true;
     } catch (error) {
+      if (accountOwner && (!publicSignedIn || accountLibrary.owner !== accountOwner || !stories.includes(story))) return false;
       story.saveError = error.message || "Could not save. Your story is still readable in this tab.";
       story.dirty = story.saved;
       show(story.saveError);
@@ -694,14 +740,16 @@ function persistStory(story, {explicit = false} = {}) {
 }
 function makeStory({id = createStoryId(), title = "Untitled story", text: source, corrections = [],
   position = 0, revision = null, updatedAt = Date.now(), folderId = null, betaId = null, controlled = false,
-  description = "", favorite = false}) {
+  description = "", favorite = false, accountOwner = null, accountId = accountOwner ? id : null}) {
   const model = new ReaderModel();
   model.load(source, {deferAnalysis: true, documentId: id});
   corrections.forEach((level, index) => { if (level !== null) model.setOverride(index, level); });
   const safePosition = Math.max(0, Math.min(model.paragraphs.length - 1, position));
-  return {id, title, description, favorite, model, folderId, betaId, controlled, explicitCorrections:new Set(), position: safePosition, furthest: safePosition, saved: revision !== null, revision,
+  return {id, title, description, favorite, model, folderId, betaId, controlled, accountOwner, accountId,
+    lastAccountChanges: accountOwner ? JSON.stringify(accountStoryChanges({position: safePosition, corrections, title, description, favorite})) : null,
+    explicitCorrections:new Set(), position: safePosition, furthest: safePosition, saved: revision !== null, revision,
     dirty: false, saving: false, saveError: "", changeVersion: 0, saveTimer: null, saveChain: Promise.resolve(),
-    deleting: false, analysisPromise: null, sceneModel: "loom", nocturneMessage: "", updatedAt, lastOpenedAt: 0};
+    deleting: false, analysisPromise: null, sceneModel: controlled ? "loom" : nextStoryModel, nocturneMessage: "", updatedAt, lastOpenedAt: 0};
 }
 
 function renderStory() {
@@ -845,6 +893,7 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   display(); renderLibrary();
   scrollToCurrent();
   if (focusReader) $("story-title").focus({preventScroll: true});
+  if (story.sceneModel === "nocturne" && nocturneReady !== true) void checkNocturne();
   void analyse(story);
 }
 
@@ -1021,7 +1070,7 @@ function openDraft() {
 }
 
 function addPreparedStory(record, {folderId = null} = {}) {
-  if (stories.length >= 20) throw new Error("Your library holds up to 20 stories. Remove one before adding another.");
+  if (stories.filter(story => !story.accountOwner).length >= 20) throw new Error("This browser library holds up to 20 stories. Remove one before adding another.");
   const title = record.title?.trim() || "Untitled story";
   if (title.length > 120) throw new Error("Choose a title up to 120 characters.");
   const story = makeStory({...record, title, folderId});
@@ -1051,6 +1100,7 @@ function openStoryDetails(story, opener) {
   });
   $("story-details-shelf").replaceChildren(...options);
   $("story-details-shelf").value = story.folderId ?? "";
+  $("story-details-shelf").disabled = Boolean(story.accountOwner);
   text("story-details-status", "");
   openDialog("story-details-dialog", opener);
   $("story-details-title").focus({preventScroll: true});
@@ -1208,17 +1258,22 @@ async function confirmStart() {
 }
 async function removeStory(story, {keepSession = false} = {}) {
   if (!story || story.deleting || libraryMutation) return;
+  const owner = story.accountOwner;
   cancelImport();
-  pause("Paused while local data is removed.");
+  pause("Paused while saved data is removed.");
   story.deleting = true;
   clearTimeout(story.saveTimer); story.saveTimer = null;
   display();
   await story.saveChain.catch(() => {});
   try {
-    if (story.saved || story.revision !== null) await store.deleteStory(story.id, {expectedRevision: story.revision});
+    if (owner && (!stories.includes(story) || accountLibrary.owner !== owner)) return;
+    if (owner) await accountLibrary.deleteStory(owner, story.accountId);
+    else if (story.saved || story.revision !== null) await store.deleteStory(story.id, {expectedRevision: story.revision});
+    if (!stories.includes(story)) return;
     if (keepSession) {
       story.saved = false; story.revision = null; story.dirty = false; story.saveError = "";
-      show("Session only. The saved copy was removed from this browser.");
+      story.accountOwner = story.accountId = story.lastAccountChanges = null;
+      show(owner ? "Session only. The saved copy was removed from your account." : "Session only. The saved copy was removed from this browser.");
     } else {
       story.model.cancelAnalysis();
       stories.splice(stories.indexOf(story), 1);
@@ -1231,6 +1286,7 @@ async function removeStory(story, {keepSession = false} = {}) {
       show("Story and its saved corrections and progress deleted.");
     }
   } catch (error) {
+    if (owner && (!stories.includes(story) || accountLibrary.owner !== owner)) return;
     story.saveError = error.message || "Could not remove the saved story. It is still listed.";
     show(story.saveError);
   } finally { story.deleting = false; display(); renderLibrary(); }
@@ -1254,6 +1310,7 @@ function selectSettingsTab(name, {focus = false} = {}) {
   if (settingsTab === "story") renderReview();
 }
 function savePreferences(patch) {
+  if (publicSignedIn) { void saveAccountPreferences(patch); return; }
   const result = preferences.update(patch);
   text("reader-preferences-note", result.message);
   if (!result.saved) show(result.message);
@@ -1268,7 +1325,7 @@ async function restoreBackup(file) {
     const records = await backupImporter.read(file, {existingIds: stories.map(story => story.id)});
     if (!records || operation !== importEpoch || document.hidden || libraryMutation) return;
     // Validate the complete combined workspace before changing anything.
-    serializeBackup([...stories.map(storyRecord), ...records]);
+    serializeBackup([...stories.filter(story => !story.accountOwner).map(storyRecord), ...records]);
     const additions = records.map(record => makeStory(record));
     if (operation !== importEpoch || document.hidden || libraryMutation) return;
     stories.push(...additions);
@@ -1358,7 +1415,10 @@ $("library-search")?.addEventListener("input", event => { libraryQuery = event.t
 $("library-sort")?.addEventListener("change", event => { librarySort = event.target.value; renderLibrary(); });
 $("import-backup-trigger")?.addEventListener("click", () => $("import-backup").click());
 $("import-backup")?.addEventListener("change", event => { const file = event.target.files?.[0]; if (file) void restoreBackup(file); });
-$("export-library")?.addEventListener("click", () => { if (stories.length) exportStories(stories.map(storyRecord), "satinlore-library-backup.json"); });
+$("export-library")?.addEventListener("click", () => {
+  const local = stories.filter(story => !story.accountOwner);
+  if (local.length) exportStories(local.map(storyRecord), "satinlore-library-backup.json");
+});
 $("export-story")?.addEventListener("click", () => { const story = currentStory(); if (story) exportStories([storyRecord(story)], "satinlore-story-backup.json"); });
 for (const name of ["reader", "story"]) {
   $(`settings-${name}-tab`)?.addEventListener("click", () => { pause("Settings changed. Confirm Start to continue."); selectSettingsTab(name); });
@@ -1376,7 +1436,10 @@ $("retry-access")?.addEventListener("click", () => {
 $("scene-model").addEventListener("change", event => {
   const story = currentStory();
   const choice = event.target.value;
-  if (!story || story.controlled || story.deleting || libraryMutation || !["loom", "nocturne"].includes(choice) || story.sceneModel === choice) return;
+  if (story?.deleting || libraryMutation || !["loom", "nocturne"].includes(choice)) return;
+  nextStoryModel = choice;
+  if (!story || story.controlled) { renderStoryModel(story); return; }
+  if (story.sceneModel === choice) return;
   pause("Story model changed. Confirm Start when ready.");
   story.sceneModel = choice;
   syncReaderMapping(story);
@@ -1469,20 +1532,40 @@ $("reanalyze").addEventListener("click", () => {
   syncReaderMapping(story);
   void analyse(story, {force: true});
 });
+function confirmSaveStory(story, {accountOwner = null} = {}) {
+  const toAccount = Boolean(accountOwner);
+  text("save-heading", toAccount ? (story.saved ? "Copy to your account?" : "Save to your account?") : "Save on this browser?");
+  text("save-description", toAccount ? "Save this story and your reading position so you can open them when you sign in on another device." : "Your story and reading position will be here when you return.");
+  text("save-privacy", toAccount ? "SatinLore stores your story text when you choose this option. Only save material you have permission to keep in your account." : "Anyone using this browser profile may be able to see them. Clearing browser data can remove them.");
+  text("confirm-save", toAccount ? "Save to my account" : "Save on this browser");
+  openDialog("save-dialog"); saveIntent = {id: story.id, accountOwner};
+}
 $("save-story").addEventListener("click", () => {
   const story = currentStory(); if (!story) return;
   if (story.saved) { void persistStory(story, {explicit: true}); return; }
-  openDialog("save-dialog"); saveIntent = story.id;
+  confirmSaveStory(story);
+});
+$("save-account-story").addEventListener("click", async () => {
+  const story = currentStory();
+  if (!publicMode || !story || story.controlled || story.deleting) return;
+  if (story.accountOwner) { void persistStory(story, {explicit: true}); return; }
+  if (!publicSignedIn) {
+    publicAccount?.open($("save-account-story"), () => { if (story === currentStory()) $("save-account-story").click(); });
+    return;
+  }
+  const owner = await loadAccountLibrary();
+  if (owner && publicSignedIn && story === currentStory() && !story.saving) confirmSaveStory(story, {accountOwner: owner});
 });
 $("confirm-save").addEventListener("click", () => {
-  const story = currentStory(), id = saveIntent; saveIntent = null; closeDialog("save-dialog");
-  if (story?.id === id) void persistStory(story, {explicit: true});
+  const story = currentStory(), intent = saveIntent; saveIntent = null; closeDialog("save-dialog");
+  if (story && intent && story.id === intent.id) void persistStory(story, {explicit: true, accountOwner: intent.accountOwner});
 });
 $("cancel-save").addEventListener("click", () => { saveIntent = null; closeDialog("save-dialog"); });
 $("session-only").addEventListener("click", () => {
   const story = currentStory(); if (!story?.saved) return;
   pause("Paused while you choose how to keep this story.");
-  if (confirm("Remove this story's saved copy from this browser and keep it only for this tab session?")) void removeStory(story, {keepSession: true});
+  const destination = story.accountOwner ? "your account" : "this browser";
+  if (confirm(`Remove this story's saved copy from ${destination} and keep it only for this tab session?`)) void removeStory(story, {keepSession: true});
 });
 $("rename-story").addEventListener("click", () => openStoryDetails(currentStory(), $("rename-story")));
 for (const id of ["story-details-close", "story-details-cancel"]) $(id).addEventListener("click", () => closeDialog("story-details-dialog"));
@@ -1502,7 +1585,7 @@ $("story-details-form").addEventListener("submit", event => {
     $("story-details-description").focus();
     return;
   }
-  const folderId = folders.find(folder => folder.id === $("story-details-shelf").value)?.id ?? null;
+  const folderId = !story.accountOwner ? folders.find(folder => folder.id === $("story-details-shelf").value)?.id ?? null : null;
   Object.assign(story, {title, description, folderId});
   markDirty(story);
   closeDialog("story-details-dialog");
@@ -1513,22 +1596,25 @@ $("delete-story").addEventListener("click", () => deleteStory(currentStory()));
 $("delete-all").addEventListener("click", async () => {
   if (libraryMutation || libraryLoading) return;
   pause("Paused before clearing the local library.");
-  if (!confirm("Delete all stories saved on this browser and all stories in this tab? Appearance is kept. This cannot be undone.")) return;
+  if (!confirm("Delete stories saved on this browser and session-only stories? Account stories and appearance are kept. This cannot be undone.")) return;
   libraryMutation = true;
   cancelImport(); closeDialogs(); ++selectionEpoch;
-  stories.forEach(story => { story.deleting = true; clearTimeout(story.saveTimer); story.model.cancelAnalysis(); });
+  const local = stories.filter(story => !story.accountOwner);
+  local.forEach(story => { story.deleting = true; clearTimeout(story.saveTimer); story.model.cancelAnalysis(); });
   display(); renderLibrary();
-  await Promise.all(stories.map(story => story.saveChain.catch(() => {})));
+  await Promise.all(local.map(story => story.saveChain.catch(() => {})));
   try {
     await store.deleteAll();
-    stories.length = 0; folders = []; folderFilter = "all"; activeId = null; libraryError = "";
+    const retained = stories.filter(story => story.accountOwner);
+    stories.splice(0, stories.length, ...retained);
+    folders = []; folderFilter = "all"; libraryError = "";
     $("source").value = ""; $("story-title-input").value = ""; $("file").value = "";
     if ($("draft-story")) $("draft-story").value = "";
     if ($("draft-title")) $("draft-title").value = "";
-    renderStory(); controller.setStory([]);
+    if (!currentStory()) { activeId = null; renderStory(); controller.setStory([]); }
     show("All local stories, corrections and progress deleted. Appearance was kept.");
   } catch (error) {
-    stories.forEach(story => { story.deleting = false; });
+    local.forEach(story => { story.deleting = false; });
     libraryError = error.message || "Could not clear local storage. No deletion success is claimed.";
     show(libraryError);
   }
@@ -1569,7 +1655,10 @@ $("reading-spacing").addEventListener("change", () => {
   $("reader").dataset.spacing = $("reading-spacing").value; reflow("Reading spacing changed. Confirm Start to continue.");
   savePreferences({spacing: $("reading-spacing").value});
 });
-window.addEventListener("satinlore:appearance", () => reflow("Appearance changed. Confirm Start to continue."));
+window.addEventListener("satinlore:appearance", event => {
+  reflow("Appearance changed. Confirm Start to continue.");
+  if (event.detail?.user && publicSignedIn) void saveAccountPreferences({appearance: event.detail.preference});
+});
 window.addEventListener("resize", () => {
   const library = $("library-panel");
   if (isNarrow() && !library.hidden && !$("settings-panel").hidden) {
@@ -1617,11 +1706,103 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => { if (setupFlow?.snapshot().active) setupFlow.cancel(); cancelImport(); pause("Page closed."); closeDialogs(); hostedAccess?.suspend(); });
 window.addEventListener("pageshow", () => { if (hostedAccess && !document.hidden) void hostedAccess.resume(); });
 window.addEventListener("storage", event => {
+  if (publicMode && event.key === sessionChangeKey) {
+    if (latest.mode === "lovense") controller.disconnect();
+    updatePublicSession(false);
+    void hostedAccess.check({fresh: true});
+    return;
+  }
   if (event.key !== "satinlore.library.v1" && event.key !== null) return;
   pause("The local library changed in another tab. Saved copies will not be overwritten silently.");
   libraryError = "The library changed in another tab. Reload to see its saved stories; session-only text remains in this tab until reload.";
   renderLibrary();
 });
+
+function applyReaderPreferences({width, fontSize, spacing, follow}) {
+  $("reading-width").value = document.body.dataset.readingWidth = width;
+  $("font-size").value = fontSize;
+  $("reader").className = `reader-size-${fontSize}`;
+  $("reading-spacing").value = $("reader").dataset.spacing = spacing;
+  $("follow-scroll").checked = follow;
+}
+
+function accountAppearance(active, preference) {
+  window.dispatchEvent(new CustomEvent("satinlore:account-appearance", {detail: {active, preference}}));
+}
+
+function loadAccountLibrary() {
+  if (!publicSignedIn) return Promise.resolve(null);
+  if (pendingAccountLibrary) return pendingAccountLibrary;
+  if (accountLibrary.owner) return Promise.resolve(accountLibrary.owner);
+  const task = (async () => {
+    try {
+      const snapshot = await accountLibrary.open();
+      await localLibraryReady;
+      if (!publicSignedIn || pendingAccountLibrary !== task || snapshot.owner !== accountLibrary.owner) return null;
+      for (const record of snapshot.stories) {
+        const id = stories.some(story => story.id === record.id) ? createStoryId() : record.id;
+        stories.push(makeStory({...record, id, accountId: record.id, accountOwner: snapshot.owner}));
+      }
+      accountPreferences = snapshot.preferences ?? {...preferences.values, appearance: document.documentElement.dataset.appearance || "dark"};
+      applyReaderPreferences(accountPreferences);
+      accountAppearance(true, accountPreferences.appearance);
+      text("reader-preferences-note", snapshot.preferences ? "Your saved account settings are in use." : "Changes to these settings will be saved to your account.");
+      if (!activeId && stories.length) selectStory(stories[0].id);
+      else { display(); renderLibrary(); }
+      return snapshot.owner;
+    } catch {
+      if (pendingAccountLibrary === task && publicSignedIn) show("Your account library could not be opened. Try saving again or reload to reopen it.");
+      return null;
+    } finally {
+      if (pendingAccountLibrary === task) pendingAccountLibrary = null;
+    }
+  })();
+  pendingAccountLibrary = task;
+  return task;
+}
+
+async function saveAccountPreferences(patch) {
+  const owner = await loadAccountLibrary();
+  if (!owner || !publicSignedIn || owner !== accountLibrary.owner || !accountPreferences) return;
+  const {revision, ...next} = {...accountPreferences, ...patch};
+  accountPreferences = next;
+  applyReaderPreferences(next);
+  if (patch.appearance !== undefined) accountAppearance(true, patch.appearance);
+  try {
+    await accountLibrary.savePreferences(owner, next);
+    if (publicSignedIn && owner === accountLibrary.owner) text("reader-preferences-note", "Reading preferences saved to your account.");
+  } catch (error) {
+    if (publicSignedIn && owner === accountLibrary.owner) text("reader-preferences-note", error.message || "Your account settings could not be saved.");
+  }
+}
+
+function clearAccountLibrary() {
+  accountLibrary.clear(); pendingAccountLibrary = null; accountPreferences = null;
+  for (const story of stories.filter(value => value.accountOwner)) {
+    clearTimeout(story.saveTimer);
+    story.model.cancelAnalysis();
+    stories.splice(stories.indexOf(story), 1);
+  }
+  saveIntent = null;
+  closeDialog("save-dialog");
+  if (activeId && !currentStory()) {
+    pause("Your account stories are hidden while you’re signed out.");
+    closeDialogs(); ++selectionEpoch;
+    activeId = null;
+    $("story-details-title").value = $("story-details-description").value = "";
+    renderStory(); controller.setStory([]);
+    if (stories.length) selectStory(stories[0].id);
+  }
+  applyReaderPreferences(preferences.load().preferences);
+  accountAppearance(false);
+  text("reader-preferences-note", "Reading preferences are saved on this browser while you’re signed out.");
+  display(); renderLibrary();
+}
+
+function announceSessionChange() {
+  try { window.localStorage.setItem(sessionChangeKey, createStoryId()); }
+  catch { /* The authenticated guard and owner check still isolate writes. */ }
+}
 
 function updatePublicSession(signedIn) {
   if (publicSignedIn === signedIn) return;
@@ -1630,19 +1811,26 @@ function updatePublicSession(signedIn) {
   text("open-account-welcome", signedIn ? "Manage sign-in" : "Sign in");
   if (signedIn) {
     void accountClient?.load();
+    accountAppearance(true);
+    void loadAccountLibrary();
     if (currentStory()?.sceneModel === "nocturne") void checkNocturne();
   } else {
     nocturneReady = null;
     accountClient?.clear();
+    clearAccountLibrary();
   }
 }
 
 if (publicMode) {
   text("open-account-welcome", "Sign in");
+  text("account-storage-description", "Save stories and reading settings to your account to use them on other devices. Choose which stories to save.");
   publicAccount = mountPublicAccount({document,
     openDialog: opener => openDialog("public-account-dialog", opener),
     closeDialog: () => closeDialog("public-account-dialog"),
-    onVerified: () => hostedAccess.check({fresh: true}),
+    onVerified: async () => {
+      announceSessionChange();
+      return hostedAccess.check({fresh: true});
+    },
     onSignOut: async request => {
       pause("Signing out. Start when you’re ready.");
       if (latest.mode === "lovense") controller.disconnect();
@@ -1651,6 +1839,7 @@ if (publicMode) {
         const value = await request();
         if (value?.authenticated !== false) throw Error();
         updatePublicSession(false);
+        announceSessionChange();
       } finally {
         if (!document.hidden) await hostedAccess.resume();
       }
@@ -1705,12 +1894,7 @@ if (hostedMode) {
 
 const loadedPreferences = preferences.load();
 const initialPreferences = loadedPreferences.preferences;
-$("reading-width").value = initialPreferences.width;
-$("font-size").value = initialPreferences.fontSize;
-$("reading-spacing").value = initialPreferences.spacing;
-$("follow-scroll").checked = initialPreferences.follow;
-$("reader").className = `reader-size-${initialPreferences.fontSize}`;
-$("reader").dataset.spacing = initialPreferences.spacing;
+applyReaderPreferences(initialPreferences);
 text("reader-preferences-note", loadedPreferences.message);
 // These presentation modules consume snapshots; they never dispatch device commands.
 if (document.createElementNS) {
@@ -1756,6 +1940,7 @@ if (document.createElementNS) {
       if (publicMode) {
         hostedAccess.suspend();
         updatePublicSession(false);
+        announceSessionChange();
         if (!document.hidden) void hostedAccess.resume();
         show("Account data removed. Stories saved in this browser are still here.");
       }
@@ -1763,7 +1948,8 @@ if (document.createElementNS) {
     getContext:()=>{
       const state=controller.snapshot(),channels={...state.calibration.channels};
       for(const channel of state.activeChannels || [state.channel])if(channels[channel])channels[channel]=selectedSettings(state,channel);
-      return {model:state.model,mode:state.feel?.mode||"story",channels,activeChannels:state.activeChannels||[state.channel],ceiling:state.ceiling,storyId:currentStory()?.id||null};
+      const story = currentStory();
+      return {model:state.model,mode:state.feel?.mode||"story",channels,activeChannels:state.activeChannels||[state.channel],ceiling:state.ceiling,storyId:story?.accountId || story?.id || null};
     },
     onStop:()=>pause("Account settings changed. Start when ready."),
     onRegistered:()=>{closeDialog("app-settings-dialog");recordAllowedEvent({type:"step",step:"account"});setupFlow.open();},
@@ -1802,7 +1988,7 @@ reserveDockSpace();
 controller.setVisible(!document.hidden);
 display(controller.snapshot());
 renderLibrary();
-void (async () => {
+localLibraryReady = (async () => {
   try {
     const folderResult = await folderStore.loadAll();
     folders = folderResult.folders;

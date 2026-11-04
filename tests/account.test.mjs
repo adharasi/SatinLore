@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ReaderAccount, handleAccount, accountIdentity, normalizePreset, normalizeChannelSettings, ACCOUNT_BODY_BYTES } from "../deploy/cloudflare/accounts.mjs";
+import { ReaderAccount, handleAccount, accountIdentity, ensureEmailAccount, normalizePreset, normalizeChannelSettings, ACCOUNT_BODY_BYTES } from "../deploy/cloudflare/accounts.mjs";
 
 const ORIGIN = "https://app.satinlore.com";
 const BETA = "https://beta.satinlore.com";
@@ -12,18 +12,30 @@ function internal(path = "/api/account", body, options = {}) {
   return new Request("https://accounts.internal" + path, { method: body === undefined ? "GET" : "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json", ...options.headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...options });
 }
 function storageFixture() {
-  let value;
+  let values = new Map();
+  function handle(target) {
+    return {
+      async get(key) {
+        if (Array.isArray(key)) return structuredClone(new Map(key.filter(item => target.has(item)).map(item => [item, target.get(item)])));
+        return structuredClone(target.get(key));
+      },
+      async put(key, next) { target.set(key, structuredClone(next)); },
+      async delete(key) {
+        if (Array.isArray(key)) return key.filter(item => target.delete(item)).length;
+        return target.delete(key);
+      },
+    };
+  }
   const storage = {
-    async get(key) { assert.equal(key, "state"); return structuredClone(value); },
-    async put(key, next) { assert.equal(key, "state"); value = structuredClone(next); },
+    async get(key) { return handle(values).get(key); },
     async transaction(callback) {
-      let pending = structuredClone(value);
-      const result = await callback({ get: async () => structuredClone(pending), put: async (_key, next) => { pending = structuredClone(next); } });
-      value = pending;
+      const pending = structuredClone(values);
+      const result = await callback(handle(pending));
+      values = pending;
       return result;
     },
   };
-  return { storage, state: () => structuredClone(value), set: next => { value = structuredClone(next); } };
+  return { storage, state: () => structuredClone(values.get("state")), set: next => { values.set("state", structuredClone(next)); } };
 }
 function fixture() { const f = storageFixture(); return { ...f, service: new ReaderAccount({ storage: f.storage }, {}) }; }
 const create = service => service.fetch(internal("/api/account", { action: "create", adult: true, expectedRevision: 0 }));
@@ -175,4 +187,55 @@ test("the authenticated router binds only verified subject and issuer, strips me
   } }) } };
   const denied = await handleAccount(publicRequest("/api/account"), delayed, { config, session: expiresDuringRead });
   assert.equal(denied.status, 403); assert.equal((await denied.text()).includes("privateAccount"), false);
+});
+
+test("cloud story routes require a verified app email account and reject stale cross-account writes", async () => {
+  const buckets = new Map();
+  let publicRequest, forwarded;
+  const config = { origin: ORIGIN, issuer: ORIGIN };
+  const emailSession = character => ({ authMode: "email", subject: `email-v1:${character.repeat(64)}`, expiresAt: Date.now() + 60000 });
+  const firstSession = emailSession("a"), secondSession = emailSession("b");
+  const env = { READER_ACCOUNTS: { idFromName: name => name, get(name) {
+    if (!buckets.has(name)) buckets.set(name, fixture().service);
+    return { fetch(request) {
+      forwarded = { bodyUsed: publicRequest?.bodyUsed, headers: request.headers };
+      return buckets.get(name).fetch(request);
+    } };
+  } } };
+  const library = "/api/account/library";
+  const call = (session, body, headers = {}) => {
+    publicRequest = new Request(ORIGIN + library, {
+      method: body === undefined ? "GET" : "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return handleAccount(publicRequest, env, { config, session });
+  };
+  assert.equal((await call(null)).status, 403);
+  const accessSession = { expiresAt: firstSession.expiresAt, subject: "synthetic-founder" };
+  const forged = await handleAccount(new Request(ORIGIN + library, { headers: { "X-SatinLore-Account-Mode": "email" } }), env,
+    { config: { origin: ORIGIN, issuer: "https://synthetic.cloudflareaccess.com" }, session: accessSession });
+  assert.equal(forged.status, 403);
+  assert.equal(await ensureEmailAccount(env, config, firstSession, Date.now()), true);
+  assert.equal(await ensureEmailAccount(env, config, secondSession, Date.now()), true);
+  const first = await (await call(firstSession)).json(), second = await (await call(secondSession)).json();
+  assert.notEqual(first.owner, second.owner);
+  assert.deepEqual(first.stories, []); assert.equal(first.revision, 0);
+  assert.equal((await call(firstSession, undefined, { "Sec-Fetch-Site": "same-site" })).status, 403);
+  const mutation = { action: "saveStory", expectedOwner: first.owner, expectedRevision: 0,
+    story: { id: STORY, title: "Synthetic workspace", text: "Two readers stopped at the library.", corrections: [0], position: 0, analysisVersion: "fixture" } };
+  assert.equal((await call(secondSession, mutation)).status, 409, "A cookie changed in another tab cannot retarget a pending save.");
+  assert.equal((await call(firstSession, { ...mutation, story: { ...mutation.story, ceiling: 10 } })).status, 400);
+  const saved = await call(firstSession, mutation, { Cookie: "private=fixture", "X-SatinLore-Account-Expires-At": "1" });
+  assert.equal(saved.status, 200);
+  assert.equal(forwarded.bodyUsed, false, "The Worker must stream the body to the bounded DO parser without reading it.");
+  assert.equal(forwarded.headers.get("Cookie"), null);
+  assert.equal(forwarded.headers.get("X-SatinLore-Account-Expires-At"), String(firstSession.expiresAt));
+  assert.equal(saved.headers.get("Cache-Control"), "no-store");
+  assert.equal(saved.headers.get("Cross-Origin-Resource-Policy"), "same-origin");
+  assert.equal((await call(firstSession, { ...mutation, story: { ...mutation.story, text: "X".repeat(1_950_000) } })).status, 413,
+    "The durable parser must enforce the body limit even without a length header.");
+  assert.equal((await (await call(firstSession)).json()).stories[0].text, mutation.story.text);
+  assert.deepEqual((await (await call(secondSession)).json()).stories, []);
+  const beta = await handleAccount(new Request(BETA + library), env, { config: { ...config, origin: BETA }, session: firstSession });
+  assert.equal(beta.status, 403);
 });

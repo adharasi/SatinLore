@@ -2,7 +2,7 @@
 export const READER_PREFERENCES_KEY = "satinlore.reader-preferences.v1";
 export const DEFAULT_READER_PREFERENCES = Object.freeze({width: "wide", fontSize: "normal", spacing: "normal", follow: true});
 const choices = {width: ["comfortable", "wide", "full"], fontSize: ["small", "normal", "large"], spacing: ["compact", "normal", "relaxed"]};
-function validated(value) {
+export function validateReaderPreferences(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !Object.hasOwn(DEFAULT_READER_PREFERENCES, key))) throw new TypeError("Invalid reading preferences.");
   const next = {...DEFAULT_READER_PREFERENCES, ...value};
   if (typeof next.follow !== "boolean" || Object.entries(choices).some(([key, allowed]) => !allowed.includes(next[key]))) throw new TypeError("Invalid reading preferences.");
@@ -29,12 +29,12 @@ export class ReaderPreferences {
       if (typeof raw !== "string" || raw.length > 500) throw new Error();
       const envelope = JSON.parse(raw);
       if (!envelope || envelope.schemaVersion !== 1 || Object.keys(envelope).some(key => !["schemaVersion", "preferences"].includes(key))) throw new Error();
-      this.current = validated(envelope.preferences);
+      this.current = validateReaderPreferences(envelope.preferences);
       return {preferences: this.values, available: true, message: ""};
     } catch { return {preferences: this.values, available: true, message: "Saved reading preferences could not be read. Default settings are in use for this visit."}; }
   }
   update(patch) {
-    const next = validated({...this.current, ...validatedPatch(patch)});
+    const next = validateReaderPreferences({...this.current, ...validatedPatch(patch)});
     this.current = next;
     try {
       this._storage().setItem(READER_PREFERENCES_KEY, JSON.stringify({schemaVersion: 1, preferences: next}));
@@ -45,6 +45,6 @@ export class ReaderPreferences {
 function validatedPatch(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !Object.hasOwn(DEFAULT_READER_PREFERENCES, key))) throw new TypeError("Invalid reading preferences.");
   // Validate supplied values without filling defaults, so changing one setting preserves the others.
-  validated(value);
+  validateReaderPreferences(value);
   return value;
 }

@@ -8,20 +8,22 @@ async function hmac(key, value) {
 }
 
 /** Send a single transactional message via the regional SES v2 endpoint using SigV4. */
-export async function sendReaderCode(config, recipient, code, fetcher = fetch) {
+export async function sendReaderCode(config, recipient, code, purpose, fetcher = fetch) {
   const { region, from, accessKey, secretKey, sessionToken } = config;
   const host = `email.${region}.amazonaws.com`;
   const path = "/v2/email/outbound-emails";
   const timestamp = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
   const date = timestamp.slice(0, 8);
+  const reset = purpose === "reset";
+  const action = reset ? "password reset" : "email verification";
   const content = JSON.stringify({
     FromEmailAddress: from,
     Destination: { ToAddresses: [recipient] },
     Content: { Simple: {
-      Subject: { Charset: "UTF-8", Data: "Your SatinLore sign-in code" },
+      Subject: { Charset: "UTF-8", Data: `Your SatinLore ${action} code` },
       Body: { Text: {
         Charset: "UTF-8",
-        Data: `Your SatinLore sign-in code is ${code}. It expires in 10 minutes. Enter it on app.satinlore.com to continue. If you did not request this code, you can ignore this email.`,
+        Data: `Your SatinLore ${action} code is ${code}. It expires in 10 minutes. Enter it on app.satinlore.com to continue. If you did not request this code, you can ignore this email.`,
       } },
     } },
   });

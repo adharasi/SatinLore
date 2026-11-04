@@ -46,6 +46,12 @@ for (const story of ANALYSED_PRACTICE_STORIES) {
 test("the practice picker opens session-only analysed and known-level stories, with Stop and Escape", async t => {
   const app = workspace(); t.after(() => app.destroy());
   await app.settle();
+  const model = app.nodes.get("scene-model");
+  assert.equal(model.disabled, false);
+  assert.equal(model.value, "loom");
+  model.value = "nocturne"; await model.dispatch("change");
+  assert.equal(model.value, "nocturne");
+  assert.equal(app.nodes.get("nocturne-panel").hidden, true);
   await app.click("control-playground");
   const picker = app.nodes.get("practice-story-choice"), dialog = app.nodes.get("practice-story-dialog");
   assert.equal(dialog.open, true);
@@ -65,6 +71,7 @@ test("the practice picker opens session-only analysed and known-level stories, w
   assert.equal(app.read("currentStory().saved"), false);
   assert.equal(app.read("latest.running"), false);
   assert.equal(app.nodes.get("scene-model").disabled, false);
+  assert.equal(app.read("currentStory().sceneModel"), "nocturne");
   assert.equal(app.read("currentStory().model.paragraphs[3].phase"), "peak");
 
   await app.click("control-playground");
@@ -77,17 +84,21 @@ test("the practice picker opens session-only analysed and known-level stories, w
   await app.click("practice-story-open"); await app.settle();
   assert.equal(app.read("currentStory().controlled"), true);
   assert.equal(app.read("currentStory().model.paragraphs[2].override"), 4);
-  assert.equal(app.nodes.get("scene-model").disabled, true);
+  assert.equal(model.disabled, false);
+  model.value = "loom"; await model.dispatch("change");
+  model.value = "nocturne"; await model.dispatch("change");
+  assert.equal(app.read("currentStory().model.paragraphs[2].override"), 4);
+  assert.equal(app.nodes.get("nocturne-panel").hidden, true);
   assert.match(app.nodes.get("scene-model-help").textContent, /fixed levels/);
   assert.equal(app.nodes.get("model-practice-shortcut").hidden, false);
   assert.equal(app.read("latest.running"), false);
   await app.click("model-practice-shortcut");
   assert.equal(picker.value, ANALYSED_PRACTICE_STORIES[0].id);
   await app.click("practice-story-open"); await app.settle();
-  const model = app.nodes.get("scene-model");
   assert.equal(model.disabled, false);
-  model.value = "nocturne"; await model.dispatch("change");
   assert.equal(app.read("currentStory().sceneModel"), "nocturne");
+  model.value = "loom"; await model.dispatch("change");
+  assert.equal(app.read("currentStory().sceneModel"), "loom");
   assert.equal(app.libraryValues.size, 0);
   assert.deepEqual(app.errors, []);
 });

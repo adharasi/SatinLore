@@ -4,9 +4,10 @@ import {readFileSync} from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../app/static/appearance.js", import.meta.url), "utf8");
-function boot({saved = null, dark = false, blocked = false} = {}) {
+function boot({saved = null, dark = false, blocked = false, defaultDark = false} = {}) {
   const writes = [], events = [];
-  const root = {dataset: {}, style: {}};
+  const root = {dataset: defaultDark ? {appearanceDefault: "dark"} : {}, style: {}};
+  const listeners = new Map();
   const select = {value: "", addEventListener(_name, fn) { this.change = fn; }};
   const readerSelect = {value: "", addEventListener(_name, fn) { this.change = fn; }};
   const note = {textContent: ""};
@@ -18,6 +19,7 @@ function boot({saved = null, dark = false, blocked = false} = {}) {
     getElementById: id => id === "appearance" ? select : id === "reading-appearance" ? readerSelect : id === "toggle-dark-mode" ? toggle : id === "appearance-note" ? note : null,
     addEventListener(_name, fn) { ready = fn; }};
   const window = {matchMedia: () => media,
+    addEventListener: (name, fn) => listeners.set(name, fn),
     localStorage: {getItem: () => { if (blocked) throw Error("unavailable"); return saved; },
       setItem: (key, value) => { if (blocked) throw Error("unavailable"); writes.push([key, value]); }},
     dispatchEvent: event => events.push(event)};
@@ -25,9 +27,28 @@ function boot({saved = null, dark = false, blocked = false} = {}) {
     this.type = name; this.detail = options.detail;
   }}});
   return {root, select, readerSelect, toggle, note, writes, events, ready,
+    applyAccount(detail) { listeners.get("satinlore:account-appearance")({detail}); },
     choose(value) { select.change({target: {value}}); },
     os(value) { media.matches = value; media.change(); }};
 }
+
+test("reader dark default pre-paints without overriding an explicit browser preference", () => {
+  assert.equal(boot({defaultDark: true}).root.dataset.theme, "dark");
+  assert.equal(boot({defaultDark: true, saved: "light"}).root.dataset.theme, "light");
+  assert.equal(boot({defaultDark: true, saved: "system"}).root.dataset.theme, "light");
+});
+
+test("signed-in theme updates are isolated from the browser preference and clear on sign-out", () => {
+  const app = boot({defaultDark: true, saved: "light"});
+  app.ready(); app.applyAccount({active: true, preference: "light"});
+  app.choose("dark");
+  assert.equal(app.root.dataset.theme, "dark");
+  assert.equal(app.events.at(-1).detail.user, true);
+  assert.deepEqual(app.writes, []);
+  app.applyAccount({active: false});
+  assert.equal(app.root.dataset.theme, "light");
+  assert.equal(app.events.at(-1).detail.user, false);
+});
 
 test("appearance resolves System before DOM ready without writing storage", () => {
   const app = boot({dark: true});
