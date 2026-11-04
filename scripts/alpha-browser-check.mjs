@@ -266,6 +266,8 @@ try {
   await movementDetails.locator(":scope > summary").click();
   const minimum = vibration.locator('input[data-setting="minimum"]');
   const maximum = vibration.locator('input[data-setting="maximum"]');
+  assert.equal(await maximum.inputValue(), "20", "Alpha simulator opens with the full range.");
+  assert.equal(await page.getByRole("button", {name: "Allow higher levels", includeHidden: true}).count(), 0);
   await minimum.press("End");
   const oldMaximum = Number(await maximum.inputValue());
   assert.equal(Number(await minimum.inputValue()), oldMaximum);
@@ -387,6 +389,8 @@ try {
   begin("opening a vendor WebSocket and exercising the isolated SDK fallback");
   const {context: pairingContext, page: pairingPage} = await openContext();
   const qrUrl = "https://api.lovense-api.com/alpha-browser-fixture.svg";
+  const physicalCommands = [];
+  let fixtureSocket;
   let failSocket = false, socketAttempts = 0, fallbackLoads = 0;
   await pairingContext.route("https://api.lovense-api.com/api/basicApi/getSocketUrl", async route => {
     const headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "POST"};
@@ -413,12 +417,14 @@ try {
   await pairingContext.routeWebSocket(url => url.hostname === "api.lovense-api.com" && url.pathname === "/fixture/socket.io/", socket => {
     socketAttempts++;
     if (failSocket) { void socket.close({code: 1011, reason: "Synthetic socket failure"}); return; }
+    fixtureSocket = socket;
     socket.onMessage(message => {
       if (typeof message !== "string" || !message.startsWith("42")) return;
       const [name, payload] = JSON.parse(message.slice(2));
       if (name === "basicapi_get_qrcode_ts") socket.send("42" + JSON.stringify(["basicapi_get_qrcode_tc", {
         code: 0, data: {ackId: payload.ackId, qrcodeUrl: qrUrl},
       }]));
+      if (name === "basicapi_send_toy_command_ts") physicalCommands.push(payload);
     });
     socket.send('0{"sid":"synthetic-socket","upgrades":[],"pingInterval":25000,"pingTimeout":5000}');
     socket.send("40");
@@ -435,6 +441,35 @@ try {
   await pairingPage.waitForFunction(() => document.querySelector("#alpha-device-qr-image")?.naturalWidth > 0);
   assert.equal(socketAttempts, 1, "The real opaque bridge can open a vendor WebSocket.");
   assert.equal(fallbackLoads, 0);
+  const fixtureToy = "synthetic-flexer";
+  fixtureSocket.send("42" + JSON.stringify(["basicapi_update_device_info_tc", {
+    online: true, toyList: [{id: fixtureToy, toyType: "flexer", connected: true}],
+  }]));
+  const liveSelect = pairingPage.locator("#alpha-device-select");
+  await liveSelect.selectOption(fixtureToy);
+  await pairingPage.locator("#alpha-device-select-confirm").click();
+  for (const channel of ["vibrate", "fingering"]) {
+    const row = pairingPage.locator(`.alpha-verify-movement[data-channel="${channel}"]`);
+    await row.locator("button").click();
+    await row.locator('input[type="checkbox"]').check();
+  }
+  await pairingPage.locator("#alpha-verify-continue").click();
+  await pairingPage.locator("#alpha-controls").waitFor({state: "visible"});
+  const liveMovement = channel => pairingPage.locator(`#alpha-movement-cards [data-channel="${channel}"]`);
+  for (const channel of ["vibrate", "fingering"]) {
+    assert.equal(await liveMovement(channel).locator('[data-setting="maximum"]').inputValue(), "20");
+  }
+  assert.deepEqual(physicalCommands.filter(command => command.action !== "Stop").map(command => command.action),
+    ["Vibrate:1", "Fingering:1"], "The range changes no movement before an explicit Start.");
+  await liveMovement("vibrate").locator('[data-setting="level"]').press("End");
+  await pairingPage.locator("#alpha-device-start").click();
+  await pairingPage.waitForFunction(() => document.querySelector('[data-channel="vibrate"] .alpha-output output')?.textContent === "20 / 20");
+  assert.ok(physicalCommands.some(command => command.action === "Fingering:1,Vibrate:20" &&
+    command.toy === fixtureToy && command.timeSec === 2), "The opaque bridge accepts a bounded level-20 command for the checked Flexer.");
+  await pairingPage.locator("#alpha-device-stop").click();
+  await pairingPage.locator("#alpha-back-to-checks").click();
+  await pairingPage.locator("#alpha-device-disconnect").click();
+  await connect.waitFor({state: "visible"});
   failSocket = true;
   const fallbackResponse = pairingPage.waitForResponse("https://api.lovense-api.com/basic-sdk/core.min.js");
   await connect.click();

@@ -258,10 +258,6 @@ function buildDeviceRows(channels) {
       const setting = control.dataset.setting;
       const label = control.closest("label");
       if (label) control.setAttribute("aria-label", `${movement.label} ${label.firstChild.textContent.trim().toLowerCase()}`);
-      if (setting === "range") {
-        control.addEventListener("click", () => deviceAction(() => device.enableRange(channel)));
-        continue;
-      }
       control.addEventListener(control.type === "range" ? "input" : "change", () => {
         device.set(channel, setting, control.type === "range" ? Number(control.value) : control.value);
         renderDevice();
@@ -290,7 +286,6 @@ function renderDevice() {
   const channels = d.channels ?? [];
   const checked = d.verifiedChannels ?? [];
   const active = d.activeChannels ?? [];
-  const ranged = d.personalRangeChannels ?? [];
   $("alpha-device-mode").textContent = simulator ? "FLEXER SIMULATOR" : "FLEXER · LOVENSE REMOTE";
   $("alpha-device-title").textContent = verifying ? "Check your device" : exploring ? "Your movements" : simulator ? "Connect the simulator" : "Connect your toy";
   $("alpha-connection-badge").textContent = connected ? "Device selected" : connecting ? "Connecting" : d.toys?.length ? "Choose your Flexer" : d.qrUrl ? "Scan the code" : "Disconnected";
@@ -356,13 +351,8 @@ function renderDevice() {
     card.querySelector(".alpha-output output").textContent = output[channel] === null || output[channel] === undefined ? "Not confirmed" : `${output[channel]} / 20`;
     for (const control of card.querySelectorAll("[data-setting]")) {
       const field = control.dataset.setting;
-      if (field === "range") {
-        control.hidden = simulator || !checked.includes(channel) || ranged.includes(channel);
-        control.disabled = busy || !ready || d.running;
-        continue;
-      }
       if (control.type === "range") {
-        control.max = String(field === "maximum" ? d.maximums[channel] : settings.maximum);
+        if (field !== "maximum") control.max = String(settings.maximum);
         control.closest("label").querySelector("output").value = String(settings[field]);
       }
       control.value = String(settings[field]);

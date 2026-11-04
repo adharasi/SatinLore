@@ -281,8 +281,7 @@
 .alpha-slider output, #alpha-review-time-label { float: right; color: var(--action); }
 .alpha-slider output, .alpha-time-field label { margin-inline-end: 37px; }
 .alpha-movement-detail > summary { font-size: .85rem; }
-.alpha-movement-detail select, .alpha-movement-detail button { margin: 5px 0 8px; }
-.alpha-range-settings:has(button[hidden]) { display: none; }
+.alpha-movement-detail select { margin: 5px 0 8px; }
 .alpha-playback-actions { margin: 9px 0 3px; }
 .alpha-mark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .alpha-mark-grid button { padding-inline: 7px; font-size: .84rem; }

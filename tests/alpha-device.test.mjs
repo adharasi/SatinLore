@@ -91,6 +91,9 @@ test("Alpha rehearsal checks each movement and preserves independent level and z
   assert.equal(await device.choose(["vibrate", "fingering"]), false);
   await app.checkMovement("fingering");
   assert.equal(await device.choose(["vibrate", "fingering"]), true);
+  assert.equal(device.snapshot().settings.vibrate.maximum, 20);
+  assert.equal(device.snapshot().settings.fingering.maximum, 20);
+  assert.equal(device.snapshot().settings.vibrate.level, 1);
   device.set("vibrate", "level", 4);
   device.set("fingering", "level", 2);
   device.set("vibrate", "minimum", 3);
@@ -113,30 +116,31 @@ test("Alpha rehearsal checks each movement and preserves independent level and z
   assert.ok(!JSON.stringify(app.events).includes("sim-flexer"));
 });
 
-test("Alpha live range remains per checked movement and every command targets one Flexer", async t => {
+test("Alpha enables the full range for checked live movements without starting the Flexer", async t => {
   const bridge = new FakeBridge(), app = fixture({bridge}), device = app.device;
   t.after(() => device.destroy());
   assert.equal(await device.connect("live"), true);
   assert.deepEqual(device.snapshot().toys, [{id: "one-flexer", label: "Flexer"}]);
   assert.throws(() => device.select("another-toy"), /discovered Flexer/);
   await device.select("one-flexer");
-  assert.equal(await device.enableRange("vibrate"), false);
+  assert.equal(await device.choose(["vibrate"]), false);
+  assert.deepEqual(bridge.grants, []);
   await app.checkMovement("vibrate");
+  assert.equal(await device.choose(["vibrate", "fingering"]), false);
+  assert.deepEqual(bridge.grants, []);
   await app.checkMovement("fingering");
-  await device.choose(["vibrate", "fingering"]);
-  assert.equal(await device.enableRange("vibrate"), true);
-  assert.deepEqual(bridge.grants.map(value => value.channels), [["vibrate"]]);
-  assert.throws(() => device.set("vibrate", "maximum", 8), /up to 5/);
-  assert.equal(await device.enableRange("fingering"), true);
+  assert.equal(await device.choose(["vibrate", "fingering"]), true);
   assert.deepEqual(bridge.grants.map(value => value.channels), [["vibrate"], ["fingering"]]);
   assert.equal(device.snapshot().running, false);
-  device.set("vibrate", "maximum", 8);
-  device.set("vibrate", "level", 7);
+  assert.equal(device.snapshot().settings.vibrate.maximum, 20);
+  assert.equal(device.snapshot().settings.fingering.maximum, 20);
+  assert.deepEqual(bridge.commands.map(frame => frame.level), [1, 1], "Only gentle checks are sent before Start.");
+  device.set("vibrate", "level", 20);
   device.set("fingering", "level", 2);
   assert.equal(bridge.commands.length, 2, "Draft edits did not transmit a movement.");
   assert.equal(await device.start(), true);
   await settle();
-  assert.deepEqual(bridge.commands.at(-1).levels, {vibrate: 7, fingering: 2});
+  assert.deepEqual(bridge.commands.at(-1).levels, {vibrate: 20, fingering: 2});
   assert.ok(bridge.commands.every(frame => frame.deviceId === "one-flexer" && frame.durationMs === 2000));
   app.document.hidden = true;
   app.document.dispatchEvent(new Event("visibilitychange"));
@@ -147,6 +151,28 @@ test("Alpha live range remains per checked movement and every command targets on
   assert.equal(await device.start(), false);
   assert.equal(device.snapshot().running, false);
   assert.ok(bridge.stops.every(frame => frame.deviceId === "one-flexer"));
+});
+
+test("Alpha stays paused if a range grant fails and retries only the missing grant", async t => {
+  const bridge = new FakeBridge(), {device, checkMovement} = fixture({bridge});
+  t.after(() => device.destroy());
+  let failFlexing = true;
+  bridge.enablePersonalRange = async request => {
+    bridge.grants.push(request.channels[0]);
+    return request.channels[0] !== "fingering" || !failFlexing;
+  };
+  await device.connect("live");
+  await device.select("one-flexer");
+  await checkMovement("vibrate");
+  await checkMovement("fingering");
+  await assert.rejects(device.choose(["vibrate", "fingering"]), /range could not be confirmed/);
+  assert.equal(await device.start(), false);
+  assert.equal(bridge.commands.length, 2);
+  failFlexing = false;
+  assert.equal(await device.choose(["vibrate", "fingering"]), true);
+  assert.deepEqual(bridge.grants, ["vibrate", "fingering", "fingering"]);
+  assert.equal(device.snapshot().settings.vibrate.maximum, 20);
+  assert.equal(device.snapshot().running, false);
 });
 
 test("lowering a personal maximum also lowers the continuous minimum and rejects any increase above it", async t => {

@@ -28,10 +28,10 @@ Alpha runs at `https://app.satinlore.com/alpha`. It is a Flexer study with a sim
 ## First rehearsal and live visit
 
 1. Open Alpha, choose **Simulator**, confirm you are 18 or older and choose **Allow data collection**. Connect and select the simulator. Test each movement, tick the check only after it starts and stops, then continue to the controls.
-2. Follow **What to try**. Try each movement on its own, then combine the two if both are available. Set a personal maximum and test whether you prefer a low continuous minimum or a quiet break. Lower the maximum and verify the minimum drops with it. **Stop** stops the movements. **Finish & stop** also opens the feedback page.
+2. Follow **What to try**. Try each movement on its own, then combine the two if both are available. The personal maximum starts at 20/20 and the starting movement level is 1/20. Lower the maximum and verify the minimum drops with it. **Stop** stops the movements. **Finish & stop** also opens the feedback page.
 3. Save the three required answers and any optional feedback or timestamped notes, then choose **Back to study home**. As Dilan, open the session in `/admin` and check separate replays of pairing, movement checks, controls and feedback. Review the control timeline, marks and submitted answers there. To delete a synthetic rehearsal, use the admin session’s delete action.
 4. For a real Flexer, turn on Bluetooth and pair your Flexer in the **Lovense Remote** phone app. Open Alpha on a second screen, choose **My Flexer** and **Connect**. In Remote choose **+ → Scan QR**. Scan the code, keep Remote open and choose your Flexer in Alpha.
-5. Set the Flexer down and check each movement separately at the low test level. Continue with only the movements that started and stopped as expected. Start with the conservative range. If the Flexer keeps moving after **Stop**, stop it in Lovense Remote or on the device.
+5. Set the Flexer down and check each movement separately at level 1. **Continue to controls** makes the full range available for each checked movement. Controls stay paused until you press **Start**. Lower the personal maximum if you want a tighter limit. If the Flexer keeps moving after **Stop**, stop it in Lovense Remote or on the device.
 
 To check the live integration without a toy, sign in as Dilan on a desktop, choose **My Flexer** and select **Connect**. A QR code should appear before a Flexer is paired. Seeing it verifies the live token exchange and QR setup. Device discovery, movement and Stop still need a physical Flexer.
 

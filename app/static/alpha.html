@@ -275,29 +275,25 @@
       <div class="alpha-movement-heading"><div><h4></h4><p class="note"></p></div><label class="alpha-check alpha-channel-select"><input type="checkbox"><span>Use movement</span></label></div>
       <div class="alpha-output"><span>Requested level</span><output></output></div>
       <div class="alpha-control-field">
-        <label class="alpha-slider">Level <output></output><input data-setting="level" type="range" min="0" max="5" step="1" value="1"></label>
+        <label class="alpha-slider">Level <output></output><input data-setting="level" type="range" min="0" max="20" step="1" value="1"></label>
         <details class="alpha-tip"><summary aria-label="About level"><span aria-hidden="true">?</span></summary><p>Choose how strong this movement should feel. Higher numbers are stronger.</p></details>
       </div>
       <div class="alpha-control-field">
-        <label class="alpha-slider">Personal maximum <output></output><input data-setting="maximum" type="range" min="0" max="5" step="1" value="5"></label>
+        <label class="alpha-slider">Personal maximum <output></output><input data-setting="maximum" type="range" min="0" max="20" step="1" value="20"></label>
         <details class="alpha-tip"><summary aria-label="About personal maximum"><span aria-hidden="true">?</span></summary><p>Set the strongest level this movement can reach. The level stays within this limit even when the rhythm varies.</p></details>
       </div>
       <details class="alpha-movement-detail" open><summary>Minimum, rhythm and Ease off level</summary>
         <div class="alpha-control-field">
-          <label class="alpha-slider">Continuous minimum <output></output><input data-setting="minimum" type="range" min="0" max="5" step="1" value="0"></label>
+          <label class="alpha-slider">Continuous minimum <output></output><input data-setting="minimum" type="range" min="0" max="20" step="1" value="0"></label>
           <details class="alpha-tip"><summary aria-label="About continuous minimum"><span aria-hidden="true">?</span></summary><p>Set a low level to keep this movement going while you explore. Choose zero to allow quiet breaks. Keep the minimum at or below your personal maximum.</p></details>
         </div>
         <div class="alpha-control-field">
-          <label class="alpha-slider">Ease off level <output></output><input data-setting="recovery" type="range" min="0" max="5" step="1" value="0"></label>
+          <label class="alpha-slider">Ease off level <output></output><input data-setting="recovery" type="range" min="0" max="20" step="1" value="0"></label>
           <details class="alpha-tip"><summary aria-label="About Ease off level"><span aria-hidden="true">?</span></summary><p>Choose where this movement goes when you press Ease off. Set it to zero if you want that movement to go quiet.</p></details>
         </div>
         <div class="alpha-field">
           <label><span class="alpha-field-name">Rhythm</span><select data-setting="rhythm"><option value="steady">Steady</option><option value="gentle">Gentle variation</option><option value="dynamic">More variation</option></select></label>
           <details class="alpha-tip"><summary aria-label="About rhythm"><span aria-hidden="true">?</span></summary><p>Choose whether the movement stays steady or varies over time. Try Gentle variation before More variation.</p></details>
-        </div>
-        <div class="alpha-range-settings">
-          <button data-setting="range" type="button" hidden>Allow higher levels</button>
-          <p class="note">You can choose a higher personal maximum after allowing higher levels.</p>
         </div>
       </details>
     </article>

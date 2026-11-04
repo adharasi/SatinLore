@@ -3,7 +3,7 @@ import {ReaderDeviceController} from "./devices/reader-device.mjs";
 
 export const FLEXER_CHANNELS = Object.freeze(["vibrate", "fingering"]);
 const RHYTHMS = ["steady", "gentle", "dynamic"];
-const DEFAULT = Object.freeze({level: 1, maximum: 5, minimum: 0, recovery: 0, rhythm: "steady"});
+const DEFAULT = Object.freeze({level: 1, maximum: 20, minimum: 0, recovery: 0, rhythm: "steady"});
 const wholeLevel = value => Number.isInteger(value) && value >= 0 && value <= 20;
 const availableChannels = channels => FLEXER_CHANNELS.filter(channel => channels.includes(channel));
 const supportedToy = toy => toy.model === "flexer" && availableChannels(toy.capabilities).length > 0;
@@ -93,7 +93,6 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
       activeChannels: chosen, supportsCombined: selected && state.supportsCombined && channels.length === 2,
       testing: state.testing, lastTest: test, running, busy, output, outputKnown: state.outputKnown,
       playbackMode: state.feel.playbackMode, settings: Object.fromEntries(FLEXER_CHANNELS.map(id => [id, {...settings[id]}])),
-      maximums: Object.fromEntries(FLEXER_CHANNELS.map(id => [id, limit(id)])),
       canStart: !busy && !interfaceFailed && authorized && selected && chosen.length > 0 && chosen.length === activeChannels.length &&
         sameChannels(chosen, state.activeChannels) && (chosen.length === 1 || state.supportsCombined) &&
         chosen.some(id => settings[id].level > 0 && settings[id].maximum > 0) && state.canStart};
@@ -222,31 +221,30 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
     return true;
   }
 
-  function limit(channel, channels = activeChannels) {
-    if (mode === "simulator") return 20;
-    const granted = controller.snapshot().personalRangeChannels;
-    const included = channels.includes(channel) ? channels : [channel];
-    return included.every(id => granted.includes(id)) ? 20 : 5;
-  }
-
-  function calibration(channel, channels = activeChannels) {
-    const draft = settings[channel];
-    const maximum = Math.min(draft.maximum, limit(channel, channels));
-    const minimum = Math.min(draft.minimum, maximum);
-    return {maximum, minimum, background: minimum, preferred: Math.max(minimum, Math.min(draft.level, maximum)),
-      recovery: Math.min(draft.recovery, maximum), rhythm: draft.rhythm, gain: Math.min(draft.level, maximum) / 10};
+  function calibration(channel) {
+    const {maximum, minimum, level, recovery, rhythm} = settings[channel];
+    return {maximum, minimum, background: minimum, preferred: Math.max(minimum, level),
+      recovery, rhythm, gain: level / 10};
   }
 
   async function applyChoice(channels, token) {
     const state = snapshot();
     if (!channels.every(id => state.verifiedChannels.includes(id)) || channels.length === 2 && !state.supportsCombined) return false;
     activeChannels = [];
-    for (const channel of channels) {
-      const effective = calibration(channel, channels);
-      const {maximum, minimum, recovery} = effective;
-      settings[channel] = {...settings[channel], maximum, minimum, recovery, level: Math.min(settings[channel].level, maximum)};
-      controller.setCalibration(channel, effective);
+    if (mode === "live") {
+      if (!await checkAuthorization(token)) return false;
+      // Alpha Continue grants the existing bridge range for checked movements.
+      // The bridge still requires a stopped gentle check for each one.
+      for (const channel of channels.filter(id => !state.personalRangeChannels.includes(id))) {
+        const selected = await controller.setChannel(channel);
+        if (!still(token)) return false;
+        if (!selected) throw new Error("The checked movement is no longer available.");
+        const granted = await controller.enablePersonalRange({channel});
+        if (!still(token)) return false;
+        if (!granted) throw new Error("The movement range could not be confirmed.");
+      }
     }
+    for (const channel of channels) controller.setCalibration(channel, calibration(channel));
     const result = channels.length === 2 ? await controller.applyChannels(channels) : await controller.applyCalibration(channels[0]);
     if (!result || !still(token)) return false;
     activeChannels = [...channels];
@@ -262,28 +260,11 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
     });
   }
 
-  function enableRange(channel) {
-    const state = snapshot();
-    if (mode !== "live" || state.running || !state.verifiedChannels.includes(channel)) return Promise.resolve(false);
-    return action(async token => {
-      if (!await checkAuthorization(token)) return false;
-      control("range", channel);
-      const previous = [...activeChannels];
-      activeChannels = [];
-      if (!await controller.setChannel(channel) || !still(token)) return false;
-      const granted = await controller.enablePersonalRange({channel});
-      if (!still(token)) return false;
-      if (previous.length) await applyChoice(previous, token);
-      return Boolean(granted) && still(token);
-    });
-  }
-
   function set(channel, field, value) {
     if (busy || controller.snapshot().testing) throw new Error(waitMessage);
     if (!snapshot().verifiedChannels.includes(channel) || !Object.hasOwn(DEFAULT, field) ||
         (field === "rhythm" ? !RHYTHMS.includes(value) : !wholeLevel(value))) throw new Error("Choose a checked movement and an available setting.");
     const draft = settings[channel];
-    if (field === "maximum" && value > limit(channel)) throw new Error(`This movement can use a limit up to ${limit(channel)}.`);
     if (field !== "maximum" && field !== "rhythm" && value > draft.maximum) {
       throw new Error(field === "minimum" ? "Keep the continuous minimum at or below your personal maximum." : "Keep the level within the chosen limit.");
     }
@@ -370,7 +351,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
   window?.addEventListener("pagehide", pagehide);
 
   return {snapshot, connect, select, refresh: () => {controller.refresh(); return snapshot();}, test, confirmTest, choose,
-    enableRange, set, start, stop, stopAndWait, disconnect, setAuthorized,
+    set, start, stop, stopAndWait, disconnect, setAuthorized,
     hold: () => playbackAction("hold", () => controller.hold()),
     easeOff: () => playbackAction("easeoff", () => controller.easeOff()),
     resume: () => playbackAction("resume", () => {controller.followStory(); return snapshot().running;}),
