@@ -4,6 +4,7 @@
   "account_id": "7ce3ade1bea6bcbe457c8d632756822e",
   "main": "deploy/cloudflare/worker.mjs",
   "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
   "keep_vars": true,

@@ -18,6 +18,7 @@ import {FolderStore, selectFolderStories} from "../../app/static/reader/folders.
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "../../app/static/reader/web-import.mjs";
 import {PRACTICE_STORIES} from "../../app/static/reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "../../app/static/reader/account-workspace.mjs";
+import {AccountLibrary} from "../../app/static/reader/account-library.mjs";
 import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel} from "../../app/static/reader/calibration.mjs";
@@ -25,7 +26,7 @@ import {nocturneCandidates, nocturneAvailable, requestNocturne} from "../../app/
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
-export function workspace({hosted = false, locks = true, publicAuth = false, authRequest} = {}) {
+export function workspace({hosted = false, locks = true, publicAuth = false, authRequest, libraryRequest} = {}) {
   let time = 1000000, timerId = 0, context, narrow = false, document;
   const timers = new Map(), nodes = new Map(), errors = [], documentListeners = new Map(), windowListeners = new Map();
   const preferenceValues = new Map(), downloads = [];
@@ -146,6 +147,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
     WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORIES,
     ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, sceneStagePatternLabel,
+    AccountLibrary: class extends AccountLibrary { constructor() { super({request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),

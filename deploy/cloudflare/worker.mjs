@@ -278,7 +278,7 @@ async function handleFeedbackAdmin(request, env, url, config, session) {
 
 export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher, analysisFetcher, emailFetcher } = {}) {
   return {
-    async fetch(request, env) {
+    async fetch(request, env, ctx) {
       const head = request.method === "HEAD";
       let responseOrigin = APP_ORIGIN;
       const finish = response => secure(response, { head, origin: responseOrigin });
@@ -294,7 +294,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       if (!config) return finish(json({ error: publicAuth ? "Email sign-in is temporarily unavailable." : "The private preview is not available." }, 503));
       responseOrigin = config.origin;
       if (publicAuth) {
-        const authResponse = await handlePublicAuth(request, env, config, emailFetcher);
+        const authResponse = await handlePublicAuth(request, env, config, emailFetcher, ctx);
         if (authResponse) return finish(authResponse);
       }
       const read = ["GET", "HEAD"].includes(request.method);

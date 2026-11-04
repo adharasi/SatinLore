@@ -1,8 +1,5 @@
 const build = document.querySelector('meta[name="satinlore-build"]')?.content;
 document.getElementById("help-build").textContent = /^[a-f0-9]{40}$/.test(build ?? "") ? build.slice(0, 12) : "Local development";
-const guides = document.getElementById("public-guides");
-guides.href = "https://satinlore.com/docs";
-guides.hidden = false;
 const hosted = document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
 const publicReader = document.querySelector('meta[name="satinlore-public-auth"]')?.content === "true";
 if (hosted && !publicReader) {

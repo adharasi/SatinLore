@@ -1,6 +1,6 @@
 # Open the public reader
 
-`app.satinlore.com` supports SatinLore email-code sign-in. The production switch is `PUBLIC_READER_ENABLED`. With the switch unset or false, the existing Access login continues to protect the reader. The release uses the existing `satinlore-private-app` Worker and provisions its own authentication storage through a tracked Durable Object migration.
+`app.satinlore.com` supports SatinLore email and password accounts. A code verifies the address during registration and authorises a password reset. The production switch is `PUBLIC_READER_ENABLED`. With the switch unset or false, the existing Access login continues to protect the reader. The release uses the existing `satinlore-private-app` Worker and its authentication Durable Object.
 
 ## 1. Prepare transactional email
 
@@ -29,18 +29,20 @@
    | `AUTH_SES_FROM_EMAIL` | Text | Bare verified sender address, for example `team@satinlore.com` |
    | `AUTH_SES_SESSION_TOKEN` | Secret | Only for temporary AWS credentials, which require renewal |
 
-2. Confirm the latest GitHub build succeeded. Keep `PRIVATE_APP_ENABLED`, the existing Access audience and team settings, beta allowlist, Lovense settings and `OPENAI_API_KEY` in place. Add `PUBLIC_READER_ENABLED` as **Text** with value `true` and deploy the settings while the current Cloudflare Access policy still covers the app.
-3. Open the reader using an existing Cloudflare Access session. Use your own inbox or alias to request a SatinLore code. Confirm the code arrives, a wrong code is rejected, the valid code creates the account, refreshing retains the session, and signing out returns to email sign-in. Request another code to check returning sign-in. Use synthetic feedback and delete it when finished.
-4. If sending fails, check SES region, the verified sender, IAM permissions and SES account sending status before editing Access. If the new screen never appears, check the Worker name, the deployment and the exact value `true`.
+2. Confirm the latest GitHub build succeeded. Password hashing runs inside the existing SQLite authentication Durable Object, which has its own CPU budget. Verify sign-in on production before changing Access. [Durable Object limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
+3. Keep `PRIVATE_APP_ENABLED`, the existing Access audience and team settings, beta allowlist, Lovense settings and `OPENAI_API_KEY` in place. Add `PUBLIC_READER_ENABLED` as **Text** with value `true` and deploy the settings while the current Cloudflare Access policy still covers the app.
+4. Open the reader using an existing Cloudflare Access session. Choose **Create account** with an inbox you own, confirm its email code and then sign in with the password. Refresh to verify the session, test **Keep me signed in** and sign out. Use **Forgot password** to set a new password. Check the old password and existing sessions are rejected, and sign in with the new password.
+5. Save a synthetic story with **Save to my account**, change an appearance or reading setting and sign in from a second browser profile. Confirm the story and settings appear there. Check that a browser-only story stays in the original browser and that a different account cannot see the synthetic story. Delete the synthetic data when finished.
+6. If sending fails, check SES region, the verified sender, IAM permissions and SES account sending status before editing Access. If the new screen never appears, check the Worker name, the deployment and the exact value `true`.
 
 ## 3. Open the reader origin
 
 1. In **Zero Trust → Access → Applications**, locate the application that matches the entire `app.satinlore.com` hostname. Record its current destinations and policy so you can restore them. Check **Workers & Pages → satinlore-private-app → Access** as well if there is any broader rule covering the Worker. [Cloudflare Access scopes](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
 2. Remove only the whole-host `app.satinlore.com` destination from Access. If that application also lists `beta.satinlore.com`, keep the beta destination and its existing audience and policies. Preserve separately configured protected destinations and the current Worker-level authentication for the Alpha and administrator surfaces. If the old whole-host application was the only outer protection on a path you intend to keep behind Access, add an appropriately restricted path policy before removing the whole-host rule.
-3. Open a fresh private window and visit [the public reader](https://app.satinlore.com/). Confirm the SatinLore email form opens directly. Repeat sign-in with an inbox you control, then try a simulator story, change Loom to Nocturne on an analysed story, stop, send a synthetic feedback note, and sign out. Confirm the beta host still asks for Cloudflare Access and the founder feedback inbox still rejects a signed-out visitor and a non-founder account.
+3. Open a fresh private window and visit [the public reader](https://app.satinlore.com/). Confirm the reader opens directly with **Sign in** in the toolbar. Repeat sign-in with an inbox you control, then try a simulator story, change Loom to Nocturne on an analysed story, stop, send a synthetic feedback note, and sign out. Confirm the beta host asks for Cloudflare Access and the founder feedback inbox rejects a signed-out visitor and a non-founder account.
 4. As founder, open [the feedback inbox](https://beta.satinlore.com/feedback-admin), search for the synthetic note, set **In review**, and choose **Save status**. Return to **Feedback → Your recent notes** in the app and refresh to see the change. Choose **Delete my feedback** on your synthetic account and confirm the note disappears from both views.
 
-Stories saved on `app.satinlore.com` stay in their existing browser library. A public email account and its saved presets are separate from the prior Access account. The beta and Alpha identities keep their existing data and access rules. Guests can read and use the simulator. Live pairing, feedback, account presets, link imports and Nocturne require sign-in.
+Existing browser stories stay in the browser library until explicitly saved to an account. Public accounts keep their own story library, reading settings and presets. The beta and Alpha identities keep their existing data and access rules. Guests can read and use the simulator. Live pairing, feedback, account storage, link imports and Nocturne require sign-in.
 
 Keep `PUBLIC_READER_OTP_KEY` in Bitwarden across rollbacks and redeploys. It also derives stable, pseudonymous account identities. Plan an account migration before rotating it so existing users retain access to their presets.
 
