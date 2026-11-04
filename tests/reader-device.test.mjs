@@ -99,7 +99,7 @@ test("simulated disconnect and command errors require explicit recovery without 
 });
 
 test("a failed renderer stops output and explicit reconnect resets the recovery latch",async()=>{
-  let broken=false;const app=fixture({onChange:()=>{if(broken)throw Error("Synthetic render failure");}}),c=app.controller;c.setStory([3]);c.connect();c.start();broken=true;c.setStrength(1.1);
+  let broken=false;const app=fixture({onChange:()=>{if(broken)throw Error("Synthetic render failure");}}),c=app.controller;c.setStory([3]);c.connect();c.start();broken=true;c.adjustLevel(1);
   assert.equal(c.snapshot().state,"ERROR_PAUSED");assert.equal(c.snapshot().output,0);broken=false;assert.equal(c.connect(),true);assert.equal(c.start(),true);c.destroy();
 });
 

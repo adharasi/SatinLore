@@ -235,7 +235,7 @@ export class ReaderDeviceController {
   setPosition(index){return this.active.setPosition(index),this.snapshot();}
   setLevel(index,value,options){this.active.setLevel(index,value,options);this.levels[index]=value;if(value===0&&options?.manual!==false)this.manualZeros.add(index);else this.manualZeros.delete(index);return this.notify();}
   setManualZeros(indices){this.active.setManualZeros(indices);this.manualZeros=new Set(indices);return this.snapshot();}
-  setStrength(value){return this.active.setStrength(value),this.snapshot();}
+  adjustLevel(direction){this.active.adjustLevel(direction);return this.snapshot();}
   setCeilingFromControl(value){
     if(this.mode==="simulator")this.sim.setCeilingFromControl(value);
     else{

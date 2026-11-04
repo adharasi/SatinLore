@@ -7,14 +7,31 @@ export const DEFAULT_CHANNEL_CALIBRATION = Object.freeze({
 });
 const fields = Object.keys(DEFAULT_CHANNEL_CALIBRATION);
 const whole = value => Number.isInteger(value) && value >= 0 && value <= 20;
+const movementIds = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
 export function normalizeSceneProfiles(profiles, length) {
   if (profiles === undefined) return [];
   if (!Array.isArray(profiles) || profiles.length !== length) throw new RangeError("Use the current paragraph patterns.");
   return Array.from(profiles, profile => {
     if (!profile || !["steady", "gentle", "dynamic"].includes(profile.rhythm) ||
         typeof profile.quiet !== "boolean") throw new RangeError("Use a supported paragraph pattern.");
-    return {rhythm: profile.rhythm, quiet: profile.quiet};
+    const movements = profile.movements;
+    if (movements !== undefined && (!Array.isArray(movements) || movements.length > movementIds.length ||
+        Array.from(movements).some(id => !movementIds.includes(id)) || new Set(movements).size !== movements.length)) {
+      throw new RangeError("Use supported scene movements.");
+    }
+    return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]})};
   });
+}
+
+// A capped beat can hide part of an adjustment. Skip that flat portion so
+// each click still changes the current target by one whole level.
+export function stepSectionLevel(offset, direction, targetAt) {
+  if (direction !== -1 && direction !== 1) throw new RangeError("Adjust the level by one step.");
+  const target = targetAt(offset) + direction;
+  for (let next = offset + direction; Math.abs(next) <= 20; next += direction) {
+    if (targetAt(next) === target) return next;
+  }
+  return offset;
 }
 
 const gain = value => Number.isFinite(value) && value >= 0 && value <= 2 && Math.abs(value * 10 - Math.round(value * 10)) < 1e-9;
@@ -58,20 +75,21 @@ export class ReadingFeel {
   get ramping(){return this.followLevel!==null;}
   advanceFollow(from,ceiling=20){if(this.followLevel!==null && whole(from)){this.followLevel=Math.min(20,from+2);if(this.followLevel>=Math.min(ceiling,this.settings.maximum))this.followLevel=null;}}
   capReturn(value){return this.followLevel===null?value:Math.min(value,this.followLevel);}
-  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, now = 0} = {}) {
+  desired({base = 0, strength = 1, ceiling = 5, manualZero = false, scene, levelAdjustment = 0, now = 0} = {}) {
     // Deliberate zero and zero gain/strength always outrank any preferred floor.
     if (!whole(base) || !whole(ceiling) || !Number.isFinite(strength) || strength > 2 || manualZero || (base === 0 && scene?.quiet) || strength <= 0 || this.settings.gain === 0 || ceiling === 0) return 0;
     ceiling=Math.min(ceiling,this.settings.maximum);
     if (this.playbackMode !== "story") return Math.min(ceiling, this.heldLevel ?? 0);
     const {mode, minimum, background, rhythm} = this.settings;
-    if (base === 0) return this.capReturn(mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0);
+    const adjust = target => this.capReturn(Math.max(0, Math.min(ceiling, target + levelAdjustment)));
+    if (base === 0) return adjust(mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0);
     const phase = Math.floor(Math.max(0, now - this.startedAt) / 2000) % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
     const modulation = variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
     const scaled = base * strength * this.settings.gain;
     // A softer beat must not round an otherwise active scene down to a stop.
     const target = Math.max(rhythm === "scene" && scaled >= 1 ? 1 : 0, Math.floor(scaled * modulation));
-    return this.capReturn(Math.min(ceiling, Math.max(minimum, target)));
+    return adjust(Math.min(ceiling, Math.max(minimum, target)));
   }
 }
 
@@ -79,7 +97,7 @@ export class ReadingFeel {
 export class CombinedReadingFeel {
   constructor(channels, {mode = "story"} = {}) {
     if(!channels || typeof channels!=="object" || Array.isArray(channels) || Object.keys(channels).length<2 || Object.keys(channels).length>5 ||
-        Object.keys(channels).some(key=>!["vibrate","fingering","rotate","thrusting","oscillate"].includes(key)))throw new TypeError("Choose two or more available movements on one toy.");
+        Object.keys(channels).some(key=>!movementIds.includes(key)))throw new TypeError("Choose two or more available movements on one toy.");
     this.channels=Object.fromEntries(Object.entries(channels).map(([id,value])=>[id,{...normalizeChannelCalibration(value)}]));
     this.policies=Object.fromEntries(Object.entries(this.channels).map(([id,{maximum,...value}])=>{
       const policy=new ReadingFeel();policy.configure({mode,maximum,...value});return[id,policy];
@@ -102,7 +120,17 @@ export class CombinedReadingFeel {
   get ramping(){return Object.values(this.policies).some(policy=>policy.ramping);}
   advanceFollow(from,ceiling=20){for(const [id,policy] of Object.entries(this.policies))policy.advanceFollow(from?.[id],Math.min(ceiling,this.channels[id].maximum));}
   ceilings(ceiling){return Object.fromEntries(Object.entries(this.channels).map(([id,value])=>[id,Math.min(ceiling,value.maximum)]));}
-  vector(context){return Object.fromEntries(Object.entries(this.policies).map(([id,policy])=>[id,policy.desired({...context,ceiling:Math.min(context.ceiling,this.channels[id].maximum)})]));}
+  vector(context) {
+    const entries = Object.entries(this.policies);
+    let selected;
+    if (context.scene?.movements) {
+      selected = context.scene.movements.filter(id => Object.hasOwn(this.policies, id));
+      if (!selected.length) selected = [Object.hasOwn(this.policies, "vibrate") ? "vibrate" : entries[0][0]];
+    }
+    return Object.fromEntries(entries.map(([id, policy]) => [
+      id, selected && policy.playbackMode === "story" && !selected.includes(id) ? 0 : policy.desired(context)
+    ]));
+  }
   desired(context){return Math.max(0,...Object.values(this.vector(context)));}
   holdLevels(values){
     if(!values || typeof values!=="object" || Array.isArray(values) || Object.keys(values).length!==Object.keys(this.channels).length ||

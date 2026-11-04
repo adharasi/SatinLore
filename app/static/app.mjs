@@ -1,4 +1,5 @@
 import {ReaderDeviceController} from "./devices/reader-device.mjs";
+import {channelLabel} from "./devices/toy-profiles.mjs";
 import {TextImporter} from "./reader/import.mjs";
 import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
@@ -68,7 +69,7 @@ let hostedAccess = null;
 let hostedAccessReady = !hostedMode;
 const canStartHere = () => !hostedMode || Boolean(hostedAccessReady && hostedAccess?.isAuthorized());
 let latest = {state: "DISCONNECTED", connected: false, running: false, output: 0,
-  ceiling: 5, strength: 1, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
+  ceiling: 5, levelAdjustment: 0, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
 
 const currentStory = () => stories.find(story => story.id === activeId) ?? null;
 const playbackIdentity = () => JSON.stringify([latest.mode || "simulator",connection.selectedId || latest.selectedDeviceId || "",latest.activeChannels || [latest.channel || "vibrate"],latest.calibration?.channels || {}]);
@@ -182,7 +183,6 @@ function cancelImport() {
   if (cancelledLink) text("url-import-status", "Link import cancelled. Your stories are unchanged.");
   if (cancelledBackup) text("library-transfer-status", "Backup opening cancelled. Existing stories are unchanged.");
 }
-function formatStrength(value = latest.strength ?? 1) { return `${value.toFixed(1)}×`; }
 function saveState(story) {
   if (!story) return {state: "session", label: "Session only"};
   if (story.saveError) return {state: "error", label: story.saveError};
@@ -291,8 +291,9 @@ function updateCurrentCorrection(story) {
   $("level").disabled = !paragraph || libraryMutation || story?.deleting;
   $("reset-level").disabled = !paragraph || paragraph.override === null || libraryMutation || story?.deleting;
   const rhythm = {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
+  const movements = paragraph?.movements?.length ? paragraph.movements.map(channelLabel).join(" + ") : "Default movement";
   text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
-    paragraph.advisory || (paragraph.quiet ? "Quiet section" : paragraph.sceneId && rhythm ? `Scene ${paragraph.sceneId} · ${rhythm}` : "Using the local suggestion."));
+    paragraph.advisory || (paragraph.quiet ? "Quiet section" : paragraph.sceneId && rhythm ? `Scene ${paragraph.sceneId} · ${rhythm} · ${movements}` : "Using the local suggestion."));
   text("effective-level", `${latest.target ?? 0} / 20`);
   text("correction-position", paragraph ? `Current section ${latest.position + 1} of ${story.model.paragraphs.length}` : "No section selected");
   const nodes = reviewNodes.get(latest.position);
@@ -327,10 +328,9 @@ function display(state = latest) {
   $("cap").max = String(state.maxCeiling??(state.mode === "lovense" ? 5 : 20));
   text("ceiling-help", state.mode === "lovense" ? `This movement's available range is 0–${state.maxCeiling??5}. Reductions apply immediately. A higher maximum pauses until you choose Start; there is no extra popup.` : "Changes apply immediately within the simulator. Adjusting the maximum does not start playback.");
   $("cap").setAttribute("aria-valuetext", `${state.ceiling} out of 20 confirmed maximum`);
-  text("strength-value", formatStrength());
-  $("strength-minus").disabled = libraryMutation || story?.deleting || state.strength <= 0;
-  $("strength-plus").disabled = libraryMutation || story?.deleting || state.strength >= 2;
-  $("strength-reset").disabled = libraryMutation || story?.deleting || state.strength === 1;
+  const levelLocked = !story?.model.analysisReady || !state.connected || state.testing || libraryMutation || story.deleting;
+  $("level-down").disabled = levelLocked || !state.levelDown;
+  $("level-up").disabled = levelLocked || !state.levelUp;
   const reconnect = state.state === "ERROR_PAUSED";
   $("connect").disabled = state.connected && !reconnect;
   $("connect").hidden = state.connected && !reconnect;
@@ -835,7 +835,7 @@ async function confirmStart() {
   startIntent = null;
   const story = currentStory();
   if (!canStartHere() || !intent || story?.id !== intent.id || !story.model.analysisReady || document.hidden ||
-      latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || playbackIdentity() !== intent.device || !latest.connected) return;
+      latest.ceiling !== intent.ceiling || latest.levelAdjustment !== intent.levelAdjustment || playbackIdentity() !== intent.device || !latest.connected) return;
   const operation = ++startEpoch;
   pendingStart = true; display();
   let release = null;
@@ -843,11 +843,11 @@ async function confirmStart() {
     if (hostedMode) {
       const allowed = await hostedAccess.check({fresh: true});
       if (!allowed || !canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story ||
-          !story.model.analysisReady || latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || playbackIdentity() !== intent.device || !latest.connected) return;
+          !story.model.analysisReady || latest.ceiling !== intent.ceiling || latest.levelAdjustment !== intent.levelAdjustment || playbackIdentity() !== intent.device || !latest.connected) return;
     }
     release = await acquirePlayback();
     if (!canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story || !story.model.analysisReady ||
-        latest.ceiling !== intent.ceiling || latest.strength !== intent.strength || playbackIdentity() !== intent.device) { release?.(); return; }
+        latest.ceiling !== intent.ceiling || latest.levelAdjustment !== intent.levelAdjustment || playbackIdentity() !== intent.device) { release?.(); return; }
     if (!release) {
       show(navigator.locks ? "Another tab is playing. Pause it first." :
         "Playback needs a browser with Web Locks support. You can still read and correct levels.");
@@ -1032,9 +1032,9 @@ $("start").addEventListener("click", () => {
   if (!canStartHere() || !story?.model.analysisReady || !latest.connected || latest.running || pendingStart || document.hidden) return;
   cancelPosition(); followPosition();
   openDialog("start-dialog");
-  startIntent = {id: story.id, ceiling: latest.ceiling, strength: latest.strength, device: playbackIdentity()};
+  startIntent = {id: story.id, ceiling: latest.ceiling, levelAdjustment: latest.levelAdjustment, device: playbackIdentity()};
   const movement = (latest.activeChannels || [latest.channel || "vibrate"]).map(channel=>`${latest.channels?.find(item=>item.id===channel)?.label || channel} · up to ${Math.min(latest.ceiling,selectedSettings(latest,channel).maximum)}/20`).join(" + ");
-  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · session strength ${formatStrength()}.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
+  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · current level ${latest.target}/20.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
   text("confirm-start", `Start with maximum ${latest.ceiling}/20`);
 });
 $("confirm-start").addEventListener("click", () => void confirmStart());
@@ -1056,13 +1056,12 @@ $("confirm-ceiling").addEventListener("click", () => {
   display();
 });
 $("cancel-ceiling").addEventListener("click", () => { ceilingIntent = null; closeDialog("ceiling-dialog"); display(); });
-for (const [id, delta] of [["strength-minus", -1], ["strength-plus", 1]]) $(id).addEventListener("click", () => {
-  if (libraryMutation || currentStory()?.deleting) return;
+for (const [id, delta] of [["level-down", -1], ["level-up", 1]]) $(id).addEventListener("click", () => {
+  if ($(id).disabled) return;
   cancelStart();
-  controller.setStrength(Math.max(0, Math.min(20, Math.round(latest.strength * 10) + delta)) / 10);
-  recordAllowedEvent({type:"control",control:"strength",value:latest.strength});
+  const next = controller.adjustLevel(delta);
+  recordAllowedEvent({type:"control",control:"section-level",value:next.target});
 });
-$("strength-reset").addEventListener("click", () => { cancelStart(); controller.setStrength(1); });
 for (const [id, delta] of [["previous", -1], ["next", 1]]) $(id).addEventListener("click", () => {
   const story = currentStory(); if (!story || story.deleting || libraryMutation) return;
   cancelPosition();

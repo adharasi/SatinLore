@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {ReaderModel} from "../app/static/reader/model.mjs";
 
 const story = [
-  "Their tender romantic kiss expressed affection.",
+  "Their tender romantic kiss expressed affection. The motion flexed.",
   "Rain tapped softly on the window.",
   "They shared a tender romantic embrace full of affection.",
 ].join("\n\n");
@@ -14,6 +14,10 @@ test("immediate and deferred analysis produce the same local scene mapping and p
   assert.ok(immediate.effectiveLevels()[0] > 0);
   assert.equal(immediate.effectiveLevels()[1], immediate.effectiveLevels()[0], "A brief sensory detail retains the preceding level.");
   assert.equal(immediate.effectiveProfiles()[1].rhythm, immediate.effectiveProfiles()[0].rhythm);
+  const profiles = immediate.effectiveProfiles();
+  assert.deepEqual(profiles.map(profile => profile.movements), [["fingering"], ["fingering"], []]);
+  profiles[0].movements.push("rotate");
+  assert.deepEqual(immediate.effectiveProfiles()[0].movements, ["fingering"]);
   assert.equal(immediate.paragraphs[0].sceneId, immediate.paragraphs[2].sceneId);
   const deferred = new ReaderModel();
   deferred.load(story, {deferAnalysis: true});

@@ -237,10 +237,19 @@ try {
   assert.match(await candidate.textContent(), /Flexer/i);
   await select.selectOption(await candidate.getAttribute("value"));
   await page.locator("#alpha-device-select-confirm").click();
+  const preview = page.locator("#alpha-movement-preview");
+  await preview.waitFor({ state: "visible" });
   for (const channel of ["vibrate", "fingering"]) {
     const row = page.locator(`.alpha-verify-movement[data-channel="${channel}"]`);
     await row.locator("button").click();
+    await page.waitForFunction(channel => {
+      const preview = document.getElementById("alpha-movement-preview");
+      const meter = preview.querySelector(`[data-preview-channel="${channel}"] meter`);
+      return meter.value > 0 && preview.dataset[channel === "vibrate" ? "vibrating" : "flexing"] === "true";
+    }, channel);
     await row.locator('input[type="checkbox"]').check();
+    assert.equal(await preview.locator(`[data-preview-channel="${channel}"] output`).textContent(), "0 / 20");
+    assert.match(await preview.locator(`[data-preview-trace="${channel}"]`).getAttribute("d"), /V/, "The preview records the simulator’s changing level.");
   }
   await page.locator("#alpha-verify-continue").click();
   await page.locator("#alpha-controls").waitFor({ state: "visible" });
@@ -274,6 +283,7 @@ try {
   await page.locator('[data-alpha-mark="climax"]').click();
   await page.locator("#alpha-finish").click();
   await page.locator("#alpha-feedback-form").waitFor({ state: "visible" });
+  assert.equal(await preview.isVisible(), false, "The movement preview closes at feedback.");
   assert.ok(!calls.some(call => call.path === `${API}/sessions/${sessionId}/finish`), "Stopping the device leaves the study open for feedback capture.");
   await page.locator('#alpha-record-strip[data-state="recording"]').waitFor({ state: "visible" });
   const form = page.locator("#alpha-feedback-form");

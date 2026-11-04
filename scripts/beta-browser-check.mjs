@@ -51,46 +51,35 @@ async function chooseFlexer(page, { tested = true } = {}) {
   await page.locator("#setup-selection").waitFor({ state: "visible" });
   assert.equal(await page.locator("#setup-devices").inputValue(), "");
   await page.locator("#setup-devices").selectOption("sim-flexer"); await page.locator("#setup-primary").click();
-  await page.locator("#setup-test-panel").waitFor({ state: "visible" });
-  if (!tested) return;
-  await page.locator("#setup-channel").selectOption("vibrate");
-  await range(page, "setup-test-level", 1); await page.locator("#setup-test").click();
-  await page.waitForFunction(() => !document.querySelector("#setup-response-checked").disabled);
-  await page.locator("#setup-response-checked").check(); await page.locator("#setup-primary").click();
   await page.locator("#calibration-view").waitFor({ state: "visible" });
+  if (!tested) return;
+  await page.locator("#calibration-test-vibrate").click();
+  await page.locator("#calibration-confirm-vibrate").check();
 }
 async function exploreCalibration(page) {
   const movements = [
-    { channel: "vibrate", values: [1, 2, 3, 5, 0] },
-    { channel: "fingering", values: [1, 1, 2, 4, 0] },
+    { channel: "vibrate", values: { maximum: 5, minimum: 1, background: 2, preferred: 3, recovery: 0 } },
+    { channel: "fingering", values: { maximum: 4, minimum: 1, background: 1, preferred: 2, recovery: 0 } },
   ];
-  for (const movement of movements) {
-    assert.equal(await page.locator("#calibration-channel").inputValue(), movement.channel);
-    if (movement.channel === "fingering") assert.match(await page.locator("#calibration-feature-copy").textContent(), /Flexer|flexing|vibration/i);
-    await page.locator("#calibration-next").click();
-    for (let index = 0; index < movement.values.length; index++) {
-      await range(page, "calibration-level", movement.values[index]);
-      assert.match(await page.locator("#calibration-status").textContent(), /Nothing starts|Draft updated/i);
-      if (index === 1) {
-        await page.locator("#calibration-test").click();
-        await page.waitForFunction(() => !document.querySelector("#calibration-stopped").disabled);
-        await page.locator("#calibration-stopped").check();
-        await page.locator("#calibration-rating-good").click();
-      }
-      await page.locator("#calibration-next").click();
+  for (const {channel, values} of movements) {
+    assert.equal(await page.locator(`#calibration-movement-${channel}`).isVisible(), true);
+    assert.equal(await page.locator(`#calibration-use-${channel}`).isChecked(), true);
+    for (const [key, value] of Object.entries(values)) {
+      await range(page, `calibration-${key}-${channel}`, value);
     }
-    await page.locator("#calibration-summary").waitFor({ state: "visible" });
-    await page.locator("#calibration-continuity").selectOption("continuous");
-    await page.locator("#calibration-apply").click();
-    await page.waitForFunction(() => /Levels applied/.test(document.querySelector("#calibration-status").textContent));
+    assert.match(await page.locator("#calibration-status").textContent(), /Draft updated/);
+    await range(page, `calibration-test-level-${channel}`, values.background);
+    await page.locator(`#calibration-test-${channel}`).click();
+    const confirmation = page.locator(`#calibration-confirm-${channel}`);
+    await confirmation.check();
+    await page.locator(`#calibration-rating-good-${channel}`).click();
     await output(page, 0);
-    await page.locator("#calibration-next").click();
   }
-  // Flexer offers an optional combination after its two individual movements.
-  // These checks compare one action at a time; explicitly keep that selection.
-  await page.locator("#calibration-together").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#calibration-skip-movement").textContent(), "Keep one movement");
-  await page.locator("#calibration-skip-movement").click();
+  // Check explicit single-movement selection before the legacy one-channel
+  // playback assertions. Both movements started checked on the same page.
+  await page.locator("#calibration-use-vibrate").uncheck();
+  await page.locator("#calibration-continuity").selectOption("continuous");
+  await page.locator("#calibration-apply").click();
   await page.locator("#setup-practice-picker").waitFor({ state: "visible" });
   await page.locator("#calibration-view").waitFor({ state: "hidden" });
   await page.locator("#setup-practice-story").selectOption("evening-train-v1");

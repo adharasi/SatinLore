@@ -10,7 +10,7 @@ function harness(options = {}) {
       calls.push("connect"); requests.push(request);
       const toy = {id: "sim-" + request.model, label: request.model, model: request.model, capabilities: ["vibrate"]};
       flow.update({mode: request.mode, model: request.model, connectionState: "discovered", connected: true, running: false, output: 0,
-        position: 0, strength: 1, ceiling: 5, toys: [toy], selectedId: null});
+        position: 0, levelAdjustment: 0, ceiling: 5, toys: [toy], selectedId: null});
       return true;
     },
     onSelectDevice(id) { calls.push("select"); flow.update({selectedId: id}); return true; },
@@ -112,12 +112,12 @@ test("native Escape cancellation stops and restores the opener", async () => {
 
 test("the practice checklist observes control changes and restart; Finish always stops first", async () => {
   const app = harness(); await app.openPractice();
-  app.flow.update({connected: true, running: true, output: 2, position: 0, strength: 1, ceiling: 5});
-  app.flow.update({connected: true, running: true, output: 4, position: 2, strength: 1.2, ceiling: 6});
+  app.flow.update({connected: true, running: true, output: 2, position: 0, levelAdjustment: 0, ceiling: 5});
+  app.flow.update({connected: true, running: true, output: 4, position: 2, levelAdjustment: 1, ceiling: 6});
   assert.equal(app.flow.snapshot().checks.restart, false);
-  app.flow.update({connected: true, running: false, output: 0, position: 2, strength: 1.2, ceiling: 6});
-  app.flow.update({connected: true, running: true, output: 4, position: 2, strength: 1.2, ceiling: 6});
-  assert.deepEqual(app.flow.snapshot().checks, {started: true, position: true, strength: true, maximum: true, restart: true});
+  app.flow.update({connected: true, running: false, output: 0, position: 2, levelAdjustment: 1, ceiling: 6});
+  app.flow.update({connected: true, running: true, output: 4, position: 2, levelAdjustment: 1, ceiling: 6});
+  assert.deepEqual(app.flow.snapshot().checks, {started: true, position: true, level: true, maximum: true, restart: true});
   await app.click("setup-finish");
   assert.deepEqual(app.calls.slice(-2), ["stop", {completed: true}]);
   assert.equal(app.nodes.get("setup-coach").hidden, true);
@@ -146,7 +146,7 @@ test("global Stop can cancel pending setup through the public cancel method", as
 test("the coach mirrors unavailable Start readiness and recovers without automatic output", async () => {
   let app;
   app = harness({onPractice() {
-    app.flow.update({connected: true, running: false, output: 0, position: 0, strength: 1,
+    app.flow.update({connected: true, running: false, output: 0, position: 0, levelAdjustment: 0,
       ceiling: 5, canStart: false, readiness: "Start needs browser Web Locks."}); return true;
   }});
   await app.openPractice();
@@ -155,7 +155,7 @@ test("the coach mirrors unavailable Start readiness and recovers without automat
   assert.equal(app.document.activeElement, app.nodes.get("setup-coach-heading"));
   assert.equal(app.nodes.get("setup-coach-heading").getAttribute("tabindex"), "-1");
   await app.click("setup-start"); assert.equal(app.calls.includes("start"), false);
-  app.flow.update({connected: true, running: false, output: 0, position: 0, strength: 1, ceiling: 5, canStart: true});
+  app.flow.update({connected: true, running: false, output: 0, position: 0, levelAdjustment: 0, ceiling: 5, canStart: true});
   assert.equal(app.nodes.get("setup-start").disabled, false);
   assert.equal(app.nodes.get("setup-coach-status").textContent, "");
   assert.equal(app.calls.includes("start"), false);

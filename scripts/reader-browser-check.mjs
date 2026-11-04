@@ -161,38 +161,32 @@ async function selectRehearsalDevice(page, profile) {
   assert.deepEqual(await page.locator("#setup-devices option").evaluateAll(options => options.map(option => option.value)), ["", `sim-${profile.id}`]);
   await page.locator("#setup-devices").selectOption(`sim-${profile.id}`);
   await page.locator("#setup-primary").click();
-  await page.locator("#setup-test-panel").waitFor({state: "visible"});
-  assert.deepEqual(await page.locator("#setup-channel option").evaluateAll(options => options.map(option => option.value)), profile.channels,
+  await page.locator("#calibration-view").waitFor({state: "visible"});
+  assert.deepEqual(await page.locator("#calibration-movements > section").evaluateAll(cards => cards.map(card => card.id.replace("calibration-movement-", ""))), profile.channels,
     `${profile.label} exposes its own simulated movements, without inventing other controls.`);
-  assert.equal(await page.locator("#setup-test-level").getAttribute("max"), "5");
-  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "A selected toy must pass a deliberate test and confirmation before practice.");
+  for (const channel of profile.channels) {
+    assert.equal(await page.locator(`#calibration-use-${channel}`).isChecked(), true);
+    assert.equal(await page.locator(`#calibration-confirm-${channel}`).isChecked(), false);
+  }
 }
 
 async function testRehearsalDevice(page, profile) {
-  await page.locator("#setup-channel").selectOption(profile.testChannel || "vibrate");
-  await setRange(page, "setup-test-level", 2);
-  await page.locator("#setup-test").click();
-  await page.waitForFunction(() => /Simulated output 2 \/ 20/.test(document.querySelector("#setup-live-output").textContent));
-  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "Positive output cannot be confirmed as stopped.");
-  assert.equal(await page.locator("#setup-response-checked").isDisabled(), true);
+  const channel = profile.testChannel || "vibrate";
+  const confirmation = page.locator(`#calibration-confirm-${channel}`);
+  assert.equal(await page.locator(`#calibration-test-level-${channel}`).getAttribute("max"), "5");
+  await setRange(page, `calibration-test-level-${channel}`, 2);
+  await page.locator(`#calibration-test-${channel}`).click();
+  assert.equal(await page.locator("#calibration-live-output").textContent(), "Simulated level: 2 / 20",
+    await page.locator("#calibration-status").textContent());
+  assert.equal(await page.locator("#calibration-apply").isDisabled(), true, "Settings stay paused during a movement test.");
+  assert.equal(await confirmation.isDisabled(), true, "Positive output cannot be confirmed as stopped.");
   await page.clock.runFor(2100);
-  await page.waitForFunction(() => !document.querySelector("#setup-test").disabled && /Simulated output 0 \/ 20/.test(document.querySelector("#setup-live-output").textContent));
-  assert.equal(await page.locator("#setup-response-checked").isChecked(), false);
-  assert.equal(await page.locator("#setup-primary").isDisabled(), true, "A timer alone cannot supply the user's response confirmation.");
-  await page.locator("#setup-response-checked").check();
-  await page.locator("#setup-primary").click();
-  // Calibration is deliberately optional. Legacy controller journeys retain
-  // their authored 0,2,4,1,3,0 fixture; the new beta suite explores every field.
-  await page.locator("#calibration-view").waitFor({state: "visible"});
-  for (const channel of profile.channels) {
-    await page.waitForFunction(value => document.querySelector("#calibration-channel").value === value, channel);
-    await page.locator("#calibration-skip-movement").click();
-  }
-  if (profile.channels.length > 1) {
-    await page.locator("#calibration-together").waitFor({state: "visible"});
-    assert.equal(await page.locator("#calibration-skip-movement").textContent(), "Keep one movement");
-    await page.locator("#calibration-skip-movement").click();
-  }
+  await page.waitForFunction(name => !document.querySelector(`#calibration-confirm-${name}`).disabled &&
+    /Simulated level: 0 \/ 20/.test(document.querySelector("#calibration-live-output").textContent), channel);
+  assert.equal(await confirmation.isChecked(), false, "A timer alone cannot supply the user's response confirmation.");
+  await confirmation.check();
+  // Leave settings unchanged so the fixture can rehearse the movement tested above.
+  await page.locator("#calibration-skip").click();
   await page.locator("#setup-practice-picker").waitFor({state: "visible"});
   await page.locator("#calibration-view").waitFor({state: "hidden"});
   await page.locator("#setup-practice-story").selectOption("control-check-v1");
@@ -257,7 +251,7 @@ async function toyConnectionChecks(page) {
       await output(page, 0);
       await page.locator("#setup-retry").click();
       await selectRehearsalDevice(page, profile);
-      assert.equal(await page.locator("#setup-response-checked").isChecked(), false);
+      assert.equal(await page.locator(`#calibration-confirm-${profile.testChannel}`).isChecked(), false);
       await testRehearsalDevice(page, profile);
       await page.locator("#setup-close").click();
       await page.locator("#setup-dialog").waitFor({state: "hidden"});
@@ -522,7 +516,6 @@ async function libraryDiscoveryChecks(page) {
   await page.locator("#story-tabs [role=tab]").filter({hasText: title}).click();
   await page.waitForFunction(value => document.querySelector("#story-title").textContent === value, title);
   await analysed(page); await output(page, 0);
-  assert.equal(await page.locator("#strength-value").textContent(), "1.0×", "Tab changes reset session strength without starting output.");
 }
 
 async function backupAndPreferenceChecks(page) {
@@ -546,7 +539,6 @@ async function backupAndPreferenceChecks(page) {
   await analysed(page); await output(page, 0);
   assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).stories.length, libraryKey), 1, "Restoring adds session-only copies; it does not silently persist a second story.");
   assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
-  assert.equal(await page.locator("#strength-value").textContent(), "1.0×");
   await openReview(page);
   assert.equal(await page.locator("#level").inputValue(), "0", "A restored manual zero survives fresh local analysis.");
   await closeSettings(page); await backupSettings(page);
@@ -622,8 +614,8 @@ async function refinementChecks(page, setPromptReply) {
   await page.clock.runFor(1100); await output(page, 2);
   assert.equal(await page.locator(".simulator-device").getAttribute("data-output"), "2",
     "The side preview observes actual output while the reading sidebar stays open.");
-  await page.locator("#strength-plus").click();
-  await page.locator("#strength-minus").click();
+  await page.locator("#level-up").click();
+  await page.locator("#level-down").click();
   await setRange(page, "cap", 6);
   assert.equal(await page.locator("#ceiling-dialog").isVisible(), false);
   assert.equal(await page.locator("#status").textContent(), "Simulator running");
@@ -752,17 +744,14 @@ export async function checkReader(page, context, origin) {
     await start(page);
     await page.clock.runFor(1100); await output(page, 3);
   }
-  for (let i = 0; i < 5; i++) await page.locator("#strength-plus").click();
-  assert.equal(await page.locator("#strength-value").textContent(), "1.5×");
+  await page.locator("#level-up").click();
+  assert.equal(await page.locator("#target-output").textContent(), "4 / 20");
   await page.clock.runFor(1100);
   await output(page, 4);
   assert.equal(await page.locator("#capValue").textContent(), "5");
-  await page.locator("#strength-minus").click();
-  await output(page, 4); // 3 × 1.4 still rounds down to 4.
-  await page.locator("#strength-minus").click();
+  await page.locator("#level-down").click();
+  assert.equal(await page.locator("#target-output").textContent(), "3 / 20");
   await output(page, 0); // A lower resulting command stops the old one immediately.
-  await page.clock.runFor(1100); await output(page, 3);
-  await page.locator("#strength-reset").click();
   await page.clock.runFor(1100); await output(page, 3);
   await setRange(page, "cap", 0);
   await output(page, 0); await page.clock.runFor(1100); await output(page, 0);
@@ -772,30 +761,31 @@ export async function checkReader(page, context, origin) {
   assert.equal(await page.locator("#status").textContent(), "Simulator running", "A direct maximum change does not interrupt a running simulation.");
   await page.clock.runFor(1100); await output(page, 3);
   await page.locator("#pause").click(); await output(page, 0);
-  await page.locator("#strength-plus").click();
+  await page.locator("#level-up").click();
   await page.clock.runFor(1100); await output(page, 0);
-  await start(page); await output(page, 3);
+  await start(page); await output(page, 4);
   await page.locator("#stop").click();
-  assert.equal(await page.locator("#strength-value").textContent(), "1.1×", "Pause and Stop retain session strength.");
+  assert.equal(await page.locator("#target-output").textContent(), "4 / 20", "Pause and Stop retain the current section level.");
   await page.clock.runFor(1100); await output(page, 0);
 
   await openReview(page); await setRange(page, "level", 0); await closeSettings(page);
-  for (let i = 0; i < 12; i++) if (!await page.locator("#strength-plus").isDisabled()) await page.locator("#strength-plus").click();
-  assert.equal(await page.locator("#strength-value").textContent(), "2.0×");
-  assert.equal(await page.locator("#strength-plus").isDisabled(), true);
+  assert.equal(await page.locator("#target-output").textContent(), "0 / 20");
+  assert.equal(await page.locator("#level-up").isDisabled(), true, "Explicit zero outranks the level buttons.");
   await start(page); await page.clock.runFor(1100); await output(page, 0);
   await openReview(page); await setRange(page, "level", 3); await closeSettings(page);
+  await page.locator("#level-up").click();
+  await page.locator("#level-up").click();
   await start(page); await page.clock.runFor(1100); await output(page, 5);
-  assert.equal(await page.locator("#target-output").textContent(), "5 / 20", "Strength cannot exceed the confirmed maximum.");
-  for (let i = 0; i < 20; i++) await page.locator("#strength-minus").click();
-  assert.equal(await page.locator("#strength-value").textContent(), "0.0×");
-  assert.equal(await page.locator("#strength-minus").isDisabled(), true);
-  assert.equal(await page.locator("#capValue").textContent(), "5", "Strength changes do not alter the confirmed ceiling.");
+  assert.equal(await page.locator("#target-output").textContent(), "5 / 20");
+  assert.equal(await page.locator("#level-up").isDisabled(), true, "The level cannot exceed the confirmed maximum.");
+  for (let i = 0; i < 5; i++) await page.locator("#level-down").click();
+  assert.equal(await page.locator("#target-output").textContent(), "0 / 20");
+  assert.equal(await page.locator("#level-down").isDisabled(), true);
+  assert.equal(await page.locator("#capValue").textContent(), "5", "Level changes do not alter the confirmed ceiling.");
   await page.clock.runFor(1100); await output(page, 0);
   await openReview(page);
-  assert.equal(await page.locator("#level").inputValue(), "3", "Session strength never rewrites the paragraph correction.");
+  assert.equal(await page.locator("#level").inputValue(), "3", "The dock level never rewrites the paragraph correction.");
   await closeSettings(page);
-  await page.locator("#strength-reset").click();
 
   await openSettings(page); await page.locator("#follow-scroll").check(); await closeSettings(page);
   await scrollTo(page, 2); await page.clock.runFor(300); await current(page, 2);
@@ -873,17 +863,15 @@ export async function checkReader(page, context, origin) {
   const savedId = await page.locator("#story-list button[data-story-id]").filter({hasText: promptReply}).getAttribute("data-story-id");
   assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).stories.length, libraryKey), 1);
   await start(page);
-  await page.locator("#strength-plus").click();
+  if (await page.locator("#level-up").isEnabled()) await page.locator("#level-up").click();
   await selectStory(page, "First story");
   await output(page, 0);
-  assert.equal(await page.locator("#strength-value").textContent(), "1.0×", "Story switching resets strength without starting output.");
   await selectStory(page, promptReply); await current(page, savedPosition);
   await add(page, "READER_PRIVATE_CANARY\n\nAn ordinary walk.", "Session only canary");
   assert.deepEqual(requests, [], "Story text must never appear in network requests.");
   assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).stories.length, libraryKey), 1);
   await page.reload(); await analysed(page); await current(page, savedPosition);
   assert.equal(await page.locator("#story-title").textContent(), promptReply);
-  assert.equal(await page.locator("#strength-value").textContent(), "1.0×");
   await output(page, 0);
   assert.equal(await page.locator("#start").isDisabled(), true, "Restoration does not reconnect or arm playback.");
   assert.equal(await page.locator("#story-list button[data-story-id]").count(), 1, "Session-only stories disappear on reload.");
@@ -981,5 +969,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, bounded session strength, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

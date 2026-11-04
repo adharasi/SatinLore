@@ -10,7 +10,7 @@ export const PRACTICE_STORY = Object.freeze({
   text: [
     "The reading room was quiet. Sunlight crossed the floor and the first pages waited on the table. Begin here with a quiet section: the preview should be still, even after you press Start.",
     "The station clock moved towards the hour. Beyond the window a train approached, slowly at first, its lights appearing through the evening haze. Scroll to this section and watch the preview begin to move.",
-    "The train gathered speed. The landscape changed from fields to woodland and back again, its rhythm growing stronger. Try the strength buttons and move the maximum. The preview follows the output shown in the controls.",
+    "The train gathered speed. The landscape changed from fields to woodland and back again, its rhythm growing stronger. Try the + and − level buttons and move the maximum. The preview shows how the toy would move.",
     "The carriage slowed beside a small platform. A traveller folded a letter and looked towards the door. Read this part more slowly. Stop scrolling for a moment, then move back to the previous section if you want to compare the change.",
     "A whistle sounded and the journey continued. Lights flickered past the window, then faded into the distance. Try a quicker scroll, then Pause or Stop. Restart only when you are ready; changing a control while paused will not start playback.",
     "At the final station everything became quiet again. The book rested beside the window. When the controls feel comfortable, finish setup and open a story of your own.",
@@ -22,7 +22,7 @@ export const PRACTICE_STORY = Object.freeze({
 // status snapshots; model choice alone never authorises a command or a toy ID.
 export const SETUP_MODELS = Object.freeze(TOY_PROFILES.map(({id, label}) => Object.freeze({id, label})));
 export const SETUP_STORIES = Object.freeze([Object.freeze({...PRACTICE_STORY, betaId: "control-check-v1", controlled: true,
-  description: "Check scrolling, strength, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
+  description: "Check scrolling, section levels, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
   .map(story => Object.freeze({...story, authoredLevels: true, quietZeros: true})));
 const CHANNEL_LABELS = Object.freeze(Object.fromEntries(TOY_PROFILES.flatMap(profile => profile.channels.map(channel => [channel.id, channel.label]))));
 function qrSource(value) {
@@ -133,11 +133,11 @@ export function createSetupFlow({document = globalThis.document, window = global
   coach.hidden = true;
   const coachHeading = make("h3", {id: "setup-coach-heading", value: "Find what feels right.", attrs: {tabindex: "-1"}});
   coach.append(make("span", {className: "setup-step-label", value: "05 / Your test read"}), coachHeading,
-    make("p", {value: "Start the practice story, then try strength, maximum and scrolling. The levels are deliberately set for practice, not analysed from this text."}));
-  const checks = {started: false, position: false, strength: false, maximum: false, restart: false};
+    make("p", {value: "Start the practice story, then try the level buttons, maximum and scrolling. The levels are deliberately set for practice, not analysed from this text."}));
+  const checks = {started: false, position: false, level: false, maximum: false, restart: false};
   const checklist = make("ul", {className: "setup-checklist"}), checkNodes = new Map();
   for (const [name, label] of [["started", "Start the test read"], ["position", "Move through the story"],
-    ["strength", "Try + and − strength"], ["maximum", "Adjust the maximum"], ["restart", "Stop or pause, then restart"]]) {
+    ["level", "Try the + and − level buttons"], ["maximum", "Adjust the maximum"], ["restart", "Stop or pause, then restart"]]) {
     const item = make("li", {value: label}); item.dataset.done = "false"; checkNodes.set(name, item); checklist.append(item);
   }
   const coachActions = make("div", {className: "setup-coach-actions"});
@@ -170,14 +170,16 @@ export function createSetupFlow({document = globalThis.document, window = global
     onModeChange: onCalibrationModeChange, onEvent: onResearchEvent,
     onComplete(result) {
       if (disposed || phase !== "calibrate") return;
-      stopped(); current.calibration = result.settings; phase = "practice";
-      status.textContent = "Choose a controlled story. It will open paused."; render();
+      stopped(); phase = "practice";
+      status.textContent = result.applied.length ? "Settings applied. Choose a story to try them with. It will open paused." : "Choose a practice story. It will open paused.";
+      render();
     }});
   const calibrationContext = () => ({...current, mode, model: selected()?.model || preferredModel, channels: channels(),
     settings: current.calibration?.channels || current.calibration || {}, readingMode: current.feel?.mode});
   const openCalibration = () => {
     if (disposed) return false;
     ++epoch; stopped(); busy = false; coach.hidden = true;
+    dialog.setAttribute("aria-busy", "false");
     if (!effectiveConnected() || !selected()) { phase = "connect"; render(); if (!dialog.open) dialog.showModal(); return false; }
     phase = "calibrate"; status.textContent = "";
     if (!dialog.open) dialog.showModal();
@@ -220,11 +222,13 @@ export function createSetupFlow({document = globalThis.document, window = global
       "Choose the toy you connected in Lovense Remote. The next step shows the movements available on that toy.";
   };
   function render() {
+    dialog.dataset.phase = phase;
     chooser.hidden = phase !== "connect"; connection.hidden = phase !== "pair"; selection.hidden = phase !== "select";
-    testPanel.hidden = phase !== "test"; rehearsal.hidden = mode !== "simulator" || !["pair", "select", "test"].includes(phase);
+    testPanel.hidden = phase !== "test"; rehearsal.hidden = mode !== "simulator" || !["pair", "select", "test", "calibrate"].includes(phase);
     calibrationMount.hidden = phase !== "calibrate";
     practicePicker.hidden = phase !== "practice" || !enableCalibration;
     primary.hidden = phase === "calibrate";
+    skip.hidden = phase === "calibrate";
     back.hidden = ["connect", "closed", "reading"].includes(phase);
     model.disabled = busy; simMode.disabled = busy; liveMode.disabled = busy;
     simMode.setAttribute("aria-pressed", String(mode === "simulator")); liveMode.setAttribute("aria-pressed", String(mode === "lovense"));
@@ -284,14 +288,14 @@ export function createSetupFlow({document = globalThis.document, window = global
       capabilityNote.hidden = !capabilityNote.textContent;
       primary.textContent = enableCalibration ? "Set my movement preferences" : "Continue to practice";
     } else if (phase === "practice") {
-      step.textContent = enableCalibration ? "06 / Controlled story tests" : "05 / A short practice read"; heading.textContent = "Make it feel like you.";
-      intro.textContent = "Try scrolling, strength, maximum and Stop with a short neutral story before importing your own.";
+      step.textContent = "05 / A short practice read"; heading.textContent = "Make it feel like you.";
+      intro.textContent = "Try scrolling, the level buttons, maximum and Stop with a short neutral story before importing your own.";
       primary.textContent = "Open practice story";
       const choice = SETUP_STORIES.find(story => story.betaId === practiceStory.value) || SETUP_STORIES[0];
       practiceDescription.textContent = choice.description;
     } else if (phase === "calibrate") {
-      step.textContent = "05 / Your movement settings"; heading.textContent = "Explore. Compare. Make it yours.";
-      intro.textContent = "Tune each available movement, then compare it in a controlled story.";
+      step.textContent = "04 / Movement preferences"; heading.textContent = "Set your movement preferences";
+      intro.textContent = "Choose the movements to use and adjust each one on this page.";
     }
     const output = Number.isInteger(current.output) && current.outputKnown !== false ?
       Math.min(20, Math.max(0, current.output)) + " / 20" : "unconfirmed";
@@ -340,6 +344,7 @@ export function createSetupFlow({document = globalThis.document, window = global
         if (activeEpoch !== epoch || disposed || !dialog.open) return;
         safeSnapshot(result);
         if (result === false || current.selectedId !== id || !effectiveConnected()) throw new Error();
+        if (enableCalibration) { openCalibration(); return; }
         resetTest(); channel.replaceChildren(...channels().map(name => option(name, CHANNEL_LABELS[name])));
         channel.value = channels()[0] || ""; phase = "test"; status.textContent = "Selected. Output is paused.";
       } catch { if (activeEpoch === epoch) status.textContent = "Selection did not complete. Refresh the connection and choose a toy again."; }
@@ -355,7 +360,6 @@ export function createSetupFlow({document = globalThis.document, window = global
         status.textContent = "The test confirmation is no longer current. Select the toy and repeat its test before continuing."; render(); return;
       }
       stopped();
-      if (enableCalibration) { openCalibration(); return; }
       phase = "practice"; status.textContent = "The test read opens paused. Start only when ready."; render(); return;
     }
     if (phase !== "practice") return;
@@ -365,7 +369,7 @@ export function createSetupFlow({document = globalThis.document, window = global
       const result = await onPractice(story);
       if (activeEpoch !== epoch || disposed || !dialog.open) return;
       if (result === false) throw new Error();
-      resetChecks(); phase = "reading"; initial = {position: current.position, strength: current.strength, ceiling: current.ceiling};
+      resetChecks(); phase = "reading"; initial = {position: current.position, levelAdjustment: current.levelAdjustment, ceiling: current.ceiling};
       closeDialog(); coach.hidden = false; refreshCoachReadiness(); coachHeading.focus({preventScroll: true});
     } catch { if (activeEpoch === epoch && !disposed) status.textContent = "The practice story could not open. Your other stories are unchanged. Try again."; }
     finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
@@ -454,11 +458,11 @@ export function createSetupFlow({document = globalThis.document, window = global
       render();
       if (phase === "calibrate") calibration.update(calibrationContext());
       if (phase !== "reading") return;
-      if (!initial) initial = {position: current.position, strength: current.strength, ceiling: current.ceiling};
+      if (!initial) initial = {position: current.position, levelAdjustment: current.levelAdjustment, ceiling: current.ceiling};
       const running = effectiveConnected() && current.running === true;
       if (running) { checks.started = true; if (pausedAfterStart) checks.restart = true; } else if (checks.started) pausedAfterStart = true;
       if (Number.isInteger(current.position) && current.position !== initial.position) checks.position = true;
-      if (Number.isFinite(current.strength) && current.strength !== initial.strength) checks.strength = true;
+      if (Number.isInteger(current.levelAdjustment) && current.levelAdjustment !== initial.levelAdjustment) checks.level = true;
       if (Number.isInteger(current.ceiling) && current.ceiling !== initial.ceiling) checks.maximum = true;
       for (const [name, node] of checkNodes) {
         node.dataset.done = String(checks[name]); node.setAttribute("aria-label", node.textContent + (checks[name] ? ": tried" : ": not tried yet"));

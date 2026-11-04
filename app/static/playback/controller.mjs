@@ -1,4 +1,4 @@
-import {normalizeSceneProfiles, ReadingFeel} from "../reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel, stepSectionLevel} from "../reader/calibration.mjs";
 // Continuous reading playback for the synchronous simulator only.
 // A real asynchronous transport needs a separately qualified controller/adapter.
 export const COMMAND_SECONDS = 2;
@@ -50,6 +50,7 @@ export class PlaybackController {
     this.position = 0;
     this.ceiling = 5;
     this.strengthTenths = 10;
+    this.levelAdjustment = 0;
     this.connected = false;
     this.visible = true;
     this.output = 0; this.outputLevels = null;
@@ -64,9 +65,13 @@ export class PlaybackController {
   }
 
   snapshot() {
+    const now = this.now();
+    const target = this._intent(this.levelAdjustment, now).level;
     return {state: this.state, connected: this.connected, running: this.state === "PLAYING",
       output: this.output, ceiling: this.ceiling, strength: this.strengthTenths / 10,
-      baseLevel: this.levels[this.position] ?? 0, target: this._desired(), outputLevels:this.outputLevels?{...this.outputLevels}:null,
+      levelAdjustment: this.levelAdjustment, levelDown: target > 0 && this._intent(-20, now).level < target,
+      levelUp: target < this.ceiling && this._intent(20, now).level > target,
+      baseLevel: this.levels[this.position] ?? 0, target, outputLevels:this.outputLevels?{...this.outputLevels}:null,
       position: this.position, reason: this.reason, feel: this.feel.snapshot()};
   }
 
@@ -151,6 +156,7 @@ export class PlaybackController {
     this.manualZeros.clear();
     this.position = 0;
     this.strengthTenths = 10;
+    this.levelAdjustment = 0;
     if (!checked.length && this.state !== "ERROR_PAUSED") this.reason = "Load text to begin.";
     return this._notify();
   }
@@ -164,7 +170,9 @@ export class PlaybackController {
   }
 
   setPosition(index) {
-    this.position = this._position(index);
+    const next = this._position(index);
+    if (next !== this.position) this.levelAdjustment = 0;
+    this.position = next;
     return this._desiredChanged();
   }
 
@@ -173,6 +181,7 @@ export class PlaybackController {
     try { validLevel(value); }
     catch (error) { this.pause("Invalid paragraph intensity."); throw error; }
     this.levels[index] = value;
+    if (index === this.position) this.levelAdjustment = 0;
     if (manual && value === 0) this.manualZeros.add(index); else this.manualZeros.delete(index);
     return this._desiredChanged();
   }
@@ -240,6 +249,13 @@ export class PlaybackController {
     return this._desiredChanged();
   }
 
+  adjustLevel(direction) {
+    if (!this.levels.length) return this.snapshot();
+    const now = this.now();
+    this.levelAdjustment = stepSectionLevel(this.levelAdjustment, direction, offset => this._intent(offset, now).level);
+    return this._desiredChanged();
+  }
+
   _desiredChanged() {
     // Reductions never wait behind the next dispatch. Resume only on its normal cadence.
     const intent=this._intent();
@@ -248,9 +264,9 @@ export class PlaybackController {
     return this._notify();
   }
 
-  _intent() {
+  _intent(levelAdjustment = this.levelAdjustment, now = this.now()) {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],now:this.now()};
+      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],levelAdjustment,now};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }

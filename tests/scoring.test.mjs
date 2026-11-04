@@ -92,11 +92,36 @@ test("pace and stronger cue matches produce distinct bounded rhythm suggestions"
   assert.ok(result[3].advisory);
 });
 
+test("matched scenes expose only distinct, explicitly described movements", () => {
+  const cue = "A tender kiss.";
+  const descriptions = ["The rhythm oscillated and moved side to side.", "A rotation.",
+    "A repeated thrust.", "Flexing, then flexing again.", "A vibration."].join(" ");
+  const result = groupScenes(sceneRows(`${cue} ${descriptions}`, cue, `${cue} A microvibration.`));
+  assert.deepEqual(result.map(p => p.movements), [
+    ["vibrate", "fingering", "rotate", "thrusting", "oscillate"], [], [],
+  ]);
+  assert.deepEqual(result.map(p => p.level), [1, 1, 1]);
+  assert.deepEqual(groupScenes(sceneRows("A passion for rotating models.", descriptions)).map(p => [p.level, p.movements]),
+    [[0, []], [0, []]]);
+});
+
+test("short context retains a scene's movement, while quiet boundaries clear it", () => {
+  const flex = "A tender kiss. The motion flexed.";
+  const vibration = "A tender kiss. A soft vibration.";
+  const result = groupScenes(sceneRows(flex, "Rain brushed against the window.", vibration,
+    "They needed a break. A tender kiss. The motion flexed.", vibration));
+  assert.deepEqual(result.map(p => p.movements), [["fingering"], ["fingering"], ["vibrate"], [], ["vibrate"]]);
+  assert.notEqual(result[0].movements, result[1].movements);
+  assert.deepEqual(result.map(p => p.sceneId), [1, 1, 1, null, 2]);
+  assert.equal(result[3].quiet, true);
+});
+
 test("sensitive wording receives an advisory zero and no story text in the result", () => {
-  const sample = "A forced romantic embrace and a tender kiss.";
+  const sample = "A forced romantic embrace and a tender kiss. A vibration.";
   const result = groupScenes(sceneRows("A tender kiss.", sample, "A tender kiss."));
   assert.equal(result[1].level, 0);
   assert.equal(result[1].quiet, true);
+  assert.deepEqual(result[1].movements, []);
   assert.ok(result[1].advisory);
   assert.equal(JSON.stringify(result).includes(sample), false);
 });

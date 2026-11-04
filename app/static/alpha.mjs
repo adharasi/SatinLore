@@ -1,6 +1,7 @@
 import {AlphaTimeline} from "./alpha-timeline.mjs";
 import {createAlphaDevice} from "./alpha-device.mjs";
 import {captureAlphaScreen} from "./alpha-screen.mjs";
+import {createAlphaMovementView} from "./alpha-movement-view.mjs";
 
 const $ = id => document.getElementById(id);
 const API = "/alpha/api/alpha";
@@ -75,6 +76,7 @@ function currentScreen() {
 }
 
 const screenCapture = captureAlphaScreen({currentScreen, record: emit});
+const movementPreview = createAlphaMovementView($("alpha-movement-preview"));
 
 function setAccount(value) {
   account = value?.authenticated === true ? value : null;
@@ -109,6 +111,7 @@ function teardownDevice() {
   ++deviceGeneration;
   device?.destroy();
   device = deviceState = null;
+  movementPreview.update(null);
   previousChannels = previousToys = "";
   selectedLiveDevice = false;
   $("alpha-device-qr-image").removeAttribute("src");
@@ -269,7 +272,10 @@ function buildDeviceRows(channels) {
 }
 
 function renderDevice() {
-  if (!session || !deviceState || stage === "feedback") return;
+  if (!session || !deviceState || stage === "feedback") {
+    movementPreview.update(null);
+    return;
+  }
   const d = deviceState;
   const mode = session.mode;
   const simulator = mode === "simulator";
@@ -280,6 +286,7 @@ function renderDevice() {
   const ready = connected && !d.busy && !d.testing;
   const verifying = stage === "connect" && connected;
   const exploring = stage === "controls" && connected;
+  movementPreview.update(verifying || exploring ? d : null);
   const channels = d.channels ?? [];
   const checked = d.verifiedChannels ?? [];
   const active = d.activeChannels ?? [];

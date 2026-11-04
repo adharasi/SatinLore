@@ -1,10 +1,12 @@
-/** Progressive, local calibration UI. It never connects, starts or saves an account preset itself. */
+import {RHYTHMS} from "./calibration.mjs";
+
+/** Drafts and explicit short checks for the movements on the selected toy. */
 export const CALIBRATION_FIELDS = Object.freeze([
-  {key: "minimum", label: "Your minimum", hint: "The lowest level you want in Continuous background mode. Zero keeps quiet passages available.", action: "Try this minimum"},
-  {key: "background", label: "A background level", hint: "Choose a gentle level you would like behind a quieter part of a story.", action: "Try this background"},
-  {key: "preferred", label: "A level you like", hint: "Find a level you would want to return to. It does not need to be the strongest one.", action: "Try this level"},
-  {key: "maximum", label: "Your upper limit", hint: "Choose the strongest level you want this movement to reach. You can lower it at any time.", action: "Try this limit"},
-  {key: "recovery", label: "Your Ease off level", hint: "Ease off reduces output to this level and holds it until you choose Follow story. Zero means stop output.", action: "Try Ease off level"},
+  {key: "maximum", label: "Maximum", hint: "The strongest level this movement can reach."},
+  {key: "minimum", label: "Minimum", hint: "The floor when you use a background level."},
+  {key: "background", label: "Background", hint: "The level for quieter parts of a story."},
+  {key: "preferred", label: "Preferred level", hint: "A level you would like to return to."},
+  {key: "recovery", label: "Ease off", hint: "The level when you choose Ease off. Zero stops output."},
 ]);
 
 const FEATURES = Object.freeze({
@@ -25,298 +27,425 @@ export function calibrationDraft(value = {}, limit = 5) {
     preferred: Math.min(maximum, Math.max(minimum, level(value.preferred, Math.min(2, maximum)))), maximum,
     recovery: Math.min(maximum, level(value.recovery)),
     gain: typeof value.gain === "number" && Number.isFinite(value.gain) && value.gain >= 0 && value.gain <= 2 ? Math.round(value.gain * 10) / 10 : 1,
-    rhythm: ["steady", "gentle", "dynamic"].includes(value.rhythm) ? value.rhythm : "steady"};
+    rhythm: RHYTHMS.includes(value.rhythm) ? value.rhythm : "steady"};
 }
 
-/** Uses only confirmed discovered channels supplied by the application. */
+/** Selection expresses intent. A separate observed check qualifies each live movement. */
 export function createCalibrationView({document = globalThis.document, mount,
   onTest = () => false, onConfirmTest = () => false, onStop = () => {},
   onChange = () => {}, onApply = () => false, onApplyChannels = null, onEnablePersonalRange = null,
   onModeChange = () => {}, onEvent = () => {}, onComplete = () => {}} = {}) {
-  if (!document?.createElement || !mount) return {open() {}, update() {}, close() {}, destroy() {}, snapshot: () => ({active: false})};
-  const make = (tag, id, text = "", cls = "") => {
-    const el = document.createElement(tag); if (id) el.id = id; if (text) el.textContent = text; if (cls) el.className = cls; return el;
+  if (!document?.createElement || !mount) return {open() {}, update() {}, close() {}, interrupt() {}, destroy() {}, snapshot: () => ({active: false})};
+  const make = (tag, id = "", text = "", className = "") => {
+    const node = document.createElement(tag);
+    if (id) node.id = id;
+    if (text) node.textContent = text;
+    if (className) node.className = className;
+    return node;
   };
-  const button = (id, text, cls = "") => { const el = make("button", id, text, cls); el.setAttribute("type", "button"); return el; };
-  const field = (labelText, control) => {
-    const wrap = make("div", null, "", "setup-field"), label = make("label", null, labelText);
-    label.setAttribute("for", control.id); wrap.append(label, control); return wrap;
+  const button = (id, text, className = "") => {
+    const node = make("button", id, text, className);
+    node.setAttribute("type", "button");
+    return node;
   };
-  const option = (value, label) => { const el = make("option", null, label); el.value = value; return el; };
-  const shell = make("section", "calibration-view", "", "calibration-view"); shell.hidden = true;
-  shell.setAttribute("aria-labelledby", "calibration-heading"); shell.dataset.betaControl = "calibration";
-  const progress = make("p", "calibration-progress", "", "setup-step-label");
-  const heading = make("h3", "calibration-heading", "Explore your toy"); heading.setAttribute("tabindex", "-1");
-  const intro = make("p", "calibration-intro");
-  const capabilities = make("div", "calibration-capabilities", "", "calibration-capabilities");
-  const movement = make("select", "calibration-channel");
-  const movementField = field("Movement to explore", movement);
-  const feature = make("div", "calibration-feature", "", "calibration-feature");
-  const glyph = make("span", "calibration-feature-glyph", "", "calibration-feature-glyph"); glyph.setAttribute("aria-hidden", "true");
-  const featureText = make("div"), featureTitle = make("strong", "calibration-feature-title"), featureCopy = make("p", "calibration-feature-copy");
-  featureText.append(featureTitle, featureCopy); feature.append(glyph, featureText);
-  const liveOutput = make("output", "calibration-live-output", "", "calibration-live-output"); liveOutput.setAttribute("aria-live", "polite");
-  const liveMeter = make("div", "calibration-live-meter", "", "calibration-live-meter"); liveMeter.setAttribute("aria-hidden", "true");
-  const liveFill = make("span"); liveMeter.append(liveFill);
-  const personalRange = make("section", "calibration-personal-range", "", "calibration-personal-range");
-  const personalRangeHeading = make("strong", "calibration-personal-range-heading", "Begin gently. Choose your range.");
-  const personalRangeCopy = make("p", "calibration-personal-range-copy", "", "note");
-  const enableRange = button("calibration-enable-personal-range", "Enable personal range");
-  personalRange.append(personalRangeHeading, personalRangeCopy, enableRange);
-  const levels = make("section", "calibration-levels", "", "calibration-levels");
-  const levelName = make("h4", "calibration-level-name");
-  const levelHelp = make("p", "calibration-level-help", "", "note");
-  const slider = make("input", "calibration-level");
-  for (const [k,v] of Object.entries({type: "range", min: 0, max: 5, step: 1})) slider.setAttribute(k, String(v));
-  slider.value = "0";
-  const readout = make("output", "calibration-level-value"); readout.setAttribute("for", slider.id);
-  const preview = make("div", "calibration-level-preview", "", "calibration-level-preview"); preview.setAttribute("aria-hidden", "true");
-  const previewBars = Array.from({length: 20}, () => make("span")); preview.append(...previewBars);
-  const pulse = button("calibration-test", "Try this level", "primary");
-  const check = make("input", "calibration-stopped"); check.setAttribute("type", "checkbox");
-  const checkLabel = make("label", null, "", "setup-confirmation"); checkLabel.setAttribute("for", check.id);
-  checkLabel.append(check, make("span", null, "I checked the response and the output has stopped."));
-  const ratings = make("div", "calibration-ratings", "", "calibration-ratings"); ratings.setAttribute("role", "group"); ratings.setAttribute("aria-label", "How this test felt");
-  const ratingButtons = new Map();
-  for (const [id, label] of [["light", "Too light"], ["good", "Good for me"], ["strong", "Too much"]]) {
-    const el = button("calibration-rating-" + id, label); ratings.append(el); ratingButtons.set(id, el);
-  }
-  const feedbackHelp = make("p", null, "Ratings are optional. You can skip any level or movement. No outcome is required.", "note");
-  levels.append(levelName, levelHelp, field("Level", slider), readout, preview, pulse, checkLabel, ratings, feedbackHelp);
-  const summary = make("section", "calibration-summary", "", "calibration-summary");
-  const summaryList = make("dl", "calibration-summary-list", "", "calibration-summary-list");
-  const rhythm = make("select", "calibration-rhythm");
-  for (const [value,label] of [["steady","Steady"],["gentle","Gentle changes"],["dynamic","More variation"]]) rhythm.append(option(value,label));
-  const gain = make("input", "calibration-gain");
-  for (const [key,value] of Object.entries({type:"range",min:0,max:2,step:.1})) gain.setAttribute(key,String(value)); gain.value = "1";
-  const gainValue = make("output", "calibration-gain-value"); gainValue.setAttribute("for", gain.id);
+  const option = (value, text) => {
+    const node = make("option", "", text);
+    node.value = value;
+    return node;
+  };
+  const field = (text, control, readout) => {
+    const wrap = make("div", "", "", "setup-field");
+    const label = make("label", "", text);
+    label.setAttribute("for", control.id);
+    wrap.append(label, control);
+    if (readout) wrap.append(readout);
+    return wrap;
+  };
+  const range = (id, min, max, step = 1) => {
+    const input = make("input", id);
+    for (const [key, value] of Object.entries({type: "range", min, max, step})) input.setAttribute(key, String(value));
+    return input;
+  };
+  const checkbox = (id, text) => {
+    const input = make("input", id);
+    input.setAttribute("type", "checkbox");
+    const label = make("label", "", "", "setup-confirmation");
+    label.setAttribute("for", id);
+    label.append(input, make("span", "", text));
+    return {input, label};
+  };
+  const output = input => {
+    const node = make("output");
+    node.setAttribute("for", input.id);
+    return node;
+  };
+  const shell = make("section", "calibration-view", "", "calibration-view");
+  shell.hidden = true;
+  shell.setAttribute("aria-label", "Movement preferences");
+  shell.dataset.betaControl = "calibration";
+  const guidance = make("p", "calibration-guidance", "", "note");
   const continuity = make("select", "calibration-continuity");
-  continuity.append(option("story", "Story dynamics · quiet passages can be still"), option("continuous", "Continuous background · keep my chosen minimum"));
-  const apply = button("calibration-apply", "Use these levels", "primary");
-  summary.append(make("p", null, "These levels belong to this movement. Applying them keeps output paused. Save a named preset from the reading controls to keep them on your account."),
-    summaryList, field("While following the story", continuity), field("Story variation", rhythm), field("Story strength", gain), gainValue, apply);
-  const together = make("section", "calibration-together", "", "calibration-together");
-  const togetherHelp = make("p", "calibration-together-help");
-  const togetherChoices = make("div", "calibration-together-choices", "", "calibration-together-choices");
-  const togetherApply = button("calibration-together-apply", "Use these movements together", "primary");
-  together.append(togetherHelp, togetherChoices, make("p", null, "Each movement keeps its own levels. Applying the combination stays paused; the next story still needs a separate Start.", "note"), togetherApply);
-  const controls = make("div", null, "", "calibration-navigation");
-  const previous = button("calibration-previous", "Previous"), next = button("calibration-next", "Set my levels", "primary"), skip = button("calibration-skip-movement", "Skip this movement");
-  controls.append(previous, skip, next);
-  const status = make("p", "calibration-status", "", "note"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-  shell.append(progress, heading, intro, capabilities, movementField, feature, liveOutput, liveMeter, personalRange, levels, summary, together, status, controls); mount.append(shell);
+  continuity.append(option("story", "Quiet passages can be still"), option("continuous", "Keep my background levels"));
+  const liveOutput = make("output", "calibration-live-output", "", "calibration-live-output");
+  liveOutput.setAttribute("aria-live", "polite");
+  const cards = make("div", "calibration-movements", "", "calibration-movements");
+  const status = make("p", "calibration-status", "", "note");
+  status.setAttribute("role", "status");
+  const apply = button("calibration-apply", "Use these settings", "primary");
+  const skip = button("calibration-skip", "Skip for now");
+  const applyNote = make("p", "calibration-apply-note", "", "note");
+  apply.setAttribute("aria-describedby", applyNote.id);
+  const actions = make("div", "", "", "calibration-navigation");
+  actions.append(skip, apply);
+  shell.append(guidance, field("During quieter passages", continuity), liveOutput, cards, status, applyNote, actions);
+  mount.append(shell);
 
-  let active = false, context = {}, channelIndex = 0, fieldIndex = 0, stage = "features", busy = false, epoch = 0, tested = false, accepted = false, draft = {}, records = {}, applied = new Set(), destroyed = false, readingMode = "story", checkedMovements = new Set(), combinedChoices = new Set();
-  const available = () => Array.isArray(context.channels) ? [...new Set(context.channels.filter(name => FEATURES[name]))] : [];
-  const channel = () => available()[channelIndex] || "";
-  const offeredFeature = name => FEATURES[name] ? {...FEATURES[name], label: name === "oscillate" && context.mode === "simulator" ? "Oscillation · simulator" : FEATURES[name].label} : null;
+  let active = false, destroyed = false, context = {}, epoch = 0, busy = false;
+  let drafts = {}, selected = new Set(), checked = new Set(), lastTest = null, readingMode = "story";
+  let cardSignature = "", views = new Map();
+  const available = () => Array.isArray(context.channels) ? [...new Set(context.channels.filter(name => Object.hasOwn(FEATURES, name)))] : [];
+  const simulator = () => context.mode === "simulator";
   const canCombine = () => context.supportsCombined === true && available().length > 1 && typeof onApplyChannels === "function";
-  const rangeEnabled = () => context.mode === "simulator" || Array.isArray(context.personalRangeChannels) && context.personalRangeChannels.includes(channel());
-  const limit = () => context.mode !== "lovense" || context.maxCeiling === 20 && rangeEnabled() ? 20 : 5;
-  const testLimit = () => Math.min(limit(), level(context.ceiling, 5));
-  const ready = () => context.connected === true && typeof context.selectedId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(context.selectedId) && Boolean(channel()) && !["error", "expired", "disconnected"].includes(context.connectionState);
-  const safeStop = () => { try { onStop(); } catch { /* Parent owns transport recovery. */ } };
-  const emit = (type, extra = {}) => { try { onEvent({type, channel: channel(), ...extra}); } catch { /* Optional research never owns controls. */ } };
-  const resetTest = () => { tested = false; accepted = false; check.checked = false; };
-  const changed = () => {
-    records[channel()] = copy(draft);
-    try { onChange({model: context.model, channel: channel(), settings: copy(draft), apply: false}); } catch { /* A local draft remains usable when account save is unavailable. */ }
+  const featureLabel = name => name === "oscillate" && simulator() ? "Oscillation · simulator" : FEATURES[name].label;
+  const rangeGranted = name => context.personalRangeChannels?.includes?.(name) === true;
+  const limit = name => simulator() || rangeGranted(name) ? 20 : 5;
+  const draft = name => calibrationDraft(drafts[name], limit(name));
+  const testLimit = name => Math.min(5, level(context.ceiling, 5), draft(name).maximum);
+  const ready = () => context.connected === true && typeof context.selectedId === "string" &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(context.selectedId) && !["error", "expired", "disconnected"].includes(context.connectionState);
+  const stopped = () => context.output === 0 && context.outputKnown !== false && context.testing !== true;
+  const stop = () => { try { onStop(); } catch { /* Parent owns transport recovery. */ } };
+  const emit = (type, fields = {}) => { try { onEvent({type, ...fields}); } catch { /* Research is optional. */ } };
+  const chosen = () => available().filter(name => selected.has(name));
+  const checkedFrom = value => new Set(Array.isArray(value.verifiedChannels) ? value.verifiedChannels.filter(name => available().includes(name)) : []);
+  const chooseDefaults = () => {
+    const names = available();
+    const primary = names.includes(context.channel) ? context.channel : names[0];
+    return new Set(canCombine() ? names : primary ? [primary] : []);
   };
-  const selectChannel = index => {
-    ++epoch; safeStop(); channelIndex = Math.max(0, Math.min(available().length - 1, index));
-    fieldIndex = 0; stage = "features"; busy = false; draft = calibrationDraft(records[channel()], limit()); resetTest(); status.textContent = ""; render();
-  };
+  const currentOperation = (token, id) => active && token === epoch && id === context.selectedId;
+  const unchanged = (token, id) => currentOperation(token, id) && ready();
+
+  function applyBlocker() {
+    const names = chosen();
+    if (!ready()) return "Connect and select a toy to use these settings.";
+    if (!names.length) return "Choose at least one movement.";
+    if (!simulator() && names.some(name => !checked.has(name))) return "Check each selected movement and confirm it stopped, or deselect it.";
+    if (!simulator() && names.length > 1 && names.some(name => draft(name).maximum > 5) && names.some(name => !rangeGranted(name))) {
+      return "For a combination above level 5, enable the range on each selected movement or lower its maximum.";
+    }
+    if (!stopped()) return "Wait until the movement stops.";
+    return "";
+  }
+
+  function changeDraft(name, key, value) {
+    if (!active || busy || !ready() || !available().includes(name)) return;
+    const next = {...draft(name), [key]: value};
+    if (["background", "preferred"].includes(key)) next.minimum = Math.min(next.minimum, value);
+    drafts[name] = calibrationDraft(next, limit(name));
+    if (key === "rhythm") emit("calibration_rhythm", {channel: name, rhythm: value});
+    else if (key === "gain") emit("calibration_gain", {channel: name, value});
+    else emit("calibration_adjust", {channel: name, field: key, value});
+    status.textContent = "Draft updated. Nothing starts until you choose Start.";
+    render();
+  }
+
+  function makeCard(name) {
+    const section = make("section", "calibration-movement-" + name, "", "calibration-movement");
+    const heading = make("h4", "calibration-title-" + name, featureLabel(name));
+    section.setAttribute("aria-labelledby", heading.id);
+    const use = checkbox("calibration-use-" + name, "Use " + FEATURES[name].label.toLowerCase() + " while reading");
+    use.input.setAttribute("type", canCombine() ? "checkbox" : "radio");
+    use.input.setAttribute("name", "calibration-movement");
+    use.input.addEventListener("change", () => {
+      if (!active || busy || !available().includes(name)) return;
+      if (!canCombine()) selected = new Set([name]);
+      else if (use.input.checked) selected.add(name);
+      else selected.delete(name);
+      status.textContent = "";
+      render();
+    });
+    const sliders = make("div", "", "", "calibration-sliders");
+    const fields = new Map();
+    for (const {key, label, hint} of CALIBRATION_FIELDS) {
+      const input = range("calibration-" + key + "-" + name, 0, 5);
+      const value = output(input);
+      const help = make("p", input.id + "-hint", hint, "note");
+      const wrapper = field(label, input, value);
+      input.setAttribute("aria-describedby", help.id);
+      wrapper.append(help);
+      input.addEventListener("input", () => {
+        const raw = Number(input.value);
+        const max = key === "maximum" ? limit(name) : draft(name).maximum;
+        if (Number.isInteger(raw) && raw >= 0 && raw <= max) changeDraft(name, key, raw);
+      });
+      fields.set(key, {input, value});
+      sliders.append(wrapper);
+    }
+    const rhythm = make("select", "calibration-rhythm-" + name);
+    rhythm.append(option("scene", "Follow scene rhythm"), option("steady", "Steady"), option("gentle", "Gentle changes"), option("dynamic", "More variation"));
+    rhythm.addEventListener("change", () => {
+      if (RHYTHMS.includes(rhythm.value)) changeDraft(name, "rhythm", rhythm.value);
+    });
+    const gain = range("calibration-gain-" + name, 0, 2, .1);
+    const gainValue = output(gain);
+    gain.addEventListener("input", () => {
+      const value = Number(gain.value);
+      if (Number.isFinite(value) && value >= 0 && value <= 2) changeDraft(name, "gain", Math.round(value * 10) / 10);
+    });
+    sliders.append(field("Variation", rhythm), field("Story strength", gain, gainValue));
+
+    const checkArea = make("div", "", "", "calibration-check");
+    const checkStatus = make("p", "calibration-check-status-" + name, "", "note");
+    const testLevel = range("calibration-test-level-" + name, 1, 5);
+    testLevel.value = "1";
+    const testReadout = output(testLevel);
+    const testButton = button("calibration-test-" + name, "Test for 2 seconds");
+    const confirmation = checkbox("calibration-confirm-" + name,
+      simulator() ? "I saw the simulated level return to zero." : "I checked the movement and confirmed the toy stopped.");
+    const enableRange = button("calibration-enable-range-" + name, "Enable this movement’s personal range");
+    const ratings = make("div", "", "", "calibration-ratings");
+    ratings.setAttribute("role", "group");
+    ratings.setAttribute("aria-label", "Optional " + FEATURES[name].label.toLowerCase() + " rating");
+    for (const [rating, label] of [["light", "Too light"], ["good", "Good for me"], ["strong", "Too much"]]) {
+      const control = button("calibration-rating-" + rating + "-" + name, label);
+      control.addEventListener("click", () => {
+        if (!active || busy || lastTest?.name !== name || !lastTest.confirmed) return;
+        emit("calibration_rating", {channel: name, field: "preferred", value: lastTest.level, rating});
+        status.textContent = "Rating noted. It is shared only when beta recording is on.";
+      });
+      ratings.append(control);
+    }
+    testLevel.addEventListener("input", () => { if (!busy) render(); });
+    testButton.addEventListener("click", () => runTest(name));
+    confirmation.input.addEventListener("change", () => confirm(name));
+    enableRange.addEventListener("click", () => grant(name));
+    checkArea.append(checkStatus, field("Short test level", testLevel, testReadout), testButton, confirmation.label, ratings, enableRange);
+    section.append(heading, make("p", "", FEATURES[name].description, "note"), use.label, sliders, checkArea);
+    cards.append(section);
+    return {use, fields, rhythm, gain, gainValue, checkStatus, testLevel, testReadout, testButton, confirmation, enableRange, ratings};
+  }
+
   function render() {
     shell.hidden = !active;
     if (!active || destroyed) return;
-    const names = available(), currentFeature = offeredFeature(channel());
-    progress.textContent = names.length ? "Movement " + (channelIndex + 1) + " of " + names.length + (stage === "levels" ? " · Level " + (fieldIndex + 1) + " of " + CALIBRATION_FIELDS.length : "") : "Choose a connected toy first";
-    heading.textContent = stage === "features" ? "What your toy can do." : stage === "levels" ? "Find your " + (currentFeature?.label.toLowerCase() || "movement") + " levels." : stage === "together" ? "Put movements together." : "Your movement settings.";
-    intro.textContent = context.mode === "simulator" ? "SIMULATOR · Watch the movement and output on screen. These choices are a rehearsal, not a physical calibration." :
-      "Explore one movement at a time. Each test is a short request; you decide what feels right and can stop or skip at any time.";
-    capabilities.hidden = stage !== "features"; capabilities.replaceChildren();
-    for (const name of names) {
-      const item = make("div", null, "", "calibration-capability");
-      const icon = make("span", null, FEATURES[name].icon); icon.setAttribute("aria-hidden", "true");
-      item.append(icon, make("strong", null, offeredFeature(name).label), make("p", null, FEATURES[name].example)); capabilities.append(item);
+    const names = available();
+    const signature = JSON.stringify([names, canCombine(), simulator()]);
+    if (signature !== cardSignature) {
+      cardSignature = signature;
+      cards.replaceChildren();
+      views = new Map(names.map(name => [name, makeCard(name)]));
     }
-    movement.replaceChildren(...names.map(name => option(name, offeredFeature(name).label))); movement.value = channel(); movement.disabled = busy || names.length < 2;
-    feature.hidden = stage === "together";
-    glyph.textContent = currentFeature?.icon || "—"; featureTitle.textContent = currentFeature?.label || "No movement available";
-    featureCopy.textContent = currentFeature?.description || "Connect and explicitly select a supported toy to continue.";
-    const actualOutput = Number.isInteger(context.output) && context.output >= 0 && context.output <= 20 ? context.output : null;
-    liveOutput.textContent = (context.mode === "simulator" ? "Simulated output: " : "Requested output: ") + (actualOutput === null ? "unknown · check the device" : actualOutput + " / 20");
-    glyph.dataset.running = String(context.mode === "simulator" && actualOutput > 0); glyph.dataset.movement = channel();
-    liveFill.style.width = String(actualOutput === null ? 0 : actualOutput * 5) + "%";
-    liveMeter.dataset.unknown = String(actualOutput === null);
-    personalRange.hidden = context.mode !== "lovense" || stage === "together";
-    personalRangeHeading.textContent = rangeEnabled() ? "Personal range enabled for this movement." : "Begin gently. Choose your range.";
-    personalRangeCopy.textContent = rangeEnabled() ? "This connection can use your chosen levels up to 20/20. Your maximum is still " + level(context.ceiling, 5) + "/20. Applying settings stays paused, and saved presets never enable a range on a new connection." :
-      "The first check stays at 5/20 or below. After testing this movement and checking its Stop, you can enable levels up to 20/20 for this connection. Nothing starts, and your maximum stays as chosen.";
-    enableRange.textContent = rangeEnabled() ? "Personal range enabled" : "Enable personal range";
-    enableRange.disabled = busy || !ready() || context.output !== 0 || !checkedMovements.has(channel()) || rangeEnabled() || typeof onEnablePersonalRange !== "function";
-    levels.hidden = stage !== "levels"; summary.hidden = stage !== "summary"; together.hidden = stage !== "together";
-    const f = CALIBRATION_FIELDS[fieldIndex];
-    levelName.textContent = f.label; levelHelp.textContent = f.hint;
-    slider.max = String(limit()); slider.value = String(draft[f.key]); slider.disabled = busy || !ready();
-    readout.textContent = String(draft[f.key]) + " / 20 · current test ceiling " + testLimit() + (context.mode === "lovense" ? " · session range " + limit() : "");
-    for (let i = 0; i < previewBars.length; i++) previewBars[i].dataset.on = String(i < draft[f.key]);
-    pulse.textContent = draft[f.key] === 0 ? "Confirm zero output" : f.action + " · 2 seconds";
-    pulse.disabled = busy || !ready() || draft[f.key] > testLimit();
-    check.disabled = busy || !tested || context.output !== 0; check.checked = accepted;
-    for (const el of ratingButtons.values()) el.disabled = busy || !accepted;
-    previous.hidden = stage === "features"; previous.disabled = busy;
-    skip.disabled = busy; next.disabled = busy || !names.length;
-    next.textContent = stage === "features" ? "Set my levels" : stage === "levels" ? (fieldIndex < CALIBRATION_FIELDS.length - 1 ? "Next level" : "Review these levels") : stage === "together" ? "Continue to story tests" : channelIndex < names.length - 1 ? "Explore next movement" : canCombine() ? "Explore movements together" : "Continue to story tests";
-    skip.textContent = stage === "together" ? "Keep one movement" : "Skip this movement";
-    apply.disabled = busy || !ready(); apply.textContent = applied.has(channel()) ? "Apply these levels again" : "Use these levels";
-    summaryList.replaceChildren();
-    for (const f of CALIBRATION_FIELDS) summaryList.append(make("dt", null, f.label), make("dd", null, String(draft[f.key]) + " / 20"));
-    rhythm.value = draft.rhythm; rhythm.disabled = busy; gain.value = String(draft.gain); gain.disabled = busy; gainValue.textContent = draft.gain.toFixed(1) + "×";
-    continuity.value = readingMode; continuity.disabled = busy;
-    togetherChoices.replaceChildren();
-    for (const name of names) {
-      const checkbox = make("input", "calibration-combine-" + name); checkbox.setAttribute("type", "checkbox");
-      checkbox.checked = combinedChoices.has(name); checkbox.disabled = busy || !checkedMovements.has(name);
-      const choice = make("label", null, "", "setup-confirmation"); choice.setAttribute("for", checkbox.id);
-      choice.append(checkbox, make("span", null, offeredFeature(name).label + (checkedMovements.has(name) ? " · checked individually" : " · test and confirm this movement first")));
-      checkbox.addEventListener("change", () => {
-        if (busy || !checkedMovements.has(name)) return;
-        if (checkbox.checked) combinedChoices.add(name); else combinedChoices.delete(name);
-        render();
-      });
-      togetherChoices.append(choice);
+    guidance.textContent = simulator() ? "Adjust each movement here and try a short simulated test if you like." :
+      "Adjust each movement here. Run a short test and check the physical stop for each movement you want to use.";
+    if (names.length > 1 && !canCombine()) guidance.textContent += " Choose one movement for this connection.";
+    continuity.value = readingMode;
+    continuity.disabled = busy || !ready();
+    const known = context.outputKnown !== false && Number.isInteger(context.output) && context.output >= 0 && context.output <= 20;
+    liveOutput.textContent = (simulator() ? "Simulated level: " : "Requested level: ") + (known ? context.output + " / 20" : "unconfirmed");
+    for (const [name, view] of views) {
+      const value = draft(name), max = testLimit(name), verified = checked.has(name), test = lastTest?.name === name ? lastTest : null;
+      const disabled = busy || !ready();
+      const needsGentleCheck = !simulator() && !verified;
+      view.use.input.checked = selected.has(name);
+      view.use.input.disabled = disabled;
+      for (const [key, control] of view.fields) {
+        control.input.max = String(key === "maximum" ? limit(name) : value.maximum);
+        control.input.value = String(value[key]);
+        control.input.disabled = disabled;
+        control.value.textContent = value[key] + " / 20";
+      }
+      view.rhythm.value = value.rhythm;
+      view.rhythm.disabled = disabled;
+      view.gain.value = String(value.gain);
+      view.gain.disabled = disabled;
+      view.gainValue.textContent = value.gain.toFixed(1) + "×";
+      view.checkStatus.textContent = max === 0 ? "A zero maximum blocks the short test." : simulator() ?
+        "Optional test on the simulator." : verified ? "Movement checked. Short tests stay within levels 1 to 5." :
+          "Run the level 1 check before using this movement.";
+      view.testLevel.max = String(Math.max(1, max));
+      view.testLevel.value = String(needsGentleCheck ? 1 : Math.min(Math.max(1, Number(view.testLevel.value) || 1), Math.max(1, max)));
+      view.testLevel.disabled = disabled || max <= 1 || needsGentleCheck;
+      view.testReadout.textContent = view.testLevel.value + " / 20";
+      view.testButton.textContent = needsGentleCheck ? "Run gentle check" : "Test for 2 seconds";
+      view.testButton.disabled = disabled || !stopped() || max === 0;
+      view.confirmation.label.hidden = !test;
+      view.confirmation.input.checked = test?.confirmed === true;
+      view.confirmation.input.disabled = disabled || !test || test.confirmed || !stopped();
+      view.ratings.hidden = !test?.confirmed;
+      for (const control of view.ratings.children) control.disabled = disabled || !test?.confirmed;
+      view.enableRange.hidden = simulator() || typeof onEnablePersonalRange !== "function";
+      view.enableRange.disabled = disabled || !verified || !stopped() || rangeGranted(name);
+      view.enableRange.textContent = rangeGranted(name) ? "Personal range enabled for this connection" : "Enable this movement’s personal range";
     }
-    togetherHelp.textContent = "Your connected toy exposes more than one movement. Choose the movements you want together after checking each one separately. This step is optional.";
-    togetherApply.disabled = busy || !ready() || !canCombine() || combinedChoices.size < 2 || [...combinedChoices].some(name => !checkedMovements.has(name));
+    const blocker = applyBlocker();
+    apply.disabled = busy || Boolean(blocker);
+    applyNote.textContent = blocker || "Applying these settings keeps the toy paused.";
+    skip.disabled = busy;
   }
-  const completeOrNext = () => {
-    safeStop();
-    if (channelIndex < available().length - 1) { selectChannel(channelIndex + 1); return; }
-    if (stage !== "together" && canCombine()) { stage = "together"; status.textContent = ""; render(); return; }
-    ++epoch; active = false; render();
-    try { onComplete({settings: copy(records), applied: [...applied], readingMode}); } catch { /* Parent owns next step. */ }
-  };
-  next.addEventListener("click", () => {
-    if (busy || !active || !channel()) return;
-    safeStop(); resetTest();
-    if (stage === "features") stage = "levels";
-    else if (stage === "levels" && fieldIndex < CALIBRATION_FIELDS.length - 1) fieldIndex++;
-    else if (stage === "levels") stage = "summary";
-    else { completeOrNext(); return; }
-    status.textContent = ""; render(); heading.focus?.({preventScroll: true});
-  });
-  previous.addEventListener("click", () => {
-    if (busy || !active) return;
-    ++epoch; safeStop(); resetTest(); status.textContent = "";
-    if (stage === "together") stage = "summary";
-    else if (stage === "summary") { stage = "levels"; fieldIndex = CALIBRATION_FIELDS.length - 1; }
-    else if (fieldIndex > 0) fieldIndex--;
-    else stage = "features";
+
+  async function runTest(name) {
+    if (!active || busy || !ready() || !stopped() || !views.has(name)) return;
+    const value = !simulator() && !checked.has(name) ? 1 : Number(views.get(name).testLevel.value);
+    if (!Number.isInteger(value) || value < 1 || value > testLimit(name)) return;
+    const token = ++epoch, id = context.selectedId;
+    busy = true;
+    lastTest = null;
+    stop();
+    checked.delete(name);
+    status.textContent = "Testing " + FEATURES[name].label.toLowerCase() + " for two seconds.";
     render();
-  });
-  skip.addEventListener("click", () => { if (busy || !active) return; emit("calibration_skip"); completeOrNext(); });
-  movement.addEventListener("change", () => { if (!busy && available().includes(movement.value)) selectChannel(available().indexOf(movement.value)); });
-  slider.addEventListener("input", () => {
-    if (busy || !active || !ready()) return;
-    const value = Number(slider.value); if (!Number.isInteger(value) || value < 0 || value > limit()) return;
-    safeStop(); resetTest(); draft[CALIBRATION_FIELDS[fieldIndex].key] = value;
-    if (CALIBRATION_FIELDS[fieldIndex].key === "minimum") {
-      draft.background = Math.max(value, draft.background); draft.preferred = Math.max(value, draft.preferred);
-    }
-    if (["background", "preferred"].includes(CALIBRATION_FIELDS[fieldIndex].key)) draft.minimum = Math.min(value, draft.minimum);
-    draft = calibrationDraft(draft, limit()); changed(); emit("calibration_adjust", {field: CALIBRATION_FIELDS[fieldIndex].key, value}); status.textContent = "Draft updated. Nothing starts when you move a slider."; render();
-  });
-  pulse.addEventListener("click", async () => {
-    if (busy || !active || !ready() || draft[CALIBRATION_FIELDS[fieldIndex].key] > testLimit()) return;
-    const value = draft[CALIBRATION_FIELDS[fieldIndex].key], action = channel(), id = context.selectedId, activeEpoch = ++epoch;
-    if (value > 0) { checkedMovements.delete(action); combinedChoices.delete(action); }
-    safeStop(); busy = true; resetTest(); status.textContent = value === 0 ? "Stop requested. Check that output is zero." : "Testing " + FEATURES[action].label.toLowerCase() + " for two seconds…"; render();
     try {
-      const result = value === 0 ? (safeStop(), true) : await onTest({channel: action, level: value});
-      if (!active || activeEpoch !== epoch || id !== context.selectedId || action !== channel()) return;
+      const result = await onTest({channel: name, level: value});
+      if (!unchanged(token, id)) return;
       if (result && typeof result === "object") context = {...context, ...result};
-      if (!(result === true || result && typeof result === "object") || !ready()) throw new Error();
-      tested = true; emit("calibration_test", {field: CALIBRATION_FIELDS[fieldIndex].key, value});
-      status.textContent = context.mode === "simulator" ? "Test ended. Check the simulated output, then confirm it is stopped." : "Test and Stop requested. Check the physical response and that the toy stopped.";
-    } catch { if (activeEpoch === epoch) status.textContent = "The test did not complete. Stop, check the connection and retry."; }
-    finally { if (activeEpoch === epoch) { busy = false; render(); } }
-  });
-  check.addEventListener("change", () => {
-    if (!active || busy || !tested || context.output !== 0 || !check.checked) { accepted = false; render(); return; }
-    const zero = draft[CALIBRATION_FIELDS[fieldIndex].key] === 0;
-    try { accepted = zero || onConfirmTest() === true; } catch { accepted = false; }
-    if (accepted && !zero) checkedMovements.add(channel());
-    status.textContent = accepted ? "Checked. Add an optional rating or continue." : "The test is no longer current. Repeat it and check the response."; render();
-  });
-  for (const [rating, el] of ratingButtons) el.addEventListener("click", () => {
-    if (!active || busy || !accepted) return;
-    emit("calibration_rating", {field: CALIBRATION_FIELDS[fieldIndex].key, value: draft[CALIBRATION_FIELDS[fieldIndex].key], rating}); status.textContent = "Selected for this test. Shared only when beta recording is on. You can adjust the level or continue.";
-  });
+      if (!result || !ready()) throw new Error();
+      lastTest = {name, level: value, confirmed: false};
+      emit("calibration_test", {channel: name, field: "preferred", value});
+      status.textContent = simulator() ? "Check the simulated level, then confirm." : "Check the physical movement and stop, then confirm below.";
+    } catch {
+      if (currentOperation(token, id)) status.textContent = "The test did not complete. Check the device before trying again.";
+    } finally {
+      if (currentOperation(token, id)) { busy = false; render(); }
+    }
+  }
+
+  function confirm(name) {
+    if (!active || busy || !ready() || !stopped() || lastTest?.name !== name || lastTest.confirmed ||
+        !views.get(name)?.confirmation.input.checked) { render(); return; }
+    let confirmed = false;
+    try { confirmed = onConfirmTest() === true; } catch { /* The parent may reject stale checks. */ }
+    if (!active || lastTest?.name !== name || !ready()) return;
+    if (confirmed) {
+      lastTest.confirmed = true;
+      checked.add(name);
+    }
+    status.textContent = confirmed ? "Movement checked. You can rate this test or continue." : "The check is out of date. Run the short test again.";
+    render();
+  }
+
+  async function grant(name) {
+    if (!active || busy || simulator() || !ready() || !stopped() || !checked.has(name) || rangeGranted(name) ||
+        typeof onEnablePersonalRange !== "function") return;
+    const token = ++epoch, id = context.selectedId;
+    busy = true;
+    stop();
+    render();
+    try {
+      const result = await onEnablePersonalRange({channel: name});
+      if (!unchanged(token, id)) return;
+      if (result && typeof result === "object") context = {...context, ...result};
+      if (!result || !stopped() || !rangeGranted(name)) throw new Error();
+      emit("calibration_range_enabled", {channel: name});
+      status.textContent = "Personal range enabled. Your chosen maximum is still " + draft(name).maximum + " / 20.";
+    } catch {
+      if (currentOperation(token, id)) status.textContent = "The range could not be enabled. Repeat the movement and stop check.";
+    } finally {
+      if (currentOperation(token, id)) { busy = false; render(); }
+    }
+  }
+
+  function complete(applied) {
+    ++epoch;
+    active = false;
+    busy = false;
+    render();
+    onComplete({settings: copy(drafts), applied, readingMode});
+  }
+
   continuity.addEventListener("change", () => {
     if (!active || busy || !["story", "continuous"].includes(continuity.value)) return;
-    readingMode = continuity.value; try { onModeChange(readingMode); } catch { /* Explicit user choice remains a local draft. */ }
-    emit("calibration_mode", {mode: readingMode}); render();
+    readingMode = continuity.value;
+    emit("calibration_mode", {mode: readingMode});
   });
-  rhythm.addEventListener("change", () => { if (!active || busy || !["steady","gentle","dynamic"].includes(rhythm.value)) return; draft.rhythm = rhythm.value; changed(); emit("calibration_rhythm", {rhythm: draft.rhythm}); render(); });
-  gain.addEventListener("input", () => { const value = Number(gain.value); if (!active || busy || !Number.isFinite(value) || value < 0 || value > 2) return; draft.gain = Math.round(value * 10) / 10; changed(); emit("calibration_gain", {value: draft.gain}); render(); });
+  skip.addEventListener("click", () => {
+    if (!active || busy) return;
+    stop();
+    emit("calibration_skip");
+    complete([]);
+  });
   apply.addEventListener("click", async () => {
-    if (!active || busy || !ready()) return;
-    const activeEpoch = ++epoch, action = channel(), id = context.selectedId; busy = true; safeStop(); render();
+    if (!active || busy || applyBlocker()) return;
+    const names = chosen(), token = ++epoch, id = context.selectedId;
+    const settings = Object.fromEntries(names.map(name => [name, draft(name)]));
+    busy = true;
+    stop();
+    render();
     try {
-      const result = await onApply({model: context.model, channel: action, settings: copy(draft)});
-      if (!active || activeEpoch !== epoch || id !== context.selectedId || channel() !== action) return;
-      if (result === false) throw new Error();
-      records[action] = copy(draft); applied.add(action); emit("calibration_apply"); status.textContent = "Levels applied. Output is paused. Save a named preset from the reading controls to keep them.";
-    } catch { if (activeEpoch === epoch) status.textContent = "These levels were not applied. Your draft is still here; try again."; }
-    finally { if (activeEpoch === epoch) { busy = false; render(); } }
+      const result = names.length > 1 ? await onApplyChannels({model: context.model, channels: names, settings, mode: readingMode}) :
+        await onApply({model: context.model, channel: names[0], settings: settings[names[0]]});
+      if (!unchanged(token, id)) return;
+      if (!result) throw new Error();
+      if (names.length === 1) onModeChange(readingMode);
+      for (const name of names) onChange({model: context.model, channel: name, settings: settings[name], apply: false});
+      emit(names.length > 1 ? "calibration_combine" : "calibration_apply", names.length > 1 ? {channels: names} : {channel: names[0]});
+      complete(names);
+    } catch {
+      if (currentOperation(token, id)) status.textContent = "Settings could not be applied. Your draft is still here.";
+    } finally {
+      if (currentOperation(token, id)) { busy = false; render(); }
+    }
   });
-  togetherApply.addEventListener("click", async () => {
-    const chosen = available().filter(name => combinedChoices.has(name));
-    if (!active || busy || !ready() || !canCombine() || chosen.length < 2 || chosen.some(name => !checkedMovements.has(name))) return;
-    const activeEpoch = ++epoch, id = context.selectedId; busy = true; safeStop(); render();
-    try {
-      const settings = Object.fromEntries(chosen.map(name => [name, calibrationDraft(records[name], limit())]));
-      const result = await onApplyChannels({model: context.model, channels: chosen, settings, mode: readingMode});
-      if (!active || activeEpoch !== epoch || id !== context.selectedId) return;
-      if (result === false) throw new Error();
-      emit("calibration_combine", {channels: chosen}); status.textContent = "Combination applied. Output is paused. The test story will still need your Start.";
-    } catch { if (activeEpoch === epoch) status.textContent = "The combination was not applied. You can keep testing one movement at a time."; }
-    finally { if (activeEpoch === epoch) { busy = false; render(); } }
-  });
-  enableRange.addEventListener("click", async () => {
-    if (!active || busy || !ready() || context.output !== 0 || !checkedMovements.has(channel()) || rangeEnabled() || typeof onEnablePersonalRange !== "function") return;
-    const action = channel(), id = context.selectedId, activeEpoch = ++epoch; busy = true; safeStop(); render();
-    try {
-      const result = await onEnablePersonalRange({channel: action});
-      if (!active || activeEpoch !== epoch || id !== context.selectedId || action !== channel()) return;
-      if (result && typeof result === "object") context = {...context, ...result};
-      if (result === false || !ready() || context.output !== 0 || !rangeEnabled() || context.maxCeiling !== 20) throw new Error();
-      emit("calibration_range_enabled");
-      status.textContent = "Personal range enabled. Your maximum has not changed and output is paused. Choose and apply your upper limit when ready.";
-    } catch { if (activeEpoch === epoch) status.textContent = "Personal range was not enabled. Repeat the gentle test, check that it stopped, then try again."; }
-    finally { if (activeEpoch === epoch) { busy = false; render(); } }
-  });
+
   return {
     open(value = {}) {
       if (destroyed) return;
-      ++epoch; safeStop(); context = {...value}; channelIndex = 0; fieldIndex = 0; stage = "features"; busy = false; active = true;
-      records = value.settings && typeof value.settings === "object" && !Array.isArray(value.settings) ? copy(value.settings) : {};
-      checkedMovements = new Set(Array.isArray(value.verifiedChannels) ? value.verifiedChannels.filter(name => available().includes(name)) : []); combinedChoices = new Set();
+      ++epoch;
+      active = false;
+      stop();
+      context = {...value};
+      active = true;
+      busy = false;
+      lastTest = null;
+      drafts = Object.fromEntries(available().map(name => [name, calibrationDraft(value.settings?.[name], limit(name))]));
+      checked = checkedFrom(value);
+      selected = chooseDefaults();
       readingMode = value.readingMode === "continuous" || value.feel?.mode === "continuous" ? "continuous" : "story";
-      applied = new Set(); draft = calibrationDraft(records[channel()], limit()); resetTest(); status.textContent = ""; render(); heading.focus?.({preventScroll: true});
+      status.textContent = "";
+      render();
     },
     update(value = {}) {
-      const oldId = context.selectedId, oldChannel = channel(), previouslyReady = ready(); context = {...context, ...value};
-      if (active && (oldId !== context.selectedId || oldChannel !== channel() || previouslyReady && !ready())) {
-        ++epoch; checkedMovements.clear(); combinedChoices.clear(); safeStop(); busy = false; resetTest(); status.textContent = "Connection changed. Reconnect and select the toy before testing again.";
+      if (!active) return;
+      const previousId = context.selectedId, previousMode = context.mode, previouslyReady = ready(), previous = available();
+      const previouslyCombined = canCombine();
+      context = {...context, ...value};
+      const names = available();
+      const changed = previousId !== context.selectedId || previousMode !== context.mode || previouslyReady && !ready() ||
+        previouslyCombined !== canCombine() || previous.length !== names.length || previous.some(name => !names.includes(name));
+      if (changed) {
+        ++epoch;
+        busy = false;
+        lastTest = null;
+        checked.clear();
+        selected = chooseDefaults();
+        if (previousId !== context.selectedId || previousMode !== context.mode) {
+          drafts = Object.fromEntries(names.map(name => [name, calibrationDraft(context.settings?.[name], limit(name))]));
+        }
+        stop();
+        status.textContent = "Connection changed. Check the selected toy before continuing.";
       }
-      if (active && Array.isArray(value.verifiedChannels)) checkedMovements = new Set(value.verifiedChannels.filter(name => available().includes(name)));
-      if (active) { draft = calibrationDraft(draft, limit()); render(); }
+      if (Array.isArray(value.verifiedChannels)) checked = checkedFrom(value);
+      render();
     },
-    close() { ++epoch; const wasActive = active; active = false; busy = false; resetTest(); if (wasActive) safeStop(); render(); },
-    interrupt(message = "Stopped. Repeat a test only when ready.") { ++epoch; busy = false; resetTest(); if (active) { safeStop(); status.textContent = message; render(); } },
-    snapshot() { return {active, stage, channel: channel(), field: CALIBRATION_FIELDS[fieldIndex].key, busy, tested, accepted, settings: copy(records), draft: copy(draft), readingMode, checkedMovements: [...checkedMovements], combinedChoices: [...combinedChoices]}; },
-    destroy() { if (destroyed) return; this.close(); destroyed = true; shell.remove?.(); },
+    close() {
+      ++epoch;
+      const wasActive = active;
+      active = false;
+      busy = false;
+      lastTest = null;
+      if (wasActive) stop();
+      render();
+    },
+    interrupt(message = "Stopped. Repeat a test only when ready.") {
+      ++epoch;
+      busy = false;
+      lastTest = null;
+      if (active) { stop(); status.textContent = message; render(); }
+    },
+    snapshot() {
+      return {active, busy, settings: copy(drafts), readingMode, checkedMovements: [...checked],
+        selectedChannels: chosen(), lastTest: lastTest ? {...lastTest} : null};
+    },
+    destroy() { if (!destroyed) { this.close(); destroyed = true; shell.remove?.(); } },
   };
 }

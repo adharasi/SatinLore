@@ -61,7 +61,7 @@ export const ALPHA_ASSETS = Object.freeze([
   ["alpha.html", "/alpha/index.html"],
   ["alpha-admin.html", "/alpha/admin.html"],
   ...[
-    "alpha.css", "alpha.mjs", "alpha-device.mjs", "alpha-screen.mjs", "alpha-screen-schema.mjs", "alpha-timeline.mjs",
+    "alpha.css", "alpha.mjs", "alpha-movement-view.mjs", "alpha-device.mjs", "alpha-screen.mjs", "alpha-screen-schema.mjs", "alpha-timeline.mjs",
     "alpha-admin.css", "alpha-admin.mjs", "theme.css", "favicon.svg",
     "devices/reader-device.mjs", "devices/bridge-transport.mjs",
     "devices/profile-simulator.mjs", "devices/toy-profiles.mjs",

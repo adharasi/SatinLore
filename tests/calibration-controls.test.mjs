@@ -150,3 +150,77 @@ test("asynchronous playback shares scene quiet and pattern selection with the si
   assert.equal(controller.desired(), 0);
   assert.equal(controller.snapshot().running, false);
 });
+
+test("section steps move one level through caps and leave corrections and neighboring sections alone", () => {
+  const {controller, device, clock} = synchronous();
+  controller.connect();
+  controller.setStory([9, 2, 0]);
+  controller.setManualZeros([2]);
+  assert.equal(controller.snapshot().target, 5);
+  controller.adjustLevel(-1);
+  assert.equal(controller.snapshot().target, 4);
+  assert.equal(device.snapshot().strength, 0);
+  controller.start();
+  assert.equal(device.snapshot().strength, 4);
+  controller.adjustLevel(1);
+  clock.advance(1000);
+  assert.equal(device.snapshot().strength, 5);
+  controller.adjustLevel(1);
+  assert.equal(controller.snapshot().levelUp, false);
+  controller.setPosition(1);
+  assert.equal(controller.snapshot().target, 2);
+  controller.setPosition(0);
+  assert.equal(controller.snapshot().baseLevel, 9);
+  controller.setPosition(2);
+  controller.adjustLevel(1);
+  assert.equal(controller.snapshot().target, 0);
+  assert.equal(controller.snapshot().levelUp, false);
+  controller.pause();
+});
+
+test("asynchronous section steps cannot start a paused connection or override a quiet scene", async () => {
+  const clock = new SimulationClock();
+  const transport = new ScenarioTransport({clock});
+  const controller = new AsyncPlaybackController({transport, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer});
+  controller.selectDevice("sim-a");
+  controller.setStory([3, 0], [{rhythm: "steady", quiet: false}, {rhythm: "steady", quiet: true}]);
+  const connecting = controller.connect();
+  await clock.advance(200);
+  assert.equal(await connecting, true);
+  controller.adjustLevel(1);
+  assert.equal(controller.snapshot().target, 4);
+  assert.equal(transport.requests.some(request => request.kind === "command"), false);
+  assert.equal(controller.start(controller.prepareStart()), true);
+  await clock.advance(200);
+  assert.equal(controller.snapshot().output, 4);
+  controller.setPosition(1);
+  controller.adjustLevel(1);
+  await clock.advance(200);
+  assert.equal(controller.snapshot().output, 0);
+  assert.equal(controller.snapshot().levelUp, false);
+  controller.destroy();
+});
+
+test("a combined simulator follows selected scene movements and never enables an unchecked movement", async t => {
+  const {clock} = synchronous();
+  const controller = new ReaderDeviceController(clock);
+  t.after(() => controller.destroy());
+  const profile = movements => ({rhythm: "steady", quiet: false, movements});
+  controller.setStory([3, 3, 3], [profile(["fingering"]), profile(["oscillate"]), profile(["vibrate", "fingering"])]);
+  await controller.beginConnection({mode: "simulator", model: "flexer"});
+  await controller.selectDevice("sim-flexer");
+  await controller.applyChannels(["vibrate", "fingering"]);
+  controller.adjustLevel(1);
+  controller.start();
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 0, fingering: 4});
+  controller.pause();
+  controller.setPosition(1);
+  controller.start();
+  clock.advance(1000);
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 3, fingering: 0});
+  controller.pause();
+  controller.setPosition(2);
+  controller.start();
+  clock.advance(1000);
+  assert.deepEqual(controller.snapshot().channelOutputs, {vibrate: 3, fingering: 3});
+});

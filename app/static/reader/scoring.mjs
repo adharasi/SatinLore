@@ -42,6 +42,13 @@ const TIME_BOUNDARY = /\b(?:(?:the )?(?:next|following) (?:day|morning|night)|(?
 const SENSITIVE_CUE = /\b(?:non[ -]consensual|coerc(?:e|ed|es|ing|ion)|forced|unwanted|underage|child(?:ren)?|rape|assault(?:ed)?)\b/u;
 const SOFT_PACE = /\b(?:slow(?:ly)?|unhurried|gentl(?:e|y)|gradual(?:ly)?|softly)\b/u;
 const VARIABLE_PACE = /\b(?:quick(?:ly)?|sudden(?:ly)?|urgent(?:ly)?|abrupt(?:ly)?|rapid(?:ly)?)\b/u;
+const MOVEMENT_CUES = [
+  ["vibrate", /\bvibrat(?:e|es|ed|ing|ions?)\b/u],
+  ["fingering", /\b(?:flex(?:es|ed|ing)?|fingering)\b/u],
+  ["rotate", /\brotat(?:e|es|ed|ing|ions?)\b/u],
+  ["thrusting", /\bthrust(?:s|ing)?\b/u],
+  ["oscillate", /\b(?:oscillat(?:e|es|ed|ing|ions?)|side[ -]to[ -]side)\b/u],
+];
 
 function sceneCandidate(paragraph) {
   if (!paragraph || typeof paragraph.text !== "string" || !Number.isInteger(paragraph.band) ||
@@ -63,6 +70,8 @@ function sceneCandidate(paragraph) {
       band === 4 ? "Review this stronger local suggestion if needed." : null;
   const rhythm = level >= 3 && (band === 4 || VARIABLE_PACE.test(value)) ? "dynamic" :
     level >= 2 && SOFT_PACE.test(value) ? "gentle" : "steady";
+  // Motion cues describe an already matched scene. They cannot activate one.
+  const movements = level > 0 ? MOVEMENT_CUES.filter(([, cue]) => cue.test(value)).map(([id]) => id) : [];
   const short = value.length > 0 && value.length <= 180 && value.split(/\s+/u).length <= 24;
   return {
     anchor: level > 0 && paragraph.override !== 0,
@@ -70,7 +79,7 @@ function sceneCandidate(paragraph) {
     result: {band, level, reason: rest ? "Rest or scene boundary; left at zero." :
       sensitive ? "Sensitive wording; left at zero for review." :
         uncertain ? "Context is uncertain; left at zero." : paragraph.reason,
-      sceneId: null, rhythm, quiet, advisory},
+      sceneId: null, rhythm, quiet, advisory, movements},
   };
 }
 
@@ -94,8 +103,8 @@ export function groupScenes(paragraphs) {
     if (carriesThrough) {
       // Keep the preceding cadence for this brief detail. Changing to a lower
       // level here would send Stop before the next finite device renewal.
-      const {band, level, rhythm} = before.result;
-      Object.assign(candidate.result, {band, level, rhythm,
+      const {band, level, rhythm, movements} = before.result;
+      Object.assign(candidate.result, {band, level, rhythm, movements: [...movements],
         reason: "Brief detail within the same scene; kept the preceding rhythm."});
     }
     candidate.result.sceneId = activeScene;

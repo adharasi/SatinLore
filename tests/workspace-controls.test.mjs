@@ -197,9 +197,11 @@ test("missing Web Locks explains why Start is unavailable while reading stays us
 
 test("a rendering failure leaves explicit reconnect and Stop available instead of a silent dead end", async t => {
   const app = await ready(t);
+  app.nodes.get("level").value = "3";
+  await app.nodes.get("level").dispatch("input");
   const cap = app.nodes.get("cap"), original = cap.setAttribute;
   cap.setAttribute = () => { throw Error("Synthetic render failure"); };
-  await app.click("strength-plus"); await app.settle();
+  await app.click("level-up"); await app.settle();
   assert.equal(app.read("controller.snapshot().state"), "ERROR_PAUSED");
   assert.equal(app.nodes.get("connect").disabled, false);
   assert.equal(app.nodes.get("connect").hidden, false);
@@ -247,16 +249,19 @@ test("direct typing opens a session-only story and keeps the existing library", 
   assert.equal(app.nodes.get("draft-story").value, "");
 });
 
-test("strength works before and during playback and maximum gestures never open a popup", async t => {
+test("section levels change by one before and during playback without a maximum popup", async t => {
   const app = workspace(); t.after(() => app.destroy()); await app.settle();
-  assert.equal(app.nodes.get("strength-plus").disabled, false);
-  await app.click("strength-plus");
-  assert.equal(app.read("latest.strength"), 1.1);
+  assert.equal(app.nodes.get("level-up").disabled, true);
   await app.add(); await app.click("connect");
-  app.nodes.get("level").value = "4"; await app.nodes.get("level").dispatch("input");
+  app.nodes.get("level").value = "3"; await app.nodes.get("level").dispatch("input");
+  await app.click("level-up");
+  assert.equal(app.read("latest.target"), 4);
+  assert.equal(app.read("latest.output"), 0);
   await start(app);
-  await app.click("strength-plus");
-  assert.equal(app.read("latest.strength"), 1.1);
+  await app.click("level-up");
+  assert.equal(app.read("latest.target"), 5);
+  assert.equal(app.nodes.get("level-up").disabled, true);
+  assert.equal(app.read("currentStory().model.paragraphs[0].override"), 3);
   app.nodes.get("cap").value = "9"; await app.nodes.get("cap").dispatch("input");
   assert.equal(app.read("latest.ceiling"), 9);
   assert.equal(app.read("latest.running"), true);

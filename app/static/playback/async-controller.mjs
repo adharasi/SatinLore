@@ -1,4 +1,4 @@
-import {normalizeSceneProfiles, ReadingFeel} from "../reader/calibration.mjs";
+import {normalizeSceneProfiles, ReadingFeel, stepSectionLevel} from "../reader/calibration.mjs";
 /** Experimental async contract for the deterministic lab only; not a qualified hardware adapter. */
 export const ASYNC_COMMAND_MS = 2000;
 const level = value => {
@@ -15,6 +15,7 @@ export class AsyncPlaybackController {
     this.state = "DISCONNECTED"; this.connected = false; this.selected = null; this.visible = true; this.authorized = true;
     this.feel = new ReadingFeel(); this.manualZeros = new Set();
     this.levels = []; this.sceneProfiles = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
+    this.levelAdjustment = 0;
     this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose a simulated device explicitly.";
     this.requests = new Map(); this.stopTasks = new Map(); this.uncertain = new Set(); this.errorLatch = false;
     this.commandSettlements = new Map(); this.needsFreshStop = new Set();
@@ -22,16 +23,20 @@ export class AsyncPlaybackController {
     this.unsubscribe = transport.subscribe?.(event => { if (event.type === "disconnect" && event.deviceId === this.selected) { this.uncertain.add(event.deviceId); this.output = null; this.connected = false; void this.pause("Connection lost. Reconnect, then confirm a new Start."); } });
   }
   snapshot() {
+    const now = this.now();
+    const target = this.intent(this.levelAdjustment, now).level;
     return { state: this.state, running: this.state === "PLAYING", connected: this.connected, selectedDeviceId: this.selected,
       canStart: this.state === "READY_PAUSED" && this.connected && !!this.selected && this.visible && this.authorized && !!this.levels.length && !this.errorLatch && !this.uncertain.size,
-      output: this.output,outputLevels:this.outputLevels?{...this.outputLevels}:null, outputKnown: this.output !== null, target: this.desired(), ceiling: this.ceiling, strength: this.strengthTenths / 10,
+      output: this.output,outputLevels:this.outputLevels?{...this.outputLevels}:null, outputKnown: this.output !== null, target, ceiling: this.ceiling, strength: this.strengthTenths / 10,
+      levelAdjustment: this.levelAdjustment, levelDown: target > 0 && this.intent(-20, now).level < target,
+      levelUp: target < this.ceiling && this.intent(20, now).level > target,
       position: this.position, generation: this.generation, staleReplies: this.staleReplies, uncertainTargets: [...this.uncertain],
       feel: this.feel.snapshot(),
       pending: [...this.requests.values()].filter(value => !value.rawSettled).map(value => ({ ...value.frame })), reason: this.reason };
   }
-  intent() {
+  intent(levelAdjustment = this.levelAdjustment, now = this.now()) {
     const context={base:this.levels[this.position] ?? 0,strength:this.strengthTenths / 10,
-      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],now:this.now()};
+      ceiling:this.ceiling,manualZero:this.manualZeros.has(this.position),scene:this.sceneProfiles[this.position],levelAdjustment,now};
     const levels=this.feel.vector?.(context);
     return levels?{level:Math.max(0,...Object.values(levels)),levels,ceilings:this.feel.ceilings(this.ceiling)}:{level:this.feel.desired(context)};
   }
@@ -214,7 +219,7 @@ export class AsyncPlaybackController {
     }
     catch (error) { void this.pause("Invalid mapping. Playback is paused."); throw error; }
     void this.pause("Story changed. Confirm a new Start.");
-    this.levels = checked; this.sceneProfiles = sceneProfiles; this.manualZeros.clear(); this.position = 0; this.strengthTenths = 10; return this.notify();
+    this.levels = checked; this.sceneProfiles = sceneProfiles; this.manualZeros.clear(); this.position = 0; this.strengthTenths = 10; this.levelAdjustment = 0; return this.notify();
   }
   changed() {
     ++this.revision; this.startIntent = null;
@@ -225,18 +230,26 @@ export class AsyncPlaybackController {
   }
   setPosition(index) {
     if (!Number.isInteger(index) || index < 0 || index >= this.levels.length) { void this.pause("Invalid position."); throw new RangeError("Choose an existing section."); }
+    if (index !== this.position) this.levelAdjustment = 0;
     this.position = index; return this.changed();
   }
   setLevel(index, value, {manual = true} = {}) {
     try { level(value); if (!Number.isInteger(index) || index < 0 || index >= this.levels.length) throw new RangeError("Choose an existing section."); }
     catch (error) { void this.pause("Invalid section level."); throw error; }
     this.levels[index] = value;
+    if (index === this.position) this.levelAdjustment = 0;
     if(manual && value === 0)this.manualZeros.add(index);else this.manualZeros.delete(index);
     return this.changed();
   }
   setStrength(value) {
     if (!Number.isFinite(value) || value < 0 || value > 2 || Math.abs(Math.round(value * 10) - value * 10) > 1e-9) { void this.pause("Invalid session strength."); throw new RangeError("Use strength 0–2 in steps of 0.1."); }
     this.strengthTenths = Math.round(value * 10); return this.changed();
+  }
+  adjustLevel(direction) {
+    if (!this.levels.length) return this.snapshot();
+    const now = this.now();
+    this.levelAdjustment = stepSectionLevel(this.levelAdjustment, direction, offset => this.intent(offset, now).level);
+    return this.changed();
   }
   setCeiling(value) {
     try { level(value); if (value > this.ceiling) throw new RangeError("A higher ceiling needs confirmation."); }
