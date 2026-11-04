@@ -18,20 +18,21 @@ import {FolderStore, selectFolderStories} from "../../app/static/reader/folders.
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "../../app/static/reader/web-import.mjs";
 import {PRACTICE_STORIES} from "../../app/static/reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "../../app/static/reader/account-workspace.mjs";
+import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel} from "../../app/static/reader/calibration.mjs";
 import {nocturneCandidates, nocturneAvailable, requestNocturne} from "../../app/static/reader/nocturne.mjs";
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
-export function workspace({hosted = false, locks = true} = {}) {
+export function workspace({hosted = false, locks = true, publicAuth = false, authRequest} = {}) {
   let time = 1000000, timerId = 0, context, narrow = false, document;
   const timers = new Map(), nodes = new Map(), errors = [], documentListeners = new Map(), windowListeners = new Map();
   const preferenceValues = new Map(), downloads = [];
   const setTimer = (callback, delay) => { timers.set(++timerId, {callback, at: time + delay}); return timerId; };
   const clearTimer = id => timers.delete(id);
   const now = () => time;
-  let accessRequest = () => Promise.resolve(Response.json({authenticated: true, expiresAt: time + 3600000}));
+  let accessRequest = () => Promise.resolve(Response.json(publicAuth ? {authenticated: false, expiresAt: null} : {authenticated: true, expiresAt: time + 3600000}));
   let accessCalls = 0, lockHeld = false, lockGate = null;
   const classList = () => {
     const values = new Set(); return {add: value => values.add(value), remove: value => values.delete(value), contains: value => values.has(value)};
@@ -92,6 +93,7 @@ export function workspace({hosted = false, locks = true} = {}) {
     createDocumentFragment: () => new Element("fragment"),
     querySelector(selector) {
       if (selector === 'meta[name="satinlore-hosted-access"]') return hosted ? {content: "true"} : null;
+      if (selector === 'meta[name="satinlore-public-auth"]') return publicAuth ? {content: "true"} : null;
       if (selector === "dialog[open]") return [...nodes.values()].find(node => node.tagName === "DIALOG" && node.open) || null;
       if (selector === ".workspace-header") return nodes.get("workspace-header");
       return null;
@@ -144,6 +146,7 @@ export function workspace({hosted = false, locks = true} = {}) {
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
     WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORIES,
     ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, sceneStagePatternLabel,
+    mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,

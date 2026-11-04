@@ -16,6 +16,7 @@ function fixture(t) {
     sql: { exec(query, ...bindings) { const statement = db.prepare(query); if (statement.columns().length) { const rows = statement.all(...bindings); return { toArray: () => rows }; } statement.run(...bindings); return { toArray: () => [] }; } },
     transactionSync(callback) { db.exec("BEGIN"); try { const value = callback(); db.exec("COMMIT"); return value; } catch (error) { db.exec("ROLLBACK"); throw error; } },
     async setAlarm(time) { alarm = time; },
+    async deleteAlarm() { alarm = null; },
     async deleteAll() { db.exec("DROP TABLE IF EXISTS feedback; DROP TABLE IF EXISTS rate_windows"); alarm = null; },
   };
   return { service: new PrivateFeedback({ storage }, {}), db, alarm: () => alarm };
@@ -33,6 +34,28 @@ test("feedback accepts only deliberate fields and bounded text, never client ide
   assert.throws(() => normalizeFeedback(sample({ category: "story" })));
   assert.throws(() => normalizeFeedback(sample({ rating: 6 })));
   assert.throws(() => normalizeFeedback(sample({ idempotencyKey: "private-token" })));
+});
+
+test("the founder inbox expires notes and quota after a Durable Object restart", async t => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const f = fixture(t);
+  const path = "/internal/inbox/feedback";
+  const owner = { "X-Feedback-Owner": "c".repeat(64) };
+  assert.equal((await f.service.fetch(request(path, sample(), owner))).status, 201);
+  assert.equal((await f.service.fetch(request(path, sample({ idempotencyKey: crypto.randomUUID() }), owner))).status, 201);
+  const deleted = await f.service.fetch(request("/internal/inbox/delete", { confirm: true }, owner));
+  assert.equal(deleted.status, 200);
+  assert.equal((await f.service.fetch(request(path, sample({ idempotencyKey: crypto.randomUUID() }), owner))).status, 429);
+  now += 60000;
+  const saved = await f.service.fetch(request(path, sample(), owner));
+  assert.equal(saved.status, 201);
+  assert.ok(f.alarm() > now);
+  now += FEEDBACK_RETENTION_MS;
+  const restarted = new PrivateFeedback({ storage: f.service.storage }, {});
+  await restarted.alarm();
+  assert.deepEqual((await (await restarted.fetch(request("/internal/inbox/review"))).json()).feedback, []);
+  assert.equal(f.alarm(), null);
 });
 test("feedback writes durably, retries safely after a lost acknowledgement, and rejects changed-payload replay", async t => {
   const f = fixture(t);

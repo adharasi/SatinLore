@@ -1,2 +1,20 @@
 .account-welcome{max-width:44rem;margin:1.5rem auto 2rem;padding:clamp(1.1rem,3vw,2rem);background:var(--panel-bg,#fffaf3);border:1px solid var(--border,#d7c8c4);border-radius:12px}.account-welcome[hidden]{display:none}.account-intro h2{font-family:Georgia,serif;font-size:clamp(1.55rem,3vw,2.2rem);margin:.25em 0}.account-intro>p{max-width:65ch}.account-intro button{margin:.5rem .5rem .5rem 0}.account-intro .check-label{margin:1rem 0}.preset-section select,.preset-section input:not([type=checkbox]){width:100%;min-width:0;margin:.5rem 0}.preset-section button{min-height:44px;margin:.3rem .4rem .3rem 0}.preset-section details{margin-top:.7rem}.feel-actions{display:flex;flex-wrap:wrap;gap:.4rem}.feel-actions button{flex:1;min-height:44px}.feel-adjustments label{display:block;margin-top:.8rem}.feel-adjustments input[type=range]{width:100%;min-height:34px}.feel-adjustments output{float:right;font-variant-numeric:tabular-nums}.feel-status{font-size:.85rem;color:var(--text-muted,#776b71)}.feel-primary-label{display:flex;align-items:center;gap:.6rem}.feel-primary-label select{min-width:0;flex:1}.account-data-controls{display:flex;flex-wrap:wrap;gap:.5rem}.account-data-controls details{flex-basis:100%}@media(max-width:650px){.account-welcome{margin:1rem 0;padding:1rem}.feel-actions button{flex-basis:40%}}
 #beta-recording-mount:not(:empty){position:sticky;top:calc(var(--header-height,72px) + .25rem);z-index:35}.setup-dialog>.beta-recording{position:sticky;top:0;z-index:3}.feel-adjustments>input[type=range]{width:100%;min-height:34px}
+.header-actions .public-account-button{display:inline-flex;width:auto;gap:6px;align-items:center;white-space:nowrap}
+.header-actions .public-account-button[hidden]{display:none}
+.public-account-dialog{width:min(450px,calc(100vw - 24px))}
+.public-account-dialog form>input{display:block;width:100%;margin:.4rem 0 1rem}
+.public-account-dialog .dialog-actions{margin:.8rem 0}
+.public-account-dialog .dialog-actions[hidden]{display:none}
+.public-account-dialog .public-account-age{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0}
+.public-account-dialog .public-account-age input{margin:0}
+.public-account-links{display:flex;gap:.5rem;flex-wrap:wrap}
+#public-account-status:empty{display:none}
+@media(max-width:699px){.header-actions .public-account-button{width:44px}.public-account-button span{display:none}}
+@media(max-width:420px){
+  .workspace-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;column-gap:6px}
+  .header-story{max-width:none}
+  .header-actions{grid-column:1/-1;justify-content:space-between}
+  .header-actions .public-account-button{width:auto}
+  .header-feedback-link span,.public-account-button span{display:inline}
+}

@@ -9,12 +9,13 @@ export class ProfileSimulator {
     this.connected = false; this.strength = 0; this.activeChannels = {}; this.deadline = 0;
     this.failure = null;
     this.setModel(options.model || "lush");
-    this.setChannel(options.channel || "vibrate");
+    if (options.channel) this.setChannel(options.channel);
   }
   get profile() { return getToyProfile(this.model); }
   setModel(model) {
-    if (!getToyProfile(model)) throw new Error("Choose a supported toy model.");
-    this.disconnect(); this.model = model; this.channel = "vibrate";
+    const profile = getToyProfile(model);
+    if (!profile) throw new Error("Choose a supported toy model.");
+    this.disconnect(); this.model = model; this.channel = profile.simChannels[0];
   }
   setChannel(channel) {
     if (!this.profile?.simChannels.includes(channel)) throw new Error("Choose an available movement.");

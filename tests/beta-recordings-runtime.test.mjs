@@ -13,6 +13,7 @@ test("beta recordings run in actual SQLite Durable Object storage with ownership
         return env.BETA_RECORDINGS.get(env.BETA_RECORDINGS.idFromName("beta-recordings-v1")).fetch(new Request("https://beta-recordings.internal"+url.pathname+url.search,{method:request.method,headers,...(request.method==="POST"?{body:request.body}:{})}));
       }};` },
     { type: "ESModule", path: root + "deploy/cloudflare/beta-recordings.mjs", contents: await readFile(new URL("../deploy/cloudflare/beta-recordings.mjs", import.meta.url), "utf8") },
+    { type: "ESModule", path: root + "app/static/devices/toy-profiles.mjs", contents: await readFile(new URL("../app/static/devices/toy-profiles.mjs", import.meta.url), "utf8") },
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0, durableObjects: { BETA_RECORDINGS: { className: "BetaRecordings", useSQLite: true } } });
   t.after(() => mf.dispose());
   const post = (body, extra = {}) => mf.dispatchFetch("https://beta.satinlore.com/api/beta/recordings", { method: "POST", headers: { "Content-Type": "application/json", ...extra }, body: JSON.stringify(body) });

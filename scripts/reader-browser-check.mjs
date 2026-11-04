@@ -4,6 +4,7 @@ import {mkdir, readFile} from "node:fs/promises";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {MOVEMENT_READINGS} from "../tests/scene-evaluation-fixtures.mjs";
+import {SETUP_MODELS} from "../app/static/reader/setup-flow.mjs";
 
 const evidence = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../artifacts/frontend");
 const libraryKey = "satinlore.library.v1";
@@ -150,6 +151,7 @@ const toyRehearsals = [
   {id: "dolce", label: "Dolce", channels: ["vibrate"]},
   {id: "hush", label: "Hush", channels: ["vibrate"]},
   {id: "osci3", label: "Osci 3", channels: ["vibrate", "oscillate"], testChannel: "oscillate"},
+  {id: "solacepro", label: "Solace Pro", channels: ["thrusting"], testChannel: "thrusting"},
 ];
 
 async function selectRehearsalDevice(page, profile) {
@@ -197,7 +199,7 @@ async function prepareToyRehearsal(page, profile) {
   await page.locator("#open-setup").click();
   await page.locator("#setup-dialog").waitFor({state: "visible"});
   assert.deepEqual(await page.locator("#setup-model option").evaluateAll(options => options.map(option => [option.value, option.textContent])),
-    toyRehearsals.map(profile => [profile.id, profile.label]), "All nine requested models are reachable in the real setup dialog.");
+    SETUP_MODELS.map(profile => [profile.id, profile.pickerLabel]), "The compatibility catalogue is reachable in the real setup dialog.");
   await page.locator("#setup-model").selectOption(profile.id);
   await page.locator("#setup-mode-simulator").click();
   await page.locator("#setup-primary").click();
@@ -396,7 +398,7 @@ async function toyConnectionChecks(page) {
   await page.route("**/api/lovense/status", unavailable);
   try {
     // Lush's full practice is covered immediately before this function. Repeat
-    // the actual select/test/practice journey for every other requested model.
+    // the actual select/test/practice journey for the core model fixtures and a thrust-only profile.
     for (const profile of toyRehearsals.slice(1)) {
       await prepareToyRehearsal(page, profile);
       await page.locator("#setup-primary").click();
@@ -1223,5 +1225,5 @@ export async function checkReader(page, context, origin) {
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   assert.deepEqual(requests, []);
   page.off("request", monitor);
-  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, all nine model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap, grounded pulse, named channel stops and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
+  console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, full toy catalogue and ten model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap, grounded pulse, named channel stops and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");
 }

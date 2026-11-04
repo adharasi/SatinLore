@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>SatinLore · Feedback inbox</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <script src="/static/appearance.js"></script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="stylesheet" href="/static/feedback.css">
+  <script type="module" src="/feedback-admin/review.mjs"></script>
+</head>
+<body class="feedback-page">
+  <a href="#inbox" class="skip-link">Skip to feedback inbox</a>
+  <header class="feedback-header feedback-shell">
+    <a class="feedback-brand" href="/">SatinLore<span>.</span></a>
+    <nav aria-label="Founder navigation"><a href="/admin">Beta review</a><a href="/">Reader</a></nav>
+  </header>
+  <main id="inbox" class="feedback-shell">
+    <div class="feedback-intro">
+      <div><p class="eyebrow">FOUNDER ONLY</p><h1>Feedback inbox</h1></div>
+      <p>Review reports and ideas from the reader. Status changes appear in the sender’s recent notes. Notes expire after 30 days.</p>
+    </div>
+    <section class="feedback-card feedback-history" aria-labelledby="feedback-inbox-heading">
+      <div class="feedback-history-heading"><h2 id="feedback-inbox-heading">Recent notes</h2><button id="inbox-refresh" type="button">Refresh</button></div>
+      <div class="feedback-fields inbox-filters">
+        <label for="inbox-search">Search notes<input type="search" id="inbox-search" placeholder="Find a word or phrase" autocomplete="off"></label>
+        <label for="inbox-category">Category<select id="inbox-category"><option value="">All categories</option><option value="bug">Issue</option><option value="reading">Reading experience</option><option value="idea">Idea</option><option value="other">Other</option></select></label>
+        <label for="inbox-status">Status<select id="inbox-status"><option value="">All statuses</option><option value="new">New</option><option value="reviewing">In review</option><option value="resolved">Closed</option></select></label>
+      </div>
+      <p class="feedback-status" id="inbox-result" role="status">Loading feedback…</p>
+      <div id="inbox-notes"></div>
+    </section>
+  </main>
+</body>
+</html>

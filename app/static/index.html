@@ -22,10 +22,12 @@
       <span class="wordmark">SatinLore<span class="wordmark-dot">.</span></span>
     </div>
     <div class="header-story"><span id="header-story-title">A little space for your next story</span><div id="story-tabs" class="story-tabs" role="tablist" aria-label="Open stories"></div></div>
+    <a class="header-feedback-link" href="/support" target="_blank" rel="noopener" aria-label="Send feedback (opens in a new tab)" title="Send feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4zM8 9h8m-8 3h6"/></svg><span>Feedback</span></a>
     <div class="header-actions">
       <button id="choose-toy" type="button" class="quiet-control device-setup-shortcut" aria-label="Set up a toy" title="Choose a toy or rehearse with a simulator"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8V4m6 4V4M7 8h10v4a5 5 0 0 1-4 4.9V21h-2v-4.1A5 5 0 0 1 7 12z"/></svg><span>Toy setup</span></button>
       <button id="toggle-dark-mode" type="button" class="quiet-control theme-toggle" role="switch" aria-checked="false" aria-label="Dark mode" title="Dark mode"><span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span><span class="theme-toggle-label">Dark</span></button>
       <button id="focus-mode" class="quiet-control" aria-pressed="false" title="Hide side panels and keep reading controls">Focus</button>
+      <button id="public-account" type="button" class="quiet-control header-icon public-account-button" aria-label="Sign in" aria-haspopup="dialog" aria-controls="public-account-dialog" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20v-1a7 7 0 0 1 14 0v1"/></svg><span id="public-account-label">Sign in</span></button>
       <button id="toggle-settings" class="quiet-control header-icon" aria-label="Reading controls" aria-controls="settings-panel" aria-expanded="false" title="Reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3M9 4v6m4 4v6"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg></button>
       <button id="open-app-settings" class="quiet-control header-icon" aria-label="Settings" aria-haspopup="dialog" aria-controls="app-settings-dialog" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.3 3-.6 2.4-2 .9-2.1-.7-2 3.4 1.7 1.7v2.6L2.6 15l2 3.4 2.1-.7 2 .9.6 2.4h4.1l.6-2.4 2-.9 2.1.7 2-3.4-1.7-1.7v-2.6l1.7-1.7-2-3.4-2.1.7-2-.9-.6-2.4z"/><circle cx="11.4" cy="12" r="3"/></svg></button>
     </div>
@@ -85,11 +87,13 @@
         <section class="sidebar-section" aria-labelledby="scene-model-heading">
           <h3 id="scene-model-heading">Story model</h3>
           <label class="visually-hidden" for="scene-model">Story model</label>
-          <select id="scene-model" aria-describedby="scene-model-help"><option value="loom">Loom · On-device</option><option value="nocturne">Nocturne · Advanced beta</option></select>
+          <select id="scene-model" aria-describedby="scene-model-help"><option value="loom">Loom · On-device</option><option value="nocturne">Nocturne · Advanced</option></select>
           <p id="scene-model-help" class="note">Loom follows the story on this device. Nocturne adds rolling waves and sustained crests that follow the scene’s pacing in the simulator.</p>
+          <button id="model-practice-shortcut" type="button" class="setup-button" hidden>Open a model practice story <span aria-hidden="true">→</span></button>
           <div id="nocturne-panel" hidden>
             <p class="note">Running Nocturne sends up to 16 sets of scene labels and section numbers to OpenAI. The story’s words, title and toy settings stay on this device.</p>
             <button id="nocturne-run" type="button" class="setup-button" disabled>Send cues and analyse</button>
+            <button id="nocturne-sign-in" type="button" class="setup-button" hidden>Sign in to use Nocturne</button>
             <p id="nocturne-status" class="note" role="status"></p>
           </div>
         </section>
@@ -197,11 +201,27 @@
     <section class="app-settings-section"><h3>Account &amp; storage</h3><p>Your email sign-in protects your private account. Toy presets can be saved to your account; story text stays on this browser.</p><div id="account-settings-mount" class="account-data-controls"></div><button id="open-account-welcome" class="quiet-control">Open account setup</button></section>
     <div class="library-footer">
       <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit under Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
-      <details class="about-preview"><summary>About SatinLore</summary><p class="note">Try nine toy simulators or connect through Lovense Remote. Physical connections are a limited beta and still need model-by-model testing.</p><a href="/device-check" target="_blank" rel="noopener">Local device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
-      <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Support <span aria-hidden="true">↗</span></a></nav>
+      <details class="about-preview"><summary>About SatinLore</summary><p class="note">Try a toy simulator or connect through Lovense Remote. Available movements depend on the model and your connection.</p><a href="/device-check" target="_blank" rel="noopener">Local device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
+      <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Send feedback <span aria-hidden="true">↗</span></a></nav>
       <button id="delete-all" class="quiet-button" disabled>Delete all stories</button>
     </div>
     <div class="dialog-actions"><button id="app-settings-close" type="button" class="primary">Close</button></div>
+  </dialog>
+  <dialog id="public-account-dialog" class="story-dialog public-account-dialog" aria-labelledby="public-account-heading">
+    <div class="dialog-heading"><h2 id="public-account-heading">Sign in to SatinLore</h2><button id="public-account-close" type="button" class="icon-button" aria-label="Close account">×</button></div>
+    <p id="public-account-intro" class="note">We’ll email you a six-digit code. Use the same steps to create an account or sign back in.</p>
+    <form id="public-email-form">
+      <label for="public-email">Email address</label><input id="public-email" name="email" type="email" autocomplete="email" maxlength="254" required>
+      <label class="public-account-age"><input id="public-adult" type="checkbox" required> I am 18 or older.</label>
+      <div class="dialog-actions"><button id="public-send-code" type="submit" class="primary">Email me a code</button></div>
+    </form>
+    <form id="public-code-form" hidden>
+      <label for="public-code">Six-digit code</label><input id="public-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      <div class="dialog-actions"><button id="public-verify-code" type="submit" class="primary">Sign in</button></div>
+      <div class="public-account-links"><button id="public-change-email" type="button" class="quiet-control">Change email</button><button id="public-resend-code" type="button" class="quiet-control">Send a new code</button></div>
+    </form>
+    <div id="public-account-session" class="dialog-actions" hidden><button id="public-sign-out" type="button" class="quiet-control">Sign out</button></div>
+    <p id="public-account-status" class="note" role="status" aria-live="polite"></p>
   </dialog>
   <dialog id="practice-story-dialog" class="story-dialog" aria-labelledby="practice-story-heading">
     <div class="dialog-heading"><h2 id="practice-story-heading">Practice stories</h2><button id="practice-story-close" class="icon-button" aria-label="Close practice stories">×</button></div>

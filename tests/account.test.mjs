@@ -33,6 +33,8 @@ test("preset validation permits independent movements and zero recovery, but no 
   assert.equal(normalizePreset(preset()).channels.fingering.preferred, 2);
   assert.equal(normalizePreset(preset({ scope: "story", storyId: STORY })).storyId, STORY);
   assert.equal(normalizePreset(preset({ toy: "osci3", channels: { oscillate: channel() } })).toy, "osci3");
+  assert.equal(normalizePreset(preset({ toy: "solacepro", channels: { thrusting: channel() } })).toy, "solacepro");
+  assert.throws(() => normalizePreset(preset({ toy: "solacepro", channels: { vibrate: channel() } })), /movements exposed/);
   for (const change of [
     { email: "someone@example.test" }, { storyText: "Private fixture" }, { storyTitle: "Private title" }, { deviceId: "private-device" },
     { enabled: true }, { playback: "running" }, { toy: "unknown" }, { scope: "story", storyId: "a story title" },

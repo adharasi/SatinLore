@@ -9,6 +9,7 @@ export class ReaderAccountClient {
   }
   snapshot(){return {...this.value,presets:[...this.value.presets],busy:this.busy};}
   emit(){this.onChange(this.snapshot());}
+  clear(){++this.generation;this.busy=false;this.value={state:'local',registered:false,revision:0,presets:[],message:''};this.emit();}
   async call(path,body){
     if(!this.hosted)throw Error('Account presets are available in the signed-in app. Local stories still work here.');
     const response=await this.request(path,{method:body===undefined?'GET':'POST',credentials:'same-origin',cache:'no-store',redirect:'error',
@@ -38,7 +39,7 @@ export class ReaderAccountClient {
 }
 
 function el(document,tag,text,className){const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n;}
-export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetMount,getContext,onRegistered=()=>{},onApply=()=>{},onStop=()=>{},onResearchEvent=()=>{},document=globalThis.document}={}){
+export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetMount,getContext,onRegistered=()=>{},onApply=()=>{},onStop=()=>{},onResearchEvent=()=>{},publicMode=false,onSignIn=()=>{},onDeleted=()=>{},document=globalThis.document}={}){
   let lastRegistered=false,signature='',applying=false,selected='',note='';
   const button=(label,fn,className='')=>{const n=el(document,'button',label,className);n.type='button';n.addEventListener('click',()=>void fn());return n;};
   const status=el(document,'p','','note');status.setAttribute('role','status');
@@ -50,11 +51,12 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
   const settingsStatus=el(document,'p','','note');settingsStatus.setAttribute('role','status');
   const deleteChoice=el(document,'input');deleteChoice.type='checkbox';deleteChoice.id='confirm-account-delete';
   const deleteLabel=el(document,'label','','check-label');deleteLabel.append(deleteChoice,document.createTextNode('Remove my saved toy presets and app profile.'));
-  const deleteButton=button('Delete account data',async()=>{if(!deleteChoice.checked){note='Confirm the account data you want to remove.';render();return;}onStop();await client.delete();deleteChoice.checked=false;});
+  const deleteButton=button('Delete account data',async()=>{if(!deleteChoice.checked){note='Confirm the account data you want to remove.';render();return;}onStop();if(await client.delete())onDeleted();deleteChoice.checked=false;});
   const exportButton=button('Download my presets',()=>{onStop();const blob=new Blob([JSON.stringify({version:1,presets:client.snapshot().presets},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=el(document,'a');a.href=url;a.download='SatinLore-private-presets.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
   const signout=el(document,'a','Sign out');signout.href='/cdn-cgi/access/logout';signout.addEventListener('click',()=>onStop());
-  const deletion=el(document,'details');deletion.append(el(document,'summary','Account data'),el(document,'p','This removes app presets and profile data. It does not remove your email sign-in, local stories or separately consented beta recordings.','note'),deleteLabel,deleteButton);
-  settingsMount?.append(settingsStatus,retry.cloneNode?button('Refresh account',()=>client.load()):retry,exportButton,deletion,signout);
+  const deletion=el(document,'details');deletion.append(el(document,'summary','Account data'),el(document,'p',publicMode?'This removes your saved presets and profile and signs you out on all devices. Stories saved in this browser stay here.':'This removes app presets and profile data. It does not remove your email sign-in, local stories or separately consented beta recordings.','note'),deleteLabel,deleteButton);
+  const refresh=retry.cloneNode?button('Refresh account',()=>client.load()):retry;
+  settingsMount?.append(settingsStatus,refresh,exportButton,deletion,...(publicMode?[]:[signout]));
   const picker=el(document,'select');picker.id='account-preset-picker';picker.setAttribute('aria-label','Saved toy preset');
   picker.addEventListener('change',()=>{selected=picker.value;render();});
   const name=el(document,'input');name.id='account-preset-name';name.maxLength=64;name.placeholder='Name this preset';name.autocomplete='off';name.setAttribute('aria-label','Preset name');
@@ -76,13 +78,22 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
   const remove=button('Remove selected preset',async()=>{if(selected){const preset=client.snapshot().presets.find(p=>p.id===selected);onStop();if(await client.remove(selected))onResearchEvent({type:'preset',event:'delete',scope:preset?.scope||'account'});selected='';render();}});
   const presetStatus=el(document,'p','','note');presetStatus.setAttribute('role','status');
   const saveDetails=el(document,'details');saveDetails.append(el(document,'summary','Save these settings'),name,scope,save,el(document,'p','Presets contain toy settings. A story preset uses a private story identifier; its text is not uploaded. Applying always leaves playback paused.','note'));
-  presetMount?.append(el(document,'h3','Your presets'),picker,apply,remove,saveDetails,presetStatus);
+  const signIn=button('Sign in to save presets',onSignIn);
+  presetMount?.append(el(document,'h3','Your presets'),picker,apply,remove,saveDetails,presetStatus,...(publicMode?[signIn]:[]));
   function render(){
     const state=client.snapshot(),context=getContext();
-    if(welcomeMount)welcomeMount.hidden=!client.hosted||state.registered;
+    if(welcomeMount)welcomeMount.hidden=publicMode||!client.hosted||state.registered;
     create.disabled=state.busy;retry.disabled=state.busy;
     status.textContent=note||state.message||(state.state==='loading'?'Checking your account…':'Your email has already been verified by private sign-in.');
-    settingsStatus.textContent=state.registered?'Private account ready. Toy presets sync across the app and beta. Stories are saved separately on this browser.':client.hosted?'Create your account from the welcome panel to save presets.':'Account presets are available in the signed-in hosted app.';
+    settingsStatus.textContent=publicMode?(state.registered?'Toy presets are saved to your account. Stories stay on this browser.':'Sign in with your email to save toy presets.'):
+      state.registered?'Private account ready. Toy presets sync across the app and beta. Stories are saved separately on this browser.':client.hosted?'Create your account from the welcome panel to save presets.':'Account presets are available in the signed-in hosted app.';
+    if(publicMode){
+      const guest=state.state==='local';
+      if(guest&&lastRegistered){selected='';name.value='';scope.value='account';deleteChoice.checked=false;}
+      refresh.hidden=exportButton.hidden=deletion.hidden=guest;
+      picker.hidden=apply.hidden=remove.hidden=saveDetails.hidden=guest;
+      signIn.hidden=!guest;
+    }
     exportButton.disabled=!state.registered||state.busy;deleteButton.disabled=!state.registered||state.busy;
     const available=state.presets.filter(p=>p.toy===context.model&&(p.scope==='account'||p.storyId===context.storyId));
     const next=JSON.stringify(available.map(p=>[p.id,p.name,p.scope]));
@@ -90,7 +101,7 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
     const blocked=!state.registered||state.busy||applying||state.state!=='ready';
     save.disabled=blocked||!context.channels||!Object.keys(context.channels).length;apply.disabled=blocked||!selected;remove.disabled=blocked||!selected;picker.disabled=blocked;
     scope.querySelector('option[value="story"]').disabled=!context.storyId;
-    presetStatus.textContent=note||state.message||(state.registered?`${available.length} presets for this toy${context.storyId?' and story':''}.`:'Sign in and create your account to save presets.');
+    presetStatus.textContent=note||state.message||(state.registered?`${available.length} presets for this toy${context.storyId?' and story':''}.`:publicMode?'':'Sign in and create your account to save presets.');
     if(state.registered&&!lastRegistered)adult.checked=false;
     lastRegistered=state.registered;
   }

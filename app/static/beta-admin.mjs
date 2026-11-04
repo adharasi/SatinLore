@@ -1,10 +1,11 @@
+import {getToyProfile, TOY_PROFILES} from "./devices/toy-profiles.mjs";
 import { READING_FEEDBACK_LABELS } from "./reader/reading-feedback.mjs";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CHANNELS = ["vibrate", "fingering", "rotate", "thrusting", "oscillate"];
-const LABELS = { vibrate: "Vibration", fingering: "Flexing", rotate: "Rotation", thrusting: "Thrusting", oscillate: "Oscillation", lush: "Lush", flexer: "Flexer", nora: "Nora", domi: "Domi", velvo: "Velvo", spinel: "Spinel", dolce: "Dolce", hush: "Hush", osci3: "Osci 3", none: "Toy not selected", account: "Account", choose: "Choose your toy", connect: "Connection", features: "Explore the features", calibration: "Find your settings", playground: "Explore controls", practice: "Guided reading", story: "Story reading", complete: "Session complete", presets: "Saved presets", minimum: "Minimum", background: "Background", preferred: "Preferred level", maximum: "Maximum", recovery: "Ease off level", gain: "Story strength", rhythm: "Rhythm", continuity: "Continuity", strength: "Strength", "section-level": "Section level", action: "Movement", mode: "Mode", start: "Start", pause: "Pause", stop: "Stop", hold: "Hold", easeoff: "Ease off", follow: "Follow story", test: "Short test", comfort: "Comfort", intensity: "Intensity", sync: "Story timing", overall: "Overall", pleasure: "Pleasure" };
+const LABELS = { vibrate: "Vibration", fingering: "Flexing", rotate: "Rotation", thrusting: "Thrusting", oscillate: "Oscillation", none: "Toy not selected", account: "Account", choose: "Choose your toy", connect: "Connection", features: "Explore the features", calibration: "Find your settings", playground: "Explore controls", practice: "Guided reading", story: "Story reading", complete: "Session complete", presets: "Saved presets", minimum: "Minimum", background: "Background", preferred: "Preferred level", maximum: "Maximum", recovery: "Ease off level", gain: "Story strength", rhythm: "Rhythm", continuity: "Continuity", strength: "Strength", "section-level": "Section level", action: "Movement", mode: "Mode", start: "Start", pause: "Pause", stop: "Stop", hold: "Hold", easeoff: "Ease off", follow: "Follow story", test: "Short test", comfort: "Comfort", intensity: "Intensity", sync: "Story timing", overall: "Overall", pleasure: "Pleasure" };
 const COLORS = { vibrate: "#934e79", fingering: "#3a8490", rotate: "#a56b35", thrusting: "#6561a8", oscillate: "#487a54" };
-const label = value => LABELS[value] || String(value).replaceAll("-", " ");
+const label = value => getToyProfile(value)?.label || LABELS[value] || String(value).replaceAll("-", " ");
 function ratingText(event) {
   const context = [event.channel ? label(event.channel) : null, event.field ? label(event.field) : null].filter(Boolean).join(" · ");
   const intensity = event.question === "intensity" ? ({ 1: "Too light", 3: "Good", 5: "Too much" })[event.value] : null;
@@ -150,6 +151,12 @@ export function initializeBetaAdmin() {
   $("review-play").addEventListener("click", () => { if (!current || !duration()) return; if (playing) pause(); else { if (at >= duration()) at = 0; playing = true; lastFrame = 0; document.body.dataset.playing = "true"; $("review-play").textContent = "Pause"; frame = requestAnimationFrame(tick); } });
   $("review-speed").addEventListener("change", () => { speed = Number($("review-speed").value); });
   $("review-position").addEventListener("input", () => { pause(); at = Number($("review-position").value); render(); });
+  const toyFilter = $("review-toy");
+  for (const profile of [...TOY_PROFILES].sort((first, second) => first.pickerLabel.localeCompare(second.pickerLabel, "en"))) {
+    const option = element("option", profile.pickerLabel);
+    option.value = profile.id;
+    toyFilter.append(option);
+  }
   $("review-refresh").addEventListener("click", () => void load()); $("review-more").addEventListener("click", () => void load(true)); for (const id of ["review-mode", "review-toy"]) $(id).addEventListener("change", () => void load());
   $("review-export").addEventListener("click", () => { if (!current) return; const blob = new Blob([JSON.stringify(current, null, 2)], { type: "application/json" }), url = URL.createObjectURL(blob), link = element("a"); link.href = url; link.download = `satinlore-beta-${current.session.sid}.json`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); });
   const closeDelete = () => { if (!busy) { $("review-delete-dialog").close(); deleteSid = null; } };

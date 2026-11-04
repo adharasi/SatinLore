@@ -1,30 +1,63 @@
-// Public, bounded profiles; never a substitute for discovering a real toy.
-// Reviewed 2 November 2026 against the official Standard JS SDK, Standard API
-// and native toy-command matrix. In particular, JS does not document separate
-// Dolce motors or heating. Extra Velvo/Spinel motions require a runtime report.
-// Osci 3 oscillation requires our documented Standard Socket Function route;
-// a Basic SDK capability string alone cannot enable an undocumented argument.
+// Product names and movements are bounded by the vendor compatibility audit
+// in docs/lovense-compatibility.md. A runtime report may narrow any profile.
 const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation"});
-const profile = (id, label, shape, physicalChannels, reportedChannels = [], physicalNotes = "", simulationOnlyChannels = []) => Object.freeze({
-  id, model: id, label, shape,
-  physicalChannels: Object.freeze(physicalChannels),
-  reportedChannels: Object.freeze(reportedChannels),
-  simulationOnlyChannels: Object.freeze(simulationOnlyChannels),
-  simChannels: Object.freeze([...physicalChannels, ...reportedChannels, ...simulationOnlyChannels]),
-  channels: Object.freeze([...physicalChannels, ...reportedChannels, ...simulationOnlyChannels].map(id => Object.freeze({id, label: labels[id]}))),
-  physicalNotes,
-});
+function profile(id, label, shape, {
+  physicalChannels = ["vibrate"], socketChannels = [], reportedChannels = [], physicalNotes = "", pickerLabel = label,
+} = {}) {
+  const simChannels = [...physicalChannels, ...socketChannels, ...reportedChannels];
+  return Object.freeze({
+    id, model: id, label, shape, physicalNotes, pickerLabel,
+    physicalChannels: Object.freeze(physicalChannels),
+    socketChannels: Object.freeze(socketChannels),
+    reportedChannels: Object.freeze(reportedChannels),
+    simChannels: Object.freeze(simChannels),
+    channels: Object.freeze(simChannels.map(id => Object.freeze({id, label: labels[id]}))),
+  });
+}
 
 export const TOY_PROFILES = Object.freeze([
-  profile("lush", "Lush", "egg", ["vibrate"]),
-  profile("flexer", "Flexer", "dual", ["vibrate", "fingering"]),
-  profile("nora", "Nora", "rabbit", ["vibrate", "rotate"]),
-  profile("domi", "Domi", "wand", ["vibrate"]),
-  profile("velvo", "Velvo", "rabbit", ["vibrate"], ["rotate"], "Rotation is offered only when your connection reports it. Rolling beads have no separate control here."),
-  profile("spinel", "Spinel", "shaft", ["vibrate"], ["thrusting"], "Thrusting is offered only when your connection reports it. Heating is not controlled by SatinLore."),
-  profile("dolce", "Dolce", "dual", ["vibrate"], [], "This connection uses general vibration, without separate controls for the two motors."),
-  profile("hush", "Hush", "plug", ["vibrate"]),
-  profile("osci3", "Osci 3", "rabbit", ["vibrate"], [], "The extended Standard Socket connection offers vibration and oscillation. The Basic SDK fallback offers vibration only. Heating and separate vibration motors are unavailable here.", ["oscillate"]),
+  profile("lush", "Lush", "egg", {pickerLabel: "Lush 1–4"}),
+  profile("flexer", "Flexer", "dual", {physicalChannels: ["vibrate", "fingering"]}),
+  profile("nora", "Nora", "rabbit", {physicalChannels: ["vibrate", "rotate"], pickerLabel: "Nora / Nora 2"}),
+  profile("domi", "Domi", "wand", {pickerLabel: "Domi / Domi 2"}),
+  profile("velvo", "Velvo", "rabbit", {reportedChannels: ["rotate"],
+    physicalNotes: "Rotation is available when the extended Lovense connection lists it."}),
+  profile("spinel", "Spinel", "shaft", {reportedChannels: ["thrusting"],
+    physicalNotes: "Thrusting is available when the extended Lovense connection lists it."}),
+  profile("dolce", "Dolce", "dual", {physicalNotes: "Vibration runs together across both motors."}),
+  profile("hush", "Hush", "plug", {pickerLabel: "Hush / Hush 2"}),
+  profile("osci3", "Osci 3", "rabbit", {socketChannels: ["oscillate"],
+    physicalNotes: "The extended Lovense connection can also control oscillation."}),
+  profile("ambi", "Ambi", "egg"),
+  profile("calor", "Calor", "shaft"),
+  profile("diamo", "Diamo", "plug"),
+  profile("edge", "Edge", "dual", {pickerLabel: "Edge / Edge 2"}),
+  profile("exomoon", "Exomoon", "shaft"),
+  profile("ferri", "Ferri", "egg"),
+  profile("gemini", "Gemini", "dual"),
+  profile("glint", "Glint", "plug"),
+  profile("gravity", "Gravity", "shaft", {physicalChannels: ["vibrate", "thrusting"]}),
+  profile("gush", "Gush", "plug"),
+  profile("gush2", "Gush 2", "plug", {pickerLabel: "Gush 2 / Gush 2 Motion", reportedChannels: ["oscillate"],
+    physicalNotes: "Oscillation is available when the extended Lovense connection lists it."}),
+  profile("hyphy", "Hyphy", "wand"),
+  profile("lapis", "Lapis", "dual"),
+  profile("lushanal", "Lush Anal", "plug"),
+  profile("lushmini", "Lush Mini", "egg"),
+  profile("max", "Max", "shaft", {pickerLabel: "Max / Max 2", physicalNotes: "SatinLore controls vibration on this model."}),
+  profile("minixmachine", "Lovense Mini Sex Machine", "shaft", {physicalChannels: [], reportedChannels: ["thrusting"],
+    physicalNotes: "The extended Lovense connection must list thrusting before you can use it live."}),
+  profile("mission", "Mission", "shaft", {pickerLabel: "Mission / Mission 2"}),
+  profile("osci", "Osci / Osci 2", "rabbit"),
+  profile("ridge", "Ridge", "shaft", {reportedChannels: ["rotate"],
+    physicalNotes: "Rotation is available when the extended Lovense connection lists it."}),
+  profile("solace", "Solace", "shaft", {physicalChannels: [], reportedChannels: ["thrusting"],
+    physicalNotes: "The extended Lovense connection must list thrusting before you can use it live."}),
+  profile("solacepro", "Solace Pro", "shaft", {physicalChannels: [], reportedChannels: ["thrusting"],
+    physicalNotes: "The extended Lovense connection must list thrusting before you can use it live."}),
+  profile("vulse", "Vulse", "egg", {reportedChannels: ["thrusting"],
+    physicalNotes: "Thrusting is available when the extended Lovense connection lists it."}),
+  profile("xmachine", "Lovense Sex Machine", "shaft", {physicalChannels: ["thrusting"]}),
 ]);
 
 export const getToyProfile = id => TOY_PROFILES.find(item => item.id === id) || null;
@@ -33,12 +66,35 @@ export const channelLabel = id => labels[id] || "Unavailable";
 const validId = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const functionNames = Object.freeze({v: "vibrate", vibrate: "vibrate", r: "rotate", rotate: "rotate", f: "fingering", fingering: "fingering", t: "thrusting", thrusting: "thrusting", o:"oscillate",oscillate:"oscillate"});
 
-function modelId(value, hardwareVersion) {
+const variants = Object.freeze({
+  lush: ["Lush 1", "Lush 2", "Lush 3", "Lush 4"],
+  domi: ["Domi 1", "Domi 2"],
+  nora: ["Nora 1", "Nora 2"],
+  hush: ["Hush 1", "Hush 2"],
+  edge: ["Edge 1", "Edge 2"],
+  max: ["Max 1", "Max 2"],
+  mission: ["Mission 1", "Mission 2"],
+  osci: ["Osci 1", "Osci 2"],
+  osci3: ["Osci 3"],
+  gush: ["Gush 1"],
+  gush2: ["Gush 2", "Gush 2 Motion"],
+  xmachine: ["Sex Machine", "Lovense Sex Machine"],
+  minixmachine: ["Mini Sex Machine", "Lovense Mini Sex Machine"],
+});
+const modelKey = name => name.toLowerCase().replace(/[ _-]/g, "");
+const models = new Map(TOY_PROFILES.map(item => [item.id, {model: item.id, label: item.label}]));
+for (const [model, names] of Object.entries(variants)) {
+  for (const label of names) models.set(modelKey(label), {model, label});
+}
+
+function modelIdentity(value, hardwareVersion) {
   if (typeof value !== "string" || value.length > 64) return null;
-  const text = value.toLowerCase().replace(/[ _-]/g, "");
-  if (text === "osci3" || text === "osci" && String(hardwareVersion) === "3") return "osci3";
-  // Never promote Osci/Osci 2 or an unknown future model to the Osci 3 profile.
-  return TOY_PROFILES.find(item => item.id !== "osci3" && new RegExp(`^${item.id}(?:[1-9][0-9]?)?$`).test(text))?.id || null;
+  const key = modelKey(value), identity = models.get(key);
+  if (!identity) return null;
+  const version = typeof hardwareVersion === "string" || typeof hardwareVersion === "number" ? String(hardwareVersion) : "";
+  // Only a known generation of a base model may use the hardware version.
+  if (key === identity.model && /^[2-4]$/.test(version)) return models.get(key + version) || identity;
+  return identity;
 }
 
 function report(toy) {
@@ -53,17 +109,15 @@ function report(toy) {
 export function normaliseToy(toy, {transport = "basic-sdk"} = {}) {
   if (!toy || typeof toy !== "object" || Array.isArray(toy) || !validId(toy.id) || toy.connected !== true) return null;
   // toyType is authoritative when supplied; do not promote an arbitrary nickname.
-  const model = modelId(toy.toyType === undefined ? toy.name : toy.toyType, toy.hVersion);
-  const current = getToyProfile(model);
-  if (!current) return null;
+  const identity = modelIdentity(toy.toyType === undefined ? toy.name : toy.toyType, toy.hVersion);
+  if (!identity) return null;
+  const {model, label} = identity, current = getToyProfile(model);
   const reported = report(toy);
   const extended = transport === "standard-socket-v1";
-  const documented = [...current.physicalChannels,...(extended && model === "osci3" ? ["oscillate"] : [])];
+  const documented = [...current.physicalChannels, ...(extended ? current.socketChannels : [])];
   const capabilities = reported === null ? documented :
-    [...documented, ...current.reportedChannels].filter(channel => reported.has(channel));
+    [...documented, ...(extended ? current.reportedChannels : [])].filter(channel => reported.has(channel));
   if (!capabilities.length) return null;
-  const version = /^([1-9][0-9]?)$/.exec(String(toy.hVersion || ""))?.[1];
-  const label = `${current.label}${version && model !== "osci3" ? ` ${version}` : ""}`;
   return {id: toy.id, label, model, capabilities,
     ...(extended ? {controlTransport:"standard-socket-v1",supportsCombined:true} : {}),
     capabilitySource: reported === null ? "documented-model" : "reported",

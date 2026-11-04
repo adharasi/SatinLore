@@ -13,7 +13,7 @@ export function feedbackDraft(value) {
   return { category: value.category, message, rating };
 }
 function records(data) {
-  if (!Array.isArray(data?.feedback) || data.feedback.length > 100 || data.feedback.some(row => !row || !UUID.test(row.id) || !CATEGORIES.includes(row.category) || typeof row.message !== "string" || row.message.length > 2000 || !Number.isSafeInteger(row.createdAt) || !Number.isSafeInteger(row.expiresAt) || !(row.rating === null || Number.isInteger(row.rating) && row.rating >= 1 && row.rating <= 5))) throw Error(UNKNOWN);
+  if (!Array.isArray(data?.feedback) || data.feedback.length > 200 || data.feedback.some(row => !row || !UUID.test(row.id) || !CATEGORIES.includes(row.category) || typeof row.message !== "string" || row.message.length > 2000 || !Number.isSafeInteger(row.createdAt) || !Number.isSafeInteger(row.expiresAt) || !(row.rating === null || Number.isInteger(row.rating) && row.rating >= 1 && row.rating <= 5))) throw Error(UNKNOWN);
   return data.feedback;
 }
 export class FeedbackClient {
@@ -103,17 +103,19 @@ export function initializeFeedbackPage() {
       $("feedback-access").hidden = false; $("feedback-access").replaceChildren(document.createTextNode("Please check your sign-in to use feedback tools. "));
       const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Check sign-in again";
       retry.addEventListener("click", () => void reload());
-      const login = document.createElement("a"); login.href = "/support"; login.textContent = "Reload to sign in";
+      const login = document.createElement("a"); login.href = "/?sign-in=feedback"; login.textContent = "Go to the reader to sign in";
       $("feedback-access").append(retry, login); update();
     },
   });
   function showNotes(notes) {
     const labels = { bug: "Something did not work", idea: "An idea", reading: "The reading experience", other: "Something else" };
+    const reviewLabels = { new: "Received", reviewing: "In review", resolved: "Closed" };
     const fragment = document.createDocumentFragment();
     for (const note of notes) {
       const article = document.createElement("article"), heading = document.createElement("h3"), meta = document.createElement("p"), message = document.createElement("p");
       heading.textContent = labels[note.category]; meta.className = "feedback-note-meta";
-      meta.textContent = new Date(note.createdAt).toLocaleString() + (note.rating === null ? "" : ` · Rating ${note.rating} / 5`) + ` · Kept until ${new Date(note.expiresAt).toLocaleDateString()}`;
+      const review = reviewLabels[note.status];
+      meta.textContent = [review, new Date(note.createdAt).toLocaleString(), note.rating === null ? "" : `Rating ${note.rating} / 5`, `Kept until ${new Date(note.expiresAt).toLocaleDateString()}`].filter(Boolean).join(" · ");
       message.textContent = note.message; article.append(heading, meta, message); fragment.append(article);
     }
     $("feedback-list").replaceChildren(fragment);
@@ -129,7 +131,7 @@ export function initializeFeedbackPage() {
     } catch (error) {
       if (epoch !== listEpoch) return;
       serviceReady = false;
-      status("feedback-history-status", error.message + " Feedback tools need the private hosted app.", true);
+      status("feedback-history-status", error.message, true);
     } finally { update(); }
   }
   $("feedback-form").addEventListener("submit", async event => {
@@ -138,7 +140,7 @@ export function initializeFeedbackPage() {
     busy = true; update(); status("feedback-send-status", "Sending your note…");
     try {
       await client.submit({ category: $("feedback-category").value, rating: rating ? Number(rating) : null, message: $("feedback-message").value });
-      $("feedback-form").reset(); status("feedback-send-status", "Your feedback is saved. Thank you for helping shape SatinLore.");
+      $("feedback-form").reset(); status("feedback-send-status", "Your feedback is saved. Thank you. You can check its review status below.");
       await reload();
     } catch (error) { status("feedback-send-status", error.message + " Your draft is still here. Retry the same note to check it safely.", true); }
     finally { busy = false; update(); }

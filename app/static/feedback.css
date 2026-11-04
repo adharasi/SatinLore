@@ -35,6 +35,11 @@
 .feedback-history article h3 { font: 1.3em var(--serif); margin: 0 0 10px; }
 .feedback-history article p { white-space: pre-wrap; font-size: .9em; }
 .feedback-history article .feedback-note-meta { color: var(--secondary); font-size: .76em; line-height: 1.8; }
+.feedback-history article p { overflow-wrap: anywhere; }
+.inbox-filters { grid-template-columns: minmax(0,2fr) repeat(2,minmax(0,1fr)); }
+.inbox-filters input { display: block; width: 100%; min-height: 48px; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--secondary); border-radius: 8px; background: var(--surface); font-size: 1em; }
+.inbox-note-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 14px 0 18px; }
+.inbox-note-actions label { min-width: min(200px,100%); }
 .feedback-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 24px; border-top: 1px solid var(--separator); padding-block: 26px 36px; font-size: .78em; color: var(--secondary); }
 .feedback-delete-check { display: flex; gap: 12px; align-items: start; margin-top: 26px; }
 .feedback-delete-check input { margin-top: 3px; }
