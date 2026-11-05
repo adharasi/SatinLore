@@ -638,7 +638,7 @@ function display(state = latest) {
     analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Finding scene changes…");
   renderStoryModel(story);
   renderNocturnePeakSettings(story);
-  if (story?.nocturneContextSession?.enabled && state.running && !document.hidden && !nocturneOperation &&
+  if (story?.nocturneContextSession?.enabled && state.running && !state.readingSeeking && !document.hidden && !nocturneOperation &&
       story.nocturneContextSession.requests < 6 && contextNeedsReview(story, state.position)) {
     queueMicrotask(() => void runNocturneContext({automatic: true}));
   }
@@ -764,7 +764,7 @@ async function runNocturneContext({automatic = false} = {}) {
     session ??= story.nocturneContextSession = {enabled: false, requests: 0, reviewed: new Set(), cache: new Map()};
     session.enabled = true;
   }
-  if (!session?.enabled || session.requests >= 6 || automatic && (!latest.running || !contextNeedsReview(story, latest.position))) return;
+  if (!session?.enabled || session.requests >= 6 || automatic && (!latest.running || latest.readingSeeking || !contextNeedsReview(story, latest.position))) return;
   const candidates = nocturneContextCandidates(story.model.paragraphs, latest.position);
   // Retain reviewed neighbours as semantic context. The coverage watermark
   // prevents one new paragraph triggering another request on each tick.

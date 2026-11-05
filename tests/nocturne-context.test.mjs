@@ -131,6 +131,9 @@ test("context visit budget counts failed attempts and never schedules while paus
   assert.equal(count, 1);
   app.read("latest = {...latest,position:10}; display()"); await waitForContext(app);
   assert.equal(count, 1);
+  app.read("latest = {...latest,running:true,readingSeeking:true,position:10}; display()"); await waitForContext(app);
+  assert.equal(count, 1, "Fast seeks do not spend a request before reading settles.");
+  app.read("latest = {...latest,readingSeeking:false}");
   for (const position of [10, 20, 30, 40, 50, 59]) {
     app.read(`latest = {...latest,running:true,position:${position}}; display()`); await waitForContext(app);
   }
