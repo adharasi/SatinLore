@@ -8,7 +8,8 @@ const shapes = ["unspecified", "accented", "sustained", "alternating"];
 const endpoint = "/api/scene-analysis";
 export const NOCTURNE_CONTEXT_SESSION_REQUESTS = 12;
 export const NOCTURNE_CONTEXT_SESSION_BYTES = 60_000;
-const PREFETCH_BYTES = 600;
+// Give the next window more lead time during fast, continuous reading.
+const PREFETCH_BYTES = 1_500;
 const OVERLAP_BYTES = 480;
 const encoder = new TextEncoder();
 const byteLength = value => encoder.encode(value).length;
@@ -72,7 +73,7 @@ export function nocturneContextCandidates(paragraphs, position = 0, {attempted =
   if (start.id >= 0) {
     const end = Math.min(paragraphs.length, start.id + MAX_CONTEXT_PARAGRAPHS);
     for (let id = start.id; id < end; id++) {
-      if (attempted.has(id)) break;
+      if (attempted.has(id)) continue;
       const entry = contextEntry(paragraphs, id);
       if (!entry) { excluded++; continue; }
       if (!canFitEntry(entry, MAX_CONTEXT_BYTES)) { limited++; continue; }

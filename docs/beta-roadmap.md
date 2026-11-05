@@ -135,6 +135,8 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 ## F5 — measurable scoring evaluation
 
+The narrative-scope follow-up removes two previously observed false cues in the 40-work diagnostic and makes one existing cue distinguishable from background on a 10-work historical set. Local recall remains below the gate. The hosted simulator and one consented contextual request passed on the merged build. [Narrative evaluation and remaining gates](release-acceptance.md#narrative-scope-follow-up)
+
 The controlled-release milestone has a dedicated set of acceptance gates for story coverage, independent annotations, classification, output and reader use. [Release acceptance](release-acceptance.md)
 
 Keep the local rules as the baseline and retain suggestions **0, 1, 2, 3 and 5 out of 20**. Visual labels never authorise stronger output. Prepare a versioned, rights-cleared evaluation set and rubric, split by story/source, with held-out material and independent labels on a subset. A proposed pilot is 200–500 paragraphs; that size is a starting hypothesis, not coverage evidence.

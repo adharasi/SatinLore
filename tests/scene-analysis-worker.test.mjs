@@ -230,6 +230,8 @@ test("context v2 accepts a full dialogue window under source and output limits",
   assert.equal(provider.store, false);
   assert.equal(provider.max_output_tokens, 4096);
   assert.equal(provider.text.format.strict, true);
+  assert.match(provider.instructions, /Track the narrative frame within each contiguous block/);
+  assert.match(provider.instructions, /Reserve intimacy and explicit for actions enacted/);
   assert.deepEqual(JSON.parse(provider.input), { paragraphs });
   const fields = provider.text.format.schema.properties.labels.items.properties;
   assert.ok(fields.label.enum.includes("romance.build"));

@@ -510,9 +510,9 @@ function updateCurrentCorrection(story) {
     endedMovements ? null : "Default movement";
   const stage = {build: "Building", sustain: "Sustaining", peak: "Peak", recover: "Easing off"}[profile?.phase ?? paragraph?.phase];
   const annotation = story?.sceneModel === "nocturne" && paragraph ? story.model.contextualAnnotation(latest.position) : null;
-  const labelOnly = ["imagined", "reported", "historical"].includes(annotation?.eventKind);
+  const backgroundOnly = annotation?.phase === "quiet" || ["imagined", "reported", "historical"].includes(annotation?.eventKind);
   text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
-    annotation ? [`Nocturne context · ${annotation.category}`, annotation.eventKind, ...(labelOnly ? ["Playback follows Loom"] :
+    annotation ? [`Nocturne context · ${annotation.category}`, annotation.eventKind, ...(backgroundOnly ? ["Background setting"] :
       [stage, rhythm, movements, endedMovements])].filter(Boolean).join(" · ") :
     paragraph.sceneId && rhythm ?
       [`Scene ${paragraph.sceneId}`, stage, rhythm, movements, endedMovements, paragraph.advisory].filter(Boolean).join(" · ") :
@@ -840,17 +840,19 @@ async function runNocturne() {
   const story = currentStory();
   if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" || nocturneOperation) return;
   if (nocturneReady !== true) { await checkNocturne(); return; }
-  pause("Nocturne analysis pauses playback. Confirm Start after review.");
-  clearNocturneContext(story);
-  story.model.nocturneLabels.clear();
-  syncReaderMapping(story);
   const {cues, excluded, limited} = nocturneCandidates(story.model.paragraphs);
   const kept = [excluded ? `${excluded} ${excluded === 1 ? "section stayed" : "sections stayed"} with Loom because of content or context.` : "",
     limited ? `${limited} additional ${limited === 1 ? "section used" : "sections used"} Loom.` : ""].filter(Boolean).join(" ");
   if (!cues.length) {
-    story.nocturneMessage = `This story has no eligible Nocturne cues. Your patterns still follow Loom’s scene cues. ${kept}`.trim();
+    story.nocturneMessage = story.nocturneContextSession?.enabled ?
+      "Loom found no timing cues to refine. Nearby context review is still active." :
+      "Loom found no timing cues to refine. Enable nearby context review if you want Nocturne to look for scenes in the text.";
     display(); return;
   }
+  pause("Nocturne analysis pauses playback. Confirm Start after review.");
+  clearNocturneContext(story);
+  story.model.nocturneLabels.clear();
+  syncReaderMapping(story);
   const operation = {story, abort: new AbortController(), generation: story.model.analysisGeneration};
   nocturneOperation = operation; display();
   try {

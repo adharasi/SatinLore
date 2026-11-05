@@ -79,3 +79,19 @@ The private *Nightswimming* regression uses the same 7,326 words and 307 paragra
 The frozen author-separated release holdout, successful authenticated provider replay, hosted spend, physical qualification and reader pilot remain open. Some established Loom cues can still equal the continuous background. The simulator contrast check only applies to validated current annotations and vetted local cues in this candidate.
 
 Record the build SHA, dataset and rubric versions, settings, cohort counts, thresholds, actual results and pass/fail/not-run status in the release review. Approve the controlled release only after all applicable gates pass and the advertised scope matches the tested scope.
+
+## Narrative scope follow-up
+
+The guarded v6.7 candidate preserves Loom's existing cue classes and blocks clear figurative and modal contact cues. A local retrospective marker can suppress fresh relationship cues for up to two subsequent paragraphs. A scene break or explicit return ends that scope. Independently grounded existing cues can register above the default simulator background within the reader's calibration. The renderer still follows explicit corrections, movement stops and hard quiet. [Contextual review and fallback](nocturne-context-phase.md)
+
+| Evidence | Merged v6.3 | Expanded v6.6 trial | Guarded v6.7 candidate |
+| --- | ---: | ---: | ---: |
+| Eligible cues detected on the 10-work evaluation | 2/72 | 2/72 | 2/72 |
+| False cues on the 10-work evaluation | 0 | 1 | 0 |
+| Simulator contrast on the 10-work evaluation | 0/34 | 1/34 | 1/34 |
+| Eligible cues detected on the prior 40-work diagnostic | 5/498 | 8/498 | 5/498 |
+| False cues on the prior 40-work diagnostic | 2 | 0 | 0 |
+
+The 10-work set has 460 privately labelled anchors from 10 previously unseen authors. Its reference labels were frozen before opening the v6.6 comparison. The narrower v6.7 rerun is diagnostic. None of the Loom results meet the release recall gate. With valid fixed labels supplied directly to the v6.6 simulator, 30/34 eligible episodes registered above background. That replay isolates the renderer from provider accuracy and timing. No reference quiet boundary, hard-quiet, ceiling or Stop violation appeared in the v6.7 simulator diagnostic.
+
+On the hosted `71c3d1f47344` build, the Lush simulator reached 5/20 on the bundled practice peak and returned to zero at Stop. One contextual request on an original six-paragraph rehearsal reviewed four eligible sections and reported 746 tokens. It marked the recalled dialogue as reported, suggested two current romance cues where Loom scored zero, and produced 2/20 on the simulator. Stop returned to zero. The hosted check covered one example on the merged build. Provider generalisation, the candidate's hosted behavior and physical hardware remain open.

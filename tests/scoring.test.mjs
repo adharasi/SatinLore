@@ -461,3 +461,45 @@ test("weak, uncertain and non-present signals cannot recover an affectionate cue
   const [sensitive] = groupScenes(sceneRows("A fifteen-year-old took his hand. She was falling for him."));
   assert.deepEqual([sensitive.level, sensitive.quiet, sensitive.cloudExcluded, sensitive.currentCue], [0, true, true, undefined]);
 });
+
+test("figurative and modal contact cannot start an automatic cue", () => {
+  const figurative = "She sent him tender words and kisses across the distance.";
+  const modal = "She would draw him closer in her trembling embrace, and her lips in soft kisses brushed his cheek.";
+  const enacted = "She would send a message. Then she kissed him gently.";
+  for (const text of [figurative, "He blew her a tender kiss from the platform.", modal, modal.replace("closer in", "closer\nin")]) {
+    assert.equal(scoreParagraph(text).level, 0);
+    assert.equal(groupScenes(sceneRows(text))[0].level, 0);
+  }
+  assert.equal(groupScenes(sceneRows(enacted))[0].level, 1);
+});
+
+test("a recalled scene blocks fresh relational cues until an explicit return or scene break", () => {
+  const entry = "She could still remember that evening.";
+  const detail = "The lanterns were glowing beside the gate.";
+  const contact = "Mara was attracted to him, and held his gaze.";
+  for (const reset of ["Back in the present, she unfolded the note.", "***"]) {
+    const result = groupScenes(sceneRows(entry, detail, contact, reset, contact));
+    assert.deepEqual(result.map(p => p.level), [0, 0, 0, 0, 1]);
+    assert.equal(result[2].currentCue, undefined);
+    assert.equal(result[4].currentCue, true);
+  }
+  const result = groupScenes(sceneRows("She remembered to lock the door.", detail, contact));
+  assert.equal(result[2].level, 1);
+});
+
+test("grounded existing contact is marked for contrast without changing its level or movements", () => {
+  const contact = "They kissed gently.";
+  const [described] = groupScenes(sceneRows(contact));
+  assert.deepEqual([described.level, described.currentCue, described.movements], [1, true, []]);
+  const [vague] = groupScenes(sceneRows("A tender kiss."));
+  assert.deepEqual([vague.level, vague.currentCue, vague.movements], [1, undefined, []]);
+  const [_, continuing] = groupScenes(sceneRows(`${contact} The device flexed.`, "He kissed her again tenderly."));
+  assert.deepEqual([continuing.level, continuing.currentCue, continuing.movements], [1, true, ["fingering"]]);
+});
+
+test("a typographic single-quoted refusal takes priority over contact", () => {
+  const text = "‘No.’ She kissed him gently.";
+  assert.equal(groupScenes(sceneRows(text))[0].level, 0);
+  const reply = "‘No, certainly not sad.’ They kissed gently.";
+  assert.equal(groupScenes(sceneRows(reply))[0].level, 1);
+});

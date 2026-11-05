@@ -7,6 +7,10 @@ const CONTACT_CUES = [
   /\bembrac(?:e|es|ed|ing)\b/,
   /\bcaress(?:es|ed|ing)?\b/,
 ];
+const FIGURATIVE_CONTACT = /\b(?:blew|blows?|sent|sends?) (?:me|you|him|her|them) (?:(?:a|some) )?(?:[\p{L}]+ )?(?:words and )?kiss(?:es)?\b/gu;
+const CONTACT_BODY_SUBJECT = /^\s*(?:my|his|her|their|our|your) (?:lips|mouth|arms?|hands?)\b/u;
+const MODAL_CONTACT = /\b(?:would|could)\b/u;
+const WRAPPED_COMPLEMENT = /^\s*(?:in|with|against|on|upon)\b/u;
 // Narrated contact often has no adjective and never names a device. Keep this
 // distinct from the cues that identify a particular toy movement.
 const ENACTED_CONTACT = [
@@ -46,7 +50,7 @@ const REPORTED_SPEECH = /\b(?:(?:said|says|whisper(?:s|ed)|ask(?:s|ed)|told|tell
 const UNREALISED = /\b(?:expect(?:s|ed|ing)?|intend(?:s|ed|ing)?|consider(?:s|ed|ing)?|planned|planning|(?:was|were) going to|about to|almost|nearly|seem(?:s|ed)? to)\b/u;
 const LINKED_CLAUSE = new Set(["and", "and then", "then", "as", "while", "after", "before", "followed by"]);
 const CLAUSE_BREAK = /([.!?;\n]+|\b(?:and then|then|followed by|afterwards?|after|before|instead of|rather than|but|yet|whereas|although)\b|(?:,|\b(?:and|as|while)\b)(?=\s+(?:she|he|they|we|i|you|it|the|a|an|his|her|their|my|our|your)\b))/u;
-const EXPLICIT_STOP = /(?:^|[.!?;“"\n]\s*)(?:no|stop)(?:[,.!?;”"\n]|$)|(?:^|[.!?;\n]\s*)(?:he|she|they|we) (?:stopped|refused|(?:pulled|backed) away(?: from (?:her|him|them|each other))?)(?=[.!?;\n]|$)|\b(?:asked|told)\b[^.!?;]{0,36}\bto stop\b|\b(?:said|whispered|shouted)\s*,?\s*["“'](?:no|stop)\b/u;
+const EXPLICIT_STOP = /(?:^|[.!?;“"\n]\s*)(?:no|stop)(?:[,.!?;”"\n]|$)|(?:^|[.!?;\n]\s*)(?:he|she|they|we) (?:stopped|refused|(?:pulled|backed) away(?: from (?:her|him|them|each other))?)(?=[.!?;\n]|$)|\b(?:asked|told)\b[^.!?;]{0,36}\bto stop\b|\b(?:said|whispered|shouted)\s*,?\s*["“'](?:no|stop)\b|(?:^|[^\p{L}\p{N}])['‘](?:no|stop)[,.!?;]*'(?![\p{L}\p{N}])/u;
 const normalized = text => text.toLowerCase().replace(/’/g, "'").replace(/[^\S\n]+/gu, " ").trim();
 const QUOTED_TEXT = /“[^”]*”|"[^"]*"|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\n]*(?:'[\p{L}\p{N}][^'\n]*)*'(?![\p{L}\p{N}])/gu;
 const QUOTE_GAP = "\u2063";
@@ -80,7 +84,7 @@ function clauseEvidence(value) {
   let uncertain = false, nonPresentMotion = false, cloudExcluded = false, directBand = 0;
   let speculative = false, reported = false, detached = false, ordinal = -2;
   for (let index = 0; index < parts.length; index += 2) {
-    const clause = parts[index];
+    const clause = parts[index].replace(FIGURATIVE_CONTACT, "");
     const before = parts[index - 1];
     if (clause.trim()) ordinal += 2;
     detached = DETACHED_PAST.test(clause) || detached && before === ",";
@@ -99,8 +103,14 @@ function clauseEvidence(value) {
     const unrealised = UNREALISED.exec(clause);
     const unrealisedAction = unrealised && [...contactMatches, MOTION_MATCH].map(cue => clause.search(cue))
       .filter(position => position >= 0).reduce((first, position) => Math.min(first, position), Infinity);
+    // A linked body description can elaborate the previous unrealised
+    // contact without introducing a new actor or a current action.
+    const prior = parts[index - 2] ?? "";
+    const priorClause = parts[index - 3] === "\n" && WRAPPED_COMPLEMENT.test(prior) ? `${parts[index - 4]} ${prior}` : prior;
+    const modalContinuation = (before === "and" || before === ",") && CONTACT_BODY_SUBJECT.test(clause) &&
+      MODAL_CONTACT.test(priorClause) && hasContactCue(priorClause);
     const speculativeOrReported = speculative || reported || META_CONTEXT.test(clause) || NON_ACTUAL.test(clause) ||
-      !!unrealised && Number.isFinite(unrealisedAction) && unrealised.index < unrealisedAction;
+      modalContinuation || !!unrealised && Number.isFinite(unrealisedAction) && unrealised.index < unrealisedAction;
     if (speculativeOrReported || UNCERTAIN_CONTEXT.test(clause) || direct && before === "before") {
       const motion = hasMotionCue(clause);
       nonPresentMotion ||= speculativeOrReported && motion;
@@ -186,6 +196,12 @@ const COMPLIMENT_ATTRIBUTION = /^\u2063\s*(?:(i|he|she|they) (?:said|murmured|re
 const RELATIONAL_FRAME = /\b(?:sister|brother|mother|father|grandmother|grandfather|aunt|uncle|son|daughter|baby|grandchild|siblings|parents?|puppy|kitten|rehears(?:e|ed|al|ing)|recit(?:e|ed|es|ing)|quot(?:e|ed|es|ing)|script|lyrics|overheard|pictured|envisioned|used to|back when|back then|years ago|last (?:summer|winter|spring|autumn|fall|year)|(?:in|from) (?:a|the) (?:film|movie|play|script))\b/u;
 const RELATIONAL_REPORT = /\b(?:(?:said|says|(?:whisper|murmur)(?:ed|s)) (?:i|you|he|she|they|we)|(?:told|tells) (?:me|you|him|her|them|us))\b/u;
 const RELATIONAL_SCOPE = new Set(["after", "before", "instead of", "rather than", "but", "yet", "whereas", "although"]);
+const PAST_PERFECT_CONTACT = /\bhad (?:(?:just|already|often|once|ever|never|[\p{L}]+ly) ){0,2}(?:kissed|embraced|returned)\b/u;
+const RELATIONAL_LOOKBACK = /\b(?:remember(?:ed|ing)|recall(?:ed|ing)|recollect(?:ed|ing)|memor(?:y|ies) of|in those days|(?:mind|thoughts?) (?:went back|returned) to)\b/u;
+const RELATIONAL_WITHDRAWAL = /\b(?:hands?|arms?) (?:slipped|withdrew) (?:out of|from) (?:mine|his|hers|ours|yours|theirs)\b/u;
+const RETROSPECTIVE_ENTRY = /\b(?:on looking back|in those days|back then|(?:mind|thoughts?) (?:went back|returned) to|could (?:still )?remember (?:[\p{L}]+ing|(?:that|the) (?:day|night|evening|morning|summer|winter|moment)))\b/u;
+const RETROSPECTIVE_RETURN = /\b(?:back in the present|back to the present|the memory faded)\b/u;
+const GROUNDED_CONTACT = /\b(?:(?:we|they) (?:kiss(?:ed)?|embrace(?:d)?)|(?:kiss(?:ed|es)|embrac(?:ed|es)|caress(?:ed|es)) (?:me|you|him|her|them|each other)|(?:is|are|was|were) (?:[\p{L}]+ly )?(?:kissing|embracing|caressing) (?:me|you|him|her|them|each other|(?:the|my|his|her|your|their) (?:[\p{L}]+ )?(?:lips|mouth|shoulder)))\b/u;
 const RELEASE = /\b(?:slowed|softened|eased|relaxed|settled|(?:their|our) breathing (?:evened out|grew quieter))\b/u;
 const CONTACT_RELEASE = /\b(?:(?:they|we) (?:eased|drifted|drew|moved) apart|(?:the|their|our) (?:kiss|embrace) (?:softened|eased))\b/u;
 const PEAK = /\b(?:intensifi(?:ed|es)|crescendo|overwhelming|surge(?:d|s)?|reached (?:a|its|their) peak)\b/u;
@@ -377,7 +393,8 @@ function sceneCandidate(paragraph, incomingDevice) {
   const value = normalized(paragraph.text);
   const narrated = narration(paragraph.text);
   const evidence = clauseEvidence(narrated);
-  const rest = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim()) || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
+  const separator = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim());
+  const rest = separator || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
   const stopped = EXPLICIT_STOP.test(value);
   const sensitive = SENSITIVE_CUE.test(value) || SENSITIVE_AGE.test(value);
   const motion = sceneMovements(evidence.actual, incomingDevice && !/^["'“‘]/u.test(value));
@@ -404,12 +421,21 @@ function sceneCandidate(paragraph, incomingDevice) {
   const repositionsHold = !quiet && !cloudExcluded && paragraph.override == null && REPOSITIONED_CONTACT.test(actual);
   const relationship = band === 0 && !quiet && !cloudExcluded && paragraph.override == null ?
     relationshipEvidence(value, narrated, evidence.actual, quotes, short) : null;
+  const startsRetrospective = RETROSPECTIVE_ENTRY.test(narrated);
+  const groundedContact = band > 0 && !cloudExcluded && paragraph.override == null && !startsRetrospective &&
+    !RELATIONAL_FRAME.test(narrated) && !RELATIONAL_LOOKBACK.test(narrated) && !RELATIONAL_WITHDRAWAL.test(narrated) &&
+    evidence.active.some(clause => !clause.includes(QUOTE_GAP) && !CONTACT_REPORT.test(clause) &&
+      !INNOCENT_KISS.test(clause) && !PAST_PERFECT_CONTACT.test(clause) &&
+      (enactedContact(clause) || GROUNDED_CONTACT.test(clause)));
   const advisory = sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
     uncertain ? "The wording is ambiguous or speculative. This suggestion stays at zero." : null;
   return {
     anchor: band > 0 && paragraph.override !== 0,
     evidenceBand: band,
     relationship,
+    startsRetrospective,
+    resetsRetrospective: separator || RETROSPECTIVE_RETURN.test(narrated),
+    groundedContact,
     connective: band === 0 && !quiet && short && paragraph.override == null && !hasContactCue(value),
     contextualContact: band === 0 && !quiet && short && paragraph.override == null &&
       DIRECT_CONTACT.test(narrated.replace(/[.!?]$/u, "")),
@@ -450,9 +476,19 @@ function applyBeat(result, {phase, band, rhythm, reason, movements}) {
 export function groupScenes(paragraphs) {
   if (!Array.isArray(paragraphs)) throw new TypeError("Use an array of analysed paragraphs.");
   const candidates = [];
-  for (const paragraph of paragraphs) {
+  let recalledThrough = -1;
+  for (const [index, paragraph] of paragraphs.entries()) {
     const previous = candidates.at(-1);
-    candidates.push(sceneCandidate(paragraph, previous?.anchor && previous.deviceReference));
+    const candidate = sceneCandidate(paragraph, previous?.anchor && previous.deviceReference);
+    if (candidate.resetsRetrospective) recalledThrough = -1;
+    else if (candidate.startsRetrospective) recalledThrough = index + 2;
+    // Only veto fresh local promotions and provenance. Existing explicit
+    // movement, quiet and manually chosen values keep their own rules.
+    if (index <= recalledThrough) {
+      candidate.relationship = null;
+      candidate.groundedContact = false;
+    }
+    candidates.push(candidate);
   }
   for (const [index, candidate] of candidates.entries()) {
     const signal = candidate.relationship;
@@ -487,6 +523,7 @@ export function groupScenes(paragraphs) {
         recovery || band >= 2 && candidate.slow ? "gentle" : "steady";
       const movements = !result.currentCue && !result.movements.length && candidate.continuesContact && activeScene !== null ? previous?.movements : undefined;
       applyBeat(result, {phase, band, rhythm, reason: result.reason, movements});
+      if (candidate.groundedContact) result.currentCue = true;
       if (peak) result.advisory = "Review this stronger local suggestion if needed.";
       heldContact = !recovery && (candidate.holdsContact || heldContact && candidate.continuesContact);
       lastAnchor = index;

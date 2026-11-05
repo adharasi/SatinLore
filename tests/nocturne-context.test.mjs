@@ -115,8 +115,12 @@ test("actual context UI needs explicit consent, remains paused, reuses coverage 
   assert.equal(app.read("currentStory().model.effectiveLevels({nocturne:true})[0]"), 1);
   assert.equal(app.read("currentStory().model.effectiveLevels()[0]"), 0);
   app.read("controller.setPosition(1)");
-  assert.match(app.nodes.get("level-source").textContent, /reported · Playback follows Loom/);
+  assert.match(app.nodes.get("level-source").textContent, /reported · Background setting/);
   assert.equal(app.read("currentStory().model.effectiveLevels({nocturne:true})[1]"), 0);
+  await app.click("nocturne-run");
+  assert.match(app.nodes.get("nocturne-status").textContent, /Nearby context review is still active/);
+  assert.equal(app.read("currentStory().model.effectiveLevels({nocturne:true})[0]"), 1);
+  assert.equal(posts.length, 1, "The cue-only button has no new request or reset when Loom found no cues.");
   app.read("latest = {...latest, running:true}; display()"); await waitForContext(app);
   assert.equal(posts.length, 1, "Already reviewed nearby source is reused.");
   await app.visibility(true);
@@ -174,6 +178,30 @@ test("dialogue-heavy coverage reaches later sections in five bounded requests", 
   assert.equal(requests.length, 5);
   assert.ok(bytes <= NOCTURNE_CONTEXT_SESSION_BYTES);
   assert.deepEqual(requests.at(-1).paragraphs.slice(-1).map(p => p.id), [306]);
+});
+
+test("a nearby review can fill gaps around an earlier seek in one request", () => {
+  const paragraphs = Array.from({length: 80}, (_, i) => paragraph(`Envelope ${i} rested on the desk.`));
+  for (let id = 4; id < 8; id++) paragraphs[id].text = "x".repeat(3000);
+  const seek = nocturneContextCandidates(paragraphs, 4);
+  assert.deepEqual(seek.newIds, [4, 5, 6, 7]);
+  paragraphs[3].cloudExcluded = true;
+  paragraphs[8].override = 0;
+  const attempted = new Set(seek.newIds);
+  const backfill = nocturneContextCandidates(paragraphs, 0, {attempted});
+  assert.deepEqual(backfill.newIds, [0, 1, 2, ...Array.from({length: 55}, (_, i) => i + 9)]);
+  assert.deepEqual(backfill.paragraphs.map(({id}) => id), backfill.newIds);
+  assert.ok(backfill.sourceBytes <= 12000);
+});
+
+test("automatic review leads the edge of a reviewed window during continuous reading", () => {
+  const paragraphs = Array.from({length: 80}, (_, i) => paragraph(`Envelope ${i} rested beside the sealed parcel.`));
+  const initial = nocturneContextCandidates(paragraphs);
+  assert.equal(initial.newIds.at(-1), 63);
+  const attempted = new Set(initial.newIds);
+  assert.equal(nocturneContextNeedsReview(paragraphs, 20, {attempted}), false);
+  assert.equal(nocturneContextNeedsReview(paragraphs, 40, {attempted}), true);
+  assert.equal(nocturneContextCandidates(paragraphs, 40, {attempted}).newIds[0], 64);
 });
 
 test("context byte allowance counts failed requests and survives a consent toggle", async t => {

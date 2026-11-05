@@ -4,15 +4,18 @@ import {LEGACY_NOCTURNE_CONTEXT_VERSION, MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEX
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v6.3";
+export const ANALYSIS_VERSION = "scene-rules-v6.7";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
   typeof score.reason === "string" && score.reason.length <= 200;
 const contextLevels = Object.freeze({neutral: 0, romance: 1, flirting: 1, tension: 1, intimacy: 2, explicit: 3, aftermath: 1});
-// Noncurrent context is review metadata. Playback falls back to local analysis.
+// A confident noncurrent annotation can cancel a local false cue. The
+// reader's chosen background and local hard-quiet controls still apply.
 function playbackAnnotation(annotation) {
-  if (!annotation || ![undefined, "current", "neutral"].includes(annotation.eventKind)) return null;
+  if (annotation && ["imagined", "reported", "historical"].includes(annotation.eventKind)) {
+    return {...annotation, category: "neutral", phase: "quiet", shape: "unspecified"};
+  }
   return annotation;
 }
 
@@ -183,14 +186,18 @@ export class ReaderModel {
   suggestedLevel(index, {nocturne = false} = {}) {
     const paragraph = this.paragraph(index);
     const annotation = nocturne ? playbackAnnotation(this.contextualAnnotation(index)) : null;
-    return annotation ? contextLevels[annotation.category] : paragraph.suggestedLevel;
+    if (!annotation) return paragraph.suggestedLevel;
+    return annotation.phase === "quiet" ? 0 : contextLevels[annotation.category];
   }
 
   effectiveProfile(index, {nocturne = false, peakPattern, edging = false, edgePattern = "auto"} = {}) {
     const original = this.paragraph(index);
     const annotation = nocturne ? playbackAnnotation(this.contextualAnnotation(index)) : null;
+    const backgroundOnly = annotation?.phase === "quiet";
     const {rhythm, quiet, phase, sceneId, shape, override, movements = [], endedMovements = []} = annotation ?
-      {...original, phase: annotation.phase, shape: annotation.shape, sceneId: original.sceneId ?? MAX_PARAGRAPHS + index + 1} : original;
+      {...original, phase: annotation.phase, shape: annotation.shape,
+        sceneId: backgroundOnly ? null : original.sceneId ?? MAX_PARAGRAPHS + index + 1,
+        movements: backgroundOnly ? [] : original.movements} : original;
     const currentCue = original.analysed && !original.cloudExcluded && !quiet && override === null &&
       ["build", "sustain", "peak"].includes(phase) &&
       (annotation ? annotation.eventKind === "current" : original.currentCue === true);
