@@ -137,7 +137,7 @@ try {
       }};` },
     ...await Promise.all(["accounts", "beta-recordings", "feedback"].map(async name => ({ type: "ESModule", path: path.join(ROOT, `deploy/cloudflare/${name}.mjs`), contents: await readFile(path.join(ROOT, `deploy/cloudflare/${name}.mjs`), "utf8") }))),
     { type: "ESModule", path: path.join(ROOT, "app/static/devices/toy-profiles.mjs"), contents: await readFile(path.join(ROOT, "app/static/devices/toy-profiles.mjs"), "utf8") },
-    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences"].map(async name => {
+    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences", "nocturne-context-contract"].map(async name => {
       const modulePath = path.join(ROOT, `app/static/reader/${name}.mjs`);
       return { type: "ESModule", path: modulePath, contents: await readFile(modulePath, "utf8") };
     })),
