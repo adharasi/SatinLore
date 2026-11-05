@@ -38,7 +38,11 @@ for (const [source, target] of entries) {
     if (!content.includes("</head>")) throw new Error("The reader document has no head element.");
     content = content.replace("</head>", `  <meta name="satinlore-hosted-access" content="true">\n  <meta name="satinlore-build" content="${revision}">\n</head>`);
     content = content.replace(/<a\b[^>]*href=["']\/device-check["'][^>]*>[\s\S]*?<\/a>/g, "");
-    if (source !== "device-bridge.html" && /device-check|device-bridge|lovense\.mjs|https?:\/\//i.test(content)) throw new Error("The hosted document references a non-reader surface.");
+    // One fixed navigation link explains the optional analysis provider's data
+    // controls. It is not an external script, image, style or network permission.
+    const checked = source === "help.html" ? content.replace(
+      '<a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener">OpenAI’s data controls</a>', "") : content;
+    if (source !== "device-bridge.html" && /device-check|device-bridge|lovense\.mjs|https?:\/\//i.test(checked)) throw new Error("The hosted document references a non-reader surface.");
   }
   if (source.endsWith(".mjs")) {
     const imports = [

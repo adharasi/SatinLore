@@ -108,7 +108,7 @@ test("an explicit Nocturne peak shape applies in simulation despite ordinary rhy
   assert.equal(feel.desired({base: 5, ceiling: 0, scene: peak, simulatorStagePatterns: true}), 0);
 });
 
-test("a continuous background is opt-in and explicit paragraph zero, strength zero and maximum zero outrank it",()=>{
+test("explicit paragraph zero, strength zero and maximum zero outrank a configured continuous background",()=>{
   const {controller:c,clock,device}=synchronous();c.connect();c.setStory([0,4]);
   c.start();assert.equal(device.snapshot().strength,0);
   c.setFeel({mode:"continuous",minimum:1,background:2});clock.advance(1000);assert.equal(device.snapshot().strength,2);
@@ -244,6 +244,44 @@ test("simulator stage rhythms rise, accent, and taper once within the chosen ran
   assert.deepEqual(samples("peak", 5, {scene: {phase: "peak", rhythm: "dynamic", manual: true}}), [5, 3, 5, 1, 5, 5]);
   feel.configure({rhythm: "steady"});
   assert.deepEqual(samples("peak", 5), [11, 11, 11, 11, 11, 11]);
+});
+
+test("sustained simulator rhythms repeat through long dwell while other stages hold their final step", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({preferred: 6, maximum: 8, mode: "continuous", minimum: 1, background: 2});
+  feel.start(100);
+  const times = Array.from({length: 11}, (_, index) => 100 + index * 2000);
+  const wave = {phase: "sustain", rhythm: "steady", quiet: false, pattern: "wave"};
+  const trace = (scene, options = {}) => times.map(now =>
+    feel.desired({base: 3, ceiling: 8, scene, now, simulatorStagePatterns: true, ...options}));
+  assert.deepEqual(trace(wave), [4, 6, 4, 5, 4, 6, 4, 5, 4, 6, 4]);
+  const pulses = {...wave, pattern: undefined, shape: "accented"};
+  assert.deepEqual(trace(pulses), [6, 3, 6, 3, 5, 6, 3, 6, 3, 5, 6]);
+  assert.deepEqual(trace({...pulses, shape: "alternating"}), [4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4]);
+  assert.deepEqual(trace({...pulses, phase: "build"}), [6, 3, 6, 3, 5, 5, 5, 5, 5, 5, 5]);
+  assert.deepEqual(trace(wave, {preview: true}), times.map(() => 4));
+  assert.deepEqual(trace(wave, {ceiling: 1}), times.map(() => 1));
+  assert.deepEqual(trace(wave, {manualZero: true}), times.map(() => 0));
+  assert.deepEqual(trace(wave, {ceiling: 0}), times.map(() => 0));
+  assert.deepEqual(trace({...wave, quiet: true}, {base: 0}), times.map(() => 0));
+  assert.deepEqual(trace({...wave, endedMovements: ["vibrate"]}, {movement: "vibrate"}), times.map(() => 0));
+  assert.deepEqual(trace({...wave, manual: true}), times.map(() => 3));
+  assert.deepEqual(trace(wave, {simulatorStagePatterns: false}), times.map(() => 6));
+});
+
+test("the explicit steady simulator preset holds within bounds and cannot bypass corrections", () => {
+  const feel = new ReadingFeel({rhythm: "dynamic"});
+  feel.configure({preferred: 5});
+  const scene = {phase: "peak", rhythm: "dynamic", quiet: false, peakPreset: "steady"};
+  const trace = options => [0, 2000, 6000, 16000].map(now =>
+    feel.desired({base: 5, ceiling: 8, scene, now, simulatorStagePatterns: true, ...options}));
+  assert.deepEqual(trace({}), [7, 7, 7, 7]);
+  assert.deepEqual(trace({preview: true}), [7, 7, 7, 7]);
+  assert.deepEqual(trace({ceiling: 1}), [1, 1, 1, 1]);
+  assert.deepEqual(trace({manualZero: true}), [0, 0, 0, 0]);
+  assert.deepEqual(trace({ceiling: 0}), [0, 0, 0, 0]);
+  assert.deepEqual(trace({scene: {...scene, manual: true}}), [5, 3, 1, 5]);
+  assert.deepEqual(trace({simulatorStagePatterns: false}), [7, 4, 2, 7]);
 });
 
 test("a combined stage rhythm respects separate movement limits, floors, and a stopped channel", () => {
@@ -400,6 +438,43 @@ test("a lower session ceiling clamps a gentle cue instead of rounding it away", 
   assert.equal(feel.desired({base: 1, ceiling: 1, scene}), 1);
   assert.equal(feel.desired({base: 1, ceiling: 0, scene}), 0);
   assert.equal(feel.desired({base: 1, ceiling: 1, scene, manualZero: true}), 0);
+});
+
+test("simulator cue contrast uses one calibrated step and respects controls and rhythm", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({mode: "continuous", background: 1, preferred: 3, maximum: 10});
+  const scene = {phase: "build", quiet: false, currentCue: true};
+  const context = {base: 1, ceiling: 10, scene, movement: "vibrate", simulatorStagePatterns: true};
+  assert.equal(feel.desired(context), 2);
+  assert.equal(feel.desired({...context, simulatorStagePatterns: false}), 1);
+  assert.equal(feel.desired({...context, ceiling: 1}), 1);
+  assert.equal(feel.desired({...context, ceiling: 0}), 0);
+  assert.equal(feel.desired({...context, manualZero: true}), 0);
+  assert.equal(feel.desired({...context, scene: {...scene, manual: true}}), 1);
+  assert.equal(feel.desired({...context, scene: {...scene, endedMovements: ["vibrate"]}}), 0);
+  assert.equal(feel.desired({...context, base: 0, scene: {...scene, quiet: true}}), 0);
+  assert.equal(feel.desired({...context, levelAdjustment: -1}), 1);
+  assert.equal(feel.desired({...context, levelAdjustment: 1}), 3);
+  assert.equal(feel.desired({...context, strength: 0}), 0);
+  assert.equal(feel.desired({...context, strength: 0.5}), 0);
+  feel.configure({gain: 0.5, minimum: 1});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({gain: 1, preferred: 1});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({preferred: 3, minimum: 0, quietEdging: true});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({mode: "story", quietEdging: false});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({mode: "continuous"});
+  assert.equal(feel.desired({...context, scene: {...scene, edging: true}}), 1);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, scene: {...scene, shape: "accented"}, now})), [2, 1, 2]);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, base: 2, now})), [1, 1, 2]);
+  feel.hold(1);
+  assert.equal(feel.desired(context), 1);
+  feel.easeOff(0, 1);
+  assert.equal(feel.desired(context), 0);
+  feel.followStory(0);
+  assert.equal(feel.desired(context), 0);
 });
 
 test("scene motion defaults to the selected movement, with opt-in switching and a safe fallback", async t => {

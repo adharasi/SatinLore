@@ -47,10 +47,12 @@ test("the reader shows completed recommendations above the active story and clea
   await app.click("connect");
   assert.match(app.nodes.get("start-help").textContent, /Choose a background level/);
   await app.click("start");
-  assert.match(app.nodes.get("start-summary").textContent, /This section starts quiet/);
+  assert.match(app.nodes.get("start-summary").textContent, /current level 1\/20/,
+    "Fresh continuous-background preferences cover an ordinary unmatched passage.");
   await app.click("confirm-start");
   await app.settle();
-  assert.equal(app.nodes.get("reading-sync-state").textContent, "Quiet passage");
+  assert.equal(app.nodes.get("reading-sync-state").textContent, "Following");
+  assert.equal(app.read("latest.output"), 1, "The calibrated background remains visible in the actual simulator output.");
   await app.click("stop");
   await app.click("control-playground");
   app.nodes.get("practice-story-choice").value = "control-check-v1";

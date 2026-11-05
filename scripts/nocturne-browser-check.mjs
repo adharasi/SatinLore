@@ -15,6 +15,7 @@ const source = [
   "They slowed and relaxed.",
   "An underage warning card remained folded on the sill. " + canary,
   "***",
+  "A handwritten invitation lay unopened beside the lamp.",
 ].join("\n\n");
 const mime = {html: "text/html", js: "text/javascript", mjs: "text/javascript", css: "text/css", svg: "image/svg+xml"};
 const browser = await chromium.launch({headless: true,
@@ -25,6 +26,23 @@ let leaked = false;
 let configured = true;
 let providerResult = "success";
 let releasePending;
+
+async function openReaderSettings(page) {
+  if (await page.locator("#settings-panel").isHidden()) await page.locator("#toggle-settings").click();
+  const tab = page.locator("#settings-reader-tab");
+  if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
+  await page.locator("#reader-settings").waitFor({state: "visible"});
+}
+
+async function selectPeakPattern(page, value) {
+  const selector = page.locator("#nocturne-peak-pattern");
+  await selector.waitFor({state: "visible"});
+  await selector.selectOption(value);
+  await page.waitForFunction(expected => {
+    const node = document.querySelector("#nocturne-peak-pattern");
+    return node?.value === expected && !node.disabled;
+  }, value);
+}
 
 async function testPage() {
   const context = await browser.newContext({viewport: {width: 1440, height: 1000}, reducedMotion: "reduce"});
@@ -47,6 +65,10 @@ async function testPage() {
       const body = request.postDataJSON();
       posts.push(body);
       if (providerResult === "refused") return route.fulfill({status: 422, json: {code: "refused", error: canary}});
+      if (body.version === "context-v2") return route.fulfill({json: {version: "context-v2",
+        labels: body.paragraphs.map(({id}) => ({id, category: id === 6 ? "romance" : "neutral", phase: id === 6 ? "build" : "quiet",
+          shape: "unspecified", confidence: 95, eventKind: id === 6 ? "current" : "neutral"})),
+        usage: {inputTokens: 40, outputTokens: 20, totalTokens: 60}}});
       const labels = body.cues.map(({id, phase}) => ({id, label: phase === "peak" ? "crest" : "abstain"}));
       if (providerResult === "pending") {
         await new Promise(resolve => { releasePending = resolve; });
@@ -66,8 +88,8 @@ async function testPage() {
   await page.locator("#draft-story").fill(source);
   await page.locator("#open-draft").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.dataset.state === "ready");
+  await openReaderSettings(page);
   const model = page.locator("#scene-model");
-  if (!await model.isVisible()) await page.locator("#settings-story-tab").click();
   await model.waitFor({state: "visible"});
   return {context, page, model};
 }
@@ -96,6 +118,11 @@ try {
     return run && !run.hidden && !run.disabled;
   });
   assert.equal(posts.length, 0, "Selecting the model alone must not send story cues.");
+  assert.equal(await page.locator("#feel-mode").inputValue(), "continuous", "Fresh readers keep the background by default.");
+  await page.locator("#open-nocturne-patterns").click();
+  assert.equal(await page.locator("#nocturne-peak-pattern").inputValue(), "steady", "Fresh readers use steady peaks by default.");
+  await selectPeakPattern(page, "auto"); // Compare the existing explicit story-following choice.
+  await openReaderSettings(page);
   const classified = page.waitForResponse(response => new URL(response.url()).pathname === apiPath && response.request().method() === "POST");
   await run.click();
   assert.equal((await classified).status(), 200);
@@ -117,7 +144,27 @@ try {
   assert.equal(await page.locator("#capValue").textContent(), "10");
   await checkPeakMeter(page, 7);
 
+  assert.equal(await page.locator(".story-paragraph.active").getAttribute("data-index"), "2");
+  await openReaderSettings(page);
+  await page.locator("#open-nocturne-patterns").click();
+  await page.locator("#story-settings").waitFor({state: "visible"});
+  await selectPeakPattern(page, "steady");
+  await page.waitForFunction(() => /Steady hold/i.test(document.querySelector("#nocturne-current-pattern")?.textContent));
+  assert.equal(await page.locator(".story-paragraph.active").getAttribute("data-index"), "2", "Opening pattern controls preserves the selected peak.");
+  assert.match(await page.locator("#level-source").textContent(), /Peak.*Steady hold/i);
+  assert.equal(await page.locator("#output").textContent(), "0 / 20", "Choosing a profile stays paused.");
+  await page.locator("#start").click();
+  await page.locator("#confirm-start").click();
+  await page.clock.runFor(1000);
+  await page.waitForFunction(() => document.querySelector("#output")?.textContent === "7 / 20");
+  await page.clock.runFor(12000);
+  assert.equal(await page.locator("#output").textContent(), "7 / 20", "Steady hold retains the calibrated simulator level.");
+  await page.locator("#stop").click();
+  assert.equal(await page.locator("#output").textContent(), "0 / 20");
+  await selectPeakPattern(page, "auto");
+
   // Switching back to Loom restores the local stage even after a valid response.
+  await openReaderSettings(page);
   await model.selectOption("loom");
   assert.equal(posts.length, 1);
   assert.equal(await model.inputValue(), "loom");
@@ -159,10 +206,49 @@ try {
   assert.equal(posts.length, before);
   await offline.context.close();
 
+  configured = true; providerResult = "success";
+  const contextual = await testPage();
+  const contextPage = contextual.page;
+  const beforeContext = posts.length;
+  await contextual.model.selectOption("nocturne");
+  await contextPage.waitForFunction(() => !document.querySelector("#nocturne-run")?.disabled);
+  assert.equal(posts.length, beforeContext, "Contextual processing stays off on model selection.");
+  assert.equal(await contextPage.locator("#nocturne-context-consent").isChecked(), false);
+  assert.equal(await contextPage.locator("#nocturne-context-enable").isDisabled(), true);
+  await contextPage.locator("#nocturne-context-consent").check();
+  const contextResponse = contextPage.waitForResponse(response => new URL(response.url()).pathname === apiPath && response.request().method() === "POST");
+  await contextPage.locator("#nocturne-context-enable").click();
+  assert.equal((await contextResponse).status(), 200);
+  await contextPage.waitForFunction(() => /Nearby context reviewed/.test(document.querySelector("#nocturne-status")?.textContent));
+  const contextBody = posts.at(-1);
+  assert.deepEqual(Object.keys(contextBody), ["version", "consent", "paragraphs"]);
+  assert.equal(contextBody.version, "context-v2");
+  assert.equal(contextBody.consent, true);
+  assert.ok(contextBody.paragraphs.some(p => p.id === 6 && p.text.includes("handwritten invitation")), "Unmatched source can reach the consented classifier.");
+  assert.ok(contextBody.paragraphs.every(p => ![4, 5].includes(p.id)), "Protected content and hard boundaries remain excluded.");
+  assert.ok(!JSON.stringify(contextBody).includes(canary));
+  assert.match(await contextPage.locator("#output").textContent(), /^0\s*\/\s*20$/);
+  for (let i = 0; i < 6; i++) await contextPage.locator("#next").click();
+  await contextPage.waitForFunction(() => /Nocturne context.*romance/.test(document.querySelector("#level-source")?.textContent));
+  assert.equal(await contextPage.locator("#suggested-level").textContent(), "1 / 20");
+  assert.equal(posts.length, beforeContext + 1, "Paused navigation never sends automatic batches.");
+  await contextPage.locator("#connect").click();
+  await contextPage.locator("#start").click();
+  await contextPage.locator("#confirm-start").click();
+  await contextPage.waitForFunction(() => document.querySelector("#status")?.textContent === "Simulator running");
+  await contextPage.waitForFunction(() => document.querySelector("#output")?.textContent === "2 / 20");
+  await contextPage.locator("#stop").click();
+  assert.equal(await contextPage.locator("#output").textContent(), "0 / 20");
+  await contextPage.locator("#nocturne-context-disable").click();
+  assert.equal(await contextPage.locator("#nocturne-context-consent").isChecked(), false);
+  assert.equal(await contextPage.locator("#suggested-level").textContent(), "0 / 20", "Disable restores Loom immediately.");
+  assert.match(await contextPage.locator("#output").textContent(), /^0\s*\/\s*20$/);
+  await contextual.context.close();
+
   assert.deepEqual(errors, [], "No reader runtime errors.");
   assert.deepEqual(external, [], "No external browser calls.");
   assert.equal(leaked, false, "No browser request contains the story canary.");
-  console.log(`Nocturne browser checks passed in Chromium ${browser.version()}: explicit opt-in, cue-only requests, protected exclusions, 7/20 Nocturne versus 4/20 Loom peak at four seconds with the same settings, refusal fallback, Stop, and unavailable state.`);
+  console.log(`Nocturne browser checks passed in Chromium ${browser.version()}: fresh continuous/steady-peak defaults, legacy cue-only choice, protected exclusions, explicit pattern selection/hold, contextual excerpt consent and local-zero recovery, paused navigation, disable fallback, refusal, Stop and unavailable state.`);
 } finally {
   releasePending?.();
   await browser.close();

@@ -22,7 +22,7 @@ import {mountPublicAccount} from "./reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "./reader/calibration.mjs";
-import {nocturneAvailable, nocturneCandidates, requestNocturne} from "./reader/nocturne.mjs";
+import {nocturneAvailable, nocturneCandidates, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "./reader/nocturne.mjs";
 import {storyToyRecommendation} from "./reader/toy-recommendations.mjs";
 
 const $ = id => document.getElementById(id);
@@ -37,7 +37,7 @@ let simulatorView = null;
 let setupFlow = null;
 let accountClient = null, accountWorkspace = null, betaRecorder = null;
 let publicAccount = null, publicSignedIn = false;
-let patternChoices = {peakPattern: "auto", edgePattern: "auto", edging: false};
+let patternChoices = {peakPattern: DEFAULT_EXPERIENCE.peakPattern, edgePattern: "auto", edging: DEFAULT_EXPERIENCE.edging};
 let savingPatternChoice = false;
 let recordedDevice = "", recordedStory = "", recordedStep = "", feelChannelSignature = "", feelEditingChannel = null, combinationSignature = "";
 let connection = {mode: "simulator", model: "lush", toys: [], selectedId: null};
@@ -141,13 +141,15 @@ function syncManualZeros(story) {
 function readerProfiles(story) {
   return story.controlled ? undefined : story.model.effectiveProfiles({nocturne: story.sceneModel === "nocturne", ...patternChoices});
 }
+const readerLevels = story => story.model.effectiveLevels({nocturne: story.sceneModel === "nocturne"});
 function syncReaderMapping(story) {
-  controller.updateLevels(story.model.effectiveLevels(), readerProfiles(story));
+  controller.updateLevels(readerLevels(story), readerProfiles(story));
   syncManualZeros(story);
 }
 function applyReadingDefaults(values) {
+  values ??= DEFAULT_EXPERIENCE;
   const previous = patternChoices;
-  patternChoices = {peakPattern: values?.peakPattern ?? "auto", edgePattern: values?.edgePattern ?? "auto", edging: values?.edging === true};
+  patternChoices = {peakPattern: values.peakPattern ?? DEFAULT_EXPERIENCE.peakPattern, edgePattern: values.edgePattern ?? "auto", edging: values.edging === true};
   cancelStart();
   controller.setReadingDefaults(values);
   const story = currentStory();
@@ -178,7 +180,7 @@ function renderNocturnePeakSettings(story) {
   else if (profile?.manual) currentPattern = "Current section uses your level correction.";
   else if (profile?.quiet) currentPattern = "Current section is a quiet boundary.";
   else if (profile?.endedMovements?.includes(movement)) currentPattern = `${channelLabel(movement)} pauses in the current section.`;
-  else if (profile && paragraph.suggestedLevel === 0) currentPattern = `Current section is quiet. ${quiet}`;
+  else if (profile && story.model.suggestedLevel(latest.position, {nocturne: true}) === 0) currentPattern = `Current section is quiet. ${quiet}`;
   else if (profile) {
     const rhythm = selectedSettings().rhythm;
     const label = simulatorScenePatternLabel(profile, rhythm) ?? {
@@ -489,8 +491,9 @@ function storyCardAction(story, name, label, onClick, pressed) {
 
 function updateCurrentCorrection(story) {
   const paragraph = story?.model.paragraphs[latest.position];
-  const base = paragraph ? paragraph.override ?? paragraph.suggestedLevel : 0;
-  text("suggested-level", `${paragraph?.suggestedLevel ?? 0} / 20`);
+  const suggestion = paragraph ? story.model.suggestedLevel(latest.position, {nocturne: story.sceneModel === "nocturne"}) : 0;
+  const base = paragraph ? paragraph.override ?? suggestion : 0;
+  text("suggested-level", `${suggestion} / 20`);
   text("levelValue", base);
   $("level").value = base;
   $("level").setAttribute("aria-valuetext", `${base} out of 20`);
@@ -505,8 +508,12 @@ function updateCurrentCorrection(story) {
   const endedMovements = paragraph?.endedMovements?.length ? `${paragraph.endedMovements.map(channelLabel).join(" + ")} paused in this scene` : null;
   const movements = paragraph?.movements?.length ? `Movement cue: ${paragraph.movements.map(channelLabel).join(" + ")}` :
     endedMovements ? null : "Default movement";
-  const stage = {build: "Building", sustain: "Sustaining", peak: "Peak", recover: "Easing off"}[paragraph?.phase];
+  const stage = {build: "Building", sustain: "Sustaining", peak: "Peak", recover: "Easing off"}[profile?.phase ?? paragraph?.phase];
+  const annotation = story?.sceneModel === "nocturne" && paragraph ? story.model.contextualAnnotation(latest.position) : null;
+  const labelOnly = ["imagined", "reported", "historical"].includes(annotation?.eventKind);
   text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
+    annotation ? [`Nocturne context · ${annotation.category}`, annotation.eventKind, ...(labelOnly ? ["Playback follows Loom"] :
+      [stage, rhythm, movements, endedMovements])].filter(Boolean).join(" · ") :
     paragraph.sceneId && rhythm ?
       [`Scene ${paragraph.sceneId}`, stage, rhythm, movements, endedMovements, paragraph.advisory].filter(Boolean).join(" · ") :
       paragraph.advisory || (paragraph.quiet ? "Quiet section" : "Using the local suggestion."));
@@ -633,6 +640,9 @@ function display(state = latest) {
     analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Finding scene changes…");
   renderStoryModel(story);
   renderNocturnePeakSettings(story);
+  if (state.running && !state.readingSeeking && !document.hidden && !nocturneOperation && contextNeedsReview(story, state.position)) {
+    queueMicrotask(() => void runNocturneContext({automatic: true}));
+  }
   const saved = saveState(story);
   $("save-status").dataset.state = saved.state;
   text("save-status", saved.label);
@@ -668,8 +678,10 @@ const controller = new ReaderDeviceController({document, window, navigator, stor
   onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
   onInterfaceError: controlRecovery, onChange: state => {
   const stopped = latest.running && !state.running;
+  const seeking = state.readingSeeking && !latest.readingSeeking;
   if (!state.running) releasePlayback();
-  if (stopped) { cancelPosition(); cancelStart(); }
+  if (stopped) { cancelPosition(); cancelStart(); cancelNocturne(); }
+  if (seeking && nocturneOperation?.context) cancelNocturne();
   display(state);
   show(state.reason);
 }});
@@ -693,7 +705,7 @@ function renderToyRecommendation(story) {
     panel.hidden = !suggestion;
     text("story-toy-recommendations-summary", suggestion);
   }
-  return Boolean(story?.controlled || analysisPresentation.hasActivity);
+  return Boolean(story?.controlled || analysisPresentation.hasActivity || story?.sceneModel === "nocturne" && readerLevels(story).some(level => level > 0));
 }
 
 function renderStoryModel(story) {
@@ -704,19 +716,107 @@ function renderStoryModel(story) {
   $("scene-model").value = selected;
   $("scene-model").disabled = Boolean(story?.deleting || libraryMutation);
   text("scene-model-help", story?.controlled ? "This calibration story keeps its fixed levels. Choose a model for your next story, or open a model practice story to try it now." :
-    analysedStory ? "Both models follow the scene’s pacing. Nocturne adds build-up and climax patterns in the simulator." :
-    "Choose a model for your next story. Nocturne adds build-up and climax patterns in the simulator.");
+    "Loom analyses on this browser. Nocturne can also review nearby story context when you enable it.");
   $("model-practice-shortcut").hidden = !story?.controlled;
   $("model-practice-shortcut").disabled = libraryMutation || story?.deleting;
   $("nocturne-panel").hidden = selected !== "nocturne" || !analysedStory;
   $("nocturne-sign-in").hidden = !signInNeeded;
   $("nocturne-run").hidden = signInNeeded;
   $("nocturne-run").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
+  const context = story?.nocturneContextSession;
+  const contextEnabled = context?.enabled === true;
+  const {requests, bytes} = remainingContextAllowance(context);
+  $("nocturne-context-enable").hidden = signInNeeded || contextEnabled;
+  $("nocturne-context-disable").hidden = !contextEnabled;
+  $("nocturne-context-consent").disabled = contextEnabled || busy;
+  $("nocturne-context-enable").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne ||
+    libraryMutation || !$("nocturne-context-consent").checked || requests === 0 || bytes === 0;
+  const coverage = contextEnabled ? `${story.model.nocturneContext.size} of ${story.model.paragraphs.length} sections reviewed. ` : "";
+  const allowance = context?.rateLimited ? "The beta usage limit has been reached." : requests === 0 || bytes === 0 ?
+    "The nearby review allowance for this visit has been used." :
+    `${requests} ${requests === 1 ? "request" : "requests"} and ${bytes.toLocaleString()} text bytes remain this visit.`;
+  text("nocturne-context-status", `${coverage}${allowance} Unreviewed sections use Loom.`);
   text("nocturne-run", nocturneReady === false ? "Check availability" : "Analyse with Nocturne");
   text("nocturne-status", !hostedMode ? "Your patterns follow Loom’s scene cues. Further analysis is available in the hosted app." :
     signInNeeded ? "Your patterns are ready. Sign in to let Nocturne review scene cues." :
-    checkingNocturne ? "Checking analysis availability…" : busy ? "Nocturne is reviewing eligible cues. Playback is paused." :
+    checkingNocturne ? "Checking analysis availability…" : busy ? "Nocturne is reviewing selected context or cues." :
     story?.nocturneMessage || (nocturneReady === false ? "Further analysis is unavailable. Your patterns follow Loom’s scene cues." : "Choose Analyse with Nocturne when you’re ready."));
+}
+
+function clearNocturneContext(story) {
+  if (!story) return;
+  const hadContext = story.model.nocturneContext.size > 0 || story.nocturneContextSession?.enabled;
+  story.model.nocturneContext.clear();
+  const session = story.nocturneContextSession;
+  if (session) { session.enabled = false; session.attempted.clear(); }
+  if (hadContext) story.nocturneMessage = "Nearby context review is off. Your scene settings and local analysis are available.";
+  if (story === currentStory()) $("nocturne-context-consent").checked = false;
+}
+function clearAllNocturneContext() {
+  for (const story of stories) clearNocturneContext(story);
+}
+function remainingContextAllowance(session) {
+  return {
+    requests: session?.rateLimited ? 0 : NOCTURNE_CONTEXT_SESSION_REQUESTS - (session?.requests ?? 0),
+    bytes: NOCTURNE_CONTEXT_SESSION_BYTES - (session?.bytesAttempted ?? 0),
+  };
+}
+function contextNeedsReview(story, position) {
+  const session = story?.nocturneContextSession;
+  if (!session?.enabled || story.deleting || libraryMutation || !hasVerifiedAccess() || !story.model.analysisReady) return false;
+  const {requests, bytes} = remainingContextAllowance(session);
+  return requests > 0 && nocturneContextNeedsReview(story.model.paragraphs, position, {attempted: session.attempted, maxBytes: bytes});
+}
+
+async function runNocturneContext({automatic = false} = {}) {
+  const story = currentStory();
+  if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" ||
+      story.controlled || story.deleting || libraryMutation || nocturneOperation) return;
+  let session = story.nocturneContextSession;
+  const {requests, bytes} = remainingContextAllowance(session);
+  if (requests <= 0 || bytes <= 0) return;
+  if (!automatic) {
+    if (!$("nocturne-context-consent").checked) return;
+    if (nocturneReady !== true) { await checkNocturne(); return; }
+    pause("Context analysis is enabled for this visit. Confirm Start when ready.");
+    session ??= story.nocturneContextSession = {enabled: false, requests: 0, bytesAttempted: 0, rateLimited: false, attempted: new Set()};
+    session.enabled = true;
+  }
+  if (!session?.enabled || automatic && (!latest.running || latest.readingSeeking || !contextNeedsReview(story, latest.position))) return;
+  const {paragraphs, newIds, sourceBytes} = nocturneContextCandidates(story.model.paragraphs, latest.position,
+    {attempted: session.attempted, maxBytes: bytes});
+  if (!paragraphs.length) {
+    story.nocturneMessage = "No nearby sections fit this review. Loom covers these sections.";
+    display();
+    return;
+  }
+  const operation = {story, abort: new AbortController(), generation: story.model.analysisGeneration, context: true};
+  nocturneOperation = operation; display();
+  const current = () => nocturneOperation === operation && story === currentStory() && session.enabled &&
+    story.model.analysisGeneration === operation.generation && story.sceneModel === "nocturne" && !document.hidden && hasVerifiedAccess() &&
+    (!automatic || latest.running && !latest.readingSeeking);
+  try {
+    if (!current()) return;
+    // Count transport attempts, including failed or cancelled requests. The
+    // paragraph map reuses accepted labels without resending reviewed windows.
+    session.requests++;
+    session.bytesAttempted += sourceBytes;
+    for (const id of newIds) session.attempted.add(id);
+    const result = await requestNocturneContext(paragraphs, {consent: true, signal: operation.abort.signal});
+    if (!current()) return;
+    if (result.labels) {
+      for (const id of newIds) story.model.nocturneContext.set(id, result.labels.get(id));
+      syncReaderMapping(story);
+      story.nocturneMessage = `Nearby context reviewed. ${result.usage ? `${result.usage.totalTokens} tokens used by this request. ` : ""}Uncertain sections keep Loom.`;
+    } else if (result.code === "rate_limited") {
+      session.rateLimited = true;
+      story.nocturneMessage = "The beta usage limit has been reached. Loom covers unreviewed sections.";
+    } else story.nocturneMessage = "Nearby review could not finish. Loom covers those sections. This request counts towards the visit limit.";
+  } catch {
+    if (current()) story.nocturneMessage = "Nearby review could not finish. Loom covers those sections. This request counts towards the visit limit.";
+  } finally {
+    if (nocturneOperation === operation) { nocturneOperation = null; display(); }
+  }
 }
 
 async function checkNocturne() {
@@ -732,7 +832,8 @@ function cancelNocturne() {
   if (!operation) return;
   nocturneOperation = null;
   operation.abort.abort();
-  operation.story.nocturneMessage = "Analysis stopped. Your patterns still follow Loom’s scene cues.";
+  operation.story.nocturneMessage = operation.context ? "Nearby context review stopped." :
+    "Analysis stopped. Your patterns still follow Loom’s scene cues.";
 }
 
 async function runNocturne() {
@@ -740,6 +841,7 @@ async function runNocturne() {
   if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" || nocturneOperation) return;
   if (nocturneReady !== true) { await checkNocturne(); return; }
   pause("Nocturne analysis pauses playback. Confirm Start after review.");
+  clearNocturneContext(story);
   story.model.nocturneLabels.clear();
   syncReaderMapping(story);
   const {cues, excluded, limited} = nocturneCandidates(story.model.paragraphs);
@@ -908,13 +1010,14 @@ function renderStory() {
 }
 function updateReviewRow(story, index, nodes) {
   const paragraph = story.model.paragraphs[index];
-  const base = paragraph.override ?? paragraph.suggestedLevel;
+  const suggestion = story.model.suggestedLevel(index, {nocturne: story.sceneModel === "nocturne"});
+  const base = paragraph.override ?? suggestion;
   nodes.heading.textContent = `Section ${index + 1}${index === story.position ? " · current" : ""}`;
   nodes.input.value = base;
   nodes.output.textContent = `${base} / 20`;
   nodes.input.setAttribute("aria-valuetext", `${base} out of 20`);
   nodes.source.textContent = paragraph.override === null ? "Using suggestion" : "Your correction";
-  nodes.suggestion.textContent = `Suggested level: ${paragraph.suggestedLevel} / 20`;
+  nodes.suggestion.textContent = `Suggested level: ${suggestion} / 20`;
   nodes.reset.disabled = paragraph.override === null;
 }
 function renderReview() {
@@ -972,7 +1075,7 @@ function changeLevel(index, value) {
   cancelNocturne();
   story.model.setOverride(index, value);
   story.explicitCorrections.add(index);
-  controller.setLevel(index, story.model.effectiveLevels()[index]);
+  controller.setLevel(index, readerLevels(story)[index]);
   syncManualZeros(story);
   markDirty(story);
   const nodes = reviewNodes.get(index); if (nodes) updateReviewRow(story, index, nodes);
@@ -983,7 +1086,7 @@ function resetLevel(index) {
   cancelNocturne();
   story.model.resetOverride(index);
   story.explicitCorrections.delete(index);
-  controller.setLevel(index, story.model.effectiveLevels()[index], {manual: false});
+  controller.setLevel(index, readerLevels(story)[index], {manual: false});
   syncManualZeros(story);
   markDirty(story);
   const nodes = reviewNodes.get(index); if (nodes) updateReviewRow(story, index, nodes);
@@ -1036,6 +1139,8 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   closeDialogs();
   pause("Story opened. Confirm Start when you want simulated playback.");
   const previous = currentStory();
+  clearNocturneContext(previous);
+  clearNocturneContext(story);
   if (previous && previous !== story) previous.model.cancelAnalysis();
   ++selectionEpoch;
   activeId = id;
@@ -1048,7 +1153,7 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
   renderStory();
   synchronizing = true;
   const position = story.position;
-  controller.setStory(story.model.effectiveLevels(), readerProfiles(story));
+  controller.setStory(readerLevels(story), readerProfiles(story));
   syncManualZeros(story);
   controller.setPosition(position);
   synchronizing = false;
@@ -1665,7 +1770,7 @@ $("feel-channel")?.addEventListener("change",async()=>{
 });
 $("feel-mode")?.addEventListener("change",()=>{const quietEdging=$("feel-mode").value==="edging",mode=quietEdging?"continuous":$("feel-mode").value;cancelStart();controller.setFeel({mode,quietEdging});recordAllowedEvent({type:"control",control:"continuity",value:mode});});
 for (const [id, field, choices] of [
-  ["nocturne-peak-pattern", "peakPattern", ["auto", "crest", "accents", "ease"]],
+  ["nocturne-peak-pattern", "peakPattern", ["auto", "steady", "crest", "accents", "ease"]],
   ["nocturne-edge-pattern", "edgePattern", ["auto", "ease", "off"]],
 ]) $(id).addEventListener("change", async () => {
   const choice = $(id).value;
@@ -1781,12 +1886,22 @@ $("scene-model").addEventListener("change", event => {
   if (!story || story.controlled) { renderStoryModel(story); return; }
   if (story.sceneModel === choice) return;
   pause("Story model changed. Confirm Start when ready.");
+  clearNocturneContext(story);
+  story.model.nocturneLabels.clear();
   story.sceneModel = choice;
   syncReaderMapping(story);
   if (choice === "nocturne" && nocturneReady !== true) void checkNocturne();
   display();
 });
 $("nocturne-run").addEventListener("click", () => void runNocturne());
+$("nocturne-context-consent").addEventListener("change", () => display());
+$("nocturne-context-enable").addEventListener("click", () => void runNocturneContext());
+$("nocturne-context-disable").addEventListener("click", () => {
+  pause("Context analysis disabled. Confirm Start when ready.");
+  clearNocturneContext(currentStory());
+  if (currentStory()) syncReaderMapping(currentStory());
+  display();
+});
 $("nocturne-sign-in").addEventListener("click", () => publicAccount?.open($("nocturne-sign-in"), () => $("scene-model").focus()));
 $("load").addEventListener("click", () => {
   const source = $("source").value;
@@ -1918,6 +2033,7 @@ $("reanalyze").addEventListener("click", () => {
   const story = currentStory(); if (!story) return;
   pause("Refreshing suggestions. Your manual corrections are kept.");
   story.nocturneMessage = "";
+  clearNocturneContext(story);
   story.model.cancelAnalysis();
   story.analysisPromise = null;
   ++selectionEpoch;
@@ -2119,11 +2235,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     if (setupFlow?.snapshot().active) setupFlow.cancel();
     cancelImport(); pause("Paused when this tab became hidden. Confirm Start to continue."); closeDialogs();
+    clearAllNocturneContext();
+    if (currentStory()) syncReaderMapping(currentStory());
     hostedAccess?.suspend();
   } else if (hostedAccess) void hostedAccess.resume();
   controller.setVisible(!document.hidden);
 });
-window.addEventListener("pagehide", () => { if (setupFlow?.snapshot().active) setupFlow.cancel(); cancelImport(); pause("Page closed."); closeDialogs(); hostedAccess?.suspend(); });
+window.addEventListener("pagehide", () => { if (setupFlow?.snapshot().active) setupFlow.cancel(); cancelImport(); pause("Page closed."); clearAllNocturneContext(); closeDialogs(); hostedAccess?.suspend(); });
 window.addEventListener("pageshow", () => { if (hostedAccess && !document.hidden) void hostedAccess.resume(); });
 window.addEventListener("storage", event => {
   if (publicMode && event.key === sessionChangeKey) {
@@ -2173,7 +2291,7 @@ function loadAccountLibrary() {
       applyReaderPreferences(accountPreferences);
       accountAppearance(true, accountPreferences.appearance);
       accountExperience = snapshot.preferences?.experience ?? null;
-      if (accountExperience) applyReadingDefaults(accountExperience);
+      applyReadingDefaults(currentExperience());
       text("reader-preferences-note", snapshot.preferences ? "Your saved account settings are in use." : "Changes to these settings will be saved to your account.");
       if (!activeId && stories.length) selectStory(stories[0].id);
       else { display(); renderLibrary(); }
@@ -2236,6 +2354,9 @@ async function offerExperience(continuation = null) {
 }
 
 function clearAccountLibrary() {
+  pause("Account session changed. Confirm Start when ready.");
+  clearAllNocturneContext();
+  if (currentStory()) syncReaderMapping(currentStory());
   accountLibrary.forgetResumePositions();
   accountLibrary.clear(); pendingAccountLibrary = null; accountPreferences = null;
   experienceDialog.close({restore: false});
@@ -2283,6 +2404,7 @@ function updatePublicSession(signedIn) {
     nocturneReady = null;
     accountClient?.clear();
     clearAccountLibrary();
+    if (currentStory()) syncReaderMapping(currentStory());
   }
 }
 
@@ -2330,6 +2452,9 @@ if (hostedMode) {
       display();
     },
     onLost: reason => {
+      pause(reason);
+      clearAllNocturneContext();
+      if (currentStory()) syncReaderMapping(currentStory());
       if (publicMode) {
         if (latest.mode === "lovense" || nocturneOperation) {
           pause("Sign in again to reconnect a toy or use Nocturne. You can still read and try a simulator.");
@@ -2361,6 +2486,7 @@ if (hostedMode) {
 const loadedPreferences = preferences.load();
 const initialPreferences = loadedPreferences.preferences;
 applyReaderPreferences(initialPreferences);
+applyReadingDefaults(currentExperience());
 text("reader-preferences-note", loadedPreferences.message);
 // These presentation modules consume snapshots; they never dispatch device commands.
 if (document.createElementNS) {

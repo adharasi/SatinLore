@@ -205,7 +205,7 @@ try {
   await registerAndSignIn(page, {wrongFirst: true, remember: true});
   await completeExperience(page);
   await expect.poll(() => desktop.account.preferences?.experience).toEqual({
-    quiet: "continuous", edging: true, maximum: 7, rhythm: "gentle", peakPattern: "auto",
+    quiet: "continuous", edging: true, maximum: 7, rhythm: "gentle", peakPattern: "steady",
   });
   await expect(page.locator("#setup-model")).toHaveValue("flexer");
   await expect(page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
@@ -213,7 +213,7 @@ try {
   await expect(page.locator("#setup-qr")).not.toBeVisible();
   await checkQuickSimulatorSetup(page);
   await expect(page.locator("#cap")).toHaveValue("7");
-  await expect(page.locator("#nocturne-peak-pattern")).toHaveValue("auto");
+  await expect(page.locator("#nocturne-peak-pattern")).toHaveValue("steady");
   await page.locator("#nocturne-peak-pattern").selectOption("accents");
   await expect.poll(() => desktop.account.preferences?.experience?.peakPattern).toBe("accents");
   await expect(page.locator("#nocturne-edge-pattern")).toHaveValue("auto");

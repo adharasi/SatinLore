@@ -20,7 +20,7 @@ test("accounts and cloud libraries use real SQLite transactions, cross-user isol
       }};` },
     { type: "ESModule", path: root + "deploy/cloudflare/accounts.mjs", contents: await readFile(new URL("../deploy/cloudflare/accounts.mjs", import.meta.url), "utf8") },
     { type: "ESModule", path: root + "app/static/devices/toy-profiles.mjs", contents: await readFile(new URL("../app/static/devices/toy-profiles.mjs", import.meta.url), "utf8") },
-    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences"].map(async name => {
+    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences", "nocturne-context-contract"].map(async name => {
       const path = root + `app/static/reader/${name}.mjs`;
       return { type: "ESModule", path, contents: await readFile(path, "utf8") };
     })),
@@ -78,12 +78,18 @@ test("accounts and cloud libraries use real SQLite transactions, cross-user isol
   assert.equal((await saveExperience({ ...experience, maximum: 21 }, 1)).status, 400);
   assert.equal((await saveExperience({ ...experience, armed: true }, 1)).status, 400);
   assert.equal((await saveExperience({ ...experience, edgePattern: "unknown" }, 1)).status, 400);
+  assert.equal((await saveExperience({ ...experience, peakPattern: "unknown" }, 1)).status, 400);
   assert.deepEqual(await (await saveExperience(experience, 1)).json(), { preferences: { ...prefs, experience, revision: 2 } });
   experience.edgePattern = "off";
   assert.deepEqual(await (await saveExperience(experience, 2)).json(), { preferences: { ...prefs, experience, revision: 3 } });
+  experience.peakPattern = "steady";
+  assert.deepEqual(await (await saveExperience(experience, 3)).json(), { preferences: { ...prefs, experience, revision: 4 } });
+  assert.equal((await saveExperience({ ...experience, peakPattern: "steady-ish" }, 4)).status, 400);
+  assert.deepEqual((await (await cloud(library)).json()).preferences, { ...prefs, experience, revision: 4 },
+    "An unsupported shape cannot overwrite the saved steady choice or advance its revision.");
   const updatedAppearance = { ...prefs, appearance: "system" };
-  const savedAppearance = await save({ action: "savePreferences", preferences: updatedAppearance }, 3);
-  assert.deepEqual(await savedAppearance.json(), { preferences: { ...updatedAppearance, experience, revision: 4 } });
+  const savedAppearance = await save({ action: "savePreferences", preferences: updatedAppearance }, 4);
+  assert.deepEqual(await savedAppearance.json(), { preferences: { ...updatedAppearance, experience, revision: 5 } });
   const edited = await save({ action: "updateStory", id: story.id, changes: { position: 1, corrections: [null, 0], description: "", favorite: true } }, 1);
   assert.equal(edited.status, 200);
   const metadata = await edited.json();
@@ -93,7 +99,7 @@ test("accounts and cloud libraries use real SQLite transactions, cross-user isol
   assert.equal(read.stories[0].text, story.text); assert.equal(read.stories[0].position, 1);
   assert.deepEqual(read.stories[0].corrections, [null, 0]); assert.equal(read.stories[0].description, undefined);
   assert.equal(read.stories[0].favorite, true);
-  assert.deepEqual(read.preferences, { ...updatedAppearance, experience, revision: 4 });
+  assert.deepEqual(read.preferences, { ...updatedAppearance, experience, revision: 5 });
   assert.equal((await (await cloud("/api/account")).json()).library, undefined, "Preset reads don't carry saved story text.");
   const download = await (await cloud("/api/account/data")).json();
   assert.deepEqual(download.library, { revision: read.revision, stories: read.stories, preferences: read.preferences });

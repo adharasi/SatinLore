@@ -115,8 +115,13 @@
           <p id="scene-model-help" class="note">Loom finds scene changes. Nocturne uses those scenes and adds more rhythm options in the simulator.</p>
           <button id="model-practice-shortcut" type="button" class="setup-button" hidden>Open a model practice story <span aria-hidden="true">→</span></button>
           <div id="nocturne-panel" hidden>
-            <p class="note">Nocturne sends up to 16 sets of scene labels and section numbers to OpenAI. These requests exclude story text, titles and toy settings.</p>
+            <p class="note">Optional context review sends nearby story excerpts to OpenAI through SatinLore. A request can include up to 64 paragraphs and 12,000 bytes of text. Review begins when enabled and continues as you read within this visit’s allowance. <a href="/help#nocturne-privacy" target="_blank" rel="noopener">How your text is processed</a></p>
+            <label class="check-label"><input id="nocturne-context-consent" type="checkbox"> Allow nearby story excerpts for this story during this visit</label>
+            <button id="nocturne-context-enable" type="button" class="setup-button" disabled>Enable nearby context review</button>
+            <button id="nocturne-context-disable" type="button" class="setup-button" hidden>Disable nearby context review</button>
+            <p id="nocturne-context-status" class="note" role="status"></p>
             <button id="open-nocturne-patterns" type="button" class="setup-button">Choose Nocturne patterns <span aria-hidden="true">→</span></button>
+            <p class="note">You can also review up to 16 local scene cues. This option excludes story text, titles and toy settings.</p>
             <button id="nocturne-run" type="button" class="setup-button" disabled>Analyse with Nocturne</button>
             <button id="nocturne-sign-in" type="button" class="setup-button" hidden>Sign in to use Nocturne</button>
             <p id="nocturne-status" class="note" role="status"></p>
@@ -211,8 +216,8 @@
           <select id="nocturne-edge-pattern" aria-describedby="nocturne-edge-help nocturne-pattern-help"><option value="auto">Automatic</option><option value="ease">Build and ease</option><option value="off">No edging pattern</option></select>
           <p id="nocturne-edge-help" class="note">Build and ease rises, backs off, then rises again. A movement set to Steady keeps its level during the build-up.</p>
           <label for="nocturne-peak-pattern">At a scene’s climax</label>
-          <select id="nocturne-peak-pattern" aria-describedby="nocturne-peak-help nocturne-pattern-help"><option value="auto">Automatic</option><option value="crest">Sustained crest</option><option value="accents">Peak pulses</option><option value="ease">Build and ease</option></select>
-          <p id="nocturne-peak-help" class="note">Automatic uses your rhythm choice for each movement. Follow scene rhythm uses the scene’s cues.</p>
+          <select id="nocturne-peak-pattern" aria-describedby="nocturne-peak-help nocturne-pattern-help"><option value="auto">Automatic</option><option value="steady">Steady hold</option><option value="crest">Sustained crest</option><option value="accents">Peak pulses</option><option value="ease">Build and ease</option></select>
+          <p id="nocturne-peak-help" class="note">Automatic uses your rhythm choice for each movement. Steady hold keeps the calibrated level. Follow scene rhythm uses the scene’s cues.</p>
           <p id="nocturne-quiet-pattern" class="note"></p>
           <p id="nocturne-peak-status" class="note" role="status"></p>
         </section>

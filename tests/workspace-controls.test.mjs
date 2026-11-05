@@ -38,6 +38,32 @@ test("actual workspace connects, stops, starts again and reconnects without stal
   assert.deepEqual(app.errors, []);
 });
 
+test("the Nocturne steady selector applies the existing simulator hold and stays paused until Start", async t => {
+  const app = workspace(); t.after(() => app.destroy());
+  await app.settle();
+  await app.add("They kissed gently.\n\nTheir passionate, tender kiss and romantic embrace expressed affection.");
+  await app.click("connect");
+  app.nodes.get("scene-model").value = "nocturne";
+  await app.nodes.get("scene-model").dispatch("change");
+  app.nodes.get("nocturne-peak-pattern").value = "steady";
+  await app.nodes.get("nocturne-peak-pattern").dispatch("change");
+  assert.equal(app.read("currentExperience().peakPattern"), "steady");
+  assert.equal(app.read("latest.running"), false);
+  assert.match(app.nodes.get("nocturne-peak-status").textContent, /Set for this visit/);
+  await app.click("next");
+  assert.match(app.nodes.get("nocturne-current-pattern").textContent, /Steady hold/);
+  await start(app);
+  const level = app.read("latest.target");
+  assert.ok(level > 0);
+  await app.advance(10000);
+  assert.equal(app.read("latest.output"), level);
+  app.nodes.get("level").value = "0";
+  await app.nodes.get("level").dispatch("input");
+  await app.advance(2000);
+  assert.equal(app.read("latest.output"), 0);
+  assert.deepEqual(app.errors, []);
+});
+
 test("starting a short story at the page top preserves its selected first section and manual correction", async t => {
   const app = await ready(t);
   app.nodes.get("level").value = "3";

@@ -408,3 +408,56 @@ test("a plain narrated action can borrow nearby personal affection across a clau
     assert.equal(scoreParagraph(text).level, 0, text);
   }
 });
+
+test("paired present affection and directed gestures recover a low local cue without selecting a movement", () => {
+  const examples = [
+    "He reached for her hand. He was falling for her.",
+    "Mara was attracted to him, and held his gaze.",
+    "She held him close. He loved it when she held him.",
+    "“You look lovely,” she said. He blushed.",
+    "A twenty-one-year-old woman took his hand. She felt attracted to him.",
+  ];
+  for (const text of examples) {
+    const [result] = groupScenes(sceneRows(text));
+    assert.deepEqual([result.level, result.phase, result.currentCue, result.movements], [1, "build", true, []], text);
+  }
+  const [compliment, response] = groupScenes(sceneRows("“You look lovely,” she said.", "His cheeks turned pink."));
+  assert.deepEqual([compliment, response].map(p => [p.level, p.phase, p.currentCue, p.sceneId]),
+    [[1, "build", true, 1], [1, "sustain", true, 1]]);
+});
+
+test("weak, uncertain and non-present signals cannot recover an affectionate cue", () => {
+  const examples = [
+    "She smiled at him. They had both passed the exam.",
+    "Their eyes met. Her breath caught at the noise outside.",
+    "He held her hand while the medic worked.",
+    "He was falling for her. The dishes were on the table.",
+    "He held her hand. He was not attracted to her.",
+    "I was in love with him, and I smiled at her.",
+    "He was attracted to her and held his hand over the flame.",
+    "If he held her hand, he might fall in love with her.",
+    "Years ago, he held her hand. He was falling for her.",
+    "She pictured how he held her hand. She was falling for him.",
+    "Mara said she was falling for him. She reached for his hand.",
+    "“You look lovely,” he read from the script. She blushed.",
+    "“You look lovely,” his sister said. He blushed.",
+    "“You look lovely,” she said. She blushed.",
+    "“You look lovely,” she said. He blushed after dropping the baton.",
+    "He held her hand. He was falling for her. She asked him to stop.",
+  ];
+  for (const text of examples) {
+    const [result] = groupScenes(sceneRows(text));
+    assert.equal(result.level, 0, text);
+    assert.equal(result.currentCue, undefined, text);
+  }
+  const interrupted = groupScenes(sceneRows("“You look lovely,” she said.", "***", "He blushed."));
+  assert.deepEqual(interrupted.map(p => p.level), [0, 0, 0]);
+  const corrected = groupScenes(sceneRows({text: "“You look lovely,” she said.", override: 0}, "He blushed."));
+  assert.deepEqual(corrected.map(p => p.level), [0, 0]);
+  const unrelated = groupScenes(sceneRows("“I love you,” she said.", "The witness blushed as the courtroom quieted.",
+    "“You look lovely,” he said.", "She blushed with embarrassment after dropping the baton.",
+    "“You look lovely,” she said.", "She blushed."));
+  assert.deepEqual(unrelated.map(p => p.level), [0, 0, 0, 0, 0, 0]);
+  const [sensitive] = groupScenes(sceneRows("A fifteen-year-old took his hand. She was falling for him."));
+  assert.deepEqual([sensitive.level, sensitive.quiet, sensitive.cloudExcluded, sensitive.currentCue], [0, true, true, undefined]);
+});

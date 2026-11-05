@@ -1,9 +1,106 @@
 import {NOCTURNE_LABELS} from "./calibration.mjs";
+import {NOCTURNE_CONTEXT_VERSION, NOCTURNE_CONTEXT_TIMEOUT_MS, MAX_CONTEXT_PARAGRAPHS, MAX_CONTEXT_BYTES, MAX_CONTEXT_BODY_BYTES, MAX_PARAGRAPH_BYTES, validateNocturneContext} from "./nocturne-context-contract.mjs";
 export {NOCTURNE_LABELS};
+export {NOCTURNE_CONTEXT_VERSION, validateNocturneContext};
 const MAX_CUES = 16;
 const rhythms = ["steady", "gentle", "dynamic"];
 const shapes = ["unspecified", "accented", "sustained", "alternating"];
 const endpoint = "/api/scene-analysis";
+export const NOCTURNE_CONTEXT_SESSION_REQUESTS = 12;
+export const NOCTURNE_CONTEXT_SESSION_BYTES = 60_000;
+const PREFETCH_BYTES = 600;
+const OVERLAP_BYTES = 480;
+const encoder = new TextEncoder();
+const byteLength = value => encoder.encode(value).length;
+const contextBody = paragraphs => JSON.stringify({version: NOCTURNE_CONTEXT_VERSION, consent: true, paragraphs});
+const emptyBodyBytes = byteLength(contextBody([]));
+
+function contextText(paragraph) {
+  if (!paragraph?.analysed || paragraph.quiet || paragraph.cloudExcluded || paragraph.override !== null ||
+      typeof paragraph.text !== "string" || !paragraph.text.trim() || paragraph.text.includes("\u0000")) return null;
+  return paragraph.text;
+}
+
+function contextEntry(paragraphs, id) {
+  const text = contextText(paragraphs[id]);
+  if (text === null) return null;
+  const paragraph = {id, text};
+  return {paragraph, sourceBytes: byteLength(text), bodyBytes: byteLength(JSON.stringify(paragraph))};
+}
+
+function canFitEntry(entry, sourceLimit) {
+  return entry.sourceBytes <= Math.min(sourceLimit, MAX_PARAGRAPH_BYTES) && emptyBodyBytes + entry.bodyBytes <= MAX_CONTEXT_BODY_BYTES;
+}
+
+function nextContextStart(paragraphs, position, attempted, sourceLimit, lookahead) {
+  const current = Number.isInteger(position) ? Math.max(0, Math.min(position, paragraphs.length - 1)) : 0;
+  const end = Math.min(paragraphs.length, current + MAX_CONTEXT_PARAGRAPHS);
+  let distance = 0, excluded = 0, limited = 0;
+  for (let id = current; id < end; id++) {
+    if (id > current + 2 && distance > lookahead) break;
+    if (!attempted.has(id)) {
+      const entry = contextEntry(paragraphs, id);
+      if (!entry) excluded++;
+      else if (canFitEntry(entry, sourceLimit)) return {id, excluded, limited};
+      else limited++;
+    }
+    distance += byteLength(paragraphs[id]?.text ?? "");
+  }
+  return {id: -1, excluded, limited};
+}
+
+export function nocturneContextNeedsReview(paragraphs, position, {attempted = new Set(), maxBytes = MAX_CONTEXT_BYTES} = {}) {
+  return maxBytes > 0 && nextContextStart(paragraphs, position, attempted, maxBytes, PREFETCH_BYTES).id >= 0;
+}
+
+// Prefer new nearby text. A short already-attempted neighbour may provide
+// context if it fits without reducing the amount of new text in the batch.
+export function nocturneContextCandidates(paragraphs, position = 0, {attempted = new Set(), maxBytes = MAX_CONTEXT_BYTES} = {}) {
+  const sourceLimit = Math.min(MAX_CONTEXT_BYTES, maxBytes);
+  const start = nextContextStart(paragraphs, position, attempted, sourceLimit, MAX_CONTEXT_BYTES);
+  const result = [], newIds = [];
+  let {excluded, limited} = start;
+  let sourceBytes = 0, bodyBytes = emptyBodyBytes;
+  const fits = entry => result.length < MAX_CONTEXT_PARAGRAPHS && sourceBytes + entry.sourceBytes <= sourceLimit &&
+    bodyBytes + entry.bodyBytes + Number(result.length > 0) <= MAX_CONTEXT_BODY_BYTES;
+  function add(entry, overlap = false) {
+    bodyBytes += entry.bodyBytes + Number(result.length > 0);
+    sourceBytes += entry.sourceBytes;
+    if (overlap) result.unshift(entry.paragraph);
+    else { result.push(entry.paragraph); newIds.push(entry.paragraph.id); }
+  }
+  if (start.id >= 0) {
+    const end = Math.min(paragraphs.length, start.id + MAX_CONTEXT_PARAGRAPHS);
+    for (let id = start.id; id < end; id++) {
+      if (attempted.has(id)) break;
+      const entry = contextEntry(paragraphs, id);
+      if (!entry) { excluded++; continue; }
+      if (!canFitEntry(entry, MAX_CONTEXT_BYTES)) { limited++; continue; }
+      if (!fits(entry)) { limited++; break; }
+      add(entry);
+    }
+    let overlapBytes = 0;
+    for (let id = start.id - 1; id >= 0 && id >= start.id - 2 && attempted.has(id); id--) {
+      const entry = contextEntry(paragraphs, id);
+      if (!entry || overlapBytes + entry.sourceBytes > OVERLAP_BYTES || !fits(entry)) break;
+      add(entry, true);
+      overlapBytes += entry.sourceBytes;
+    }
+  }
+  return {paragraphs: result, newIds, sourceBytes, excluded, limited};
+}
+
+export async function requestNocturneContext(paragraphs, {consent = false, signal, request = fetch} = {}) {
+  if (consent !== true) throw new Error("Choose whether to send nearby story excerpts first.");
+  const timeout = AbortSignal.timeout(NOCTURNE_CONTEXT_TIMEOUT_MS);
+  const response = await request(endpoint, {method: "POST", cache: "no-store", credentials: "same-origin", redirect: "error",
+    headers: {"Content-Type": "application/json"}, body: contextBody(paragraphs),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout});
+  const value = await response.json();
+  if (!response.ok) return {labels: null, usage: null, code: value?.code};
+  if (value?.version !== NOCTURNE_CONTEXT_VERSION) throw new Error("Unexpected Nocturne annotations.");
+  return {...validateNocturneContext(paragraphs, value), code: null};
+}
 
 function nearbyPhase(paragraph, sceneId) {
   return paragraph && paragraph.sceneId === sceneId && !paragraph.quiet && !paragraph.cloudExcluded &&

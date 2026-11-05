@@ -23,10 +23,11 @@ const stagePatterns = {
 };
 const nocturnePatterns = {
   crest: {label: "Sustained crest", levels: [.75, .9, 1, 1, .55]},
-  wave: {label: "Rolling wave", levels: [.8, 1, .75, .9]},
+  wave: {label: "Rolling wave", levels: [.8, 1, .75, .9], repeat: true},
   steady: {label: "Steady hold", levels: [1]},
 };
 const peakPresets = {
+  steady: nocturnePatterns.steady,
   crest: nocturnePatterns.crest,
   accents: {label: "Peak pulses", levels: [.85, .55, 1, .55, .85, .7]},
   ease: {label: "Build and ease", levels: [.55, .8, .5, .95, .6, 1, .45]},
@@ -34,8 +35,8 @@ const peakPresets = {
 const gentleCrest = {label: "Gentle crest", levels: [.85, .95, 1, 1, .85]};
 const edgingPattern = {label: "Build and ease", levels: [.65, .85, 1, .55, .85, .95, .65]};
 const describedPatterns = {
-  accented: {label: "Short pulses", levels: [1, .65, 1, .65, .85], accents: [0, 2]},
-  alternating: {label: "Alternating rhythm", levels: [.7, 1, .7, 1], accents: [1, 3]},
+  accented: {label: "Short pulses", levels: [1, .65, 1, .65, .85], accents: [0, 2], repeat: true},
+  alternating: {label: "Alternating rhythm", levels: [.7, 1, .7, 1], accents: [1, 3], repeat: true},
   sustained: nocturnePatterns.steady,
 };
 const sceneShapes = Object.keys(describedPatterns);
@@ -58,6 +59,8 @@ function simulatorScenePattern(scene, rhythm) {
   return rhythm === "scene" ? scenePattern(scene.phase, scene.pattern) : undefined;
 }
 export const simulatorScenePatternLabel = (scene, rhythm) => simulatorScenePattern(scene, rhythm)?.label;
+export const repeatingSimulatorScenePattern = (scene, rhythm) =>
+  scene?.phase === "sustain" && simulatorScenePattern(scene, rhythm)?.repeat === true;
 const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
   Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
@@ -71,7 +74,7 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape} = profile;
+    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape, currentCue, simulatorSceneId} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean" ||
@@ -79,7 +82,9 @@ export function normalizeSceneProfiles(profiles, length) {
         peakPreset !== undefined && (profile.quiet || phase !== "peak" || !Object.hasOwn(peakPresets, peakPreset)) ||
         automaticPeak !== undefined && (automaticPeak !== true || profile.quiet || phase !== "peak" || peakPreset !== undefined) ||
         edging !== undefined && (edging !== true || profile.quiet || (phase !== "build" && phase !== "sustain")) ||
-        shape !== undefined && (profile.quiet || !["build", "sustain"].includes(phase) || !sceneShapes.includes(shape))) throw new RangeError("Use a supported scene stage.");
+        shape !== undefined && (profile.quiet || !["build", "sustain"].includes(phase) || !sceneShapes.includes(shape)) ||
+        currentCue !== undefined && (currentCue !== true || profile.quiet || !["build", "sustain", "peak"].includes(phase)) ||
+        simulatorSceneId !== undefined && (currentCue !== true || !Number.isInteger(simulatorSceneId) || simulatorSceneId < 1)) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(pattern === undefined ? {} : {pattern}),
@@ -87,15 +92,21 @@ export function normalizeSceneProfiles(profiles, length) {
       ...(automaticPeak === undefined ? {} : {automaticPeak}),
       ...(edging === undefined ? {} : {edging}),
       ...(shape === undefined ? {} : {shape}),
+      ...(currentCue === undefined ? {} : {currentCue}),
+      ...(simulatorSceneId === undefined ? {} : {simulatorSceneId}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
 
 export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
-  return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
-    next.rhythm !== previous?.rhythm || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
+  const previousSceneId = simulatorStagePatterns ? previous?.simulatorSceneId ?? previous?.sceneId : previous?.sceneId;
+  const nextSceneId = simulatorStagePatterns ? next?.simulatorSceneId ?? next?.sceneId : next?.sceneId;
+  const sameRepeatingPattern = simulatorStagePatterns && repeatingSimulatorScenePattern(previous, "scene") &&
+    repeatingSimulatorScenePattern(next, "scene") && simulatorScenePattern(previous, "scene") === simulatorScenePattern(next, "scene");
+  return !!next?.phase && (nextSceneId !== previousSceneId || next.phase !== previous?.phase ||
+    next.rhythm !== previous?.rhythm && !sameRepeatingPattern || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
       next.peakPreset !== previous?.peakPreset || next.automaticPeak !== previous?.automaticPeak || next.edging !== previous?.edging ||
-      next.shape !== previous?.shape) ||
+      next.shape !== previous?.shape || next.manual !== previous?.manual || next.quiet !== previous?.quiet) ||
     (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
     automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
@@ -178,8 +189,9 @@ export class ReadingFeel {
     const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
     const stage = simulatorStagePatterns ? simulatorScenePattern(scene, rhythm) : undefined;
-    const stageStep = stage ? Math.min(preview ? 0 : step, stage.levels.length - 1) : 0;
-    // A stage plays through once, then holds its last step until a new beat.
+    const stageStep = !stage || preview ? 0 : repeatingSimulatorScenePattern(scene, rhythm) ?
+      step % stage.levels.length : Math.min(step, stage.levels.length - 1);
+    // Sustained waves and described rhythms repeat; other stages play once and hold.
     const modulation = stage ? stage.levels[stageStep] :
       variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
     // A temporary ceiling limits the final level without shrinking the
@@ -194,8 +206,16 @@ export class ReadingFeel {
     const floor = scaled >= 1 && (rhythm === "scene" || stage || scene?.phase && !scene.manual) ? 1 : 0;
     // An explicit pulse at level 1 would otherwise be indistinguishable from a hold.
     const accent = floor && amplitude < 2 && stage?.accents?.includes(stageStep) ? 2 : 0;
-    const target = Math.max(floor, accent, Math.floor(amplitude * modulation));
-    return adjust(Math.min(ceiling, Math.max(minimum, target)));
+    const target = Math.max(minimum, floor, accent, Math.floor(amplitude * modulation));
+    // A supported current cue can quantize to the same value as the continuous
+    // background. Use one available step of headroom for the simulator only.
+    // Keep distinct waveform steps, chosen easing, attenuation and user offsets.
+    const backgroundLevel = Math.max(minimum, background);
+    const collapsed = target === backgroundLevel && Math.max(minimum, Math.floor(amplitude)) === backgroundLevel;
+    const contrast = simulatorStagePatterns && mode === "continuous" && !quietEdging && scene?.currentCue === true &&
+      !scene.quiet && !scene.manual && !scene.edging && strength >= 1 && this.settings.gain >= 1 && !stage?.accents &&
+      collapsed && backgroundLevel < Math.min(ceiling, preferred);
+    return adjust(Math.min(ceiling, target + (contrast ? 1 : 0)));
   }
 }
 

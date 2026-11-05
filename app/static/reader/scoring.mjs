@@ -150,7 +150,8 @@ export function scoreParagraph(text) {
 const SCENE_SEPARATOR = /^(?:[\s*#~_—–-]{3,}|(?:chapter|part|book|scene)\s+(?:\d+|[ivxlcdm]{1,8}|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[:.\-–—].*)?)$/u;
 const REST_BOUNDARY = /\b(?:fell asleep|went to sleep|(?:settled|lay) down to rest|(?:need(?:ed)?|take|took) (?:a |some )?(?:break|rest)|paus(?:e|ed) (?:for breath|to rest)|a (?:long|quiet) pause|slowed to a stop|quiet (?:interlude|break))\b/u;
 const TIME_BOUNDARY = /\b(?:(?:the )?(?:next|following) (?:day|morning|afternoon|evening|night|week|month|year)|(?:hours?|days?|weeks?|months?|years?) later|later that (?:evening|night))\b/u;
-const SENSITIVE_CUE = /\b(?:non[ -]?consent(?:ual)?|coerc(?:e|ed|es|ing|ion)|forced|unwanted|under[ -]?age|child(?:ren)?|(?:1[0-7]|[1-9])[ -]year[ -]olds?|incest|bestiality|rape|assault(?:ed)?)\b/u;
+const SENSITIVE_CUE = /\b(?:non[ -]?consent(?:ual)?|coerc(?:e|ed|es|ing|ion)|forced|unwanted|under[ -]?age|child(?:ren)?|(?:1[0-7]|[1-9])[ -]years?[ -]olds?|incest|bestiality|rape|assault(?:ed)?)\b/u;
+const SENSITIVE_AGE = /(?<![\p{L}\p{N}-])(?<!twenty |thirty |forty |fifty |sixty |seventy |eighty |ninety )(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)[ -]years?[ -]olds?\b/u;
 const SOFT_PACE = /\b(?:slow(?:ly)?|unhurried|gentl(?:e|y)|gradual(?:ly)?|softly)\b/u;
 const VARIABLE_PACE = /\b(?:quick(?:ly)?|sudden(?:ly)?|urgent(?:ly)?|abrupt(?:ly)?|rapid(?:ly)?)\b/u;
 const MOVEMENT_CUES = [
@@ -169,6 +170,22 @@ const CONTACT_CONTINUES = /\b(?:kiss(?:ed|es) (?:me|you|him|her|them|each other)
 const REPOSITIONED_CONTACT = /\b(?:(?:laid|placed|moved|slid) (?:my|his|her|their|your|our) (?:hands|arms) (?:round|around|against|over|onto) (?:my|his|her|their|your|our) (?:back|shoulders?|neck|waist|arms?|hands?)|disengaged (?:my|his|her|their|your|our) hands from (?:my|his|her|their|your|our) face[^.!?;]{0,36}\b(?:laid|placed|moved) (?:my|his|her|their|your|our) arms)\b/u;
 const DIALOGUE_TAG = /\b(?:he|she|they|i) (?:said|murmured|asked|replied|whispered|answered|continued)\b/gu;
 const DIALOGUE_DEPARTURE = /\b(?:i|we) (?:must|have to|need to|should|ought to) (?:go|leave|run|head off)\b/u;
+const RELATIONAL_AFFECTION = /\b(?:(?:in love with|falling for|attracted to|had a crush on|flirt(?:ed|s|ing) with|(?:affection|longing|tenderness) for)|(?:like|liked|love|loved) (?:it )?when (?:i|you|he|she|they) (?:touched|held|smiled at|looked at)) (me|you|him|her|them|each other)(?=\s*$|[,.!?;]| (?:and|as|while|when|too|again)\b)/u;
+const RELATIONAL_GESTURES = [
+  /\b(?:took|reached for) (my|his|her|your|their) hand\b/u,
+  /\b(?:(?:met|held|caught) (my|his|her|your|their) (?:gaze|eye)|(?:looked|gazed) into (my|his|her|your|their) eyes)\b/u,
+  /\b(?:smiled|grinned|leaned) (?:at|toward|towards) (me|you|him|her|them|each other)\b/u,
+  /\bbrushed (?:a (?:wet )?lock of )?hair (?:off|away from) (my|his|her|your|their) (?:forehead|face|eyes)\b/u,
+  /\b(?:held|clasped) (me|you|him|her|them|each other) close\b/u,
+];
+const POSSESSIVE_RECIPIENTS = {my: "me", his: "him", her: "her", your: "you", their: "them"};
+const RESPONSE_ACTORS = {my: "i", his: "he", her: "she", their: "they"};
+const RELATIONAL_RESPONSE = /^(?:(i|he|she|they) (?:blushed|went pink)|(my|his|her|their) (?:cheeks|face) (?:flushed|grew warm|turned pink))(?: again| at (?:the|his|her|my|their) (?:compliment|words))?[.!?]*$/u;
+const DIRECT_COMPLIMENT = /^(?:i (?:really )?(?:like|love|adore) (?:you|being with you|spending time with you|your (?:eyes|smile|laugh))|(?:i (?:think|know) )?you(?:'re| are| look) (?:(?:so|really|very|absolutely) )?(?:beautiful|handsome|gorgeous|lovely|attractive)(?: tonight)?)[.!…,]*$/u;
+const COMPLIMENT_ATTRIBUTION = /^\u2063\s*(?:(i|he|she|they) (?:said|murmured|replied|whispered|answered)(?:[.!?,]+\s*|$))?/u;
+const RELATIONAL_FRAME = /\b(?:sister|brother|mother|father|grandmother|grandfather|aunt|uncle|son|daughter|baby|grandchild|siblings|parents?|puppy|kitten|rehears(?:e|ed|al|ing)|recit(?:e|ed|es|ing)|quot(?:e|ed|es|ing)|script|lyrics|overheard|pictured|envisioned|used to|back when|back then|years ago|last (?:summer|winter|spring|autumn|fall|year)|(?:in|from) (?:a|the) (?:film|movie|play|script))\b/u;
+const RELATIONAL_REPORT = /\b(?:(?:said|says|(?:whisper|murmur)(?:ed|s)) (?:i|you|he|she|they|we)|(?:told|tells) (?:me|you|him|her|them|us))\b/u;
+const RELATIONAL_SCOPE = new Set(["after", "before", "instead of", "rather than", "but", "yet", "whereas", "although"]);
 const RELEASE = /\b(?:slowed|softened|eased|relaxed|settled|(?:their|our) breathing (?:evened out|grew quieter))\b/u;
 const CONTACT_RELEASE = /\b(?:(?:they|we) (?:eased|drifted|drew|moved) apart|(?:the|their|our) (?:kiss|embrace) (?:softened|eased))\b/u;
 const PEAK = /\b(?:intensifi(?:ed|es)|crescendo|overwhelming|surge(?:d|s)?|reached (?:a|its|their) peak)\b/u;
@@ -309,6 +326,49 @@ function sceneMovements(actual, incomingDevice) {
   return {movements: orderedMovements(selected), endedMovements, ended, continuation, deviceReference, unresolved, shapes};
 }
 
+function relationshipEvidence(value, narrated, actual, quotes, short) {
+  if (RELATIONAL_FRAME.test(narrated)) return null;
+  // Only use narrated, present clauses that the existing scope scan retained.
+  // A named emotion and a directed gesture are separate pieces of evidence.
+  let previous;
+  let paired = false;
+  const affectionTargets = new Set(), gestureTargets = new Set();
+  for (const {clause, index, before} of actual) {
+    if (!clause.trim() || clause.includes(QUOTE_GAP) || RELATIONAL_SCOPE.has(before) || CONTACT_REPORT.test(clause) ||
+        RELATIONAL_REPORT.test(clause) || UNREALISED.test(clause) || UNCERTAIN_CONTEXT.test(clause)) continue;
+    const affection = RELATIONAL_AFFECTION.exec(clause)?.[1];
+    const gestures = RELATIONAL_GESTURES.flatMap(cue => {
+      const target = cue.exec(clause)?.slice(1).find(Boolean);
+      return target ? [POSSESSIVE_RECIPIENTS[target] ?? target] : [];
+    });
+    paired ||= gestures.includes(affection) || previous && previous.index + 2 === index &&
+      (previous.gestures.includes(affection) || gestures.includes(previous.affection));
+    if (affection) affectionTargets.add(affection);
+    for (const target of gestures) gestureTargets.add(target);
+    previous = {index, affection, gestures};
+  }
+  // A simple direct compliment can also be corroborated by an actual reaction.
+  // Dialogue without a reaction is insufficient, even when it sounds romantic.
+  const compliment = short && quotes.length === 1 && value.startsWith(quotes[0]) &&
+    !CONTACT_REPORT.test(narrated) && !SPECULATION.test(narrated) && !NON_ACTUAL.test(narrated) &&
+    !UNCERTAIN_CONTEXT.test(narrated) && !UNREALISED.test(narrated) &&
+    DIRECT_COMPLIMENT.test(quotes[0].slice(1, -1).trim());
+  const attribution = compliment ? COMPLIMENT_ATTRIBUTION.exec(narrated) : null;
+  const [prefix = "", speaker] = attribution ?? [];
+  const response = short && RELATIONAL_RESPONSE.exec(narrated.slice(prefix.length));
+  const responseActor = response && (response[1] ?? RESPONSE_ACTORS[response[2]]);
+  return {paired, compliment: compliment && (prefix.length === narrated.length || Boolean(responseActor)), speaker, responseActor,
+    affectionTargets: short ? [...affectionTargets] : [], gestureTargets: short ? gestureTargets : new Set()};
+}
+
+const hasComplimentResponse = (left, right) => left.compliment && right.responseActor && left.speaker !== right.responseActor;
+
+function linkedRelationship(previous, next) {
+  return previous && next && (!previous.responseActor && !next.compliment && hasComplimentResponse(previous, next) ||
+    previous.affectionTargets.some(target => next.gestureTargets.has(target)) ||
+    next.affectionTargets.some(target => previous.gestureTargets.has(target)));
+}
+
 function sceneCandidate(paragraph, incomingDevice) {
   if (!paragraph || typeof paragraph.text !== "string" || !Number.isInteger(paragraph.band) ||
       paragraph.band < 0 || paragraph.band >= SUGGESTION_LEVELS.length || SUGGESTION_LEVELS[paragraph.band] !== paragraph.suggestedLevel || typeof paragraph.reason !== "string") {
@@ -319,7 +379,7 @@ function sceneCandidate(paragraph, incomingDevice) {
   const evidence = clauseEvidence(narrated);
   const rest = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim()) || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
   const stopped = EXPLICIT_STOP.test(value);
-  const sensitive = SENSITIVE_CUE.test(value);
+  const sensitive = SENSITIVE_CUE.test(value) || SENSITIVE_AGE.test(value);
   const motion = sceneMovements(evidence.actual, incomingDevice && !/^["'“‘]/u.test(value));
   const {movements: describedMovements, ended} = motion;
   const quotes = narrated !== value ? [...value.matchAll(QUOTED_TEXT)].map(([quote]) => quote) : [];
@@ -342,11 +402,14 @@ function sceneCandidate(paragraph, incomingDevice) {
   const dialogue = value.length <= 240 && /^["'“‘]/u.test(value) && !DIALOGUE_DEPARTURE.test(value) &&
     !narrated.replace(DIALOGUE_TAG, "").replace(/[\u2063\s,.!?…—–-]/gu, "");
   const repositionsHold = !quiet && !cloudExcluded && paragraph.override == null && REPOSITIONED_CONTACT.test(actual);
+  const relationship = band === 0 && !quiet && !cloudExcluded && paragraph.override == null ?
+    relationshipEvidence(value, narrated, evidence.actual, quotes, short) : null;
   const advisory = sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
     uncertain ? "The wording is ambiguous or speculative. This suggestion stays at zero." : null;
   return {
     anchor: band > 0 && paragraph.override !== 0,
     evidenceBand: band,
+    relationship,
     connective: band === 0 && !quiet && short && paragraph.override == null && !hasContactCue(value),
     contextualContact: band === 0 && !quiet && short && paragraph.override == null &&
       DIRECT_CONTACT.test(narrated.replace(/[.!?]$/u, "")),
@@ -391,6 +454,18 @@ export function groupScenes(paragraphs) {
     const previous = candidates.at(-1);
     candidates.push(sceneCandidate(paragraph, previous?.anchor && previous.deviceReference));
   }
+  for (const [index, candidate] of candidates.entries()) {
+    const signal = candidate.relationship;
+    const previous = candidates[index - 1]?.relationship;
+    const next = candidates[index + 1]?.relationship;
+    if (!signal || !(signal.paired || hasComplimentResponse(signal, signal) ||
+        linkedRelationship(previous, signal) || linkedRelationship(signal, next))) continue;
+    candidate.anchor = true;
+    candidate.evidenceBand = 1;
+    candidate.movementHints = [];
+    Object.assign(candidate.result, {band: 1, level: SUGGESTION_LEVELS[1], currentCue: true,
+      reason: "Matched a present affectionate gesture or a corroborated compliment."});
+  }
   let nextScene = 0, activeScene = null, lastAnchor = -1, heldContact = false;
   const endedMovements = new Set();
   for (const [index, candidate] of candidates.entries()) {
@@ -410,7 +485,7 @@ export function groupScenes(paragraphs) {
       const band = recovery ? Math.min(2, result.band) : peak ? 4 : Math.min(3, result.band);
       const rhythm = peak || !recovery && band >= 3 && candidate.quick ? "dynamic" :
         recovery || band >= 2 && candidate.slow ? "gentle" : "steady";
-      const movements = !result.movements.length && candidate.continuesContact && activeScene !== null ? previous?.movements : undefined;
+      const movements = !result.currentCue && !result.movements.length && candidate.continuesContact && activeScene !== null ? previous?.movements : undefined;
       applyBeat(result, {phase, band, rhythm, reason: result.reason, movements});
       if (peak) result.advisory = "Review this stronger local suggestion if needed.";
       heldContact = !recovery && (candidate.holdsContact || heldContact && candidate.continuesContact);

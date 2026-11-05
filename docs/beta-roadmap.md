@@ -4,6 +4,14 @@ Approved workspace revision: 29 October 2026 (frontend specification v1.2), refi
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The 2 November eight-model request adds simulated rehearsal and a configured bounded live path; no physical model is qualified by implementation alone. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
+## Defaults and contextual Nocturne — 5 November 2026
+
+The next source phase applies Continuous background, Follow scene rhythm and Steady hold to absent experience preferences, preserving existing explicit choices and all current limits. The neutral dispatched-output harness compares these defaults with story-following and continuing scene-rhythm conditions, including long dwell, connective text, hard quiet, seek, explicit restart and lower/zero limits. Its measured gaps still include the existing Stop-before-reduction behavior; commanded means differ and no preference winner is inferred.
+
+Optional contextual Nocturne now accepts separately consented, bounded nearby excerpts through the authenticated service and GPT-6 Luna. It can classify eligible context Loom missed, using fixed non-graphic categories with strict confidence/phase validation. The cue-only path remains available. No generated story text, device commands, billing or silent library upload is introduced. Contextual state stays in memory, cancels on interruption and uses a bounded partial-coverage budget. [Defaults, privacy, costs, evaluation and remaining gates](nocturne-context-phase.md)
+
+The context v2 follow-up reviews more of a dialogue-heavy story within explicit request and byte budgets. It separates current events from noncurrent references and keeps validated low cues distinguishable from continuous background when the simulator has headroom. The candidate passed 22 Python and 603 JavaScript tests, Worker packaging and the deployment dry run. The next gates are a frozen story holdout, live Luna timing and usage, reader comparisons and physical device qualification. [Release acceptance and development replay](release-acceptance.md) · [Packaged browser checks by commit](https://github.com/adharasi/SatinLore/pull/16)
+
 ## Main reader quick start — 4 November 2026
 
 The public reader offers four optional questions on quiet passages, edging, maximum and rhythm after first sign-in. A signed-in reader can save those defaults and edit or reset them in Settings. The protected preview can try the form for the current visit. The main hosted pairing flow moves from device selection to one quick movement check, then opens Advanced controls. Existing physical limits and the separate beta test flow still apply. Nocturne offers a choice of simulator peak patterns, and the scan lists matching toy models above a story when it detects movement cues.
@@ -13,6 +21,10 @@ The remaining release checks are real inbox delivery for public signup, physical
 ## Reader movement and Nocturne patterns — 5 November 2026
 
 The main app uses the Alpha Flexer renewal behavior for identical, unexpired two-second commands. The documented socket path keeps vibration and flexing rhythm choices independent and retains targeted Stop. The simulator offers separate Nocturne choices for build-ups and climaxes based on onboarding preferences. Settings offers a first-time onboarding preview, and a practice story can be opened from an empty library.
+
+The simulator sustain renderer now repeats the existing Rolling wave, Short pulses and Alternating rhythm profiles during long dwell. Compatible paragraphs preserve the cycle while their suggested level changes. Build, peak and recovery profiles retain their one-pass timing. The existing Nocturne selector also offers Steady hold, with the same explicitly saved preference and paused-application behavior as its other choices. Manual zero, hard quiet boundaries, movement stops and all limits retain priority. These changes apply to simulator stage patterns; live transport behavior and physical qualification are separate. [Evidence comparison and next phase](pattern-continuity-phase.md)
+
+For this renderer follow-up, local common checks passed with 22 Python and 573 JavaScript tests, including timed model/controller playback, the actual selector binding and real SQLite preference round trips. Worker packaging passed with 84 allowlisted assets and the isolated bridge. The focused packaged Nocturne browser check includes steady selection and long hold, but could not run here because its Chromium executable was unavailable; its script passed syntax checking. Pull-request CI runs the packaged browser journeys; its latest result is attached to the review. Deployment and physical evidence remain open.
 
 Local checks passed for 22 Python and 542 JavaScript tests. Chromium checks covered the reader, verified account fixture, onboarding preview, and the separate beta and Alpha journeys.
 
@@ -123,6 +135,8 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 ## F5 — measurable scoring evaluation
 
+The controlled-release milestone has a dedicated set of acceptance gates for story coverage, independent annotations, classification, output and reader use. [Release acceptance](release-acceptance.md)
+
 Keep the local rules as the baseline and retain suggestions **0, 1, 2, 3 and 5 out of 20**. Visual labels never authorise stronger output. Prepare a versioned, rights-cleared evaluation set and rubric, split by story/source, with held-out material and independent labels on a subset. A proposed pilot is 200–500 paragraphs; that size is a starting hypothesis, not coverage evidence.
 
 Compare the existing rules, contextual improvements, a simple linear baseline and only then a licensed local classifier if useful. Measure neutral false activations, severe overestimates, ordinal error, correction burden, abstention, load size/memory and cold/warm latency. Choose promotion thresholds before inspecting held-out results. Neutral plumbing fixtures alone cannot establish usefulness on intended reading material.
@@ -135,7 +149,7 @@ The fourth rules revision adds a 43-paragraph corpus across seven original stori
 
 The fifth rules revision adds grounded pulses and buzzing, short device references and named movement stops. On 47 new paragraphs across five original stories, the deployed fourth revision matched 33 annotations and the fifth matched 47. Both matched all 43 original annotations. A separate Chromium scroll comparison across four simulators went from 19 to 28 matching movement sets out of 28. A second Flexer scroll read-through matched all 10 annotations, including persistence of a named stop through a room detail. Sentence-by-sentence timing within paragraphs and broader story evaluation remain open. [Context comparison and replay steps](reader-scene-testing.md)
 
-The simulator can now play a slow build, a peak with distinct accents and a gradual taper using **Follow scene rhythm**. Each pattern advances once, then holds its last step until the next beat. Compare the shapes against **Steady** under the same settings, then use permission-cleared passages to separate rhythm preference from stage-classification errors. Live device behavior remains a separate qualification milestone. [Simulator rehearsal](reader-scene-testing.md#rehearse-build-peak-and-recovery-patterns)
+The simulator can now play a slow build, a peak with distinct accents and a gradual taper using **Follow scene rhythm**. These stages advance once, then hold their last step until the next beat. Sustain waves and explicitly described pulse/alternation profiles repeat using the same two-second steps. Compare the shapes against **Steady** under the same settings, then use permission-cleared passages to separate rhythm preference from stage-classification errors. Live device behavior remains a separate qualification milestone. [Simulator rehearsal](reader-scene-testing.md#rehearse-build-peak-and-recovery-patterns)
 
 The sixth local revision broadens tests for unrealised actions, reported movement, quoted time markers and nearby objects that can be mistaken for a movement cue. The deployed fifth revision matched 13 of 29 new annotations and the sixth matched 29. Both matched all 90 earlier annotations. The sixth revision also produces bounded local rhythm categories for advanced analysis. These results describe targeted fixtures. Broader accuracy, model usefulness and physical feel still need separate tests. [Comparison and fixtures](reader-scene-testing.md#expectations-reported-actions-and-competing-movement)
 

@@ -25,12 +25,12 @@ import {mountExperienceDialog} from "../../app/static/reader/experience-dialog.m
 import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "../../app/static/reader/calibration.mjs";
-import {nocturneCandidates, nocturneAvailable, requestNocturne} from "../../app/static/reader/nocturne.mjs";
+import {nocturneCandidates, nocturneAvailable, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "../../app/static/reader/nocturne.mjs";
 import {storyToyRecommendation} from "../../app/static/reader/toy-recommendations.mjs";
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
-export function workspace({hosted = false, locks = true, publicAuth = false, authRequest, libraryRequest} = {}) {
+export function workspace({hosted = false, locks = true, publicAuth = false, authRequest, libraryRequest, sceneRequest} = {}) {
   let time = 1000000, timerId = 0, context, narrow = false, document;
   const timers = new Map(), nodes = new Map(), errors = [], documentListeners = new Map(), windowListeners = new Map();
   const preferenceValues = new Map(), downloads = [];
@@ -158,7 +158,12 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, simulatorScenePatternLabel,
     AccountLibrary: class extends AccountLibrary { constructor() { super({request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
-    DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne, storyToyRecommendation, channelLabel,
+    DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates,
+    nocturneAvailable: () => nocturneAvailable(sceneRequest),
+    requestNocturne: (cues, options) => requestNocturne(cues, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
+    requestNocturneContext: (paragraphs, options) => requestNocturneContext(paragraphs, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
+    storyToyRecommendation, channelLabel, nocturneContextCandidates, nocturneContextNeedsReview,
+    NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, queueMicrotask, AbortController,
     DEFAULT_EXPERIENCE, validateExperience, mountExperienceDialog,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,

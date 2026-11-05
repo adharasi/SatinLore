@@ -199,6 +199,9 @@ test("deployment invokes authentication ahead of all assets and packages only th
     assert.match(page, /<meta name="satinlore-build" content="(?:[a-f0-9]{40}|local)">/);
   }
   assert.doesNotMatch(hosted, /<script[^>]+(?:lovense-api|device-bridge)/i);
+  const help = await readFile(resolve(output, "help.html"), "utf8");
+  assert.match(help, /<a href="https:\/\/developers\.openai\.com\/api\/docs\/guides\/your-data" target="_blank" rel="noopener">OpenAI’s data controls<\/a>/);
+  assert.doesNotMatch(help, /<(?:script|img|link)[^>]+(?:src|href)=["']https?:\/\//i);
   const bridge = await readFile(resolve(output, "device-bridge.html"), "utf8");
   assert.match(bridge, /<script id="lovense-isolated-bundle">/);
   const embedded = bridge.match(/<script id="lovense-isolated-bundle">([\s\S]*?)<\/script>/);
