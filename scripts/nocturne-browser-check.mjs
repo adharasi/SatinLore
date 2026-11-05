@@ -26,6 +26,23 @@ let configured = true;
 let providerResult = "success";
 let releasePending;
 
+async function openReaderSettings(page) {
+  if (await page.locator("#settings-panel").isHidden()) await page.locator("#toggle-settings").click();
+  const tab = page.locator("#settings-reader-tab");
+  if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
+  await page.locator("#reader-settings").waitFor({state: "visible"});
+}
+
+async function selectPeakPattern(page, value) {
+  const selector = page.locator("#nocturne-peak-pattern");
+  await selector.waitFor({state: "visible"});
+  await selector.selectOption(value);
+  await page.waitForFunction(expected => {
+    const node = document.querySelector("#nocturne-peak-pattern");
+    return node?.value === expected && !node.disabled;
+  }, value);
+}
+
 async function testPage() {
   const context = await browser.newContext({viewport: {width: 1440, height: 1000}, reducedMotion: "reduce"});
   const page = await context.newPage();
@@ -66,8 +83,8 @@ async function testPage() {
   await page.locator("#draft-story").fill(source);
   await page.locator("#open-draft").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.dataset.state === "ready");
+  await openReaderSettings(page);
   const model = page.locator("#scene-model");
-  if (!await model.isVisible()) await page.locator("#settings-story-tab").click();
   await model.waitFor({state: "visible"});
   return {context, page, model};
 }
@@ -117,8 +134,14 @@ try {
   assert.equal(await page.locator("#capValue").textContent(), "10");
   await checkPeakMeter(page, 7);
 
-  await page.locator("#nocturne-peak-pattern").selectOption("steady");
+  assert.equal(await page.locator(".story-paragraph.active").getAttribute("data-index"), "2");
+  await openReaderSettings(page);
+  await page.locator("#open-nocturne-patterns").click();
+  await page.locator("#story-settings").waitFor({state: "visible"});
+  await selectPeakPattern(page, "steady");
   await page.waitForFunction(() => /Steady hold/i.test(document.querySelector("#nocturne-current-pattern")?.textContent));
+  assert.equal(await page.locator(".story-paragraph.active").getAttribute("data-index"), "2", "Opening pattern controls preserves the selected peak.");
+  assert.match(await page.locator("#level-source").textContent(), /Peak.*Steady hold/i);
   assert.equal(await page.locator("#output").textContent(), "0 / 20", "Choosing a profile stays paused.");
   await page.locator("#start").click();
   await page.locator("#confirm-start").click();
@@ -128,9 +151,10 @@ try {
   assert.equal(await page.locator("#output").textContent(), "7 / 20", "Steady hold retains the calibrated simulator level.");
   await page.locator("#stop").click();
   assert.equal(await page.locator("#output").textContent(), "0 / 20");
-  await page.locator("#nocturne-peak-pattern").selectOption("auto");
+  await selectPeakPattern(page, "auto");
 
   // Switching back to Loom restores the local stage even after a valid response.
+  await openReaderSettings(page);
   await model.selectOption("loom");
   assert.equal(posts.length, 1);
   assert.equal(await model.inputValue(), "loom");
