@@ -52,7 +52,7 @@ If beta has no matching Access application yet, its Worker still denies unsigned
 
 ## Rehearse tonight without hardware
 
-1. Sign in to the hosted app using your existing founder email and Cloudflare PIN. Confirm 18+ and choose **Create my private account** if it has not already been created. Account creation does not start recording or connect a toy.
+1. Sign in to the hosted app using your existing founder email and Cloudflare PIN. Confirm 18+ and choose **Set up saved presets** if you have yet to add a profile. This step leaves recording and toy connection off.
 2. Open **Toy setup**, choose **Flexer → Try a simulator**, connect and explicitly select the synthetic device. Nothing should move before a requested test.
 3. Request a level-1, two-second vibration test. Watch the simulator's numeric output return to zero, then check **I checked the response and the output is stopped**. Continue to movement setup.
 4. Check that Flexer explains both **Vibration** and **Fingering / flexing**. Walk through minimum, background, preferred level, upper limit and Ease off level for each movement. Sliders change drafts; they do not automatically send output. Tests require their own button, and ratings remain optional.

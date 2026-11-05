@@ -76,7 +76,7 @@ test("Nocturne's automatic climax follows each movement's rhythm without overrid
   assert.deepEqual(levels("gentle"), [5, 6, 7, 7, 5]);
   assert.deepEqual(levels("dynamic"), [5, 7, 4, 6, 3]);
   assert.deepEqual(levels("scene"), [5, 6, 7, 7, 3]);
-  assert.deepEqual(levels("scene", {...peak, pattern: "accents"}), levels("dynamic"));
+  assert.deepEqual(levels("scene", {...peak, pattern: "accents"}), [5, 3, 7, 3, 5]);
   assert.deepEqual(levels("gentle", {...peak, manual: true}), [5, 5, 4, 4, 5]);
 });
 
@@ -206,6 +206,24 @@ test("scene rhythms apply within the user's gain, strength, maximum and quiet ch
   assert.equal(feel.desired({base: 0, scene: {rhythm: "steady", quiet: true}}), 0);
   assert.equal(feel.desired({base: 0, scene: {rhythm: "steady", quiet: false}}), 2);
   assert.equal(feel.desired({base: 4, scene: dynamic, manualZero: true}), 0);
+});
+
+test("an explicitly described light pulse has a distinct simulator rhythm without changing live movement", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  const scene = {phase: "sustain", rhythm: "steady", quiet: false, shape: "accented"};
+  const trace = options => [0, 2000, 4000, 6000, 8000].map(now =>
+    feel.desired({base: 1, scene, now, simulatorStagePatterns: true, ...options}));
+  assert.deepEqual(trace({}), [2, 1, 2, 1, 1]);
+  assert.deepEqual(trace({ceiling: 1}), [1, 1, 1, 1, 1]);
+  assert.deepEqual(trace({ceiling: 0}), [0, 0, 0, 0, 0]);
+  assert.deepEqual(trace({manualZero: true}), [0, 0, 0, 0, 0]);
+  assert.deepEqual(trace({simulatorStagePatterns: false}), [1, 1, 1, 1, 1]);
+  feel.configure({rhythm: "steady"});
+  assert.deepEqual(trace({}), [1, 1, 1, 1, 1]);
+  feel.configure({rhythm: "dynamic"});
+  assert.deepEqual(trace({}), [1, 1, 1, 1, 1], "An automatic low beat must not cut out during variation.");
+  feel.configure({gain: 0});
+  assert.deepEqual(trace({}), [0, 0, 0, 0, 0]);
 });
 
 test("simulator stage rhythms rise, accent, and taper once within the chosen range", () => {

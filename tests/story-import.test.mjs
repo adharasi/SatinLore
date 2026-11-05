@@ -7,6 +7,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { ao3StoryUrl, boundedImportText, importPublicStory, normalizeImportedStory, storyImportJson } from "../deploy/cloudflare/story-import.mjs";
 import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
 import { identifyStoryUrl, WebStoryImporter, readStoryFile } from "../app/static/reader/web-import.mjs";
+import { preparePlainStoryText, splitText } from "../app/static/reader/import.mjs";
 
 const AO3 = "https://archiveofourown.org/works/12345";
 const ORIGIN = "https://app.satinlore.com";
@@ -155,7 +156,33 @@ test("access expiring during external import returns no story after the public f
 test("local story files remain local and respect file type, UTF-8 and reader bounds", async () => {
   const file = new File(["A train waited.\n\nThe clock struck eight."], "The quiet station.txt", { type: "text/plain" });
   assert.deepEqual(await readStoryFile(file), parsed);
+  assert.deepEqual(await readStoryFile(new File(["A train waited.\r\nThe clock struck eight."], file.name)), parsed);
   await assert.rejects(readStoryFile(new File(["no"], "story.pdf")), /text file|HTML/);
   await assert.rejects(readStoryFile(new File([new Uint8Array([255])], "story.txt")), /UTF-8/);
   await assert.rejects(readStoryFile(new File(["a".repeat(500001)], "story.txt")), /500 KB/);
+});
+
+test("new plain text accepts single-newline prose while saved and wrapped text keeps its boundaries", () => {
+  const single = "The train waited.\n“It's eight,” she said.\nTime to leave";
+  const separated = "The train waited.\n\n“It's eight,” she said.\n\nTime to leave";
+  assert.equal(preparePlainStoryText(single), separated);
+  assert.equal(preparePlainStoryText(separated), separated);
+  assert.deepEqual(splitText(single), [single], "The saved paragraph index contract is unchanged.");
+  const wrapped = "The train waited at the edge of\nthe platform. A clock struck eight.";
+  assert.equal(preparePlainStoryText(wrapped), wrapped);
+  const atLimit = "A".repeat(499_997) + ".\nB";
+  assert.equal(preparePlainStoryText(atLimit), atLimit);
+});
+
+test("a new wall of text becomes readable sections without changing the prose", () => {
+  const oneBlock = Array.from({ length: 100 }, (_, index) => `The station clock reached ${index} seconds.`).join(" ");
+  const sections = splitText(preparePlainStoryText(oneBlock));
+  assert.ok(sections.length > 3);
+  assert.equal(sections.join(" "), oneBlock);
+  assert.ok(sections.every(section => section.length <= 900 && section.endsWith(".")));
+  assert.deepEqual(splitText(oneBlock), [oneBlock]);
+  const unclear = "The same unpunctuated line ".repeat(80);
+  assert.equal(preparePlainStoryText(unclear), unclear);
+  const preserved = `${oneBlock}\n\nA new chapter begins.`;
+  assert.equal(preparePlainStoryText(preserved), preserved);
 });

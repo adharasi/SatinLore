@@ -58,14 +58,14 @@
     <section id="beta-recording-mount" aria-label="Beta recording choices"></section>
     <section id="account-welcome" class="account-welcome" aria-label="Your private account" hidden></section>
     <section id="empty-workspace" class="empty-workspace" aria-labelledby="empty-heading">
-      <div class="draft-heading"><span class="draft-mark" aria-hidden="true">S.</span><p id="empty-heading">Add a story</p></div>
+      <div class="draft-heading"><span class="draft-mark" aria-hidden="true">S.</span><h1 id="empty-heading">Add a story</h1></div>
       <div class="draft-sources" role="group" aria-label="How to add a story">
         <button id="draft-paste" class="quiet-control">Write or paste</button>
         <button id="empty-new-story" class="quiet-control" aria-describedby="draft-formats">Upload a file</button>
         <button id="empty-link-import" class="quiet-control" aria-controls="story-link-import" aria-expanded="false">Use a link</button>
         <button id="draft-return" class="quiet-control" hidden>Return to reading</button>
       </div>
-      <p id="draft-formats" class="note">Files: TXT or an AO3 HTML download. Links: public AO3 works and chapters. Other sites use a manual path for text you have permission to use.</p>
+      <p id="draft-formats" class="visually-hidden">Choose a plain text file or an AO3 HTML download.</p>
       <section id="story-link-import" class="story-import draft-link-import" aria-labelledby="import-link-heading" hidden>
         <h3 id="import-link-heading">Use a story link</h3>
         <label for="story-url">Story link</label><input id="story-url" type="url" maxlength="2048" placeholder="Paste a story link" autocomplete="off" spellcheck="false" aria-describedby="url-import-help">
@@ -74,9 +74,9 @@
       </section>
       <label class="visually-hidden" for="draft-title">Story title</label><input id="draft-title" class="draft-title" type="text" maxlength="120" placeholder="Untitled story" autocomplete="off">
       <label class="visually-hidden" for="draft-story">Write or paste your story</label><textarea id="draft-story" class="draft-story" maxlength="500000" rows="10" placeholder="Write or paste your story here…" aria-describedby="draft-help"></textarea>
-      <div class="draft-actions"><button id="open-draft" class="primary">Read story <span aria-hidden="true">→</span></button></div>
-      <p id="draft-help" class="note draft-help">Write or paste text you have permission to use. It opens for this visit and stays on this device until you choose how to save it.</p>
       <p id="draft-status" class="note" role="status" aria-live="polite"></p>
+      <div class="draft-actions draft-actions-primary"><button id="open-draft" class="primary">Read story <span aria-hidden="true">→</span></button></div>
+      <p id="draft-help" class="note draft-help">Use text you have permission to read here. You can choose how to save the story after you open it.</p>
       <div class="draft-actions">
         <button id="empty-setup" class="quiet-control empty-setup-button">Set up a toy <span aria-hidden="true">→</span></button>
         <button id="empty-practice" class="quiet-control empty-setup-button">Try a practice story <span aria-hidden="true">→</span></button>
@@ -84,11 +84,11 @@
     </section>
     <section id="reading-workspace" class="reading-workspace" role="tabpanel" aria-labelledby="story-title" hidden>
       <div class="story-heading"><h1 id="story-title" tabindex="-1">Your story</h1><div class="story-meta"><span id="save-status" role="status" aria-live="polite">Session only</span><span class="meta-divider" aria-hidden="true">·</span><span id="analysis-status" role="status" aria-live="polite">Preparing suggestions</span></div><button id="save-account-story" class="quiet-control" hidden>Save to my account</button></div>
-      <section id="story-toy-recommendations" class="story-toy-recommendations" aria-labelledby="story-toy-recommendations-heading" hidden>
-        <h2 id="story-toy-recommendations-heading">Suggested Lovense toys</h2>
-        <p id="story-toy-recommendations-summary" role="status"></p>
-        <p class="note">These suggestions match movements detected in the story. Your connection determines which movements are available.</p>
-      </section>
+      <details id="story-toy-recommendations" class="story-toy-recommendations" hidden>
+        <summary id="story-toy-recommendations-toggle">Suggested Lovense toys</summary>
+        <p id="story-toy-recommendations-summary"></p>
+        <p class="note">Available movements depend on the toy you connect.</p>
+      </details>
       <p id="reader-help" class="visually-hidden">Scroll to read, or use Previous and Next section. Reading controls and optional corrections are on the right.</p>
       <div id="reader" class="reader-size-normal" data-spacing="normal" role="region" aria-label="Story reader" aria-describedby="reader-help" tabindex="0"><div id="paragraph"></div></div>
       <div id="reading-end" class="end-note">
@@ -112,7 +112,7 @@
           <h3 id="scene-model-heading">Story model</h3>
           <label class="visually-hidden" for="scene-model">Story model</label>
           <select id="scene-model" aria-describedby="scene-model-help"><option value="loom">Loom</option><option value="nocturne">Nocturne · Advanced</option></select>
-          <p id="scene-model-help" class="note">Both models follow the scene’s pacing. Nocturne adds build-up and climax patterns in the simulator.</p>
+          <p id="scene-model-help" class="note">Loom finds scene changes. Nocturne uses those scenes and adds more rhythm options in the simulator.</p>
           <button id="model-practice-shortcut" type="button" class="setup-button" hidden>Open a model practice story <span aria-hidden="true">→</span></button>
           <div id="nocturne-panel" hidden>
             <p class="note">Nocturne sends up to 16 sets of scene labels and section numbers to OpenAI. These requests exclude story text, titles and toy settings.</p>
@@ -193,6 +193,8 @@
             <select id="reading-feedback-section"></select>
             <div class="feel-actions" aria-label="Reason for feedback" role="group">
               <button type="button" data-reading-issue="too-strong">Too strong</button>
+              <button type="button" data-reading-issue="too-weak">Too weak</button>
+              <button type="button" data-reading-issue="missed-movement">Expected movement here</button>
               <button type="button" data-reading-issue="wrong-moment">Wrong moment</button>
               <button type="button" data-reading-issue="wrong-movement">Wrong movement</button>
             </div>
@@ -234,7 +236,7 @@
       <div class="transport-primary">
         <div class="output-line"><span id="output-label">Level</span> <output id="output">0 / 20</output> <span id="reading-sync-state" class="note" hidden></span></div>
         <meter id="meter" min="0" max="20" value="0" aria-label="Requested intensity">0</meter>
-        <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect simulator" title="Connect simulator">Connect</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
+        <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect Lush simulator" title="Connect Lush simulator">Simulator</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
         <button id="transport-more" type="button" aria-expanded="false" aria-controls="transport-options" aria-label="More playback controls">More</button>
       </div>
       <div id="transport-options" class="transport-options">

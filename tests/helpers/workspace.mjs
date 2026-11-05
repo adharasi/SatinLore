@@ -4,7 +4,7 @@ import {webcrypto} from "node:crypto";
 import {setTimeout as nextTurn} from "node:timers/promises";
 import {MockDevice} from "../../app/static/devices/mock.mjs";
 import {channelLabel} from "../../app/static/devices/toy-profiles.mjs";
-import {TextImporter} from "../../app/static/reader/import.mjs";
+import {preparePlainStoryText, TextImporter} from "../../app/static/reader/import.mjs";
 import {createStoryId} from "../../app/static/reader/identity.mjs";
 import {ReaderModel} from "../../app/static/reader/model.mjs";
 import {isReadingJump, selectReadingParagraph} from "../../app/static/reader/position.mjs";
@@ -149,7 +149,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
   const source = readFileSync(new URL("../../app/static/app.mjs", import.meta.url), "utf8").replace(/^import .+;\s*$/gm, "");
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
-    MockDevice: TestDevice, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE,
+    MockDevice: TestDevice, preparePlainStoryText, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE,
     isReadingJump, selectReadingParagraph, PlaybackController, ReaderDeviceController: TestController, HostedAccessGuard: TestGuard,
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },

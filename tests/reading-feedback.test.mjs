@@ -70,6 +70,8 @@ test("post-playback feedback is optional and offers only sections played in the 
 
 test("feedback reasons and section indices have a closed contract", () => {
   assert.deepEqual(normalizeReadingMark("too-strong", 0), {issue: "too-strong", position: 0});
+  assert.deepEqual(normalizeReadingMark("too-weak", 0), {issue: "too-weak", position: 0});
+  assert.deepEqual(normalizeReadingMark("missed-movement", 0), {issue: "missed-movement", position: 0});
   assert.deepEqual(normalizeReadingMark("wrong-movement", 1999), {issue: "wrong-movement", position: 1999});
   for (const [issue, position] of [["constructor", 0], ["CUSTOM TEXT", 0], ["wrong-moment", -1], ["wrong-moment", 2000], ["wrong-moment", "1"], ["wrong-moment", 1.5]]) {
     assert.equal(normalizeReadingMark(issue, position), null);
@@ -81,10 +83,12 @@ test("section feedback shortcut selects the current played section after playbac
   h.feedback.update(story, {position: 0, running: false});
   assert.equal(h.shortcut.hidden, true);
   h.feedback.update(story, {position: 0, running: true});
+  h.feedback.update(story, {position: 1, running: true, readingSeeking: true});
   h.feedback.update(story, {position: 2, running: true});
   assert.equal(h.shortcut.hidden, false);
   assert.equal(h.feedback.open(0), false, "Opening requires paused playback.");
   h.feedback.update(story, {position: 0, running: false});
+  assert.deepEqual(h.select.children.map(option => option.value), ["0", "2"], "A muted seek is not a played section.");
   assert.equal(h.feedback.open(0), true);
   assert.equal(h.select.value, "0");
   assert.equal(h.select.focused, true);

@@ -1,0 +1,750 @@
+{
+  "version": 1,
+  "corpusId": "public-domain-romance-v1",
+  "annotationProtocol": "single-editorial-review-pre-score-v1",
+  "passages": [
+    {
+      "id": "persuasion-ch23",
+      "split": "calibration",
+      "authorId": "jane-austen",
+      "author": "Jane Austen",
+      "authorDeathYear": 1817,
+      "workId": "persuasion",
+      "title": "Persuasion",
+      "publicationYear": 1817,
+      "language": "en",
+      "theme": "romantic-dialogue-without-clear-contact",
+      "source": "https://github.com/standardebooks/jane-austen_persuasion/blob/fa8ac94bf0fb6f9f67221c775526b305b8ff42bf/src/epub/text/chapter-23.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/105",
+          "https://github.com/standardebooks/jane-austen_persuasion/blob/fa8ac94bf0fb6f9f67221c775526b305b8ff42bf/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        54,
+        64
+      ],
+      "file": "persuasion-ch23.txt",
+      "sha256": "6bce1ea9151ab414f81a210d67fb6c7af614f5d853baca0736e7c8a28f8dcd65",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Travel and social obligation"
+        },
+        {
+          "phase": "quiet",
+          "note": "Mutual recognition without contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "Practical question"
+        },
+        {
+          "phase": "quiet",
+          "note": "Practical reply"
+        },
+        {
+          "phase": "quiet",
+          "note": "Proposed help, in dialogue"
+        },
+        {
+          "phase": "quiet",
+          "note": "Romantic reunion expressed through conversation"
+        },
+        {
+          "phase": "quiet",
+          "note": "Recollection of earlier jealousy"
+        },
+        {
+          "phase": "quiet",
+          "note": "Recollection of feelings"
+        },
+        {
+          "phase": "quiet",
+          "note": "Recollection of a different relationship"
+        },
+        {
+          "phase": "quiet",
+          "note": "Recollection of earlier distress"
+        },
+        {
+          "phase": "quiet",
+          "note": "Reported conversation"
+        }
+      ]
+    },
+    {
+      "id": "north-and-south-ch52",
+      "split": "calibration",
+      "authorId": "elizabeth-gaskell",
+      "author": "Elizabeth Gaskell",
+      "authorDeathYear": 1865,
+      "workId": "north-and-south",
+      "title": "North and South",
+      "publicationYear": 1855,
+      "language": "en",
+      "theme": "indirect-contact-and-dialogue-continuity",
+      "source": "https://github.com/standardebooks/elizabeth-gaskell_north-and-south/blob/9d3b15629f56e58a6bc470bd0dccb669804b1e21/src/epub/text/chapter-52.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/4276",
+          "https://github.com/standardebooks/elizabeth-gaskell_north-and-south/blob/9d3b15629f56e58a6bc470bd0dccb669804b1e21/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        25,
+        40
+      ],
+      "file": "north-and-south-ch52.txt",
+      "sha256": "1499512af153a65a206a4b77a1ed842e461215bd0cde82f2746ddfeef06202e1",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Business and disappointment"
+        },
+        {
+          "phase": "quiet",
+          "note": "Finances with a trembling delivery"
+        },
+        {
+          "phase": "quiet",
+          "note": "A name is spoken"
+        },
+        {
+          "phase": "quiet",
+          "note": "Proximity without reciprocal contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "A name is repeated"
+        },
+        {
+          "phase": "quiet",
+          "note": "Physical approach without established mutual contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "Conditional dialogue before contact"
+        },
+        {
+          "phase": "build",
+          "note": "She leans into him and he holds her"
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue within the same embrace",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Reply within the same embrace",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Hands reposition while they remain in contact"
+        },
+        {
+          "phase": "sustain",
+          "note": "Continued soft dialogue before they turn",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Reply before they turn",
+          "continuation": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Attention changes and she lifts her head",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Conversation about flowers"
+        },
+        {
+          "phase": "quiet",
+          "note": "Question about flowers"
+        }
+      ]
+    },
+    {
+      "id": "lady-chatterleys-lover-ch3",
+      "split": "calibration",
+      "authorId": "d-h-lawrence",
+      "author": "D. H. Lawrence",
+      "authorDeathYear": 1930,
+      "workId": "lady-chatterleys-lover",
+      "title": "Lady Chatterley’s Lover",
+      "publicationYear": 1928,
+      "language": "en",
+      "theme": "request-versus-contact-and-departure",
+      "source": "https://github.com/standardebooks/d-h-lawrence_lady-chatterleys-lover/blob/bc80bc242d4876def3fe4a6eca619f55f5c42ec8/src/epub/text/chapter-3.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/73144",
+          "https://github.com/standardebooks/d-h-lawrence_lady-chatterleys-lover/blob/bc80bc242d4876def3fe4a6eca619f55f5c42ec8/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        62,
+        72
+      ],
+      "file": "lady-chatterleys-lover-ch3.txt",
+      "sha256": "5b8ba9e2fd028110765d5dc033d654863aaf5964cf9c0b2bad6f8dabec88da6c",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Dialogue about whether to tell another person"
+        },
+        {
+          "phase": "quiet",
+          "note": "Emotional reply"
+        },
+        {
+          "phase": "quiet",
+          "note": "Turning aside"
+        },
+        {
+          "phase": "quiet",
+          "note": "More discussion of secrecy"
+        },
+        {
+          "phase": "quiet",
+          "note": "Requested kiss in dialogue; action still unrealized"
+        },
+        {
+          "phase": "quiet",
+          "note": "Verbal reassurance"
+        },
+        {
+          "phase": "build",
+          "note": "An actual brief affectionate hand kiss before departure"
+        },
+        {
+          "phase": "quiet",
+          "note": "The next setting at lunch",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Dialogue at lunch"
+        },
+        {
+          "phase": "quiet",
+          "note": "Dialogue at lunch"
+        },
+        {
+          "phase": "quiet",
+          "note": "Dialogue at lunch"
+        }
+      ]
+    },
+    {
+      "id": "lady-chatterleys-lover-ch16",
+      "split": "calibration",
+      "authorId": "d-h-lawrence",
+      "author": "D. H. Lawrence",
+      "authorDeathYear": 1930,
+      "workId": "lady-chatterleys-lover",
+      "title": "Lady Chatterley’s Lover",
+      "publicationYear": 1928,
+      "language": "en",
+      "theme": "adult-affection-and-immediate-separation",
+      "source": "https://github.com/standardebooks/d-h-lawrence_lady-chatterleys-lover/blob/bc80bc242d4876def3fe4a6eca619f55f5c42ec8/src/epub/text/chapter-16.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/73144",
+          "https://github.com/standardebooks/d-h-lawrence_lady-chatterleys-lover/blob/bc80bc242d4876def3fe4a6eca619f55f5c42ec8/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        357,
+        372
+      ],
+      "file": "lady-chatterleys-lover-ch16.txt",
+      "sha256": "bd48f79be98322349de6a1825cf15356a951a24d22f8d2ceb296d581846266cd",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Travel through the wood"
+        },
+        {
+          "phase": "quiet",
+          "note": "Past encounter mentioned in dialogue"
+        },
+        {
+          "phase": "quiet",
+          "note": "Practical reply"
+        },
+        {
+          "phase": "quiet",
+          "note": "Walking in silence"
+        },
+        {
+          "phase": "quiet",
+          "note": "Future plans, without contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "Travel reply"
+        },
+        {
+          "phase": "quiet",
+          "note": "Following along the path"
+        },
+        {
+          "phase": "quiet",
+          "note": "He stops walking"
+        },
+        {
+          "phase": "quiet",
+          "note": "Departure is announced"
+        },
+        {
+          "phase": "build",
+          "note": "She puts her arms around him and clings"
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue during the contact",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "He reciprocates with an embrace and repeats a kiss"
+        },
+        {
+          "phase": "quiet",
+          "note": "A brief exchange ends and he prepares to leave",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "He physically leaves to check for the car",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Practical reply about transport"
+        },
+        {
+          "phase": "quiet",
+          "note": "Anxious observation"
+        }
+      ]
+    },
+    {
+      "id": "the-age-of-innocence-ch15",
+      "split": "holdout",
+      "authorId": "edith-wharton",
+      "author": "Edith Wharton",
+      "authorDeathYear": 1937,
+      "workId": "the-age-of-innocence",
+      "title": "The Age of Innocence",
+      "publicationYear": 1920,
+      "language": "en",
+      "theme": "imagination-distress-and-ambiguous-contact",
+      "source": "https://github.com/standardebooks/edith-wharton_the-age-of-innocence/blob/f9c1f4ab244b14896e7bda0c7dac2ac22d9a85f0/src/epub/text/chapter-15.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/541",
+          "https://github.com/standardebooks/edith-wharton_the-age-of-innocence/blob/f9c1f4ab244b14896e7bda0c7dac2ac22d9a85f0/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        36,
+        50
+      ],
+      "file": "the-age-of-innocence-ch15.txt",
+      "sha256": "7298b280891336a3275cbba2d275b346e092531a4bb11e89f2d6d5ea088883f3",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Ordinary dialogue from separate positions"
+        },
+        {
+          "phase": "quiet",
+          "note": "Expression of affection in dialogue"
+        },
+        {
+          "phase": "quiet",
+          "note": "Stiffened posture"
+        },
+        {
+          "phase": "quiet",
+          "note": "Verbal reflection"
+        },
+        {
+          "phase": "quiet",
+          "note": "Temptation and imagination without contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "Questions without contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "The characters remain across the room"
+        },
+        {
+          "phase": "quiet",
+          "note": "Embrace is imagined and interrupted"
+        },
+        {
+          "phase": "quiet",
+          "note": "Surprised reaction"
+        },
+        {
+          "phase": "quiet",
+          "note": "Hand contact accompanies alarm and withdrawal"
+        },
+        {
+          "phase": "quiet",
+          "note": "Derisive reaction"
+        },
+        {
+          "phase": "quiet",
+          "note": "Hand contact ends as he withdraws",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "The visitor enters"
+        },
+        {
+          "phase": "quiet",
+          "note": "A jump to the next morning",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Recollection and observation"
+        }
+      ]
+    },
+    {
+      "id": "the-age-of-innocence-ch16",
+      "split": "holdout",
+      "authorId": "edith-wharton",
+      "author": "Edith Wharton",
+      "authorDeathYear": 1937,
+      "workId": "the-age-of-innocence",
+      "title": "The Age of Innocence",
+      "publicationYear": 1920,
+      "language": "en",
+      "theme": "positive-contact-followed-by-withdrawal",
+      "source": "https://github.com/standardebooks/edith-wharton_the-age-of-innocence/blob/f9c1f4ab244b14896e7bda0c7dac2ac22d9a85f0/src/epub/text/chapter-16.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/541",
+          "https://github.com/standardebooks/edith-wharton_the-age-of-innocence/blob/f9c1f4ab244b14896e7bda0c7dac2ac22d9a85f0/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        1,
+        12
+      ],
+      "file": "the-age-of-innocence-ch16.txt",
+      "sha256": "dc4b7bfe65e9e91e507a1e40316957175ce1487daf3cdb0c25705e46e4939d33",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Arrival at a house"
+        },
+        {
+          "phase": "quiet",
+          "note": "Internal reflection"
+        },
+        {
+          "phase": "quiet",
+          "note": "Affection expressed verbally"
+        },
+        {
+          "phase": "quiet",
+          "note": "Anticipation and outdoor description without contact"
+        },
+        {
+          "phase": "build",
+          "note": "He embraces and kisses her; she pulls back before the paragraph ends"
+        },
+        {
+          "phase": "quiet",
+          "note": "They talk after she draws back",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Her hand slips out and past kisses are recalled",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Change to ordinary conversation"
+        },
+        {
+          "phase": "quiet",
+          "note": "Reading and social conversation"
+        },
+        {
+          "phase": "quiet",
+          "note": "They return for breakfast",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Breakfast dialogue"
+        },
+        {
+          "phase": "quiet",
+          "note": "A practical explanation"
+        }
+      ]
+    },
+    {
+      "id": "the-awakening-ch36",
+      "split": "holdout",
+      "authorId": "kate-chopin",
+      "author": "Kate Chopin",
+      "authorDeathYear": 1904,
+      "workId": "the-awakening",
+      "title": "The Awakening",
+      "publicationYear": 1899,
+      "language": "en",
+      "theme": "sustained-reciprocal-contact-and-two-transitions",
+      "source": "https://github.com/standardebooks/kate-chopin_the-awakening/blob/f6ebcc5759e72fd35719d0878b66f515ba4b03bb/src/epub/text/chapter-36.xhtml",
+      "rights": {
+        "basis": "public-domain-text-and-cc0-editorial-contribution",
+        "territories": [
+          "GB",
+          "US"
+        ],
+        "evidence": [
+          "https://www.gutenberg.org/ebooks/160",
+          "https://github.com/standardebooks/kate-chopin_the-awakening/blob/f6ebcc5759e72fd35719d0878b66f515ba4b03bb/LICENSE.md",
+          "https://www.gov.uk/copyright/how-long-copyright-lasts"
+        ],
+        "allowedUses": [
+          "offline-evaluation",
+          "repository-redistribution"
+        ]
+      },
+      "sourceParagraphs": [
+        20,
+        51
+      ],
+      "file": "the-awakening-ch36.txt",
+      "sha256": "ac675441ab2fbe6d20b4d433780a4da39802c977aa4a44c8ee4805ce4f5ac349",
+      "annotations": [
+        {
+          "phase": "quiet",
+          "note": "Ordinary conversation"
+        },
+        {
+          "phase": "quiet",
+          "note": "Contact is with a cat"
+        },
+        {
+          "phase": "quiet",
+          "note": "Travel and lighting a lamp"
+        },
+        {
+          "phase": "quiet",
+          "note": "Approach without contact"
+        },
+        {
+          "phase": "quiet",
+          "note": "Question"
+        },
+        {
+          "phase": "quiet",
+          "note": "Answer"
+        },
+        {
+          "phase": "build",
+          "note": "A mutual kiss, embrace and held hands"
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue while holding hands",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Reply while holding hands",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Continued touch and another kiss after recollection"
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue while the contact continues",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Reply while the contact continues",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Conversation returns to the past while contact continues",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Response within the same contact",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Response within the same contact",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Response within the same contact",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue about dreams while present contact continues",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Response within the same contact",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Reply just before ongoing contact is confirmed",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Continuing contact contrasted with past distance",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue while ongoing contact continues",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Mutual proximity and repeated kisses"
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue in the immediate contact context",
+          "continuation": true
+        },
+        {
+          "phase": "quiet",
+          "note": "Visible alarm before interruption",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "A third person interrupts with news",
+          "boundary": true
+        },
+        {
+          "phase": "quiet",
+          "note": "She stands up to leave"
+        },
+        {
+          "phase": "quiet",
+          "note": "Practical offer"
+        },
+        {
+          "phase": "build",
+          "note": "A new embrace after she returns"
+        },
+        {
+          "phase": "peak",
+          "note": "An explicitly stronger mutual kiss and embrace"
+        },
+        {
+          "phase": "sustain",
+          "note": "Dialogue in the farewell embrace",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "Plea while the embrace continues",
+          "continuation": true
+        },
+        {
+          "phase": "sustain",
+          "note": "She leans into him again while saying goodbye"
+        }
+      ]
+    }
+  ]
+}

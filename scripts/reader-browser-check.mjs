@@ -1034,6 +1034,55 @@ async function readingCompletionChecks(page) {
   }
 }
 
+async function pastedRomanceChecks(context, origin) {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({width: 390, height: 844});
+    await page.clock.install();
+    await page.goto(origin);
+    const lines = [
+      "At the kitchen doorway, Mara looked back.",
+      "She slipped her arm through his and drew him close.",
+      "He rested a hand at her waist.",
+      "Their lips met for a long moment.",
+      "Their kiss deepened.",
+      "The window was still open. The rain had softened to a faint ticking on the ledge.",
+      "His arms tightened around her as she held him close.",
+      "Finally they eased apart.",
+      "The next morning, Mara opened the kitchen window.",
+      "A newspaper lay unopened on the table.",
+    ];
+    await add(page, lines.join("\n"), "The kitchen doorway");
+    assert.deepEqual(await page.locator(".story-paragraph").allTextContents(), lines);
+    assert.equal(await page.locator("#story-toy-recommendations").isHidden(), true,
+      "A story with active scenes and no toy-specific cue leaves out the recommendations panel.");
+    await page.locator("#connect").click();
+    assert.match(await page.locator("#device-label").textContent(), /Lush/i);
+    await start(page);
+    await output(page, 0);
+    await scrollTo(page, 3);
+    await page.clock.runFor(1200);
+    await current(page, 3);
+    await output(page, 1);
+    await scrollTo(page, 4);
+    await page.clock.runFor(1200);
+    await current(page, 4);
+    await output(page, 2);
+    await scrollTo(page, 5);
+    await page.clock.runFor(1200);
+    await current(page, 5);
+    await output(page, 2);
+    await scrollTo(page, 8);
+    await page.clock.runFor(1200);
+    await current(page, 8);
+    await output(page, 0);
+    await page.locator("#stop").click();
+    await output(page, 0);
+  } finally {
+    await page.close();
+  }
+}
+
 export async function checkReader(page, context, origin) {
   await page.clock.install();
   let promptReply = "Renamed afternoon";
@@ -1329,6 +1378,7 @@ export async function checkReader(page, context, origin) {
   assert.deepEqual(await page.evaluate(() => ({local: Object.keys(localStorage).sort(), session: sessionStorage.length})),
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
   await readingCompletionChecks(page);
+  await pastedRomanceChecks(context, origin);
   assert.deepEqual(requests, []);
   page.off("request", monitor);
   console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, full toy catalogue and ten model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap, grounded pulse, named channel stops and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");

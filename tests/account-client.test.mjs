@@ -48,7 +48,7 @@ test('account welcome hides only after adult confirmation and a successful regis
   mountAccountWorkspace({client,document:dom.document,welcomeMount,settingsMount:dom.make('div'),presetMount:dom.make('div'),
     getContext:()=>({model:'lush',channels:{},storyId:null}),onStop:()=>stops++,onRegistered:()=>registered++});
   await client.load();
-  const create=welcomeMount.children[0].children.find(node=>node.textContent==='Create my private account');
+  const create=welcomeMount.children[0].children.find(node=>node.textContent==='Set up saved presets');
   await create.click();
   assert.equal(posts,0,'The unchecked adult choice cannot submit registration.');
   dom.nodes.get('account-adult').checked=true;await create.click();

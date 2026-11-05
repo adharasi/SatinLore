@@ -1,4 +1,4 @@
-import { MAX_TEXT_BYTES, splitText } from "./import.mjs";
+import { MAX_TEXT_BYTES, preparePlainStoryText, splitText } from "./import.mjs";
 
 const encoder = new TextEncoder();
 const MAX_HTML_FILE_BYTES = 2_000_000;
@@ -124,6 +124,7 @@ export async function readStoryFile(file, options = {}) {
   let text; try { text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()); }
   catch { throw new Error("Choose a readable UTF-8 story file."); }
   if (html) return extractDownloadedStory(text, options);
+  text = preparePlainStoryText(text);
   const paragraphs = splitText(text);
   if (!paragraphs.length || paragraphs.length > 2000) throw new Error("Use a story of up to 500 KB and 2,000 paragraphs.");
   return { title: file.name.replace(/\.[^.]+$/, "").trim().slice(0, 120) || "Untitled story", text };

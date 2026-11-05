@@ -28,11 +28,17 @@ const nocturnePatterns = {
 };
 const peakPresets = {
   crest: nocturnePatterns.crest,
-  accents: {...stagePatterns.peak, label: "Peak pulses"},
+  accents: {label: "Peak pulses", levels: [.85, .55, 1, .55, .85, .7]},
   ease: {label: "Build and ease", levels: [.55, .8, .5, .95, .6, 1, .45]},
 };
 const gentleCrest = {label: "Gentle crest", levels: [.85, .95, 1, 1, .85]};
 const edgingPattern = {label: "Build and ease", levels: [.65, .85, 1, .55, .85, .95, .65]};
+const describedPatterns = {
+  accented: {label: "Short pulses", levels: [1, .65, 1, .65, .85], accents: [0, 2]},
+  alternating: {label: "Alternating rhythm", levels: [.7, 1, .7, 1], accents: [1, 3]},
+  sustained: nocturnePatterns.steady,
+};
+const sceneShapes = Object.keys(describedPatterns);
 const scenePattern = (phase, pattern, peakPreset) => peakPresets[peakPreset] ?? nocturnePatterns[pattern] ?? stagePatterns[phase];
 export const sceneStagePatternLabel = (phase, pattern, peakPreset) => scenePattern(phase, pattern, peakPreset)?.label;
 
@@ -42,9 +48,13 @@ function simulatorScenePattern(scene, rhythm) {
   if (scene.automaticPeak) {
     if (rhythm === "steady") return nocturnePatterns.steady;
     if (rhythm === "gentle") return gentleCrest;
-    return rhythm === "dynamic" || scene.pattern === "accents" ? peakPresets.accents : peakPresets.crest;
+    if (rhythm === "dynamic") return stagePatterns.peak;
+    return scene.pattern === "accents" ? peakPresets.accents : peakPresets.crest;
   }
   if (scene.edging && rhythm !== "steady") return edgingPattern;
+  if (rhythm === "scene" && scene.phase !== "peak" && scene.phase !== "recover" && scene.shape) {
+    return nocturnePatterns[scene.pattern] ?? describedPatterns[scene.shape];
+  }
   return rhythm === "scene" ? scenePattern(scene.phase, scene.pattern) : undefined;
 }
 export const simulatorScenePatternLabel = (scene, rhythm) => simulatorScenePattern(scene, rhythm)?.label;
@@ -61,20 +71,22 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging} = profile;
+    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean" ||
         pattern !== undefined && (profile.quiet || pattern === "abstain" || !NOCTURNE_LABELS[phase]?.includes(pattern)) ||
         peakPreset !== undefined && (profile.quiet || phase !== "peak" || !Object.hasOwn(peakPresets, peakPreset)) ||
         automaticPeak !== undefined && (automaticPeak !== true || profile.quiet || phase !== "peak" || peakPreset !== undefined) ||
-        edging !== undefined && (edging !== true || profile.quiet || (phase !== "build" && phase !== "sustain"))) throw new RangeError("Use a supported scene stage.");
+        edging !== undefined && (edging !== true || profile.quiet || (phase !== "build" && phase !== "sustain")) ||
+        shape !== undefined && (profile.quiet || !["build", "sustain"].includes(phase) || !sceneShapes.includes(shape))) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(pattern === undefined ? {} : {pattern}),
       ...(peakPreset === undefined ? {} : {peakPreset}),
       ...(automaticPeak === undefined ? {} : {automaticPeak}),
       ...(edging === undefined ? {} : {edging}),
+      ...(shape === undefined ? {} : {shape}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
@@ -82,7 +94,8 @@ export function normalizeSceneProfiles(profiles, length) {
 export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
   return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
     next.rhythm !== previous?.rhythm || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
-      next.peakPreset !== previous?.peakPreset || next.automaticPeak !== previous?.automaticPeak || next.edging !== previous?.edging) ||
+      next.peakPreset !== previous?.peakPreset || next.automaticPeak !== previous?.automaticPeak || next.edging !== previous?.edging ||
+      next.shape !== previous?.shape) ||
     (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
     automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
@@ -164,9 +177,10 @@ export class ReadingFeel {
     }
     const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
-    const stages = simulatorStagePatterns ? simulatorScenePattern(scene, rhythm)?.levels : undefined;
+    const stage = simulatorStagePatterns ? simulatorScenePattern(scene, rhythm) : undefined;
+    const stageStep = stage ? Math.min(preview ? 0 : step, stage.levels.length - 1) : 0;
     // A stage plays through once, then holds its last step until a new beat.
-    const modulation = stages ? stages[Math.min(preview ? 0 : step, stages.length - 1)] :
+    const modulation = stage ? stage.levels[stageStep] :
       variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
     // A temporary ceiling limits the final level without shrinking the
     // calibrated scale. Otherwise a low cue can round to zero at a cap of 1.
@@ -175,9 +189,12 @@ export class ReadingFeel {
     const calibrated = scene?.phase && !scene.manual ?
       (base <= 3 ? base * preferred / 3 : preferred + (peak - preferred) * Math.min(1, (base - 3) / 2)) : base;
     const scaled = calibrated * strength * this.settings.gain;
-    const amplitude = stages ? Math.min(ceiling, scaled) : scaled;
-    // A softer beat must not round an otherwise active scene down to a stop.
-    const target = Math.max((rhythm === "scene" || stages) && scaled >= 1 ? 1 : 0, Math.floor(amplitude * modulation));
+    const amplitude = stage ? Math.min(ceiling, scaled) : scaled;
+    // Keep an automatic active beat above zero after integer quantization.
+    const floor = scaled >= 1 && (rhythm === "scene" || stage || scene?.phase && !scene.manual) ? 1 : 0;
+    // An explicit pulse at level 1 would otherwise be indistinguishable from a hold.
+    const accent = floor && amplitude < 2 && stage?.accents?.includes(stageStep) ? 2 : 0;
+    const target = Math.max(floor, accent, Math.floor(amplitude * modulation));
     return adjust(Math.min(ceiling, Math.max(minimum, target)));
   }
 }

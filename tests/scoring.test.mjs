@@ -314,3 +314,97 @@ test("a character moving an object and detached past action do not choose a move
     "Last summer they shared a tender kiss. Today they kissed tenderly."));
   assert.deepEqual(result.map(p => [p.level, p.movements]), [[1, []], [1, ["rotate"]], [0, []], [1, []]]);
 });
+
+test("first-person and named-character contact anchors do not require cue adjectives", () => {
+  for (const text of ["Her lips brushed mine.", "I pressed my lips to hers.", "Our mouths came together.",
+    "Mara’s lips met his at the kitchen door.", "He leaned in and kissed her.", "She kissed me back."]) {
+    assert.equal(scoreParagraph(text).level, 1, text);
+  }
+  for (const text of ["He leaned in and kissed her forehead.", "He leaned in and kissed her on the cheek.",
+    "I pressed my lips to the rim of the glass.", "Her lips touched the edge of her cup.", "She imagined his mouth found hers.",
+    "He left before their lips met.", "He leaned in and kissed his daughter goodnight.",
+    "‘Their lips met,’ he read from the script.", "I didn't press my lips to hers."]) {
+    assert.equal(scoreParagraph(text).level, 0, text);
+  }
+});
+
+test("unadorned romantic prose builds, continues through a room detail, rises and eases off", () => {
+  const result = groupScenes(sceneRows(
+    "At the kitchen doorway, Mara looked back.",
+    "She slipped her arm through his and drew him close.",
+    "He rested a hand at her waist.",
+    "Their lips met for a long moment.",
+    "She kissed him again, then took his hand.",
+    "The window was still open. The rain had softened to a faint ticking on the ledge.",
+    "His arms tightened around her as she held him close.",
+    "Their kiss deepened.",
+    "Finally they eased apart.",
+    "The following morning, there was a queue outside the bakery."
+  ));
+  assert.deepEqual(result.map(({phase, level}) => [phase, level]), [
+    ["quiet", 0], ["build", 1], ["build", 1], ["sustain", 1], ["sustain", 1], ["sustain", 1],
+    ["sustain", 1], ["sustain", 2], ["recover", 1], ["quiet", 0],
+  ]);
+  assert.deepEqual(result.map(({sceneId}) => sceneId), [null, 1, 1, 1, 1, 1, 1, 1, 1, null]);
+  assert.ok(result.every(({movements}) => movements.length === 0));
+});
+
+test("ongoing contact carries selected movements and a fresh rhythm stays local to the current scene", () => {
+  const result = groupScenes(sceneRows(
+    "Their lips met. The device vibrated and flexed together.",
+    "His arms were still around her when she glanced over at the window, where the condensation was slowly trickling down and gathering in a small puddle on the sill.",
+    "Her fingers flexed in short bursts.",
+    "They eased apart.",
+    "Chapter II",
+    "Her fingers flexed in short bursts.",
+    "His arms were still around her."
+  ));
+  assert.deepEqual(result.map(({phase, shape, movements}) => [phase, shape, movements]), [
+    ["build", "unspecified", ["vibrate", "fingering"]], ["sustain", "unspecified", ["vibrate", "fingering"]],
+    ["sustain", "accented", ["fingering"]], ["recover", "unspecified", ["fingering"]],
+    ["quiet", "unspecified", []], ["quiet", "unspecified", []], ["quiet", "unspecified", []],
+  ]);
+});
+
+test("an established embrace carries a bounded dialogue exchange but ends at departure or unrelated action", () => {
+  const hold = "I laid my head on her shoulder. She clasped me close.";
+  const dialogue = ["“Are you warm enough?” she whispered.", "“I am now,” I answered."];
+  const result = groupScenes(sceneRows(
+    hold, ...dialogue, "I moved my arms around her neck.", ...dialogue,
+    "“I must go.”", "“I'll see you again.”",
+    hold, ...dialogue, "I placed my hands on the glass.", ...dialogue,
+    hold, ...dialogue, "“Will you be at the inn?”", "“In an hour.”"
+  ));
+  assert.deepEqual(result.map(({level}) => level), [1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0]);
+  assert.equal(scoreParagraph("She laid her head on her sister's shoulder. Her sister held her close.").level, 0);
+  assert.equal(scoreParagraph("He held her close as he opened the medicine cabinet.").level, 0);
+});
+
+test("gentle first contact stays in the build and a described increase raises the level", () => {
+  const result = groupScenes(sceneRows("I leaned in. My breath caught.", "We kissed softly.", "Our tender kiss deepened."));
+  assert.deepEqual(result.map(({phase, level}) => [phase, level]), [["build", 1], ["build", 1], ["sustain", 2]]);
+});
+
+test("web paste spacing is normalized for scoring and long ambient references stay quiet", () => {
+  assert.equal(scoreParagraph("Their\u00a0lips\tmet.").level, 1);
+  const result = groupScenes(sceneRows(`There was not a phone${" ".repeat(480_000)}buzzing.`, "phone vibration ".repeat(31_000)));
+  assert.deepEqual(result.map(({level, movements}) => [level, movements]), [[0, []], [0, []]]);
+});
+
+test("a plain narrated action can borrow nearby personal affection across a clause or sentence", () => {
+  for (const text of ["I felt a rush of tenderness for him. I kissed him.",
+    "They embraced. There was affection in their eyes.",
+    "He kissed her, and she looked at him with tenderness.",
+    "Her smile softened with affection. She put her arms around him."]) {
+    assert.equal(scoreParagraph(text).level, 1, text);
+    assert.deepEqual(groupScenes(sceneRows(text))[0].movements, []);
+  }
+  for (const text of ["We kissed.", "Her voice was full of affection. She embraced her new role.",
+    "He passionately hated the commute. They kissed.", "There was affection in his eyes. He kissed her forehead.",
+    "There was affection in his eyes. I read that they kissed.", "He thought they kissed. There was affection in his eyes.",
+    "They might have kissed. Her eyes softened with affection.", "Her eyes softened with affection. Then she sat down. They kissed.",
+    "Her eyes softened with affection, but they kissed.", "Her eyes softened with affection. ‘They kissed,’ she read.",
+    "He kissed her. She imagined there was tenderness in his eyes."]) {
+    assert.equal(scoreParagraph(text).level, 0, text);
+  }
+});

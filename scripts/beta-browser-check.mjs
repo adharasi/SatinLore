@@ -49,17 +49,19 @@ async function chooseFlexer(page, { tested = true } = {}) {
   if (await page.locator("#setup-dialog").isHidden()) await page.locator("#choose-toy").click();
   await page.locator("#setup-model").selectOption("flexer");
   await page.locator("#setup-mode-simulator").click(); await page.locator("#setup-primary").click();
-  await page.locator("#setup-selection").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#setup-devices").inputValue(), "");
-  await page.locator("#setup-devices").selectOption("sim-flexer"); await page.locator("#setup-primary").click();
   if (new URL(page.url()).origin === APP) {
     await page.locator("#setup-test").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#setup-selection").isHidden(), true);
     if (!tested) return;
     await page.locator("#setup-test").click();
     await page.locator("#setup-response-checked").check();
     await page.locator("#setup-primary").click();
     await sidebar(page);
     await page.locator("#open-calibration").click();
+  } else {
+    await page.locator("#setup-selection").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#setup-devices").inputValue(), "");
+    await page.locator("#setup-devices").selectOption("sim-flexer"); await page.locator("#setup-primary").click();
   }
   await page.locator("#calibration-view").waitFor({ state: "visible" });
   if (!tested) return;
@@ -193,11 +195,11 @@ try {
   log("creating a private account and exploring Flexer movements");
   const appContext = await context(), page = await appContext.newPage(); await page.goto(APP + "/");
   await page.locator("#account-adult").waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Create my private account", exact: true }).click();
+  await page.getByRole("button", { name: "Set up saved presets", exact: true }).click();
   assert.equal((await requestInPage(page, "GET", "/api/account")).value.registered, false, "Registration needs the adult checkbox.");
   await page.locator("#account-adult").check();
   const accountCreated=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/account"&&response.request().method()==="POST");
-  await page.getByRole("button", { name: "Create my private account", exact: true }).click();
+  await page.getByRole("button", { name: "Set up saved presets", exact: true }).click();
   const accountResponse=await accountCreated, accountState=await accountResponse.json();
   assert.equal(accountResponse.status(),201,`Account creation failed: ${JSON.stringify({status:accountResponse.status(),error:accountState.error??null})}`);
   assert.equal(accountState.registered,true,"The durable account acknowledgement must confirm registration.");
@@ -259,7 +261,7 @@ try {
   await beta.waitForFunction(() => document.querySelector("#analysis-status").dataset.state === "ready");
   await start(beta); await stopped(beta);
   await sidebar(beta, "story"); await disclosure(beta, "#reading-feedback");
-  await beta.locator('[data-reading-issue="wrong-moment"]').click();
+  await beta.locator('[data-reading-issue="missed-movement"]').click();
   assert.match(await beta.locator("#reading-feedback [role=status]").textContent(), /queued in the beta recording/);
   await sidebar(beta, "story"); await disclosure(beta, "#preset-mount details");
   await beta.locator("#account-preset-name").fill(privateName); // Never saved, never a recording field.
@@ -277,7 +279,7 @@ try {
   const detail = await requestInPage(beta, "GET", "/api/beta/recordings/" + sid);
   assert.equal(detail.status, 200); assert.ok(detail.value.events.length > 0);
   assert.ok(detail.value.events.some(event => event.type === "output" && Object.values(event.channels).some(level => level > 0)), "The consented timeline retains a real simulated test's nonzero output.");
-  assert.deepEqual(detail.value.events.filter(event => event.type === "reading-feedback").map(({issue, position}) => ({issue, position})), [{issue: "wrong-moment", position: 0}]);
+  assert.deepEqual(detail.value.events.filter(event => event.type === "reading-feedback").map(({issue, position}) => ({issue, position})), [{issue: "missed-movement", position: 0}]);
   const privateCapture = JSON.stringify(apiRequests.filter(value => /\/api\/(?:beta|lovense)\//.test(value.path)));
   assert.ok(!privateCapture.includes(privateCanary) && !privateCapture.includes(privateName), "Private text or preset input entered a recording/control request.");
   assert.equal((await requestInPage(beta, "GET", "/api/admin/beta-recordings")).status, 403, "A tester cannot inspect other participants.");

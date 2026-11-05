@@ -1,5 +1,7 @@
 export const READING_FEEDBACK_LABELS = Object.freeze({
   "too-strong": "Too strong",
+  "too-weak": "Too weak",
+  "missed-movement": "Expected movement here",
   "wrong-moment": "Wrong moment",
   "wrong-movement": "Wrong movement",
 });
@@ -71,7 +73,7 @@ export function mountReadingFeedback({mount, shortcut, document = mount?.ownerDo
   });
 
   return {
-    update(story, {position, running, testing = false}) {
+    update(story, {position, running, testing = false, readingSeeking = false}) {
       if (story !== activeStory) {
         activeStory = story;
         current = story ? sessions.get(story) ?? null : null;
@@ -79,7 +81,7 @@ export function mountReadingFeedback({mount, shortcut, document = mount?.ownerDo
         mount.open = false;
         status.textContent = "";
       }
-      if (story && running && validPosition(position)) {
+      if (story && running && !readingSeeking && validPosition(position)) {
         if (!current) {
           current = {played: new Set(), last: position, marks: []};
           sessions.set(story, current);
