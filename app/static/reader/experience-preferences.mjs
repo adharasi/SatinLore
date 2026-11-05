@@ -1,5 +1,7 @@
 export const DEFAULT_EXPERIENCE = Object.freeze({
-  quiet: "off", edging: false, maximum: 10, rhythm: "scene", peakPattern: "auto",
+  // Predictable first-use continuity. These are product defaults, not a claim
+  // of universal preference, and never replace an explicitly saved choice.
+  quiet: "continuous", edging: false, maximum: 10, rhythm: "scene", peakPattern: "steady",
 });
 
 const quietModes = new Set(["off", "continuous", "edging"]);

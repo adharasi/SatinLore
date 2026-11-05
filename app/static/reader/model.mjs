@@ -8,6 +8,10 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
   typeof score.reason === "string" && score.reason.length <= 200;
+const contextLevels = Object.freeze({neutral: 0, romance: 1, flirting: 1, tension: 1, intimacy: 2, explicit: 3, aftermath: 1});
+const contextPhases = Object.freeze({neutral: ["quiet"], romance: ["build", "sustain"], flirting: ["build", "sustain"],
+  tension: ["build", "sustain"], intimacy: ["build", "sustain", "peak", "recover"],
+  explicit: ["build", "sustain", "peak", "recover"], aftermath: ["quiet", "recover"]});
 
 function applySceneSuggestions(paragraphs) {
   // A correction controls playback at its paragraph without rewriting the analysis.
@@ -28,6 +32,7 @@ export class ReaderModel {
     this.analysisVersion = ANALYSIS_VERSION;
     this.analysisGeneration = 0;
     this.nocturneLabels = new Map();
+    this.nocturneContext = new Map();
   }
 
   load(text, {deferAnalysis = false, documentId = null} = {}) {
@@ -50,6 +55,7 @@ export class ReaderModel {
     this.documentId = id;
     this.paragraphs = paragraphs;
     this.nocturneLabels.clear();
+    this.nocturneContext.clear();
     this.analysisStatus = deferAnalysis ? "pending" : "ready";
     this.analysisVersion = ANALYSIS_VERSION;
     return this.paragraphs;
@@ -62,6 +68,7 @@ export class ReaderModel {
 
   _zeroSuggestions(reason) {
     this.nocturneLabels.clear();
+    this.nocturneContext.clear();
     for (const paragraph of this.paragraphs) {
       paragraph.suggestedLevel = 0;
       paragraph.band = 0;
@@ -138,6 +145,7 @@ export class ReaderModel {
     this.documentId = null;
     this.paragraphs = [];
     this.nocturneLabels.clear();
+    this.nocturneContext.clear();
     this.analysisStatus = "pending";
   }
 
@@ -157,11 +165,31 @@ export class ReaderModel {
 
   resetOverride(index) { this.paragraph(index).override = null; }
 
+  contextualAnnotation(index) {
+    const paragraph = this.paragraph(index), annotation = this.nocturneContext.get(index);
+    // Provider annotations never override a local hard boundary, content
+    // exclusion, missing analysis, explicit correction, or ended movement.
+    if (!paragraph.analysed || paragraph.quiet || paragraph.cloudExcluded || paragraph.override !== null ||
+        !annotation || !Number.isInteger(annotation.confidence) || annotation.confidence < 80 || annotation.confidence > 100 ||
+        !Object.hasOwn(contextLevels, annotation.category) || !contextPhases[annotation.category].includes(annotation.phase) ||
+        !["unspecified", "accented", "sustained", "alternating"].includes(annotation.shape)) return null;
+    return annotation;
+  }
+
+  suggestedLevel(index, {nocturne = false} = {}) {
+    const paragraph = this.paragraph(index);
+    const annotation = nocturne ? this.contextualAnnotation(index) : null;
+    return annotation ? contextLevels[annotation.category] : paragraph.suggestedLevel;
+  }
+
   effectiveProfile(index, {nocturne = false, peakPattern, edging = false, edgePattern = "auto"} = {}) {
-    const {rhythm, quiet, phase, sceneId, shape, override, movements = [], endedMovements = []} = this.paragraph(index);
+    const original = this.paragraph(index);
+    const annotation = nocturne ? this.contextualAnnotation(index) : null;
+    const {rhythm, quiet, phase, sceneId, shape, override, movements = [], endedMovements = []} = annotation ?
+      {...original, phase: annotation.phase, shape: annotation.shape, sceneId: original.sceneId ?? MAX_PARAGRAPHS + index + 1} : original;
     const peak = nocturne && !quiet && phase === "peak" && peakPattern !== undefined;
     const localPeak = peak && peakPattern === "auto" && (shape === "accented" || shape === "alternating") ? "accents" : undefined;
-    const pattern = nocturne ? this.nocturneLabels.get(index) ?? localPeak : undefined;
+    const pattern = nocturne ? (annotation && annotation.phase !== original.phase ? undefined : this.nocturneLabels.get(index)) ?? localPeak : undefined;
     const buildAndEase = nocturne && !quiet && (phase === "build" || phase === "sustain") &&
       (edgePattern === "ease" || (edgePattern === "auto" && edging));
     return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
@@ -176,8 +204,8 @@ export class ReaderModel {
     return this.paragraphs.map((_, index) => this.effectiveProfile(index, options));
   }
 
-  effectiveLevels() {
+  effectiveLevels(options = {}) {
     if (!this.analysisReady) return this.paragraphs.map(() => 0);
-    return this.paragraphs.map(paragraph => paragraph.override ?? paragraph.suggestedLevel);
+    return this.paragraphs.map((paragraph, index) => paragraph.override ?? this.suggestedLevel(index, options));
   }
 }

@@ -115,8 +115,13 @@
           <p id="scene-model-help" class="note">Loom finds scene changes. Nocturne uses those scenes and adds more rhythm options in the simulator.</p>
           <button id="model-practice-shortcut" type="button" class="setup-button" hidden>Open a model practice story <span aria-hidden="true">→</span></button>
           <div id="nocturne-panel" hidden>
-            <p class="note">Nocturne sends up to 16 sets of scene labels and section numbers to OpenAI. These requests exclude story text, titles and toy settings.</p>
+            <p class="note">Optional nearby context review can recognise scenes Loom misses. It sends bounded story excerpts to OpenAI through SatinLore while you read. <a href="/help#nocturne-privacy" target="_blank" rel="noopener">How your text is processed</a></p>
+            <label class="check-label"><input id="nocturne-context-consent" type="checkbox"> Allow nearby story excerpts for this story during this visit</label>
+            <button id="nocturne-context-enable" type="button" class="setup-button" disabled>Enable nearby context review</button>
+            <button id="nocturne-context-disable" type="button" class="setup-button" hidden>Disable nearby context review</button>
+            <p id="nocturne-context-status" class="note" role="status"></p>
             <button id="open-nocturne-patterns" type="button" class="setup-button">Choose Nocturne patterns <span aria-hidden="true">→</span></button>
+            <p class="note">You can also review up to 16 local scene cues. This option excludes story text, titles and toy settings.</p>
             <button id="nocturne-run" type="button" class="setup-button" disabled>Analyse with Nocturne</button>
             <button id="nocturne-sign-in" type="button" class="setup-button" hidden>Sign in to use Nocturne</button>
             <p id="nocturne-status" class="note" role="status"></p>

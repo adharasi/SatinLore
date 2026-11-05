@@ -4,6 +4,14 @@ Approved workspace revision: 29 October 2026 (frontend specification v1.2), refi
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The 2 November eight-model request adds simulated rehearsal and a configured bounded live path; no physical model is qualified by implementation alone. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
+## Defaults and contextual Nocturne — 5 November 2026
+
+The next source phase applies Continuous background, Follow scene rhythm and Steady hold to absent experience preferences, preserving existing explicit choices and all current limits. The neutral dispatched-output harness compares these defaults with story-following and continuing scene-rhythm conditions, including long dwell, connective text, hard quiet, seek, explicit restart and lower/zero limits. Its measured gaps still include the existing Stop-before-reduction behavior; commanded means differ and no preference winner is inferred.
+
+Optional contextual Nocturne now accepts separately consented, bounded nearby excerpts through the authenticated service and GPT-6 Luna. It can classify eligible context Loom missed, using fixed non-graphic categories with strict confidence/phase validation. The cue-only path remains available. No generated story text, device commands, billing or silent library upload is introduced. Contextual state stays in memory, cancels on interruption and uses a bounded partial-coverage budget. [Defaults, privacy, costs, evaluation and remaining gates](nocturne-context-phase.md)
+
+Common checks passed with 22 Python and 592 JavaScript tests. Worker packaging passed with 84 allowlisted assets and the isolated bridge, and the deployment dry run passed. The packaged browser checks run in the [implementation review](https://github.com/adharasi/SatinLore/pull/16); their current result belongs to that exact head commit. A real Luna accuracy/token/latency evaluation on fresh permitted material, preference comparisons and physical device qualification remain separate next gates. The eleven-story development corpus stays private and is not treated as a fresh holdout.
+
 ## Main reader quick start — 4 November 2026
 
 The public reader offers four optional questions on quiet passages, edging, maximum and rhythm after first sign-in. A signed-in reader can save those defaults and edit or reset them in Settings. The protected preview can try the form for the current visit. The main hosted pairing flow moves from device selection to one quick movement check, then opens Advanced controls. Existing physical limits and the separate beta test flow still apply. Nocturne offers a choice of simulator peak patterns, and the scan lists matching toy models above a story when it detects movement cues.

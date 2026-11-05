@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {workspace} from "./helpers/workspace.mjs";
-import {DEFAULT_EXPERIENCE} from "../app/static/reader/experience-preferences.mjs";
+import {DEFAULT_EXPERIENCE, validateExperience} from "../app/static/reader/experience-preferences.mjs";
+
+test("a fresh reader gets continuous scene rhythms and steady peaks without saving, connecting or starting", async t => {
+  const app = workspace();
+  t.after(() => app.destroy());
+  await app.settle();
+  assert.deepEqual(validateExperience(DEFAULT_EXPERIENCE), {
+    quiet: "continuous", edging: false, maximum: 10, rhythm: "scene", peakPattern: "steady",
+  });
+  assert.equal(app.read("currentExperience().quiet"), "continuous");
+  assert.equal(app.read("patternChoices.peakPattern"), "steady");
+  assert.equal(app.read("latest.feel.mode"), "continuous");
+  assert.equal(app.read("latest.feel.rhythm"), "scene");
+  assert.equal(app.read("latest.ceiling"), 10);
+  assert.equal(app.read("latest.connected"), false);
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.preferenceValues.size, 0);
+  assert.deepEqual(app.errors, []);
+});
 
 test("first account sign-in asks for preferences and applies only an acknowledged save", async t => {
   let signedIn = false, rejectSave = true, stored = null;
@@ -45,7 +63,7 @@ test("first account sign-in asks for preferences and applies only an acknowledge
   rejectSave = false;
   await node("experience-form").dispatch("submit");
   assert.equal(node("experience-dialog").open, false);
-  assert.deepEqual(stored.experience, {quiet: "edging", edging: true, maximum: 16, rhythm: "gentle", peakPattern: "auto"});
+  assert.deepEqual(stored.experience, {...DEFAULT_EXPERIENCE, quiet: "edging", edging: true, maximum: 16, rhythm: "gentle"});
   assert.equal(app.read("currentExperience().maximum"), 16);
   assert.equal(app.read("latest.ceiling"), 16);
   assert.equal(app.read("latest.running"), false);
@@ -99,11 +117,14 @@ test("private or local readers can edit session-only preferences without cloud s
   assert.equal(app.read("latest.output"), 0);
 });
 
-test("editing restored device preferences preserves the saved steady pattern and stays paused", async t => {
+for (const saved of [
+  {name: "steady pattern", experience: {...DEFAULT_EXPERIENCE, peakPattern: "steady"}},
+  {name: "legacy off and automatic choices", experience: {quiet: "off", edging: false, maximum: 10, rhythm: "scene", peakPattern: "auto"}},
+]) test(`editing restored device preferences preserves ${saved.name} and stays paused`, async t => {
   let signedIn = false;
   const owner = "00000000-0000-4000-8000-000000000001";
   let stored = {appearance: "dark", width: "wide", fontSize: "normal", spacing: "normal", follow: true,
-    experience: {...DEFAULT_EXPERIENCE, peakPattern: "steady"}, revision: 4};
+    experience: {...saved.experience}, revision: 4};
   const app = workspace({publicAuth: true,
     authRequest: async action => {
       signedIn = action === "login";
@@ -128,16 +149,21 @@ test("editing restored device preferences preserves the saved steady pattern and
   node("public-password").value = "sample onboarding passphrase";
   await node("public-login-form").dispatch("submit");
   await app.settle();
-  assert.equal(node("experience-dialog").open, false, "A saved steady choice is valid account data and needs no first-time prompt.");
-  assert.equal(app.read("currentExperience().peakPattern"), "steady");
+  assert.equal(node("experience-dialog").open, false, "Valid saved choices need no first-time prompt.");
+  assert.equal(app.read("currentExperience().peakPattern"), saved.experience.peakPattern);
+  assert.equal(app.read("currentExperience().quiet"), saved.experience.quiet);
+  assert.equal(app.read("latest.feel.mode"), saved.experience.quiet === "off" ? "story" : "continuous");
+  assert.equal(app.read("latest.feel.rhythm"), saved.experience.rhythm);
   await app.click("open-app-settings");
   await app.click("open-experience");
   node("experience-maximum").value = "12";
   await node("experience-form").dispatch("submit");
   assert.equal(stored.revision, 5);
   assert.equal(stored.experience.maximum, 12);
-  assert.equal(stored.experience.peakPattern, "steady", "Changing another preference retains the independent pattern choice.");
-  assert.equal(app.read("currentExperience().peakPattern"), "steady");
+  assert.equal(stored.experience.peakPattern, saved.experience.peakPattern, "Changing another preference retains the independent pattern choice.");
+  assert.equal(stored.experience.quiet, saved.experience.quiet);
+  assert.equal(stored.experience.rhythm, saved.experience.rhythm);
+  assert.equal(app.read("currentExperience().peakPattern"), saved.experience.peakPattern);
   assert.equal(app.read("latest.ceiling"), 12);
   assert.equal(app.read("latest.running"), false);
   assert.deepEqual(app.errors, []);

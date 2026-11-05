@@ -79,7 +79,7 @@ test("Nocturne rejects text, unknown fields, out-of-range cues and oversized req
   ]) {
     assert.equal((await f.worker.fetch(request(jwt, { body }), f.env)).status, 400);
   }
-  assert.equal((await f.worker.fetch(request(jwt, { body: " ".repeat(4097) }), f.env)).status, 413);
+  assert.equal((await f.worker.fetch(request(jwt, { body: " ".repeat(16_385) }), f.env)).status, 413);
   assert.equal((await f.worker.fetch(request(jwt, { headers: { "Content-Type": "text/plain" } }), f.env)).status, 400);
   assert.deepEqual(f.calls, []);
   assert.deepEqual(f.reservations, []);
@@ -108,6 +108,100 @@ test("Nocturne sends only bounded cue data to Luna and returns typed, ordered la
   assert.equal(f.reservations[0].name, "scene-analysis:v1");
   assert.deepEqual(Object.keys(f.reservations[0].body), ["reader"]);
   assert.match(f.reservations[0].body.reader, /^[a-f0-9]{64}$/);
+});
+
+const CONTEXT = { version: "context-v1", consent: true, paragraphs: [
+  { id: 3, text: "They had quietly cared for one another for years. Tonight, the invitation to stay felt different." },
+  { id: 4, text: "At dawn they checked the train timetable and packed the maps." },
+] };
+const CONTEXT_LABELS = [
+  { id: 3, category: "romance", phase: "build", shape: "unspecified", confidence: 94 },
+  { id: 4, category: "neutral", phase: "quiet", shape: "unspecified", confidence: 99 },
+];
+function contextUpstream(labels = CONTEXT_LABELS, usage = { input_tokens: 410, output_tokens: 102, total_tokens: 512 }) {
+  return Response.json({ status: "completed", usage,
+    output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
+}
+
+test("context analysis requires explicit typed consent and strictly bounded excerpts before reserving quota", async () => {
+  const f = fixture(), jwt = await token();
+  for (const body of [
+    { ...CONTEXT, consent: false }, { ...CONTEXT, consent: "true" }, { ...CONTEXT, version: "unknown" },
+    { version: CONTEXT.version, paragraphs: CONTEXT.paragraphs }, { ...CONTEXT, title: "private title" },
+    { ...CONTEXT, paragraphs: [] }, { ...CONTEXT, paragraphs: Array.from({ length: 9 }, (_, id) => ({ id, text: "A map." })) },
+    { ...CONTEXT, paragraphs: [CONTEXT.paragraphs[0], CONTEXT.paragraphs[0]] },
+    { ...CONTEXT, paragraphs: [...CONTEXT.paragraphs].reverse() },
+    { ...CONTEXT, paragraphs: [{ id: -1, text: "A map." }] },
+    { ...CONTEXT, paragraphs: [{ id: 2000, text: "A map." }] },
+    { ...CONTEXT, paragraphs: [{ id: 1, text: "" }] },
+    { ...CONTEXT, paragraphs: [{ id: 1, text: "\u0000private" }] },
+    { ...CONTEXT, paragraphs: [{ id: 1, text: "字".repeat(1001) }] },
+    { ...CONTEXT, paragraphs: Array.from({ length: 5 }, (_, id) => ({ id, text: "x".repeat(2500) })) },
+    { ...CONTEXT, paragraphs: [{ ...CONTEXT.paragraphs[0], ceiling: 20 }] },
+  ]) assert.equal((await f.worker.fetch(request(jwt, { body }), f.env)).status, 400);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.reservations, []);
+});
+
+test("explicit context requests classify existing text with bounded structured output and actual usage only", async () => {
+  const f = fixture({ provider: () => contextUpstream([...CONTEXT_LABELS].reverse()) });
+  const response = await f.worker.fetch(request(await token(), { body: CONTEXT }), f.env);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { version: "context-v1", labels: CONTEXT_LABELS,
+    usage: { inputTokens: 410, outputTokens: 102, totalTokens: 512 } });
+  const [{ options }] = f.calls;
+  const provider = JSON.parse(options.body);
+  assert.equal(provider.model, "gpt-6-luna");
+  assert.equal(provider.store, false);
+  assert.equal(provider.max_output_tokens, 1000);
+  assert.deepEqual(provider.reasoning, { effort: "none" });
+  assert.equal(provider.text.format.strict, true);
+  assert.deepEqual(JSON.parse(provider.input), { paragraphs: CONTEXT.paragraphs });
+  assert.match(provider.instructions, /untrusted source material/);
+  assert.match(provider.instructions, /never generate, continue, quote, summarize or embellish/i);
+  assert.doesNotMatch(provider.input, /context-v1|consent|synthetic-subject|example\.test|ceiling|device/);
+  assert.equal(f.reservations.length, 1);
+});
+
+test("context output rejects extra prose, wrong identities and incoherent categories without exposing provider text", async () => {
+  const jwt = await token(TESTER_EMAIL);
+  for (const labels of [
+    [{ ...CONTEXT_LABELS[0], explanation: "private canary" }, CONTEXT_LABELS[1]],
+    [{ ...CONTEXT_LABELS[0], category: "private canary" }, CONTEXT_LABELS[1]],
+    [{ ...CONTEXT_LABELS[0], category: "neutral", phase: "peak" }, CONTEXT_LABELS[1]],
+    [{ ...CONTEXT_LABELS[0], category: "abstain", phase: "sustain" }, CONTEXT_LABELS[1]],
+    [{ ...CONTEXT_LABELS[0], confidence: 101 }, CONTEXT_LABELS[1]],
+    [{ ...CONTEXT_LABELS[0], confidence: 90.5 }, CONTEXT_LABELS[1]],
+    [{ ...CONTEXT_LABELS[0], id: "3" }, CONTEXT_LABELS[1]],
+    [CONTEXT_LABELS[0], CONTEXT_LABELS[0]], [CONTEXT_LABELS[0]],
+    [CONTEXT_LABELS[0], { ...CONTEXT_LABELS[1], shape: "accented" }],
+  ]) {
+    const f = fixture({ provider: () => contextUpstream(labels) });
+    const response = await f.worker.fetch(request(jwt, { body: CONTEXT }), f.env);
+    assert.equal(response.status, 502);
+    assert.deepEqual(Object.keys(await response.json()).sort(), ["code", "error"]);
+    assert.equal(f.calls.length, 1, "No malformed result is retried.");
+  }
+});
+
+test("context low confidence abstains, invalid usage stays unknown and refusal preserves the local fallback", async () => {
+  const jwt = await token(TESTER_EMAIL);
+  const weak = [{ ...CONTEXT_LABELS[0], confidence: 79 }, CONTEXT_LABELS[1]];
+  for (const usage of [undefined, null, { input_tokens: -1, output_tokens: 100, total_tokens: 99 },
+    { input_tokens: 100, output_tokens: 100, total_tokens: 999 }, { input_tokens: "100", output_tokens: 100, total_tokens: 200 },
+    { input_tokens: 20_001, output_tokens: 100, total_tokens: 20_101 }, { input_tokens: 100, output_tokens: 1001, total_tokens: 1101 }]) {
+    const f = fixture({ provider: () => contextUpstream(weak, usage ?? null) });
+    const response = await f.worker.fetch(request(jwt, { body: CONTEXT }), f.env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.labels[0], { id: 3, category: "abstain", phase: "abstain", shape: "unspecified", confidence: 79 });
+    assert.equal(body.usage, null);
+  }
+  const f = fixture({ provider: () => Response.json({ status: "completed", output: [{ type: "message", role: "assistant",
+    content: [{ type: "refusal", refusal: "private canary" }] }] }) });
+  const response = await f.worker.fetch(request(jwt, { body: CONTEXT }), f.env);
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).code, "refused");
 });
 
 test("native Workers fetch accepts a Nocturne response and never forwards credentials on redirects", async t => {
@@ -238,6 +332,16 @@ test("Nocturne fails closed on quota errors and rechecks the Access session afte
   assert.equal(response.status, 403);
   assert.equal((await response.json()).code, "invalid_session");
   assert.equal(f.calls.length, 1);
+
+  let contextVerifications = 0;
+  const contextual = fixture({ provider: () => contextUpstream(), keyResolver: (...args) => {
+    if (++contextVerifications > 1) throw new Error("Synthetic revoked identity");
+    return localKeys(...args);
+  } });
+  const contextResponse = await contextual.worker.fetch(request(jwt, { body: CONTEXT }), contextual.env);
+  assert.equal(contextResponse.status, 403);
+  assert.equal((await contextResponse.json()).code, "invalid_session");
+  assert.equal(contextual.calls.length, 1);
 });
 
 test("the SQLite budget admits concurrent work up to per-reader and deployment limits", { timeout: 30000 }, async t => {

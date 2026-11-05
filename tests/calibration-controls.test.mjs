@@ -108,7 +108,7 @@ test("an explicit Nocturne peak shape applies in simulation despite ordinary rhy
   assert.equal(feel.desired({base: 5, ceiling: 0, scene: peak, simulatorStagePatterns: true}), 0);
 });
 
-test("a continuous background is opt-in and explicit paragraph zero, strength zero and maximum zero outrank it",()=>{
+test("explicit paragraph zero, strength zero and maximum zero outrank a configured continuous background",()=>{
   const {controller:c,clock,device}=synchronous();c.connect();c.setStory([0,4]);
   c.start();assert.equal(device.snapshot().strength,0);
   c.setFeel({mode:"continuous",minimum:1,background:2});clock.advance(1000);assert.equal(device.snapshot().strength,2);

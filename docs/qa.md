@@ -19,7 +19,7 @@ npx playwright install --only-shell chromium
 npm run test:browser
 ```
 
-For the Nocturne browser contract, run `npm run build:worker` followed by `node scripts/nocturne-browser-check.mjs`. The beta browser suite also runs this check. It uses the packaged reader and a same-origin fixture service to exercise deliberate cue submission, protected exclusions, pattern application, refusal fallback, Stop and unavailable mode without credentials or external requests.
+For the Nocturne browser contract, run `npm run build:worker` followed by `node scripts/nocturne-browser-check.mjs`. The beta browser suite also runs this check. It uses the packaged reader and a same-origin fixture service to exercise deliberate cue submission, contextual excerpt consent, protected exclusions, missed-context mapping, pattern application, refusal fallback, Stop and unavailable mode without credentials or external requests. Run the neutral dispatch comparison with `node scripts/playback-continuity-trace.mjs`; inspect gaps separately from requested targets and deliberate quiet. See [contextual Nocturne](nocturne-context-phase.md) for the current request bounds and evaluation limits.
 
 Linux may need `npx playwright install --with-deps --only-shell chromium`. Browser installation requires internet access. These checks establish application/browser behaviour against the fixture, not live SDK compatibility. Record an installation failure as unexecuted browser evidence, not a passing test.
 
@@ -44,7 +44,7 @@ Use the action/expected-result table in [test-today.md](test-today.md). Cover:
 - Immediate Stop remains accessible in settings, review and confirmation dialogs. Reductions keep priority over the finite dispatch cadence and latest-value coalescing.
 - Stop while a selection is pending, hide/return, disconnect/reconnect, story switches/deletion, restoration, inactivity, delayed timers and adapter errors. None may automatically resume output.
 - Two visible same-origin windows in one browser profile: the second cannot take over active simulator playback. Ordinary hidden-tab interruption is a separate case.
-- No local story text/titles in network requests, URLs or logs; deliberate supported-URL import is the documented transient source-fetch exception, with no automatic local-text upload or retention. Session-only content stays out of persistence. After explicit consent, allow only the documented versioned local story fields, with appearance separate. Use neutral fixtures and do not export sensitive request data.
+- No story text/titles in device-vendor requests, URLs or logs. Before contextual Nocturne is explicitly enabled, no local text enters analysis requests. After enabling, verify only the bounded current-story excerpts reach the exact-origin endpoint and OpenAI, with no automatic library backfill, analytics, persistence or diagnostics. Deliberate supported-URL import remains the separate transient source-fetch exception. Session-only content stays out of persistence. After explicit consent, allow only the documented versioned local story fields, with appearance separate. Use neutral fixtures and do not export sensitive request data.
 
 The reader facade separates synchronous profile simulation from the optional configured asynchronous Lovense bridge. Repeat relevant reading/interruption checks against both software paths, with fake transport fixtures for deterministic failures. Passing them does not qualify physical output, actual expiry or any model/firmware/Remote/browser combination.
 
@@ -69,7 +69,7 @@ The hosted Worker and local Python invitation service are independent authentica
 - All nonzero live requests target one explicitly selected ID, an allowed discovered action, at most 5/20 and two seconds. No omitted target, broadcast, indefinite output, undocumented action, saved credential or stale completion may create/resume output. Missing/failed acknowledgements must not become a claimed physical Stop or a known zero.
 - Exercise model/mode/action/selection changes, Stop while connect/test/Start is pending, hide/return, expiry, disconnect/reconnect, competing tabs and a stale SDK callback. Reconnection remains paused. Device-specific runtime capability reports must restrict offered motions; a model illustration or a simulator's actions cannot authorise unsupported real commands.
 - Simulation must exercise the same explicit selection/test/practice progression with no vendor script or credential request. Test all nine profiles and rehearsal disconnect/error/reconnect controls. A failure must require explicit recovery without auto-selection or auto-Start.
-- Use neutral content for network inspection; local stories, titles and corrections must not cross the bridge or appear in backend/vendor payloads. Never save QR/auth payloads, cookies, private device IDs or story excerpts in screenshots, HAR files or issues.
+- Use neutral content for network inspection; local stories, titles and corrections must not cross the device bridge or appear in device-vendor payloads. Only explicitly enabled, bounded contextual excerpts may reach the analysis endpoint; inspect with neutral fixtures and clear the session afterward. Never save QR/auth payloads, cookies, private device IDs or story excerpts in screenshots, HAR files or issues.
 
 ## Separate local invitation/device-check tests
 

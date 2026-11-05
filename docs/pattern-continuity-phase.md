@@ -37,3 +37,7 @@ The following phase is proposed.
 [Standard API](https://developer.lovense.com/docs/standard-solutions/standard-api) · [Lovense terms](https://www.lovense.com/terms-and-conditions)
 
 Local evidence for this slice is 22 Python tests and 573 JavaScript tests through the common check command, plus Worker packaging of 84 assets and diff checks. The focused packaged Nocturne browser command could not launch because the expected Chromium executable was unavailable. Its new steady-selection regression passed syntax checking. Physical preference, provider execution and device qualification remain open.
+
+## Implemented follow-up
+
+The [defaults and contextual Nocturne phase](nocturne-context-phase.md) implements fresh continuous-background and steady-peak defaults, preserves saved explicit choices, adds the neutral dispatched-trace comparison and introduces optional bounded contextual annotation. The trace confirms that Stop-before-reduction gaps remain measurable; it does not qualify physical output or preference. The calibrated-band transport prototype, matched-strength reader comparisons, wider semantic evaluation and physical qualification remain subsequent gates.
