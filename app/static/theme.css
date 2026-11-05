@@ -37,7 +37,7 @@ button { border: 1px solid var(--secondary); border-radius: 8px; background: tra
 button:hover:not(:disabled) { background: var(--selection); }
 button:disabled { opacity: .48; cursor: default; }
 button.primary { background: var(--action); border-color: var(--action); color: var(--on-action); }
-button.primary:hover:not(:disabled) { opacity: .9; }
+button.primary:hover:not(:disabled) { background: var(--action); opacity: .9; }
 button.stop { color: var(--stop); border-color: var(--stop); }
 button.quiet-button { border-color: transparent; text-decoration: underline; text-underline-offset: 4px; padding-left: 0; }
 label { display: block; font-size: .9375rem; font-weight: 550; }

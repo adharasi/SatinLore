@@ -12,9 +12,9 @@ export function normalizeReadingMark(issue, position) {
 }
 
 /** Keeps only explicit marks and visited section numbers in this tab. */
-export function mountReadingFeedback({mount, document = mount?.ownerDocument ?? globalThis.document,
+export function mountReadingFeedback({mount, shortcut, document = mount?.ownerDocument ?? globalThis.document,
   record = () => false, urls = globalThis.URL, schedule = globalThis.setTimeout} = {}) {
-  if (!mount || !document) return {update() {}, sharing() {}};
+  if (!mount || !document) return {update() {}, sharing() {}, open() {}};
   const get = selector => mount.querySelector(selector);
   const section = get("select"), list = get("ul"), status = get('[role="status"]');
   const exportButton = get("#download-reading-feedback"), sharingNote = get("#reading-feedback-sharing");
@@ -90,6 +90,7 @@ export function mountReadingFeedback({mount, document = mount?.ownerDocument ?? 
         mount.open = false;
       }
       mount.hidden = !current || running || testing;
+      if (shortcut) shortcut.hidden = !current || testing;
       if (mount.hidden || !optionsChanged) return;
       const options = [...current.played].sort((a, b) => a - b).map(value => {
         const option = document.createElement("option");
@@ -101,6 +102,13 @@ export function mountReadingFeedback({mount, document = mount?.ownerDocument ?? 
       section.value = String(current.last);
       renderMarks();
       optionsChanged = false;
+    },
+    open(position) {
+      if (mount.hidden || !current) return false;
+      section.value = String(current.played.has(position) ? position : current.last);
+      mount.open = true;
+      section.focus();
+      return true;
     },
     sharing(recording) { shareRecording = recording === true; sharingNote.hidden = !shareRecording; },
   };

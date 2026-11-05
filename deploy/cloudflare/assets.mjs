@@ -11,6 +11,7 @@ export const READER_ASSETS = Object.freeze([
   ["devices/mock.mjs", "/static/devices/mock.mjs"],
   ["devices/reader-device.mjs", "/static/devices/reader-device.mjs"],
   ["devices/bridge-transport.mjs", "/static/devices/bridge-transport.mjs"],
+  ["devices/pairing-image.mjs", "/static/devices/pairing-image.mjs"],
   ["devices/profile-simulator.mjs", "/static/devices/profile-simulator.mjs"],
   ["devices/toy-profiles.mjs", "/static/devices/toy-profiles.mjs"],
   ["reader/import.mjs", "/static/reader/import.mjs"],
@@ -73,7 +74,7 @@ export const ALPHA_ASSETS = Object.freeze([
   ...[
     "alpha.css", "alpha.mjs", "alpha-movement-view.mjs", "alpha-device.mjs", "alpha-screen.mjs", "alpha-screen-schema.mjs", "alpha-timeline.mjs",
     "alpha-admin.css", "alpha-admin.mjs", "theme.css", "favicon.svg",
-    "devices/reader-device.mjs", "devices/bridge-transport.mjs",
+    "devices/reader-device.mjs", "devices/bridge-transport.mjs", "devices/pairing-image.mjs",
     "devices/profile-simulator.mjs", "devices/toy-profiles.mjs",
     "playback/controller.mjs", "playback/async-controller.mjs", "reader/calibration.mjs",
   ].map(source => [source, `/alpha/static/${source}`]),

@@ -1,10 +1,4 @@
-// A URL validator only: vendor SDK/control code stays inside the opaque bridge.
-function safeQrUrl(value) {
-  if (typeof value !== "string" || value.length > 4096) return null;
-  try { const url = new URL(value); const allowed = ["lovense-api.com", "lovense.com"].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
-    return url.protocol === "https:" && !url.username && !url.password && !url.port && allowed ? url.href : null;
-  } catch { return null; }
-}
+import {safeQrUrl, safeGeneratedQrImage} from "./pairing-image.mjs";
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CHANNELS = new Set(["vibrate", "rotate", "fingering", "thrusting", "oscillate"]);
@@ -147,7 +141,7 @@ export class BridgeTransport {
     } else if (message.type === "pairing-diagnostic") {
       if (this.state === "connecting") this.pairingProblem = pairingMessage(message) || this.pairingProblem;
     } else if (message.type === "qr") {
-      const url = safeQrUrl(message.url);
+      const url = safeGeneratedQrImage(message.image) || safeQrUrl(message.url);
       if (!url) { this.dispose("The pairing code was invalid. Reconnect."); return; }
       this.qrUrl = url; this.pairingProblem = ""; this.clearTimer(this.openTimer);
       if (!this.toys.length) {this.state = "waiting"; this.message = "Scan this code in Lovense Remote.";}

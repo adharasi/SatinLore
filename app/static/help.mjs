@@ -2,6 +2,8 @@ const build = document.querySelector('meta[name="satinlore-build"]')?.content;
 document.getElementById("help-build").textContent = /^[a-f0-9]{40}$/.test(build ?? "") ? build.slice(0, 12) : "Local development";
 const hosted = document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
 const publicReader = document.querySelector('meta[name="satinlore-public-auth"]')?.content === "true";
+document.getElementById("help-public-account").hidden = !publicReader;
+document.getElementById("help-private-account").hidden = !hosted || publicReader;
 if (hosted && !publicReader) {
   document.getElementById("help-signout").hidden = false;
   document.getElementById("help-signout-note").hidden = false;

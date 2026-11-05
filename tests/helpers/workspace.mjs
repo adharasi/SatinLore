@@ -69,6 +69,11 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     getBoundingClientRect() {
       if (this.id === "transport") return {top: 800, bottom: 950, height: 150};
       if (this.id === "workspace-header") return {top: 0, bottom: 80, height: 80};
+      if (this.id === "reading-end") {
+        const count = nodes.get("paragraph")?.children[0]?.children.length ?? 0;
+        const top = 280 + count * 200 - (context?.scrollY || 0);
+        return {top, bottom: top + 100, height: 100};
+      }
       const top = 120 + Number(this.dataset.index || 0) * 200 - (context?.scrollY || 0);
       return {top, bottom: top + 180, height: 180};
     }

@@ -26,7 +26,7 @@ for (const [source, target] of entries) {
     // Bundle only trusted connection code into its authenticated document instead.
     const bundle = await build({ entryPoints: [resolve(SOURCE, "device-bridge.mjs")], bundle: true,
       alias: {parseuri: resolve(SOURCE, "devices/safe-uri.cjs")},
-      write: false, format: "iife", platform: "browser", target: "es2022", charset: "ascii", legalComments: "none" });
+      write: false, format: "iife", platform: "browser", target: "es2022", charset: "ascii", legalComments: "inline" });
     const code = bundle.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
     // The compiled code can contain replacement metacharacters such as a
     // regex end anchor followed by a backtick. Insert it literally.

@@ -1,5 +1,6 @@
 import io from "socket.io-client";
 import {supportedToys} from "./toy-profiles.mjs";
+import {safeQrUrl, safeGeneratedQrImage} from "./pairing-image.mjs";
 
 // Official Standard Socket API. This module is bundled only into the opaque
 // connection frame. It accepts no story text, account identity or developer key.
@@ -51,8 +52,9 @@ async function boundedJson(response, maximum = 65_536) {
 export class LovenseSocket {
   constructor(options, {fetcher = (...args) => globalThis.fetch(...args), socketFactory = io, now = Date.now,
     setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
-    clearTimer = timer => globalThis.clearTimeout(timer), randomId = () => crypto.randomUUID(), preserveFlexerRenewals = false} = {}) {
-    Object.assign(this,{fetcher,socketFactory,now,setTimer,clearTimer,randomId});
+    clearTimer = timer => globalThis.clearTimeout(timer), randomId = () => crypto.randomUUID(), preserveFlexerRenewals = false,
+    renderPairingImage = () => null} = {}) {
+    Object.assign(this,{fetcher,socketFactory,now,setTimer,clearTimer,randomId,renderPairingImage});
     this.platform = options?.platform;
     this.controlTransport = SOCKET_TRANSPORT;
     this.handlers = new Map(); this.toys = []; this.knownIds = new Set();
@@ -127,13 +129,19 @@ export class LovenseSocket {
       const value=envelope(raw), result=data(raw), pending=this.pendingQr;
       if (result.ackId !== pending.ackId) return;
       this.clearTimer(pending.timer);this.pendingQr=null;
-      if (value.code !== 0 || typeof result.qrcodeUrl !== "string" || result.qrcodeUrl.length > 4096) {
+      const qrcodeUrl = safeQrUrl(result.qrcodeUrl);
+      let pairingImage = null;
+      if (value.code === 0 && typeof result.qrcode === "string") {
+        try { pairingImage = safeGeneratedQrImage(this.renderPairingImage(result.qrcode)); } catch { /* Use the vendor image. */ }
+      }
+      if (value.code !== 0 || (!pairingImage && !qrcodeUrl)) {
         pending.reject(Object.assign(Error("The pairing code could not be loaded."), {
           pairing: {stage: "qr-code", code: vendorCode(value.code)},
         }));
         return;
       }
-      this.qr={qrcodeUrl:result.qrcodeUrl};pending.resolve({...this.qr});
+      this.qr = pairingImage ? {pairingImage} : {qrcodeUrl};
+      pending.resolve({...this.qr});
     } catch {this.emit("sdkError");}
   }
   appStatus(raw) {

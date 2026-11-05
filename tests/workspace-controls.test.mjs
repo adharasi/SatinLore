@@ -330,6 +330,55 @@ test("scroll jumps mute the old output and settle only on the final paragraph; S
   assert.equal(app.read("latest.output"), 0);
 });
 
+test("steady scrolling updates the active section before the last scroll event settles", async t => {
+  const app = workspace(); t.after(() => app.destroy());
+  await app.settle();
+  await app.add(Array.from({length: 12}, () => "They shared a tender kiss.").join("\n\n"));
+  await app.click("connect");
+  await start(app);
+  for (let step = 1; step <= 8; step++) {
+    await app.advance(80);
+    app.read(`scrollY = ${step * 40}; window.dispatchEvent({type:"scroll"})`);
+  }
+  assert.ok(app.read("latest.position") >= 2, "The section follows the latest reading area during the gesture.");
+  assert.equal(app.read("latest.readingSeeking"), false, "An ordinary reading scroll does not mute playback.");
+  assert.equal(app.read("latest.running"), true);
+  assert.equal(app.nodes.get("reading-sync-state").textContent, "Following");
+});
+
+test("the final paragraph stays playable until the end marker, and Replay needs confirmation", async t => {
+  const app = workspace(); t.after(() => app.destroy());
+  await app.settle();
+  await app.add(Array.from({length: 6}, () => "They shared a tender kiss.").join("\n\n"));
+  await app.click("connect");
+  app.read("controller.setLevel(5, 5)");
+  await start(app);
+  app.read('scrollY = 850; window.dispatchEvent({type:"scroll"})');
+  await app.advance(180);
+  assert.equal(app.read("latest.position"), 5, "A visible final paragraph remains reachable before the end marker.");
+  assert.equal(app.read("latest.running"), true);
+  await app.advance(1000);
+  assert.ok(app.read("latest.output") > 0, "The final paragraph can still drive the simulator.");
+  app.read('scrollY = 1180; window.dispatchEvent({type:"scroll"})');
+  assert.equal(app.read("latest.position"), 5);
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.read("latest.output"), 0);
+  assert.equal(app.nodes.get("reading-sync-state").textContent, "Finished");
+  assert.equal(app.nodes.get("start").textContent, "Replay");
+  await app.advance(2500);
+  assert.equal(app.read("latest.output"), 0, "End invalidates future renewals.");
+  await app.click("start");
+  assert.equal(app.read("latest.position"), 0);
+  assert.equal(app.nodes.get("start-dialog").open, true);
+  assert.equal(app.read("latest.running"), false);
+  await app.click("cancel-start");
+  await app.click("finish-reading");
+  assert.equal(app.nodes.get("reading-sync-state").textContent, "Finished");
+  await app.click("finish-reading");
+  assert.equal(app.read("latest.position"), 0);
+  assert.equal(app.read("latest.output"), 0);
+});
+
 test("a jump past the story stays quiet until a destination is visible and invalidates a pending Start", async t => {
   const app = await ready(t);
   app.read("controller.setLevel(0, 5)");

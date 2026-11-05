@@ -266,13 +266,21 @@ try {
   assert.equal(posts.some(entry => entry.path === "/api/account/library" && entry.body.action === "saveStory"), false, "An account save still needs explicit confirmation after login.");
   await page.locator("#confirm-save").click();
   await expect(page.locator("#save-status")).toHaveText("Saved to your account");
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 1_000));
   await page.locator("#next").click();
+  await expect(page.locator("#save-status")).toHaveText("Saving to your account…");
+  assert.equal(desktop.account.stories[0].position, 0, "The server has not received the debounced progress save.");
+  await page.reload();
+  await page.clock.resume();
+  await expect(page.locator("#position")).toHaveText("Section 2 of 4");
+  await expect(page.locator("#output")).toHaveText("0 / 20");
   await expect.poll(() => desktop.account.stories[0].position).toBe(1);
   await page.locator("#toggle-dark-mode").click();
   await expect.poll(() => desktop.account.preferences?.appearance).toBe("light");
   await page.locator("#font-size").selectOption("large");
   await expect.poll(() => desktop.account.preferences?.fontSize).toBe("large");
-  assert.equal(await page.evaluate(() => localStorage.getItem("satinlore.library.v1")), null, "Account-only stories never enter browser storage.");
+  assert.equal(await page.evaluate(() => localStorage.getItem("satinlore.library.v1")), null, "Account-only story text never enters the browser library.");
   assert.equal(await page.evaluate(() => localStorage.getItem("satinlore.appearance")), null, "Account-only appearance never overwrites the guest preference.");
 
   await page.reload();

@@ -1,8 +1,10 @@
-import {validateStoryRecord} from "./storage.mjs";
+import {MAX_SAVED_STORIES, validateStoryRecord} from "./storage.mjs";
 import {validateReaderPreferences} from "./preferences.mjs";
 import {validateExperience} from "./experience-preferences.mjs";
 
 const ownerPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const storyIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+const resumeKey = "satinlore.account-resume.v1";
 const revision = value => Number.isSafeInteger(value) && value >= 0;
 const changedSession = () => new Error("Your sign-in changed. Open your account library again before saving.");
 const unavailable = () => new Error("The account library is temporarily unavailable. Try again shortly.");
@@ -15,10 +17,11 @@ function validatedPreferences(value) {
     ...(experience === undefined ? {} : {experience: validateExperience(experience)})};
 }
 
-/** Story data lives only in authenticated requests and in this tab's memory. */
+/** Story text lives only in authenticated requests and in this tab's memory. */
 export class AccountLibrary {
-  constructor({request = (path, options) => fetch(path, options)} = {}) {
+  constructor({request = (path, options) => fetch(path, options), storage = () => globalThis.sessionStorage} = {}) {
     this.request = request;
+    this.storage = storage;
     this.session = null;
   }
 
@@ -28,6 +31,42 @@ export class AccountLibrary {
   }
 
   get owner() { return this.session?.owner ?? null; }
+
+  readResumePositions(owner) {
+    try {
+      const raw = this.storage()?.getItem(resumeKey);
+      if (!raw || raw.length > 4_096) return [];
+      const value = JSON.parse(raw);
+      if (value?.owner !== owner || !Array.isArray(value.positions)) return [];
+      return value.positions.slice(0, MAX_SAVED_STORIES).filter(entry => entry &&
+        typeof entry.id === "string" && storyIdPattern.test(entry.id) && revision(entry.revision) && revision(entry.position));
+    } catch { return []; }
+  }
+
+  // Keep only a tab-local cursor for explicitly saved account stories. A newer
+  // durable revision from another tab or device takes precedence.
+  resumePosition(owner, {id, revision: savedRevision, position, corrections}) {
+    if (!owner || owner !== this.owner) return position;
+    const marker = this.readResumePositions(owner).find(entry => entry.id === id && entry.revision === savedRevision);
+    return marker && marker.position < corrections.length ? marker.position : position;
+  }
+
+  rememberPosition(owner, id, savedRevision, position) {
+    if (!owner || owner !== this.owner || typeof id !== "string" || !storyIdPattern.test(id)) return;
+    if (position !== null && (!revision(savedRevision) || !revision(position))) return;
+    const positions = this.readResumePositions(owner).filter(entry => entry.id !== id);
+    if (position !== null) positions.unshift({id, revision: savedRevision, position});
+    try {
+      const storage = this.storage();
+      if (positions.length) storage?.setItem(resumeKey, JSON.stringify({owner, positions: positions.slice(0, MAX_SAVED_STORIES)}));
+      else storage?.removeItem(resumeKey);
+    } catch { /* Server saves still work when browser storage is blocked. */ }
+  }
+
+  forgetResumePositions() {
+    try { this.storage()?.removeItem(resumeKey); }
+    catch { /* Browser storage is optional. */ }
+  }
 
   async send(session, body) {
     const response = await this.request("/api/account/library", {

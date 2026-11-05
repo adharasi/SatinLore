@@ -47,7 +47,7 @@ async function classify(cues) {
     boundaryExact = isDeepStrictEqual(input, {cues}) &&
       isDeepStrictEqual(Object.keys(body).sort(), ["input", "instructions", "max_output_tokens", "model", "prompt_cache_options", "reasoning", "store", "text"]) &&
       body.store === false && body.model === "gpt-6-luna" && body.text.format.strict === true &&
-      body.max_output_tokens === 600 && request.redirect === "error" &&
+      body.max_output_tokens === 600 && request.redirect === "manual" &&
       url === "https://api.openai.com/v1/responses" && cues.length <= 16 &&
       cues.every(cue => isDeepStrictEqual(Object.keys(cue).sort(), cueFields));
     if (!boundaryExact) throw new Error("Unexpected outbound cue boundary.");

@@ -208,7 +208,6 @@ try {
   log("checking continuity Hold Ease off and zero maximum");
   await sidebar(page); await page.locator("#follow-scroll").uncheck();
   await page.locator("#feel-mode").selectOption("continuous");
-  await sidebar(page, "story");
   await disclosure(page, ".feel-adjustments details:has(#feel-minimum)"); await range(page, "feel-minimum", 1); await range(page, "feel-background", 1);
   await range(page, "feel-recovery", 0);
   await sidebar(page);
@@ -264,6 +263,7 @@ try {
   assert.match(await beta.locator("#reading-feedback [role=status]").textContent(), /queued in the beta recording/);
   await sidebar(beta, "story"); await disclosure(beta, "#preset-mount details");
   await beta.locator("#account-preset-name").fill(privateName); // Never saved, never a recording field.
+  await sidebar(beta);
   await disclosure(beta, ".feel-adjustments details:has(#feel-minimum)"); await range(beta, "feel-background", 2);
   await beta.locator("#beta-recording-pause").click();
   await beta.waitForFunction(() => document.querySelector("#beta-recording").dataset.state === "paused");

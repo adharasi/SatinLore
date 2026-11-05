@@ -73,6 +73,52 @@ test("actual export controls initiate current/all backups and restore fresh paus
   assert.deepEqual(app.errors, []);
 });
 
+test("restoring duplicate titles preserves originals and distinguishes fresh copies", async t => {
+  const app = await ready(t);
+  await app.add();
+  await restore(app, backupFile([backupRecord({title: "Synthetic story"}), backupRecord({title: "Synthetic story"})]));
+  assert.deepEqual(Array.from(app.read("stories.map(story => story.title)")), ["Synthetic story", "Synthetic story (restored)", "Synthetic story (restored 2)"]);
+  assert.equal(app.read("stories.every(story => !story.saved)"), true);
+});
+
+test("editing text makes a fresh paused copy without saving or changing the original", async t => {
+  const app = await ready(t);
+  await app.add();
+  const original = app.read("currentStory()");
+  const oldText = original.model.paragraphs.map(paragraph => paragraph.text).join("\n\n");
+  await app.click("save-story"); await app.click("confirm-save"); await app.settle();
+  await app.click("edit-story-text");
+  assert.equal(app.nodes.get("edit-story-source").value, oldText);
+  app.nodes.get("edit-story-source").value = "A rewritten scene.\n\nA quiet walk home.";
+  await app.click("edit-story-open"); await app.settle();
+  assert.equal(app.nodes.get("edit-story-dialog").open, false);
+  assert.equal(app.nodes.get("edit-story-source").value, "");
+  assert.equal(app.read("currentStory().title"), "Synthetic story (edited copy)");
+  assert.equal(app.read("currentStory().saved"), false);
+  assert.equal(app.read("currentStory().position"), 0);
+  assert.equal(app.read("latest.running"), false);
+  assert.equal(app.read("store._read().stories.length"), 1);
+  assert.equal(app.read("store._read().stories[0].text"), oldText);
+});
+
+test("closing file import returns to the prior story unless a typed draft needs attention", async t => {
+  const app = await ready(t);
+  await app.add();
+  const original = app.read("activeId");
+  await app.click("new-story");
+  assert.equal(app.nodes.get("draft-return").hidden, false);
+  await app.click("empty-new-story"); await app.click("cancel-import");
+  assert.equal(app.read("activeId"), original);
+  await app.click("new-story");
+  app.nodes.get("draft-story").value = "Keep this draft.";
+  await app.click("empty-new-story"); await app.click("cancel-import");
+  assert.equal(app.read("activeId"), null);
+  assert.equal(app.nodes.get("draft-story").value, "Keep this draft.");
+  await app.click("draft-return");
+  assert.equal(app.read("activeId"), original);
+  assert.equal(app.read("latest.running"), false);
+});
+
 test("the selected story card edits details, favourites, downloads, duplicates and deletes locally", async t => {
   const app = await ready(t);
   await app.add();
@@ -120,16 +166,19 @@ test("the selected story card edits details, favourites, downloads, duplicates a
   assert.deepEqual(app.errors, []);
 });
 
-test("first story opens the responsive reading controls once", async t => {
+test("opening a story leaves the phone reader unobstructed and controls are still available", async t => {
   const app = await ready(t);
   await app.resize(true);
   assert.equal(app.nodes.get("settings-panel").hidden, true);
   await app.add();
-  assert.equal(app.nodes.get("settings-panel").hidden, false);
+  assert.equal(app.nodes.get("settings-panel").hidden, true);
   assert.equal(app.nodes.get("library-panel").hidden, true);
-  await app.click("close-settings");
+  await app.click("toggle-settings");
+  assert.equal(app.nodes.get("settings-panel").hidden, false);
+  assert.equal(app.nodes.get("main-content").inert, true);
   await app.add("Another quiet paragraph.");
   assert.equal(app.nodes.get("settings-panel").hidden, true);
+  assert.equal(app.nodes.get("main-content").inert, false);
   assert.equal(app.read("latest.running"), false);
 });
 
