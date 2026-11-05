@@ -107,6 +107,27 @@ test("parent transport is idle until requested and uses an opaque exact-frame po
   await f.finish(); assert.equal(f.held(), 0);
 });
 
+test("the private port accepts only bounded pairing images and drops them when closed", async () => {
+  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAAAA";
+  const f = fixture({autoQr: false, autoToys: false});
+  assert.equal(await f.bridge.begin(), true);
+  const channel = f.channels[0];
+  f.deliver({type: "qr", image});
+  assert.equal(f.bridge.snapshot().qrUrl, image);
+  assert.equal(f.bridge.snapshot().connectionState, "waiting");
+  assert.equal(f.bridge.selected, null);
+  await f.finish();
+  f.deliver({type: "qr", image}, channel);
+  assert.equal(f.bridge.snapshot().qrUrl, null);
+
+  const rejected = fixture({autoQr: false, autoToys: false});
+  assert.equal(await rejected.bridge.begin(), true);
+  rejected.deliver({type: "qr", image: "data:image/svg+xml,<svg/>"});
+  assert.equal(rejected.bridge.snapshot().qrUrl, null);
+  assert.match(rejected.bridge.snapshot().connectionMessage, /pairing code was invalid/i);
+  await rejected.finish();
+});
+
 test("setup surfaces bounded value-free server diagnostics without treating invalid configuration as a live connection", async () => {
   const f=fixture();
   const message="Live pairing needs LOVENSE_UID_SECRET runtime Secret with 64 hexadecimal characters. Save these on the deployed private app, then refresh setup. Simulators remain available.";

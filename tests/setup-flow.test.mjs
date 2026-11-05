@@ -224,14 +224,65 @@ test("real pairing waits for detected toys, validates QR origin and never invent
   assert.match(app.nodes.get("setup-instructions").children[1].textContent, /Lovense Remote/);
   assert.equal(app.calls.includes("select"), false); assert.equal(app.calls.includes("start"), false);
   app.flow.update({qrUrl: "https://api.lovense-api.com/private-code.png"});
-  assert.equal(app.nodes.get("setup-qr").hidden, false);
+  const image = app.nodes.get("setup-qr");
+  assert.equal(image.hidden, true);
+  assert.doesNotMatch(app.nodes.get("setup-connection-badge").textContent, /SCAN/);
+  assert.equal(app.nodes.get("setup-primary").disabled, true);
+  image.naturalWidth = image.naturalHeight = 128;
+  await image.dispatch("load");
+  assert.equal(image.hidden, false);
+  assert.match(app.nodes.get("setup-connection-badge").textContent, /SCAN THE CODE/);
   app.flow.update({connected: true, toys: [{id: "real-nora", label: "Nora", capabilities: ["vibrate", "rotate"]}]});
+  assert.equal(image.getAttribute("src"), null);
   assert.equal(app.flow.snapshot().phase, "select");
   assert.equal(app.nodes.get("setup-primary").disabled, true);
   await app.selectDevice("real-nora");
   assert.deepEqual(app.nodes.get("setup-channel").children.map(option => option.value), ["vibrate", "rotate"]);
   await app.click("setup-close");
   assert.equal(app.flow.snapshot().active, false);
+});
+
+test("broken or slow pairing images offer a new session and ignore stale load events", async () => {
+  let attempts = 0, timerId = 0;
+  const timers = new Map();
+  const app = harness({
+    onConnect: () => ({connected: false, toys: [], connectionState: "waiting", liveConfigured: true,
+      qrUrl: `https://api.lovense-api.com/fixture-${++attempts}.png`}),
+    onRefresh: () => assert.fail("A new QR needs a new pairing session"),
+  });
+  app.window.setTimeout = callback => { timers.set(++timerId, callback); return timerId; };
+  app.window.clearTimeout = id => timers.delete(id);
+  app.flow.open({mode: "lovense"});
+  await app.click("setup-primary");
+  const first = app.nodes.get("setup-qr");
+  app.flow.update({connectionState: "waiting"});
+  assert.equal(app.nodes.get("setup-qr"), first, "Unrelated snapshots do not reload the image");
+  first.decode = async () => { throw new Error("Unable to decode"); };
+  await first.dispatch("load");
+  assert.equal(first.hidden, true);
+  assert.equal(first.getAttribute("src"), null);
+  assert.equal(app.nodes.get("setup-primary").textContent, "Try a new code");
+  assert.doesNotMatch(app.nodes.get("setup-instructions").children.map(node => node.textContent).join(" "), /scan/i);
+  assert.equal(timers.size, 0);
+  await app.click("setup-primary");
+  assert.equal(attempts, 2);
+  const second = app.nodes.get("setup-qr");
+  assert.notEqual(second, first);
+  await first.dispatch("error");
+  assert.match(app.nodes.get("setup-qr-placeholder").textContent, /Waiting/);
+  timers.values().next().value();
+  assert.equal(app.nodes.get("setup-primary").textContent, "Try a new code");
+  second.naturalWidth = second.naturalHeight = 128;
+  await second.dispatch("load");
+  assert.equal(second.hidden, true);
+  await app.click("setup-primary");
+  assert.equal(attempts, 3);
+  const third = app.nodes.get("setup-qr");
+  await app.click("setup-close");
+  await third.dispatch("load");
+  assert.equal(third.hidden, true);
+  assert.equal(third.getAttribute("src"), null);
+  assert.equal(timers.size, 0);
 });
 
 test("live setup sends guests to sign-in and preserves the chosen toy for explicit pairing", async () => {

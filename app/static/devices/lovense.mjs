@@ -1,5 +1,7 @@
 import {supportedToys} from "./toy-profiles.mjs";
+import {safeQrUrl, safeGeneratedQrImage} from "./pairing-image.mjs";
 export {supportedToys} from "./toy-profiles.mjs";
+export {safeQrUrl} from "./pairing-image.mjs";
 
 // Bounded SDK requests, not physical-device acknowledgements. The same adapter
 // serves the isolated connection check and finite, explicitly armed reader loop.
@@ -9,16 +11,6 @@ export const COMMAND_ACK_TIMEOUT_MS = 1500;
 const submittedResult = result => result !== false && (!result || typeof result !== "object" ||
   (result.result !== false && result.success !== false && (!("code" in result) || [0, 200, "0", "200"].includes(result.code))));
 const stopResult = result => ({status: submittedResult(result) ? "submitted" : "unconfirmed"});
-
-export function safeQrUrl(value) {
-  if (typeof value !== "string" || value.length > 4096) return null;
-  try {
-    const url = new URL(value);
-    const allowed = ["lovense-api.com", "lovense.com"].some(domain =>
-      url.hostname === domain || url.hostname.endsWith(`.${domain}`));
-    return url.protocol === "https:" && !url.username && !url.password && !url.port && allowed ? url.href : null;
-  } catch { return null; }
-}
 
 export class LovenseCheck {
   constructor({sdkFactory, emit, now = Date.now,
@@ -90,8 +82,10 @@ export class LovenseCheck {
         this.refresh();
         Promise.resolve(sdk.getQrcode()).then(result => {
           if (!this.active(generation)) return;
+          const image = safeGeneratedQrImage(result?.pairingImage);
           const url = safeQrUrl(result?.qrcodeUrl);
-          if (url) this.emit({type: "qr", url});
+          if (image) this.emit({type: "qr", image});
+          else if (url) this.emit({type: "qr", url});
           else {
             this.emit({type: "pairing-diagnostic", stage: "qr-code"});
             this.fail("The pairing code could not be loaded. Disconnect and try again.");

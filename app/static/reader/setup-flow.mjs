@@ -1,4 +1,5 @@
 import {TOY_PROFILES, getToyProfile} from "../devices/toy-profiles.mjs";
+import {safeQrUrl, safeGeneratedQrImage} from "../devices/pairing-image.mjs";
 import {createCalibrationView} from "./calibration-view.mjs";
 import {CONTROLLED_BETA_STORIES} from "./beta-stories.mjs";
 
@@ -26,15 +27,7 @@ export const SETUP_STORIES = Object.freeze([Object.freeze({...PRACTICE_STORY, be
   description: "Check scrolling, section levels, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
   .map(story => Object.freeze({...story, authoredLevels: true, quietZeros: true})));
 const CHANNEL_LABELS = Object.freeze(Object.fromEntries(TOY_PROFILES.flatMap(profile => profile.channels.map(channel => [channel.id, channel.label]))));
-function qrSource(value) {
-  if (typeof value !== "string" || value.length > 4096) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password && !url.port &&
-      ["lovense.com", "lovense-api.com"].some(host => url.hostname === host || url.hostname.endsWith("." + host)) ? url.href : null;
-  } catch { return null; }
-}
-
+const QR_IMAGE_TIMEOUT_MS = 8000;
 export function createSetupFlow({document = globalThis.document, window = globalThis.window,
   coachMount = null, onConnect = () => false, onSelectDevice = () => false,
   onRefresh = () => {}, onTest = () => false, onConfirmTest = () => true, onDisconnect = () => {}, onSimulateFailure = () => {},
@@ -81,12 +74,19 @@ export function createSetupFlow({document = globalThis.document, window = global
   modeGroup.append(simMode, liveMode);
   chooser.append(field("Which toy?", model), modeGroup);
   const connection = make("section", {id: "setup-pairing", className: "setup-pairing"});
-  const connectionBadge = make("span", {id: "setup-connection-badge", className: "setup-connection-badge"});
+  const connectionBadge = make("span", {id: "setup-connection-badge", className: "setup-connection-badge", attrs: {role: "status"}});
   const instructions = make("ol", {id: "setup-instructions", className: "setup-instructions"});
-  const qr = make("img", {id: "setup-qr", className: "setup-qr", attrs: {alt: "Private Lovense pairing QR code", referrerpolicy: "no-referrer"}});
+  const makeQrImage = () => {
+    const image = make("img", {id: "setup-qr", className: "setup-qr", attrs: {alt: "Private Lovense pairing QR code", referrerpolicy: "no-referrer"}});
+    image.hidden = true;
+    return image;
+  };
+  const qrMount = make("div");
+  let qr = makeQrImage();
+  qrMount.append(qr);
   const qrPlaceholder = make("div", {id: "setup-qr-placeholder", className: "setup-qr-placeholder"});
   const pairingNote = make("p", {id: "setup-pairing-note", className: "note"});
-  connection.append(connectionBadge, instructions, qr, qrPlaceholder, pairingNote);
+  connection.append(connectionBadge, instructions, qrMount, qrPlaceholder, pairingNote);
   const selection = make("section", {id: "setup-selection", className: "setup-selection"});
   const device = make("select", {id: "setup-devices"});
   const discoveryNote = make("p", {id: "setup-discovery-note", className: "note"});
@@ -161,6 +161,7 @@ export function createSetupFlow({document = globalThis.document, window = global
 
   let current = {}, phase = "closed", epoch = 0, busy = false, disposed = false, opener = null;
   let mode = "simulator", preferredModel = "lush", tested = false, initial = null, pausedAfterStart = false;
+  let qrRequest = null;
   const label = () => SETUP_MODELS.find(toy => toy.id === preferredModel)?.label || "Toy";
   const stopped = () => { try { onStop(); } catch { /* The application owns error recovery. */ } };
   const focusBack = () => { if (opener?.isConnected !== false) opener?.focus?.(); };
@@ -213,12 +214,53 @@ export function createSetupFlow({document = globalThis.document, window = global
     for (const node of checkNodes.values()) node.dataset.done = "false";
   };
   const resetTest = () => { tested = false; confirmation.checked = false; testLevel.value = "1"; testReadout.textContent = "1 / 20"; };
+  const clearQrImage = () => {
+    if (!qrRequest) return;
+    window?.clearTimeout?.(qrRequest.timeout);
+    qrRequest.source = null;
+    qrRequest = null;
+    qr.hidden = true;
+    qr.removeAttribute("src");
+  };
+  function showQrImage(source) {
+    if (!source) {
+      clearQrImage();
+      return "waiting";
+    }
+    if (qrRequest?.source === source) return qrRequest.state;
+    clearQrImage();
+    // Each image owns its events so a late load cannot complete a newer attempt.
+    const image = makeQrImage();
+    qr = image;
+    qrMount.replaceChildren(image);
+    const request = {source, state: "loading", timeout: null};
+    qrRequest = request;
+    const finish = state => {
+      if (qrRequest !== request || request.state !== "loading") return;
+      window?.clearTimeout?.(request.timeout);
+      request.state = state;
+      image.hidden = state !== "ready";
+      if (state === "failed") image.removeAttribute("src");
+      render();
+    };
+    image.addEventListener("load", async () => {
+      if (qrRequest !== request || request.state !== "loading") return;
+      try {
+        await image.decode?.();
+        finish(image.naturalWidth > 0 && image.naturalHeight > 0 ? "ready" : "failed");
+      } catch { finish("failed"); }
+    });
+    image.addEventListener("error", () => finish("failed"));
+    request.timeout = window?.setTimeout?.(() => finish("failed"), QR_IMAGE_TIMEOUT_MS);
+    image.setAttribute("src", source);
+    return request.state;
+  }
   const leave = ({completed = false, openStory = false} = {}) => {
     if (disposed) return;
     ++epoch; phase = "closed"; setBusy(false); stopped(); closeDialog(); coach.hidden = true;
     calibration.close();
     // QR credentials are never retained by a closed dialog.
-    current.qrUrl = null; qr.removeAttribute?.("src");
+    current.qrUrl = null; clearQrImage();
     if (openStory) { try { onFinish({completed}); } catch { /* Caller owns navigation. */ } } else focusBack();
   };
   const chooseMode = value => {
@@ -258,8 +300,8 @@ export function createSetupFlow({document = globalThis.document, window = global
     confirmation.disabled = busy || !tested || !testOutputStopped() || maximum === 0;
     const simulator = mode === "simulator";
     if (phase !== "pair" || simulator) {
-      qr.hidden = true;
-      qr.removeAttribute?.("src");
+      if (phase !== "connect" || !busy || simulator) current.qrUrl = null;
+      clearQrImage();
     }
     if (phase === "connect") {
       step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "01 / Choose your toy";
@@ -271,22 +313,32 @@ export function createSetupFlow({document = globalThis.document, window = global
       heading.textContent = quickSetup ? "Pair your toy" : simulator ? "Connect the simulator" : "Pair your toy in Lovense Remote";
       intro.textContent = simulator ? "Reconnect to practise selecting a toy, checking a movement and trying the reader controls." :
         "Keep this page open on one screen while you use Lovense Remote on your phone.";
-      const source = simulator ? null : qrSource(current.qrUrl);
-      connectionBadge.textContent = simulator ? "SIMULATED · " + label() :
-        current.liveConfigured === false ? "CONNECTION UNAVAILABLE" : source ? "SCAN THE CODE" : "GETTING YOUR CODE";
+      const source = !simulator && current.liveConfigured !== false && !needsReconnect() && (!busy || qrRequest) ?
+        safeGeneratedQrImage(current.qrUrl) || safeQrUrl(current.qrUrl) : null;
+      const qrState = showQrImage(source);
+      const ready = qrState === "ready", failed = qrState === "failed";
+      const badge = simulator ? "SIMULATED · " + label() :
+        current.liveConfigured === false ? "CONNECTION UNAVAILABLE" : ready ? "SCAN THE CODE" :
+          failed ? "CODE COULD NOT LOAD" : needsReconnect() && !busy ? "RECONNECT TO PAIR" : "GETTING YOUR CODE";
+      if (connectionBadge.textContent !== badge) connectionBadge.textContent = badge;
       instructions.replaceChildren();
       for (const text of simulator ? ["Choose the simulator when it appears in the device list.", "Run a short movement check, then try the practice read."] :
-        ["Turn on your toy and enable Bluetooth on your phone.", "Open Lovense Remote and check that the toy shows as connected.", "Open the QR scanner in Lovense Remote and scan the code on this page.", "Keep Lovense Remote open. When your toy appears here, select it."]) instructions.append(make("li", {value: text}));
-      qr.hidden = !source;
-      if (source) qr.src = source;
-      else qr.removeAttribute?.("src");
-      qrPlaceholder.hidden = Boolean(source); qrPlaceholder.textContent = simulator ? "SIMULATION · No QR scan needed" :
-        current.liveConfigured === false ? "Live connection is not configured yet." : "Waiting for your private pairing code…";
+        ["Turn on your toy and enable Bluetooth on your phone.", "Open Lovense Remote and check that the toy shows as connected.",
+          ...(ready ? ["Open the QR scanner in Lovense Remote and scan the code on this page.", "Keep Lovense Remote open. When your toy appears here, select it."] : [])]) instructions.append(make("li", {value: text}));
+      qrPlaceholder.hidden = ready;
+      const qrMessage = simulator ? "SIMULATION · No QR scan needed" : current.liveConfigured === false ? "Live connection is not configured yet." :
+        failed ? "The pairing image could not load. Try a new code." :
+          needsReconnect() && !busy ? "The pairing connection ended. Reconnect to get a new code." :
+            ready ? "" : "Waiting for your private pairing code…";
+      if (qrPlaceholder.textContent !== qrMessage) qrPlaceholder.textContent = qrMessage;
       pairingNote.textContent = current.liveConfigured === false && !simulator ?
         "The site owner needs to finish the Lovense setup. You can go back and try a simulator." :
-        simulator ? "Choose Reconnect to load the simulator again." : "Keep the code private. If the toy does not appear after scanning, choose Refresh device list.";
-      primary.textContent = needsReconnect() ? "Reconnect" : "Refresh device list";
-      primary.disabled = busy || (!simulator && current.liveConfigured === false);
+        simulator ? "Choose Reconnect to load the simulator again." : ready ?
+          "Keep the code private. If the toy does not appear after scanning, choose Refresh device list." :
+          failed ? "If a new code also fails, you can go back and try the simulator." : "";
+      primary.textContent = failed ? "Try a new code" : needsReconnect() ? "Reconnect" :
+        ready || simulator ? "Refresh device list" : "Waiting for code…";
+      primary.disabled = busy || (!simulator && (current.liveConfigured === false || !ready && !failed && !needsReconnect()));
     } else if (phase === "select") {
       step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "03 / Choose your toy";
       heading.textContent = quickSetup ? "Pair your toy" : "Choose the toy to use";
@@ -336,7 +388,8 @@ export function createSetupFlow({document = globalThis.document, window = global
       const options = {mode, model: preferredModel};
       leave(); onLiveSignIn(options); return;
     }
-    const activeEpoch = ++epoch; device.value = ""; setBusy(true); status.textContent = mode === "simulator" ? "Connecting simulator…" : "Preparing a private Lovense connection…";
+    const activeEpoch = ++epoch; device.value = ""; current.qrUrl = null; clearQrImage(); setBusy(true);
+    status.textContent = mode === "simulator" ? "Connecting simulator…" : "Preparing a private Lovense connection…";
     try {
       const result = await onConnect({mode, model: preferredModel});
       if (activeEpoch !== epoch || disposed || !dialog.open) return;
@@ -353,7 +406,7 @@ export function createSetupFlow({document = globalThis.document, window = global
     if (busy || disposed) return;
     if (phase === "connect") { await connect(); return; }
     if (phase === "pair") {
-      if (needsReconnect()) { await connect(); return; }
+      if (needsReconnect() || qrRequest?.state === "failed") { await connect(); return; }
       const activeEpoch = ++epoch; setBusy(true); status.textContent = "Checking connection…";
       try {
         const result = await onRefresh();

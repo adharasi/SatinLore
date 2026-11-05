@@ -35,7 +35,7 @@ export class ReaderAccountClient {
   create(){return this.perform('/api/account',{action:'create',adult:true,expectedRevision:this.value.revision},{message:'Your private account is ready. Choose a toy to begin.'});}
   save(preset){const clean=Object.fromEntries(presetKeys.filter(key=>Object.hasOwn(preset,key)).map(key=>[key,preset[key]]));return this.perform('/api/presets',{preset:clean,expectedRevision:this.value.revision},{message:'Preset saved to your account. Playback remains paused.'});}
   remove(id){return this.perform('/api/presets/delete',{id,expectedRevision:this.value.revision},{message:'Preset removed from your account.'});}
-  delete(){return this.perform('/api/account/delete',{confirm:true,expectedRevision:this.value.revision},{message:'Your app profile and presets were removed. Your email sign-in and browser stories are separate.'});}
+  delete({publicMode=false}={}){return this.perform('/api/account/delete',{confirm:true,expectedRevision:this.value.revision},{message:publicMode?'Your SatinLore account was deleted.':'Your app profile and presets were removed. Your email sign-in and browser stories are separate.'});}
 }
 
 function el(document,tag,text,className){const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n;}
@@ -50,11 +50,11 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
   const intro=el(document,'div','','account-intro');intro.append(el(document,'p','PRIVATE BETA','eyebrow'),el(document,'h2','Your private beta account'),el(document,'p','Create a private account with your verified email sign-in. Save toy presets across visits; your story text stays on this browser.'),adultLabel,create,retry,status);welcomeMount?.append(intro);
   const settingsStatus=el(document,'p','','note');settingsStatus.setAttribute('role','status');
   const deleteChoice=el(document,'input');deleteChoice.type='checkbox';deleteChoice.id='confirm-account-delete';
-  const deleteLabel=el(document,'label','','check-label');deleteLabel.append(deleteChoice,document.createTextNode('Remove my saved toy presets and app profile.'));
-  const deleteButton=button('Delete account data',async()=>{if(!deleteChoice.checked){note='Confirm the account data you want to remove.';render();return;}onStop();if(await client.delete())onDeleted();deleteChoice.checked=false;});
+  const deleteLabel=el(document,'label','','check-label');deleteLabel.append(deleteChoice,document.createTextNode(publicMode?'I want to delete my SatinLore account.':'Remove my saved toy presets and app profile.'));
+  const deleteButton=button(publicMode?'Delete my account':'Delete account data',async()=>{if(!deleteChoice.checked){note='Confirm the account data you want to remove.';render();return;}onStop();if(await client.delete({publicMode}))onDeleted();deleteChoice.checked=false;});
   const exportButton=button('Download my presets',()=>{onStop();const blob=new Blob([JSON.stringify({version:1,presets:client.snapshot().presets},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=el(document,'a');a.href=url;a.download='SatinLore-private-presets.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
   const signout=el(document,'a','Sign out');signout.href='/cdn-cgi/access/logout';signout.addEventListener('click',()=>onStop());
-  const deletion=el(document,'details');deletion.append(el(document,'summary','Account data'),el(document,'p',publicMode?'This removes your saved presets and profile and signs you out on all devices. Stories saved in this browser stay here.':'This removes app presets and profile data. It does not remove your email sign-in, local stories or separately consented beta recordings.','note'),deleteLabel,deleteButton);
+  const deletion=el(document,'details');deletion.append(el(document,'summary',publicMode?'Delete account':'Account data'),el(document,'p',publicMode?'Deleting your account removes your password sign-in, profile, account stories and their progress, reading preferences and toy presets. You’ll be signed out on all devices. Browser-saved stories stay here. Manage submitted feedback separately on the Feedback & data page.':'This removes app presets and profile data. Your email sign-in, browser stories and separately consented beta recordings are managed separately.','note'),deleteLabel,deleteButton);
   const refresh=retry.cloneNode?button('Refresh account',()=>client.load()):retry;
   settingsMount?.append(settingsStatus,refresh,exportButton,deletion,...(publicMode?[]:[signout]));
   const picker=el(document,'select');picker.id='account-preset-picker';picker.setAttribute('aria-label','Saved toy preset');
@@ -85,7 +85,7 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
     if(welcomeMount)welcomeMount.hidden=publicMode||!client.hosted||state.registered;
     create.disabled=state.busy;retry.disabled=state.busy;
     status.textContent=note||state.message||(state.state==='loading'?'Checking your account…':'Your email has already been verified by private sign-in.');
-    settingsStatus.textContent=publicMode?(state.registered?'Toy presets are saved to your account. Stories stay on this browser.':'Sign in with your email to save toy presets.'):
+    settingsStatus.textContent=publicMode?(state.registered?'You’re signed in. Session-only stories stay in this tab. Browser-saved stories stay in this browser.':'Sign in with your email to save stories, reading settings and toy presets to your account.'):
       state.registered?'Private account ready. Toy presets sync across the app and beta. Stories are saved separately on this browser.':client.hosted?'Create your account from the welcome panel to save presets.':'Account presets are available in the signed-in hosted app.';
     if(publicMode){
       const guest=state.state==='local';

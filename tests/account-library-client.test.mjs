@@ -48,3 +48,39 @@ test("logout and a new login discard a prior account response and all queued wri
   assert.equal(sendCount, 1);
   assert.equal(client.owner, second);
 });
+
+test("same-tab account progress survives reload and yields to newer or other-account stories", async () => {
+  let saved, owner = first;
+  const storage = () => ({getItem: () => saved ?? null, setItem: (_key, value) => { saved = value; },
+    removeItem: () => { saved = undefined; }});
+  const record = {...fixture, position: 0, corrections: [null, null, null], revision: 2};
+  const request = async () => Response.json({owner, revision: 2, preferences: null, stories: []});
+  const client = new AccountLibrary({request, storage});
+  await client.open();
+  client.rememberPosition(first, record.id, record.revision, 1);
+  client.rememberPosition(first, record.id, record.revision, 2);
+  assert.deepEqual(JSON.parse(saved), {owner: first, positions: [{id: record.id, revision: 2, position: 2}]});
+  assert.equal(client.resumePosition(first, {...record, corrections: [null]}), 0);
+
+  const reloaded = new AccountLibrary({request, storage});
+  await reloaded.open();
+  assert.equal(reloaded.resumePosition(first, record), 2);
+  assert.equal(reloaded.resumePosition(first, {...record, revision: 3, position: 1}), 1);
+  owner = second;
+  await reloaded.open();
+  assert.equal(reloaded.resumePosition(second, record), 0);
+  reloaded.rememberPosition(first, record.id, record.revision, 0);
+  assert.equal(JSON.parse(saved).positions[0].position, 2);
+  reloaded.forgetResumePositions();
+  assert.equal(saved, undefined);
+});
+
+test("blocked resume storage does not prevent opening or saving the account library", async () => {
+  const client = new AccountLibrary({storage: () => { throw Error("Denied"); }, request: async (_path, options) =>
+    options.method === "GET" ? Response.json({owner: first, revision: 1, preferences: null, stories: []}) :
+      Response.json({revision: 2, updatedAt: 5, storyRevision: 2})});
+  await client.open();
+  client.rememberPosition(first, fixture.id, 1, 1);
+  assert.equal(client.resumePosition(first, {...fixture, revision: 1}), fixture.position);
+  assert.deepEqual(await client.updateStory(first, fixture), {revision: 2, updatedAt: 5});
+});

@@ -392,15 +392,17 @@ try {
   const qrUrl = "https://api.lovense-api.com/alpha-browser-fixture.svg";
   const physicalCommands = [];
   let fixtureSocket;
-  let failSocket = false, socketAttempts = 0, fallbackLoads = 0;
+  let failSocket = false, socketAttempts = 0, fallbackLoads = 0, remoteImageLoads = 0;
   await pairingContext.route("https://api.lovense-api.com/api/basicApi/getSocketUrl", async route => {
     const headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "POST"};
     if (route.request().method() === "OPTIONS") return route.fulfill({status: 204, headers});
     await route.fulfill({headers, json: {code: 0, data: {socketIoUrl: "https://api.lovense-api.com", socketIoPath: "/fixture/socket.io"}}});
   });
-  await pairingContext.route(qrUrl, route => route.fulfill({
-    contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
-  }));
+  await pairingContext.route(qrUrl, route => {
+    remoteImageLoads++;
+    return route.fulfill({contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'});
+  });
   await pairingContext.route("https://api.lovense-api.com/basic-sdk/core.min.js", route => {
     fallbackLoads++;
     return route.fulfill({contentType: "text/javascript", body: `
@@ -423,7 +425,7 @@ try {
       if (typeof message !== "string" || !message.startsWith("42")) return;
       const [name, payload] = JSON.parse(message.slice(2));
       if (name === "basicapi_get_qrcode_ts") socket.send("42" + JSON.stringify(["basicapi_get_qrcode_tc", {
-        code: 0, data: {ackId: payload.ackId, qrcodeUrl: qrUrl},
+        code: 0, data: {ackId: payload.ackId, qrcodeUrl: qrUrl, qrcode: "Synthetic Alpha pairing value"},
       }]));
       if (name === "basicapi_send_toy_command_ts") physicalCommands.push(payload);
     });
@@ -439,7 +441,8 @@ try {
   const qr = pairingPage.locator("#alpha-device-qr");
   await connect.click();
   await qr.waitFor({state: "visible"});
-  await pairingPage.waitForFunction(() => document.querySelector("#alpha-device-qr-image")?.naturalWidth > 0);
+  await pairingPage.waitForFunction(() => document.querySelector("#alpha-device-qr-image")?.naturalWidth === 256);
+  assert.equal(remoteImageLoads, 0, "The opaque bridge renders the socket QR without requesting its vendor image.");
   assert.equal(socketAttempts, 1, "The real opaque bridge can open a vendor WebSocket.");
   assert.equal(fallbackLoads, 0);
   const fixtureToy = "synthetic-flexer";
@@ -484,6 +487,7 @@ try {
   await pairingPage.waitForFunction(() => document.querySelector("#alpha-device-qr-image")?.naturalWidth > 0);
   assert.equal(socketAttempts, 2);
   assert.equal(fallbackLoads, 1, "The fallback can start without access to browser storage.");
+  assert.equal(remoteImageLoads, 1, "The Basic SDK still uses the validated vendor image URL.");
   await pairingContext.close();
   assert.equal(routeErrors, 0, "Fixture requests completed without internal routing errors.");
   assert.equal(pageErrors, 0, "Alpha browser pages ran without unhandled errors.");

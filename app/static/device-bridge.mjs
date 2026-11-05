@@ -62,8 +62,9 @@ async function onCommand(event) {
         // Build-free local development retains the documented Basic SDK route.
         if(!document.querySelector('meta[name="satinlore-hosted-access"][content="true"]'))throw Error();
         const {LovenseSocket}=await import("./devices/lovense-socket.mjs");
+        const {renderPairingImage} = await import("./devices/qr-renderer.mjs");
         extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken}, {
-          preserveFlexerRenewals,
+          preserveFlexerRenewals, renderPairingImage,
         });
         preparingAdapter = extended;
         await extended.prepared;

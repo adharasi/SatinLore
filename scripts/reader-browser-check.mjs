@@ -62,17 +62,53 @@ async function openReview(page) {
   }
   await page.waitForFunction(() => document.querySelectorAll("#review-list [data-review-index]").length > 0);
 }
+async function reviewAndFeedbackChecks(context, origin) {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({width: 1366, height: 900});
+    await page.goto(origin);
+    const text = Array.from({length: 25}, (_, index) => `Section ${index + 1}. An ordinary walk passed the library.`).join("\n\n");
+    await add(page, text, "Paged review");
+    await openReview(page);
+    const rows = page.locator("#review-list [data-review-index]");
+    assert.equal(await rows.count(), 1, "Unread story text is hidden by default.");
+    await page.locator("#show-upcoming").click();
+    assert.equal(await rows.count(), 10, "Revealing future passages mounts only one page.");
+    await page.locator("#review-page-next").click();
+    assert.equal(await rows.first().getAttribute("data-review-index"), "10");
+    assert.equal(await rows.count(), 10);
+    await page.locator("#review-page-next").click();
+    assert.equal(await rows.count(), 5);
+    assert.equal(await page.locator("#review-page-next").isDisabled(), true);
+    await page.locator("#review-page-current").click();
+    assert.equal(await rows.first().getAttribute("data-review-index"), "0");
+    await page.locator("#show-upcoming").click();
+    assert.equal(await rows.count(), 1, "Hiding future sections restores the spoiler boundary.");
+    await closeSettings(page);
+    await page.locator("#connect").click();
+    await start(page);
+    await page.locator("#mark-reading-section").click();
+    assert.equal(await page.locator("#reading-feedback").evaluate(element => element.open), true);
+    assert.equal(await page.locator("#reading-feedback-section").inputValue(), "0");
+    assert.equal(await page.locator("#reading-feedback-section").evaluate(element => element === document.activeElement), true);
+    assert.equal(await page.locator("#pause").isDisabled(), true, "The shortcut leaves playback paused.");
+    await page.locator('[data-reading-issue="wrong-moment"]').click();
+    assert.match(await page.locator("#reading-feedback [role=status]").textContent(), /for this visit/);
+  } finally {
+    await page.close();
+  }
+}
 async function openLibrary(page) {
   if (await page.locator("#library-panel").isHidden()) await page.locator("#toggle-library").click();
 }
 async function newDialog(page) {
   await closeAppSettings(page);
-  if (await page.locator("#empty-new-story").isVisible()) await page.locator("#empty-new-story").click();
-  else {
+  if (!await page.locator("#empty-new-story").isVisible()) {
     await openLibrary(page);
-    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator("#library-import-file").click()]);
-    await chooser.setFiles([]);
+    await page.locator("#new-story").click();
   }
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.locator("#empty-new-story").click()]);
+  await chooser.setFiles([]);
   await page.locator("#new-story-dialog").waitFor({state: "visible"});
 }
 async function add(page, text, title = "A quiet afternoon", waitForAnalysis = true) {
@@ -350,7 +386,10 @@ async function sceneStagePatternChecks(page) {
     "***",
   ].join("\n\n"), "Scene variation rehearsal");
   await openSettings(page, "story");
-  const tune = page.getByText("Tune this movement", {exact: true});
+  await page.locator("#open-movement-tuning").click();
+  assert.equal(await page.locator("#settings-reader-tab").getAttribute("aria-selected"), "true");
+  assert.ok(await page.locator(".simulator-section:has(#simulator-visual):has(#feel-channel) #feel-rhythm").isVisible());
+  const tune = page.getByText("Movement limits", {exact: true});
   if (!await tune.evaluate(summary => summary.parentElement.open)) await tune.click();
   await setRange(page, "cap", 18);
   await setRange(page, "feel-preferred", 18);
@@ -537,10 +576,34 @@ async function captureLayouts(page) {
   await openLibrary(page); await assertFits(page, "320px library drawer");
   await page.locator("#close-library").click();
   await openSettings(page); await assertFits(page, "320px settings sheet");
-  await closeSettings(page);
-  for (const size of [{width: 844, height: 390}, {width: 390, height: 844}, {width: 320, height: 844}]) {
+  assert.equal(await page.locator("#main-content").evaluate(main => main.inert), true, "The open phone drawer leaves the obscured reader out of keyboard navigation.");
+  const skip = page.locator("#skip-to-story");
+  await skip.focus();
+  assert.ok(await skip.evaluate(link => {
+    const box = link.getBoundingClientRect();
+    return link.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+  }), "The focused Skip link appears above the sticky header.");
+  await skip.press("Enter");
+  assert.equal(await page.locator("#main-content").evaluate(main => main.inert), false);
+  await start(page);
+  await page.waitForFunction(() => document.querySelector("#transport").dataset.running === "true" && document.activeElement.id === "stop");
+  await page.locator("#stop").press("Enter");
+  await output(page, 0);
+  for (const size of [{width: 844, height: 390}, {width: 390, height: 844}, {width: 320, height: 568}]) {
     await page.setViewportSize(size);
     await page.waitForTimeout(100);
+    const collapsed = await page.locator("#transport").evaluate(dock => dock.getBoundingClientRect().height);
+    assert.ok(collapsed <= 90, `Compact dock leaves reading space at ${size.width}×${size.height}.`);
+    assert.ok(await page.locator("#output").isVisible(), "Output stays visible without expanding playback controls.");
+    assert.ok(await page.locator("#reading-sync-state").isVisible(), "Reading sync stays visible alongside output.");
+    assert.ok(await page.locator("#cap").isHidden(), "The compact dock keeps the maximum in its secondary controls.");
+    await page.locator("#transport-more").click();
+    assert.equal(await page.locator("#transport-more").getAttribute("aria-expanded"), "true");
+    assert.ok(await page.locator("#cap").isVisible(), "Expanding the dock reveals the maximum.");
+    await page.locator("#transport-options").evaluate(panel => { panel.scrollTop = panel.scrollHeight; });
+    await assertFits(page, `${size.width}×${size.height} with the options scrolled`);
+    await page.locator("#cap").press("Escape");
+    assert.equal(await page.locator("#transport-more").getAttribute("aria-expanded"), "false");
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     await page.clock.runFor(100);
     await assertFits(page, `${size.width}×${size.height} at 200% text`);
@@ -677,7 +740,7 @@ async function practiceLibraryChecks(context, origin) {
     await analysed(page); await output(page, 0);
     assert.equal(await page.locator("#story-title").textContent(), "After the screening");
     assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
-    assert.equal(await page.locator("#settings-panel").isVisible(), true, "The first practice story opens the reading controls.");
+    assert.equal(await page.locator("#settings-panel").isHidden(), true, "Opening a phone practice story leaves the text unobstructed.");
     assert.equal(await page.locator("#start").isDisabled(), true, "Opening a practice story never connects the device.");
     await openSettings(page);
     assert.equal(await sceneModel.inputValue(), "nocturne");
@@ -789,6 +852,7 @@ async function backupAndPreferenceChecks(page) {
   await page.locator("#import-backup").setInputFiles({name: "restore.json", mimeType: "application/json", buffer: Buffer.from(raw)});
   await page.waitForFunction(() => document.querySelectorAll("#story-list button[data-story-id]").length === 2);
   await analysed(page); await output(page, 0);
+  assert.equal(await page.locator("#story-title").textContent(), "Backup fixture (restored)");
   assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).stories.length, libraryKey), 1, "Restoring adds session-only copies; it does not silently persist a second story.");
   assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
   await openReview(page);
@@ -910,14 +974,20 @@ async function refinementChecks(page, setPromptReply) {
   page.off("request", resourceMonitor);
   await openSettings(page);
   assert.equal(await page.locator("#reading-model").count(), 0, "The placeholder story model selector is removed.");
+  await closeSettings(page); await openLibrary(page);
+  await page.locator("#new-story").click();
+  await page.locator("#empty-link-import").click();
   await page.locator("#story-url").fill("https://www.literotica.com/s/a-neutral-fixture?private=discarded#discarded");
   const linkRequests = [];
   const linkMonitor = request => { if (request.url().includes("/api/story-import")) linkRequests.push(request.url()); };
   page.on("request", linkMonitor);
   await page.locator("#import-url").click();
-  assert.match(await page.locator("#url-import-status").textContent(), /permission|unavailable|paste/i);
+  assert.match(await page.locator("#url-import-status").textContent(), /terms restrict AI use/i);
   assert.equal(await page.locator("#open-source-link").getAttribute("href"), "https://www.literotica.com/s/a-neutral-fixture");
   assert.deepEqual(linkRequests, [], "Literotica presents a source/copy fallback instead of scraping.");
+  await page.locator("#paste-source-trigger").click();
+  assert.equal(await page.locator("#story-link-import").isHidden(), true);
+  assert.equal(await page.locator("#draft-story").evaluate(node => node === document.activeElement), true);
   page.off("request", linkMonitor);
   await closeSettings(page);
   await openAppSettings(page);
@@ -939,6 +1009,31 @@ async function refinementChecks(page, setPromptReply) {
   await closeAppSettings(page);
 }
 
+async function readingCompletionChecks(page) {
+  const story = Array.from({length: 12}, (_, index) => `Section ${index + 1}. Their passionate tender kiss and romantic embrace expressed affection.`).join("\n\n");
+  for (const size of [{width: 1440, height: 1000}, {width: 390, height: 844}]) {
+    await page.setViewportSize(size);
+    await add(page, story, `Completion at ${size.width}px`);
+    await openSettings(page);
+    await page.locator("#follow-scroll").check();
+    await closeSettings(page);
+    if (size.width < 1100 && await page.locator("#library-panel").isVisible()) await page.locator("#close-library").click();
+    if (await page.locator("#connect").isVisible()) await page.locator("#connect").click();
+    await start(page);
+    await page.evaluate(() => window.scrollTo({top: document.documentElement.scrollHeight, behavior: "instant"}));
+    await page.clock.runFor(400);
+    await current(page, 11);
+    assert.equal(await page.locator("#reading-sync-state").textContent(), "Finished");
+    await output(page, 0);
+    assert.equal(await page.locator("#start").textContent(), "Replay");
+    assert.equal(await page.locator("#finish-reading").textContent(), "Back to beginning");
+    await start(page, false);
+    await current(page, 0);
+    await output(page, 0);
+    await page.locator("#cancel-start").click();
+  }
+}
+
 export async function checkReader(page, context, origin) {
   await page.clock.install();
   let promptReply = "Renamed afternoon";
@@ -953,6 +1048,8 @@ export async function checkReader(page, context, origin) {
   await page.goto(origin);
   assert.equal(await page.locator("#capValue").textContent(), "10", "A fresh simulator starts with a maximum of 10.");
   await appearanceChecks(page);
+  await reviewAndFeedbackChecks(context, origin);
+  await page.bringToFront();
   await shortStoryStartChecks(page);
   assert.equal(await page.locator("body").getAttribute("data-reading-width"), "wide");
   assert.equal(await page.locator("#settings-panel").isHidden(), true);
@@ -1231,6 +1328,7 @@ export async function checkReader(page, context, origin) {
   await refinementChecks(page, value => { promptReply = value; });
   assert.deepEqual(await page.evaluate(() => ({local: Object.keys(localStorage).sort(), session: sessionStorage.length})),
     {local: presentationKeys, session: 0}, "Only allowlisted presentation preferences remain after local story deletion.");
+  await readingCompletionChecks(page);
   assert.deepEqual(requests, []);
   page.off("request", monitor);
   console.log("Reader browser checks passed: direct typing/paste, header Dark mode switch and gear Close/×, gear appearance/backup/help and truthful hosted-account requirement, folders with paused saved membership, full toy catalogue and ten model rehearsals with explicit selection, finite tests, optional calibration/combined-step exit, opt-in scene overlap, grounded pulse, named channel stops and channel caps, channel-specific practice, disconnect/error recovery and unavailable physical-mode isolation, guided practice and actual-output/reduced-motion visual, inert AO3 HTML and Literotica fallback, short-story first-section Start/Stop/restart, Settings/Advanced tabs, centered dock, fixed library actions, optional review, repeated Start/Stop/restart, popup-free direct maximum, one-step section levels, title search/sort/tabs, backup download/session-only restore, presentation preference reload, sidebar/focus reflow, opt-in persistence and deletion, storage failures, interruption/locks, literal text and local-only privacy. Neutral workspace screenshots captured.");

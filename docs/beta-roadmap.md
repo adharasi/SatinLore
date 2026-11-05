@@ -18,6 +18,14 @@ Local checks passed for 22 Python and 542 JavaScript tests. Chromium checks cove
 
 Physical smoothness, expiry and interruption checks remain open for a Flexer connected through Lovense Remote. Simulator observations and transport fixtures establish software behavior.
 
+## Reader usability audit follow-up — 5 November 2026
+
+The reader updates its active section during steady scrolling, waits for the final position during fast seeks, and stops at story completion. Replay returns to the first section and leaves Start confirmation in place. The mobile dock keeps the current level and Stop visible with other controls available on demand. Movement and variation controls sit beside the simulator graph.
+
+Add a story groups paste, file and link import. Edited text and restored backups open as separate session copies. Review limits the number of story sections rendered at once, and a dock shortcut opens feedback on a played section. Public account resume recovery keeps a tab-scoped reading position for an explicitly account-saved story. Account settings distinguish in-progress saves from failures and explain the data covered by deletion.
+
+The pairing screen waits for a usable QR image and provides a fresh pairing attempt when an image fails. When the Standard Socket supplies pairing data, the isolated bridge renders a QR image locally. The browser uses the vendor image when local rendering is unavailable. Physical device acceptance, actual email delivery, and device-browser coverage require independent tests.
+
 ## Flexer Alpha on the app host — 3 November 2026
 
 The first preference study has a separate manual-control route at `/alpha`, using Dilan and Sadie logins, and founder review at `/admin`. The study joins consented control events, optional marks, feedback and timestamped annotations by authenticated username. With consent, Alpha captures masked visual replays of each study screen for founder review. The reader and prior beta use their existing Access and storage rules.

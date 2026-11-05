@@ -8,7 +8,9 @@ A private browser reader that turns a person's chosen story into changing contro
 
 ## Current experience
 
-The NovelAI-inspired reader opens in Midnight Ink for new visitors, with Satin Editorial and System appearance choices, a collapsible library, a continuous reading canvas and a right settings sidebar. Type/paste, upload and supported AO3 link import remain separate choices. Analysis suggests intensity, rhythm and movement by section. When it finds reliable movement cues, it lists matching toy models above the story. Review is optional. The dock changes the current section target one level at a time, and the maximum slider applies directly.
+The NovelAI-inspired reader opens in Midnight Ink for new visitors, with Satin Editorial and System appearance choices, a collapsible library, a continuous reading canvas and a right settings sidebar. **Add a story** brings together writing or pasting, TXT or AO3 HTML upload, and public AO3 link import. Analysis suggests intensity, rhythm and movement by section. When it finds reliable movement cues, it lists matching toy models above the story. Review is optional. The dock changes the current section target one level at a time, and the maximum slider applies directly.
+
+The reader follows steady scrolling and suspends playback during large jumps until the new section settles. **Finish reading** stops playback. Replay returns to the first section and asks for confirmation. The compact mobile dock keeps the current level and Stop visible. Optional review shows up to ten sections at a time, and a shortcut opens feedback for a played section.
 
 **Loom** is the default story model. The optional **Nocturne** private beta adds GPT-6 Luna classification of up to 16 locally derived scene cues on explicit request. It selects from local simulator shapes, including a sustained crest and a rolling wave. Nocturne requests contain scene cues and exclude story text and device settings. Loom covers excluded sections and service failures. [Enable and verify Nocturne](deploy/cloudflare/README.md#enable-nocturne-for-the-private-beta)
 

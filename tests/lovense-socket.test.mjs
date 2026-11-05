@@ -4,14 +4,14 @@ import {LovenseSocket,SOCKET_AUTH_URL,socketAddress,remoteCommandAddress} from "
 import {LovenseCheck} from "../app/static/devices/lovense.mjs";
 
 const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
-function fixture({authentication,metadata,socketPath="/fixture/socket",preserveFlexerRenewals=false}={}){
+function fixture({authentication,metadata,socketPath="/fixture/socket",preserveFlexerRenewals=false,renderPairingImage}={}){
   const outgoing=[],requests=[],listeners=new Map();let time=0;
   const socket={connected:false,on(name,callback){if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(callback);},
     emit(name,value){outgoing.push({name,value});},connect(){queueMicrotask(()=>{this.connected=true;incoming("connect");});},
     disconnect(){this.connected=false;},removeAllListeners(){listeners.clear();}};
   const incoming=(name,value)=>{for(const callback of listeners.get(name)||[])callback(value);};
   const fetcher=async(url,options)=>{requests.push({url,options});return url===SOCKET_AUTH_URL?authentication?authentication():Response.json({code:0,data:{socketIoUrl:"https://apps.lovense-api.com",socketIoPath:socketPath}}):metadata?metadata():Response.json({code:200,data:{toys:"{}"}});};
-  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,preserveFlexerRenewals,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
+  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,preserveFlexerRenewals,renderPairingImage,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
   const toys=(list,extras={})=>incoming("basicapi_update_device_info_tc",JSON.stringify({online:true,toyList:list,...extras}));
   const raw=(model,id=model)=>({id,toyType:model,connected:true,battery:71});
   return{sdk,socket,incoming,outgoing,requests,toys,raw,advance(ms){time+=ms;}};
@@ -61,6 +61,32 @@ test("QR responses are correlated and discovery strips unrelated fields before r
   f.toys([{...f.raw("flexer"),nickname:"PRIVATE LABEL",authToken:"NEVER RETAIN"}]);
   assert.doesNotMatch(JSON.stringify(f.sdk.getOnlineToys()),/PRIVATE LABEL|NEVER RETAIN/);
   f.sdk.destroy();
+});
+test("Standard Socket renders only the current successful QR and retains the vendor image fallback", async t => {
+  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAAAA";
+  const qrcodeUrl = "https://apps.lovense-api.com/fixture.jpg";
+  const fixtureValue = "synthetic private pairing value";
+  const raw = [];
+  const f = fixture({renderPairingImage(value) { raw.push(value); return image; }});
+  t.after(() => f.sdk.destroy());
+  await f.sdk.prepared;
+  const pending = f.sdk.getQrcode();
+  f.incoming("basicapi_get_qrcode_tc", {code: 0, data: {ackId: "stale", qrcode: fixtureValue}});
+  assert.deepEqual(raw, []);
+  f.incoming("basicapi_get_qrcode_tc", {code: 0, data: {ackId: "synthetic-ack", qrcode: fixtureValue, qrcodeUrl}});
+  assert.deepEqual(raw, [fixtureValue]);
+  assert.deepEqual(await pending, {pairingImage: image});
+  assert.deepEqual(await f.sdk.getQrcode(), {pairingImage: image});
+  assert.doesNotMatch(JSON.stringify(f.sdk.qr), /synthetic private pairing value/);
+
+  for (const renderPairingImage of [() => null, () => "data:image/svg+xml,<svg/>", () => { throw Error("fixture failure"); }]) {
+    const fallback = fixture({renderPairingImage});
+    t.after(() => fallback.sdk.destroy());
+    await fallback.sdk.prepared;
+    const pending = fallback.sdk.getQrcode();
+    fallback.incoming("basicapi_get_qrcode_tc", {code: 0, data: {ackId: "synthetic-ack", qrcode: fixtureValue, qrcodeUrl}});
+    assert.deepEqual(await pending, {qrcodeUrl});
+  }
 });
 test("extended Function relay sends one finite selected-device vector and targeted Stop without undocumented motor names",async()=>{
   const f=fixture();await f.sdk.prepared;f.toys([f.raw("flexer"),f.raw("osci3")]);

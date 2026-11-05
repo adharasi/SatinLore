@@ -20,7 +20,7 @@ export function identifyStoryUrl(value) {
   const name = ao3 ? "AO3" : SOURCES[url.hostname] ?? "This site";
   return { kind: ao3 ? "ao3" : name === "Literotica" ? "literotica" : "other", name, url: url.href, automatic: ao3,
     guidance: ao3 ? "Public AO3 links can open directly. For a restricted work, use Download → HTML on AO3, then upload the file here." :
-      name === "Literotica" ? "Open the story on Literotica. Paste text you have permission to use below. Direct fetching is unavailable under its current content-use rules." :
+      name === "Literotica" ? "Open the story on Literotica. For analysis here, use your own text or material you have permission to analyse. Literotica’s terms restrict AI use of published stories." :
         `Open the story on ${name === "This site" ? "its original site" : name}. Paste text you have permission to use, or upload a supported download.` };
 }
 function validateResult(value) {
