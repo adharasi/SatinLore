@@ -1,25 +1,28 @@
 import {splitText} from "./import.mjs";
 import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
+import {LEGACY_NOCTURNE_CONTEXT_VERSION, MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEXT_VERSION, validContextAnnotation} from "./nocturne-context-contract.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v6.2";
+export const ANALYSIS_VERSION = "scene-rules-v6.3";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
   typeof score.reason === "string" && score.reason.length <= 200;
 const contextLevels = Object.freeze({neutral: 0, romance: 1, flirting: 1, tension: 1, intimacy: 2, explicit: 3, aftermath: 1});
-const contextPhases = Object.freeze({neutral: ["quiet"], romance: ["build", "sustain"], flirting: ["build", "sustain"],
-  tension: ["build", "sustain"], intimacy: ["build", "sustain", "peak", "recover"],
-  explicit: ["build", "sustain", "peak", "recover"], aftermath: ["quiet", "recover"]});
+// Noncurrent context is review metadata. Playback falls back to local analysis.
+function playbackAnnotation(annotation) {
+  if (!annotation || ![undefined, "current", "neutral"].includes(annotation.eventKind)) return null;
+  return annotation;
+}
 
 function applySceneSuggestions(paragraphs) {
   // A correction controls playback at its paragraph without rewriting the analysis.
   const scenes = groupScenes(paragraphs.map(paragraph => ({...paragraph, override: null})));
   if (scenes.length !== paragraphs.length || !scenes.every(validScore)) throw new Error("Invalid scene analysis.");
   for (let index = 0; index < scenes.length; index++) {
-    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape} = scenes[index];
-    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape});
+    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape, currentCue} = scenes[index];
+    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape, currentCue: currentCue === true});
   }
 }
 
@@ -83,6 +86,7 @@ export class ReaderModel {
       paragraph.endedMovements = [];
       paragraph.cloudExcluded = false;
       paragraph.shape = "unspecified";
+      paragraph.currentCue = false;
     }
   }
 
@@ -168,31 +172,36 @@ export class ReaderModel {
   contextualAnnotation(index) {
     const paragraph = this.paragraph(index), annotation = this.nocturneContext.get(index);
     // Provider annotations never override a local hard boundary, content
-    // exclusion, missing analysis, explicit correction, or ended movement.
+    // exclusion, missing analysis, or explicit correction.
+    const version = annotation?.eventKind === undefined ? LEGACY_NOCTURNE_CONTEXT_VERSION : NOCTURNE_CONTEXT_VERSION;
     if (!paragraph.analysed || paragraph.quiet || paragraph.cloudExcluded || paragraph.override !== null ||
-        !annotation || !Number.isInteger(annotation.confidence) || annotation.confidence < 80 || annotation.confidence > 100 ||
-        !Object.hasOwn(contextLevels, annotation.category) || !contextPhases[annotation.category].includes(annotation.phase) ||
-        !["unspecified", "accented", "sustained", "alternating"].includes(annotation.shape)) return null;
+        annotation?.id !== index || !validContextAnnotation(annotation, version) ||
+        annotation.confidence < MIN_CONTEXT_CONFIDENCE || !Object.hasOwn(contextLevels, annotation.category)) return null;
     return annotation;
   }
 
   suggestedLevel(index, {nocturne = false} = {}) {
     const paragraph = this.paragraph(index);
-    const annotation = nocturne ? this.contextualAnnotation(index) : null;
+    const annotation = nocturne ? playbackAnnotation(this.contextualAnnotation(index)) : null;
     return annotation ? contextLevels[annotation.category] : paragraph.suggestedLevel;
   }
 
   effectiveProfile(index, {nocturne = false, peakPattern, edging = false, edgePattern = "auto"} = {}) {
     const original = this.paragraph(index);
-    const annotation = nocturne ? this.contextualAnnotation(index) : null;
+    const annotation = nocturne ? playbackAnnotation(this.contextualAnnotation(index)) : null;
     const {rhythm, quiet, phase, sceneId, shape, override, movements = [], endedMovements = []} = annotation ?
       {...original, phase: annotation.phase, shape: annotation.shape, sceneId: original.sceneId ?? MAX_PARAGRAPHS + index + 1} : original;
+    const currentCue = original.analysed && !original.cloudExcluded && !quiet && override === null &&
+      ["build", "sustain", "peak"].includes(phase) &&
+      (annotation ? annotation.eventKind === "current" : original.currentCue === true);
     const peak = nocturne && !quiet && phase === "peak" && peakPattern !== undefined;
     const localPeak = peak && peakPattern === "auto" && (shape === "accented" || shape === "alternating") ? "accents" : undefined;
     const pattern = nocturne ? (annotation && annotation.phase !== original.phase ? undefined : this.nocturneLabels.get(index)) ?? localPeak : undefined;
     const buildAndEase = nocturne && !quiet && (phase === "build" || phase === "sustain") &&
       (edgePattern === "ease" || (edgePattern === "auto" && edging));
     return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
+      ...(currentCue ? {currentCue: true} : {}),
+      ...(currentCue && annotation && original.sceneId == null ? {simulatorSceneId: sceneId} : {}),
       ...(!quiet && ["build", "sustain"].includes(phase) && shape && shape !== "unspecified" ? {shape} : {}),
       ...(pattern === undefined ? {} : {pattern}),
       ...(peak ? peakPattern === "auto" ? {automaticPeak: true} : {peakPreset: peakPattern} : {}),
@@ -201,7 +210,18 @@ export class ReaderModel {
 
   effectiveProfiles(options) {
     if (!this.analysisReady) return undefined;
-    return this.paragraphs.map((_, index) => this.effectiveProfile(index, options));
+    let contextSceneId;
+    return this.paragraphs.map((_, index) => {
+      const profile = this.effectiveProfile(index, options);
+      if (profile.simulatorSceneId === undefined) contextSceneId = undefined;
+      else {
+        // Adjacent contextual cues share a simulator scene. The renderer still
+        // resets its clock when their phase, shape or movement changes.
+        contextSceneId ??= profile.simulatorSceneId;
+        profile.simulatorSceneId = contextSceneId;
+      }
+      return profile;
+    });
   }
 
   effectiveLevels(options = {}) {

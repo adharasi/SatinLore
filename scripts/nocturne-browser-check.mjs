@@ -65,8 +65,9 @@ async function testPage() {
       const body = request.postDataJSON();
       posts.push(body);
       if (providerResult === "refused") return route.fulfill({status: 422, json: {code: "refused", error: canary}});
-      if (body.version === "context-v1") return route.fulfill({json: {version: "context-v1",
-        labels: body.paragraphs.map(({id}) => ({id, category: id === 6 ? "romance" : "neutral", phase: id === 6 ? "build" : "quiet", shape: "unspecified", confidence: 95})),
+      if (body.version === "context-v2") return route.fulfill({json: {version: "context-v2",
+        labels: body.paragraphs.map(({id}) => ({id, category: id === 6 ? "romance" : "neutral", phase: id === 6 ? "build" : "quiet",
+          shape: "unspecified", confidence: 95, eventKind: id === 6 ? "current" : "neutral"})),
         usage: {inputTokens: 40, outputTokens: 20, totalTokens: 60}}});
       const labels = body.cues.map(({id, phase}) => ({id, label: phase === "peak" ? "crest" : "abstain"}));
       if (providerResult === "pending") {
@@ -221,6 +222,7 @@ try {
   await contextPage.waitForFunction(() => /Nearby context reviewed/.test(document.querySelector("#nocturne-status")?.textContent));
   const contextBody = posts.at(-1);
   assert.deepEqual(Object.keys(contextBody), ["version", "consent", "paragraphs"]);
+  assert.equal(contextBody.version, "context-v2");
   assert.equal(contextBody.consent, true);
   assert.ok(contextBody.paragraphs.some(p => p.id === 6 && p.text.includes("handwritten invitation")), "Unmatched source can reach the consented classifier.");
   assert.ok(contextBody.paragraphs.every(p => ![4, 5].includes(p.id)), "Protected content and hard boundaries remain excluded.");
@@ -230,6 +232,13 @@ try {
   await contextPage.waitForFunction(() => /Nocturne context.*romance/.test(document.querySelector("#level-source")?.textContent));
   assert.equal(await contextPage.locator("#suggested-level").textContent(), "1 / 20");
   assert.equal(posts.length, beforeContext + 1, "Paused navigation never sends automatic batches.");
+  await contextPage.locator("#connect").click();
+  await contextPage.locator("#start").click();
+  await contextPage.locator("#confirm-start").click();
+  await contextPage.waitForFunction(() => document.querySelector("#status")?.textContent === "Simulator running");
+  await contextPage.waitForFunction(() => document.querySelector("#output")?.textContent === "2 / 20");
+  await contextPage.locator("#stop").click();
+  assert.equal(await contextPage.locator("#output").textContent(), "0 / 20");
   await contextPage.locator("#nocturne-context-disable").click();
   assert.equal(await contextPage.locator("#nocturne-context-consent").isChecked(), false);
   assert.equal(await contextPage.locator("#suggested-level").textContent(), "0 / 20", "Disable restores Loom immediately.");

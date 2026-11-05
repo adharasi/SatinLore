@@ -74,7 +74,7 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape} = profile;
+    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape, currentCue, simulatorSceneId} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean" ||
@@ -82,7 +82,9 @@ export function normalizeSceneProfiles(profiles, length) {
         peakPreset !== undefined && (profile.quiet || phase !== "peak" || !Object.hasOwn(peakPresets, peakPreset)) ||
         automaticPeak !== undefined && (automaticPeak !== true || profile.quiet || phase !== "peak" || peakPreset !== undefined) ||
         edging !== undefined && (edging !== true || profile.quiet || (phase !== "build" && phase !== "sustain")) ||
-        shape !== undefined && (profile.quiet || !["build", "sustain"].includes(phase) || !sceneShapes.includes(shape))) throw new RangeError("Use a supported scene stage.");
+        shape !== undefined && (profile.quiet || !["build", "sustain"].includes(phase) || !sceneShapes.includes(shape)) ||
+        currentCue !== undefined && (currentCue !== true || profile.quiet || !["build", "sustain", "peak"].includes(phase)) ||
+        simulatorSceneId !== undefined && (currentCue !== true || !Number.isInteger(simulatorSceneId) || simulatorSceneId < 1)) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(pattern === undefined ? {} : {pattern}),
@@ -90,14 +92,18 @@ export function normalizeSceneProfiles(profiles, length) {
       ...(automaticPeak === undefined ? {} : {automaticPeak}),
       ...(edging === undefined ? {} : {edging}),
       ...(shape === undefined ? {} : {shape}),
+      ...(currentCue === undefined ? {} : {currentCue}),
+      ...(simulatorSceneId === undefined ? {} : {simulatorSceneId}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
 
 export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
+  const previousSceneId = simulatorStagePatterns ? previous?.simulatorSceneId ?? previous?.sceneId : previous?.sceneId;
+  const nextSceneId = simulatorStagePatterns ? next?.simulatorSceneId ?? next?.sceneId : next?.sceneId;
   const sameRepeatingPattern = simulatorStagePatterns && repeatingSimulatorScenePattern(previous, "scene") &&
     repeatingSimulatorScenePattern(next, "scene") && simulatorScenePattern(previous, "scene") === simulatorScenePattern(next, "scene");
-  return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
+  return !!next?.phase && (nextSceneId !== previousSceneId || next.phase !== previous?.phase ||
     next.rhythm !== previous?.rhythm && !sameRepeatingPattern || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
       next.peakPreset !== previous?.peakPreset || next.automaticPeak !== previous?.automaticPeak || next.edging !== previous?.edging ||
       next.shape !== previous?.shape || next.manual !== previous?.manual || next.quiet !== previous?.quiet) ||
@@ -200,8 +206,16 @@ export class ReadingFeel {
     const floor = scaled >= 1 && (rhythm === "scene" || stage || scene?.phase && !scene.manual) ? 1 : 0;
     // An explicit pulse at level 1 would otherwise be indistinguishable from a hold.
     const accent = floor && amplitude < 2 && stage?.accents?.includes(stageStep) ? 2 : 0;
-    const target = Math.max(floor, accent, Math.floor(amplitude * modulation));
-    return adjust(Math.min(ceiling, Math.max(minimum, target)));
+    const target = Math.max(minimum, floor, accent, Math.floor(amplitude * modulation));
+    // A supported current cue can quantize to the same value as the continuous
+    // background. Use one available step of headroom for the simulator only.
+    // Keep distinct waveform steps, chosen easing, attenuation and user offsets.
+    const backgroundLevel = Math.max(minimum, background);
+    const collapsed = target === backgroundLevel && Math.max(minimum, Math.floor(amplitude)) === backgroundLevel;
+    const contrast = simulatorStagePatterns && mode === "continuous" && !quietEdging && scene?.currentCue === true &&
+      !scene.quiet && !scene.manual && !scene.edging && strength >= 1 && this.settings.gain >= 1 && !stage?.accents &&
+      collapsed && backgroundLevel < Math.min(ceiling, preferred);
+    return adjust(Math.min(ceiling, target + (contrast ? 1 : 0)));
   }
 }
 

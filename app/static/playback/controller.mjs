@@ -180,9 +180,11 @@ export class PlaybackController {
       const patternChanged = scenePatternChanged(previousProfile, nextProfile, this.feel.automaticMovement, true);
       if (this.state === "PLAYING" && !this.readingSeeking && (patternChanged ||
           this.sceneProfiles[next]?.phase && this.levels[this.position] !== this.levels[next])) {
-        const keepStageTime = !patternChanged && repeatingSimulatorScenePattern(previousProfile, "scene") &&
-          repeatingSimulatorScenePattern(nextProfile, "scene");
-        this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output, keepStageTime);
+        const sameContextScene = nextProfile?.simulatorSceneId !== undefined &&
+          nextProfile.simulatorSceneId === previousProfile?.simulatorSceneId;
+        const keepStageTime = !patternChanged && (sameContextScene || repeatingSimulatorScenePattern(previousProfile, "scene") &&
+          repeatingSimulatorScenePattern(nextProfile, "scene"));
+        this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output, keepStageTime, sameContextScene);
       }
     }
     this.position = next;

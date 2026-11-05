@@ -440,6 +440,43 @@ test("a lower session ceiling clamps a gentle cue instead of rounding it away", 
   assert.equal(feel.desired({base: 1, ceiling: 1, scene, manualZero: true}), 0);
 });
 
+test("simulator cue contrast uses one calibrated step and respects controls and rhythm", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({mode: "continuous", background: 1, preferred: 3, maximum: 10});
+  const scene = {phase: "build", quiet: false, currentCue: true};
+  const context = {base: 1, ceiling: 10, scene, movement: "vibrate", simulatorStagePatterns: true};
+  assert.equal(feel.desired(context), 2);
+  assert.equal(feel.desired({...context, simulatorStagePatterns: false}), 1);
+  assert.equal(feel.desired({...context, ceiling: 1}), 1);
+  assert.equal(feel.desired({...context, ceiling: 0}), 0);
+  assert.equal(feel.desired({...context, manualZero: true}), 0);
+  assert.equal(feel.desired({...context, scene: {...scene, manual: true}}), 1);
+  assert.equal(feel.desired({...context, scene: {...scene, endedMovements: ["vibrate"]}}), 0);
+  assert.equal(feel.desired({...context, base: 0, scene: {...scene, quiet: true}}), 0);
+  assert.equal(feel.desired({...context, levelAdjustment: -1}), 1);
+  assert.equal(feel.desired({...context, levelAdjustment: 1}), 3);
+  assert.equal(feel.desired({...context, strength: 0}), 0);
+  assert.equal(feel.desired({...context, strength: 0.5}), 0);
+  feel.configure({gain: 0.5, minimum: 1});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({gain: 1, preferred: 1});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({preferred: 3, minimum: 0, quietEdging: true});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({mode: "story", quietEdging: false});
+  assert.equal(feel.desired(context), 1);
+  feel.configure({mode: "continuous"});
+  assert.equal(feel.desired({...context, scene: {...scene, edging: true}}), 1);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, scene: {...scene, shape: "accented"}, now})), [2, 1, 2]);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, base: 2, now})), [1, 1, 2]);
+  feel.hold(1);
+  assert.equal(feel.desired(context), 1);
+  feel.easeOff(0, 1);
+  assert.equal(feel.desired(context), 0);
+  feel.followStory(0);
+  assert.equal(feel.desired(context), 0);
+});
+
 test("scene motion defaults to the selected movement, with opt-in switching and a safe fallback", async t => {
   const {clock} = synchronous();
   const controller = new ReaderDeviceController(clock);

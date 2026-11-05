@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {workspace} from "./helpers/workspace.mjs";
 import {waitForWorkspace, waitForContext} from "./helpers/workspace-wait.mjs";
 
-const labelsFor = paragraphs => ({version: "context-v1", labels: paragraphs.map(({id}) =>
-  ({id, category: "romance", phase: "build", shape: "unspecified", confidence: 93})), usage: null});
+const labelsFor = paragraphs => ({version: "context-v2", labels: paragraphs.map(({id}) =>
+  ({id, category: "romance", phase: "build", shape: "unspecified", confidence: 93, eventKind: "current"})), usage: null});
 
 async function contextualReader(t, provider, publicAuth = false) {
   const app = workspace({hosted: true, publicAuth, sceneRequest: async (_path, init = {}) => {
@@ -51,22 +51,22 @@ for (const invalidate of ["clearAccountLibrary()", "hostedAccess.lose('Session e
     assert.equal(app.read("latest.output"), 0);
     assert.equal(app.read("controller.levels[0]"), 0);
     assert.equal(app.read("currentStory().model.nocturneContext.size"), 0);
-    assert.equal(app.read("currentStory().nocturneContextSession.cache.size"), 0);
+    assert.equal(app.read("currentStory().nocturneContextSession.attempted.size"), 0);
     assert.equal(app.read("currentStory().nocturneContextSession.enabled"), false);
     assert.equal(app.nodes.get("nocturne-context-consent").checked, false);
     assert.deepEqual(app.errors, []);
   });
 }
 
-test("context annotations, consent and cache are absent from the actual story persistence record", async t => {
+test("context annotations, consent and allowance are absent from the actual story persistence record", async t => {
   const app = await contextualReader(t);
   await app.click("nocturne-context-enable");
   await waitForContext(app);
-  assert.ok(app.read("currentStory().nocturneContextSession.cache.size") > 0);
+  assert.ok(app.read("currentStory().nocturneContextSession.attempted.size") > 0);
   const record = JSON.parse(app.read("JSON.stringify(storyRecord(currentStory()))"));
   assert.deepEqual(Object.keys(record).sort(), ["analysisVersion", "corrections", "description", "favorite", "id", "position", "text", "title"]);
   assert.ok(record.corrections.every(value => value === null));
-  assert.doesNotMatch(JSON.stringify(record), /context-v1|confidence|nocturneContext|cache|enabled|requests/);
+  assert.doesNotMatch(JSON.stringify(record), /context-v[12]|confidence|nocturneContext|attempted|enabled|requests/i);
   assert.deepEqual(app.errors, []);
 });
 

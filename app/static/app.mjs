@@ -22,7 +22,7 @@ import {mountPublicAccount} from "./reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "./reader/calibration.mjs";
-import {nocturneAvailable, nocturneCandidates, requestNocturne, nocturneContextCandidates, nocturneContextKey, requestNocturneContext} from "./reader/nocturne.mjs";
+import {nocturneAvailable, nocturneCandidates, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "./reader/nocturne.mjs";
 import {storyToyRecommendation} from "./reader/toy-recommendations.mjs";
 
 const $ = id => document.getElementById(id);
@@ -510,8 +510,10 @@ function updateCurrentCorrection(story) {
     endedMovements ? null : "Default movement";
   const stage = {build: "Building", sustain: "Sustaining", peak: "Peak", recover: "Easing off"}[profile?.phase ?? paragraph?.phase];
   const annotation = story?.sceneModel === "nocturne" && paragraph ? story.model.contextualAnnotation(latest.position) : null;
+  const labelOnly = ["imagined", "reported", "historical"].includes(annotation?.eventKind);
   text("level-source", !paragraph ? "No section selected." : paragraph.override !== null ? "Using your correction." :
-    annotation ? [`Nocturne context · ${annotation.category}`, stage, rhythm, movements, endedMovements].filter(Boolean).join(" · ") :
+    annotation ? [`Nocturne context · ${annotation.category}`, annotation.eventKind, ...(labelOnly ? ["Playback follows Loom"] :
+      [stage, rhythm, movements, endedMovements])].filter(Boolean).join(" · ") :
     paragraph.sceneId && rhythm ?
       [`Scene ${paragraph.sceneId}`, stage, rhythm, movements, endedMovements, paragraph.advisory].filter(Boolean).join(" · ") :
       paragraph.advisory || (paragraph.quiet ? "Quiet section" : "Using the local suggestion."));
@@ -638,8 +640,7 @@ function display(state = latest) {
     analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Finding scene changes…");
   renderStoryModel(story);
   renderNocturnePeakSettings(story);
-  if (story?.nocturneContextSession?.enabled && state.running && !state.readingSeeking && !document.hidden && !nocturneOperation &&
-      story.nocturneContextSession.requests < 6 && contextNeedsReview(story, state.position)) {
+  if (state.running && !state.readingSeeking && !document.hidden && !nocturneOperation && contextNeedsReview(story, state.position)) {
     queueMicrotask(() => void runNocturneContext({automatic: true}));
   }
   const saved = saveState(story);
@@ -677,8 +678,10 @@ const controller = new ReaderDeviceController({document, window, navigator, stor
   onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
   onInterfaceError: controlRecovery, onChange: state => {
   const stopped = latest.running && !state.running;
+  const seeking = state.readingSeeking && !latest.readingSeeking;
   if (!state.running) releasePlayback();
-  if (stopped) { cancelPosition(); cancelStart(); }
+  if (stopped) { cancelPosition(); cancelStart(); cancelNocturne(); }
+  if (seeking && nocturneOperation?.context) cancelNocturne();
   display(state);
   show(state.reason);
 }});
@@ -722,13 +725,17 @@ function renderStoryModel(story) {
   $("nocturne-run").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
   const context = story?.nocturneContextSession;
   const contextEnabled = context?.enabled === true;
+  const {requests, bytes} = remainingContextAllowance(context);
   $("nocturne-context-enable").hidden = signInNeeded || contextEnabled;
   $("nocturne-context-disable").hidden = !contextEnabled;
   $("nocturne-context-consent").disabled = contextEnabled || busy;
   $("nocturne-context-enable").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne ||
-    libraryMutation || !$("nocturne-context-consent").checked || (context?.requests ?? 0) >= 6;
-  text("nocturne-context-status", contextEnabled ? `${story.model.nocturneContext.size} sections reviewed this visit. ${6 - context.requests} of 6 nearby requests remain. Unreviewed sections use Loom.` :
-    `Optional: ${6 - (context?.requests ?? 0)} of 6 nearby requests remain this visit, each covering at most 8 sections. Long stories keep Loom outside that coverage.`);
+    libraryMutation || !$("nocturne-context-consent").checked || requests === 0 || bytes === 0;
+  const coverage = contextEnabled ? `${story.model.nocturneContext.size} of ${story.model.paragraphs.length} sections reviewed. ` : "";
+  const allowance = context?.rateLimited ? "The beta usage limit has been reached." : requests === 0 || bytes === 0 ?
+    "The nearby review allowance for this visit has been used." :
+    `${requests} ${requests === 1 ? "request" : "requests"} and ${bytes.toLocaleString()} text bytes remain this visit.`;
+  text("nocturne-context-status", `${coverage}${allowance} Unreviewed sections use Loom.`);
   text("nocturne-run", nocturneReady === false ? "Check availability" : "Analyse with Nocturne");
   text("nocturne-status", !hostedMode ? "Your patterns follow Loom’s scene cues. Further analysis is available in the hosted app." :
     signInNeeded ? "Your patterns are ready. Sign in to let Nocturne review scene cues." :
@@ -741,56 +748,69 @@ function clearNocturneContext(story) {
   const hadContext = story.model.nocturneContext.size > 0 || story.nocturneContextSession?.enabled;
   story.model.nocturneContext.clear();
   const session = story.nocturneContextSession;
-  if (session) { session.enabled = false; session.reviewed.clear(); session.cache.clear(); }
+  if (session) { session.enabled = false; session.attempted.clear(); }
   if (hadContext) story.nocturneMessage = "Nearby context review is off. Your scene settings and local analysis are available.";
   if (story === currentStory()) $("nocturne-context-consent").checked = false;
 }
 function clearAllNocturneContext() {
   for (const story of stories) clearNocturneContext(story);
 }
+function remainingContextAllowance(session) {
+  return {
+    requests: session?.rateLimited ? 0 : NOCTURNE_CONTEXT_SESSION_REQUESTS - (session?.requests ?? 0),
+    bytes: NOCTURNE_CONTEXT_SESSION_BYTES - (session?.bytesAttempted ?? 0),
+  };
+}
 function contextNeedsReview(story, position) {
-  return nocturneContextCandidates(story.model.paragraphs, position).paragraphs.some(({id}) =>
-    id >= position && id <= position + 2 && !story.nocturneContextSession.reviewed.has(id));
+  const session = story?.nocturneContextSession;
+  if (!session?.enabled || story.deleting || libraryMutation || !hasVerifiedAccess() || !story.model.analysisReady) return false;
+  const {requests, bytes} = remainingContextAllowance(session);
+  return requests > 0 && nocturneContextNeedsReview(story.model.paragraphs, position, {attempted: session.attempted, maxBytes: bytes});
 }
 
 async function runNocturneContext({automatic = false} = {}) {
   const story = currentStory();
-  if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" || nocturneOperation) return;
+  if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" ||
+      story.controlled || story.deleting || libraryMutation || nocturneOperation) return;
   let session = story.nocturneContextSession;
+  const {requests, bytes} = remainingContextAllowance(session);
+  if (requests <= 0 || bytes <= 0) return;
   if (!automatic) {
-    if (!$("nocturne-context-consent").checked || (session?.requests ?? 0) >= 6) return;
+    if (!$("nocturne-context-consent").checked) return;
     if (nocturneReady !== true) { await checkNocturne(); return; }
     pause("Context analysis is enabled for this visit. Confirm Start when ready.");
-    session ??= story.nocturneContextSession = {enabled: false, requests: 0, reviewed: new Set(), cache: new Map()};
+    session ??= story.nocturneContextSession = {enabled: false, requests: 0, bytesAttempted: 0, rateLimited: false, attempted: new Set()};
     session.enabled = true;
   }
-  if (!session?.enabled || session.requests >= 6 || automatic && (!latest.running || latest.readingSeeking || !contextNeedsReview(story, latest.position))) return;
-  const candidates = nocturneContextCandidates(story.model.paragraphs, latest.position);
-  // Retain reviewed neighbours as semantic context. The coverage watermark
-  // prevents one new paragraph triggering another request on each tick.
-  const paragraphs = candidates.paragraphs;
-  if (!paragraphs.length) { display(); return; }
-  // Reserve the operation before hashing so rapid UI updates cannot duplicate it.
+  if (!session?.enabled || automatic && (!latest.running || latest.readingSeeking || !contextNeedsReview(story, latest.position))) return;
+  const {paragraphs, newIds, sourceBytes} = nocturneContextCandidates(story.model.paragraphs, latest.position,
+    {attempted: session.attempted, maxBytes: bytes});
+  if (!paragraphs.length) {
+    story.nocturneMessage = "No nearby sections fit this review. Loom covers these sections.";
+    display();
+    return;
+  }
   const operation = {story, abort: new AbortController(), generation: story.model.analysisGeneration, context: true};
   nocturneOperation = operation; display();
   const current = () => nocturneOperation === operation && story === currentStory() && session.enabled &&
-    story.model.analysisGeneration === operation.generation && story.sceneModel === "nocturne" && !document.hidden && hasVerifiedAccess();
+    story.model.analysisGeneration === operation.generation && story.sceneModel === "nocturne" && !document.hidden && hasVerifiedAccess() &&
+    (!automatic || latest.running && !latest.readingSeeking);
   try {
-    const key = await nocturneContextKey(paragraphs);
     if (!current()) return;
-    let result = session.cache.get(key);
-    if (!result) {
-      session.requests++;
-      // Count attempts, including failures and cancellations, towards the budget.
-      paragraphs.forEach(({id}) => session.reviewed.add(id));
-      result = await requestNocturneContext(paragraphs, {consent: true, signal: operation.abort.signal});
-    }
+    // Count transport attempts, including failed or cancelled requests. The
+    // paragraph map reuses accepted labels without resending reviewed windows.
+    session.requests++;
+    session.bytesAttempted += sourceBytes;
+    for (const id of newIds) session.attempted.add(id);
+    const result = await requestNocturneContext(paragraphs, {consent: true, signal: operation.abort.signal});
     if (!current()) return;
     if (result.labels) {
-      session.cache.set(key, result);
-      for (const [id, label] of result.labels) story.model.nocturneContext.set(id, label);
+      for (const id of newIds) story.model.nocturneContext.set(id, result.labels.get(id));
       syncReaderMapping(story);
-      story.nocturneMessage = `Nearby context reviewed. ${result.usage ? `${result.usage.totalTokens} tokens used by this request. ` : ""}Uncertain sections keep Loom. Playback controls are unchanged.`;
+      story.nocturneMessage = `Nearby context reviewed. ${result.usage ? `${result.usage.totalTokens} tokens used by this request. ` : ""}Uncertain sections keep Loom.`;
+    } else if (result.code === "rate_limited") {
+      session.rateLimited = true;
+      story.nocturneMessage = "The beta usage limit has been reached. Loom covers unreviewed sections.";
     } else story.nocturneMessage = "Nearby review could not finish. Loom covers those sections. This request counts towards the visit limit.";
   } catch {
     if (current()) story.nocturneMessage = "Nearby review could not finish. Loom covers those sections. This request counts towards the visit limit.";
@@ -812,7 +832,8 @@ function cancelNocturne() {
   if (!operation) return;
   nocturneOperation = null;
   operation.abort.abort();
-  operation.story.nocturneMessage = "Analysis stopped. Your patterns still follow Loom’s scene cues.";
+  operation.story.nocturneMessage = operation.context ? "Nearby context review stopped." :
+    "Analysis stopped. Your patterns still follow Loom’s scene cues.";
 }
 
 async function runNocturne() {

@@ -25,6 +25,7 @@ export const READER_ASSETS = Object.freeze([
   ["reader/model.mjs", "/static/reader/model.mjs"],
   ["reader/toy-recommendations.mjs", "/static/reader/toy-recommendations.mjs"],
   ["reader/nocturne.mjs", "/static/reader/nocturne.mjs"],
+  ["reader/nocturne-context-contract.mjs", "/static/reader/nocturne-context-contract.mjs"],
   ["reader/position.mjs", "/static/reader/position.mjs"],
   ["reader/scoring.mjs", "/static/reader/scoring.mjs"],
   ["reader/storage.mjs", "/static/reader/storage.mjs"],

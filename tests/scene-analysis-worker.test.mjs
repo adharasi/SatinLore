@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { Miniflare } from "miniflare";
 import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
+import { validateNocturneContext } from "../app/static/reader/nocturne-context-contract.mjs";
 
 const ORIGIN = "https://app.satinlore.com";
 const BETA = "https://beta.satinlore.com";
@@ -118,6 +119,12 @@ const CONTEXT_LABELS = [
   { id: 3, category: "romance", phase: "build", shape: "unspecified", confidence: 94 },
   { id: 4, category: "neutral", phase: "quiet", shape: "unspecified", confidence: 99 },
 ];
+const CONTEXT_V2 = { ...CONTEXT, version: "context-v2" };
+const CONTEXT_V2_LABELS = [
+  { id: 3, label: "romance.build", eventKind: "current", shape: "unspecified", confidence: 94 },
+  { id: 4, label: "neutral.quiet", eventKind: "neutral", shape: "unspecified", confidence: 99 },
+];
+const CONTEXT_CONTRACT = "app/static/reader/nocturne-context-contract.mjs";
 function contextUpstream(labels = CONTEXT_LABELS, usage = { input_tokens: 410, output_tokens: 102, total_tokens: 512 }) {
   return Response.json({ status: "completed", usage,
     output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
@@ -204,6 +211,104 @@ test("context low confidence abstains, invalid usage stays unknown and refusal p
   assert.equal((await response.json()).code, "refused");
 });
 
+test("context v2 accepts a full dialogue window under source and output limits", async () => {
+  const sentence = "The train arrived at dawn. ".repeat(8);
+  const paragraphs = Array.from({ length: 64 }, (_, id) => ({
+    id, text: sentence.slice(0, id < 32 ? 188 : 187),
+  }));
+  const expected = paragraphs.map(({ id }) => ({ ...CONTEXT_V2_LABELS[1], id }));
+  const usage = { input_tokens: 3200, output_tokens: 2500, total_tokens: 5700 };
+  const f = fixture({ provider: () => contextUpstream([...expected].reverse(), usage) });
+  const response = await f.worker.fetch(request(await token(), { body: { ...CONTEXT_V2, paragraphs } }), f.env);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.version, "context-v2");
+  assert.equal(result.labels.length, 64);
+  assert.deepEqual(result.usage, { inputTokens: 3200, outputTokens: 2500, totalTokens: 5700 });
+  assert.deepEqual([...validateNocturneContext(paragraphs, result).labels.keys()], paragraphs.map(({ id }) => id));
+  const provider = JSON.parse(f.calls[0].options.body);
+  assert.equal(provider.store, false);
+  assert.equal(provider.max_output_tokens, 4096);
+  assert.equal(provider.text.format.strict, true);
+  assert.deepEqual(JSON.parse(provider.input), { paragraphs });
+  const fields = provider.text.format.schema.properties.labels.items.properties;
+  assert.ok(fields.label.enum.includes("romance.build"));
+  assert.ok(fields.label.enum.includes("intimacy.peak"));
+  assert.ok(!fields.label.enum.includes("flirting.peak"));
+  assert.ok(!Object.hasOwn(fields, "phase"));
+  assert.deepEqual(fields.eventKind.enum, ["current", "imagined", "reported", "historical", "uncertain", "neutral"]);
+  assert.doesNotMatch(provider.input, /consent|context-v2|example\.test|synthetic-subject/);
+  assert.equal(f.reservations.length, 1);
+});
+
+test("context v2 rejects count, UTF-8, consent and encoded body overruns before quota", async () => {
+  const f = fixture(), jwt = await token();
+  for (const body of [
+    { ...CONTEXT_V2, consent: false },
+    { ...CONTEXT_V2, paragraphs: Array.from({ length: 65 }, (_, id) => ({ id, text: "A map." })) },
+    { ...CONTEXT_V2, paragraphs: [{ id: 0, text: "字".repeat(1001) }] },
+    { ...CONTEXT_V2, paragraphs: [
+      ...Array.from({ length: 4 }, (_, id) => ({ id, text: "字".repeat(1000) })),
+      { id: 4, text: "A" },
+    ] },
+  ]) {
+    assert.equal((await f.worker.fetch(request(jwt, { body }), f.env)).status, 400);
+  }
+  const escaped = { ...CONTEXT_V2, paragraphs: Array.from({ length: 3 }, (_, id) => ({ id, text: '"'.repeat(2999) + "A" })) };
+  assert.equal((await f.worker.fetch(request(jwt, { body: escaped }), f.env)).status, 413);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.reservations, []);
+});
+
+test("context v2 preserves narrative event kind and converts weak evidence to abstention", async () => {
+  const labels = [
+    CONTEXT_V2_LABELS[0],
+    { ...CONTEXT_V2_LABELS[0], id: 4, eventKind: "imagined" },
+    { ...CONTEXT_V2_LABELS[0], id: 5, eventKind: "reported" },
+    { ...CONTEXT_V2_LABELS[0], id: 6, eventKind: "historical" },
+    { ...CONTEXT_V2_LABELS[0], id: 7, confidence: 79 },
+    { ...CONTEXT_V2_LABELS[1], id: 8 },
+  ];
+  const paragraphs = labels.map(({ id }) => ({ id, text: "A letter was folded." }));
+  const f = fixture({ provider: () => contextUpstream(labels, { input_tokens: 120, output_tokens: 4097, total_tokens: 4217 }) });
+  const response = await f.worker.fetch(request(await token(), { body: { ...CONTEXT_V2, paragraphs } }), f.env);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.deepEqual(result.labels.map(({ eventKind }) => eventKind), ["current", "imagined", "reported", "historical", "uncertain", "neutral"]);
+  assert.deepEqual(result.labels[4], { id: 7, category: "abstain", phase: "abstain", shape: "unspecified", confidence: 79, eventKind: "uncertain" });
+  assert.equal(result.usage, null);
+  assert.equal(validateNocturneContext(paragraphs, result).labels.size, paragraphs.length);
+});
+
+test("context v2 falls back on incompatible labels and refuses without exposing provider text", async () => {
+  const jwt = await token(TESTER_EMAIL);
+  for (const first of [
+    { ...CONTEXT_V2_LABELS[0], label: "flirting.peak" },
+    { ...CONTEXT_V2_LABELS[0], eventKind: "uncertain" },
+    { ...CONTEXT_V2_LABELS[0], eventKind: "neutral" },
+    { ...CONTEXT_V2_LABELS[0], label: "abstain.abstain" },
+    { ...CONTEXT_V2_LABELS[0], eventKind: "private canary" },
+    { ...CONTEXT_V2_LABELS[0], explanation: "private canary" },
+    { ...CONTEXT_V2_LABELS[0], id: 4 },
+    { ...CONTEXT_V2_LABELS[0], id: 999 },
+  ]) {
+    const f = fixture({ provider: () => contextUpstream([first, CONTEXT_V2_LABELS[1]]) });
+    const response = await f.worker.fetch(request(jwt, { body: CONTEXT_V2 }), f.env);
+    assert.equal(response.status, 502);
+    const result = await response.json();
+    assert.equal(result.code, "invalid_result");
+    assert.doesNotMatch(JSON.stringify(result), /canary/);
+    assert.equal(f.calls.length, 1);
+  }
+  const refused = fixture({ provider: () => Response.json({ status: "completed", output: [{ type: "message",
+    role: "assistant", content: [{ type: "refusal", refusal: "private canary" }] }] }) });
+  const response = await refused.worker.fetch(request(jwt, { body: CONTEXT_V2 }), refused.env);
+  assert.equal(response.status, 422);
+  const result = await response.json();
+  assert.equal(result.code, "refused");
+  assert.doesNotMatch(JSON.stringify(result), /canary/);
+});
+
 test("native Workers fetch accepts a Nocturne response and never forwards credentials on redirects", async t => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const source = "deploy/cloudflare/scene-analysis.mjs";
@@ -222,22 +327,31 @@ test("native Workers fetch accepts a Nocturne response and never forwards creden
         });
       } };` },
     { type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8") },
+    { type: "ESModule", path: root + CONTEXT_CONTRACT, contents: await readFile(root + CONTEXT_CONTRACT, "utf8") },
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
   bindings: { OPENAI_API_KEY: KEY },
   durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } },
   async outboundService(request) {
     outbound.push({ url: request.url, method: request.method, authorization: request.headers.get("Authorization") });
     if (request.url !== upstreamURL) return Response.json({ error: "unexpected destination" }, { status: 400 });
-    assert.deepEqual(JSON.parse((await request.json()).input), { cues: CUES });
+    const input = JSON.parse((await request.json()).input);
+    if (input.paragraphs) {
+      assert.deepEqual(input, { paragraphs: CONTEXT_V2.paragraphs });
+      return contextUpstream(CONTEXT_V2_LABELS);
+    }
+    assert.deepEqual(input, { cues: CUES });
     return redirect ? Response.redirect("https://redirect.example.test/", 302) : upstream();
   } });
   t.after(() => mf.dispose());
-  const analyse = () => mf.dispatchFetch(`${ORIGIN}/api/scene-analysis`, {
-    method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify({ cues: CUES }),
+  const analyse = (body = { cues: CUES }) => mf.dispatchFetch(`${ORIGIN}/api/scene-analysis`, {
+    method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const success = await analyse();
   assert.equal(success.status, 200);
   assert.deepEqual(await success.json(), { labels: LABELS });
+  const contextResponse = await analyse(CONTEXT_V2);
+  assert.equal(contextResponse.status, 200);
+  assert.equal(validateNocturneContext(CONTEXT_V2.paragraphs, await contextResponse.json()).labels.size, 2);
 
   redirect = true;
   const rejected = await analyse();
@@ -246,7 +360,7 @@ test("native Workers fetch accepts a Nocturne response and never forwards creden
   const result = await rejected.json();
   assert.ok(!JSON.stringify(result).includes(KEY));
   const expected = { url: upstreamURL, method: "POST", authorization: `Bearer ${KEY}` };
-  assert.deepEqual(outbound, [expected, expected], "The redirect destination receives no request or credential.");
+  assert.deepEqual(outbound, [expected, expected, expected], "The redirect destination receives no request or credential.");
 });
 
 test("Nocturne maps unavailable, rejected, and malformed upstream results without leaking provider data", async () => {
@@ -354,6 +468,7 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
         return stub.fetch(new Request("https://scene-analysis.internal/reserve", request));
       } };` },
     { type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8") },
+    { type: "ESModule", path: root + CONTEXT_CONTRACT, contents: await readFile(root + CONTEXT_CONTRACT, "utf8") },
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
   durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } } });
   t.after(() => mf.dispose());

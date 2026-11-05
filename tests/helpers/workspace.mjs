@@ -25,7 +25,7 @@ import {mountExperienceDialog} from "../../app/static/reader/experience-dialog.m
 import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "../../app/static/reader/calibration.mjs";
-import {nocturneCandidates, nocturneAvailable, requestNocturne, nocturneContextCandidates, nocturneContextKey, requestNocturneContext} from "../../app/static/reader/nocturne.mjs";
+import {nocturneCandidates, nocturneAvailable, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "../../app/static/reader/nocturne.mjs";
 import {storyToyRecommendation} from "../../app/static/reader/toy-recommendations.mjs";
 
 // Execute the actual application bindings with only DOM, storage, clock, access
@@ -162,7 +162,8 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     nocturneAvailable: () => nocturneAvailable(sceneRequest),
     requestNocturne: (cues, options) => requestNocturne(cues, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
     requestNocturneContext: (paragraphs, options) => requestNocturneContext(paragraphs, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
-    storyToyRecommendation, channelLabel, nocturneContextCandidates, nocturneContextKey, queueMicrotask, AbortController,
+    storyToyRecommendation, channelLabel, nocturneContextCandidates, nocturneContextNeedsReview,
+    NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, queueMicrotask, AbortController,
     DEFAULT_EXPERIENCE, validateExperience, mountExperienceDialog,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,

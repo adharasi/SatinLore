@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
-// The real SHA-256 implementation completes on Node's crypto worker pool.
-// Parallel test files can delay it beyond a fixed number of event-loop turns.
+// Analysis and mocked requests may take more than a fixed number of turns
+// when tests share the event loop with other work.
 export async function waitForWorkspace(app, predicate, message = "Workspace condition did not settle.") {
   const deadline = Date.now() + 10_000;
   // Let any queued application operation start before observing completion.

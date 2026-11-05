@@ -4,6 +4,9 @@ import {ReaderModel} from "../app/static/reader/model.mjs";
 import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged} from "../app/static/reader/calibration.mjs";
 import {PlaybackController} from "../app/static/playback/controller.mjs";
 import {MockDevice} from "../app/static/devices/mock.mjs";
+import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
+import {DEFAULT_EXPERIENCE} from "../app/static/reader/experience-preferences.mjs";
+import {NOCTURNE_CONTEXT_VERSION, validateNocturneContext} from "../app/static/reader/nocturne-context-contract.mjs";
 import {SimulationClock} from "../app/static/simulation/clock.mjs";
 
 const story = [
@@ -134,6 +137,101 @@ test("a repeating sustain keeps its phase across compatible model paragraphs and
   await clock.advance(1000);
   assert.equal(device.snapshot().strength, 4, "An explicit restart begins at the first step.");
   controller.pause();
+});
+
+test("first-use simulator output distinguishes current contextual cues while preserving quiet and scene continuity", async t => {
+  const model = new ReaderModel();
+  model.load([
+    "The reading room opened before sunrise.",
+    "A handwritten note waited on the table.",
+    "A folded map lay in the bag.",
+    "The room was empty.",
+    "Another message arrived.",
+    "A bell rang upstairs.",
+    "A truck passed the window.",
+    "***",
+    "The rain had stopped.",
+  ].join("\n\n"));
+  const labels = [
+    ["neutral", "quiet", "neutral"],
+    ["romance", "build", "current"],
+    ["intimacy", "build", "current"],
+    ["explicit", "peak", "imagined"],
+    ["explicit", "peak", "reported"],
+    ["explicit", "peak", "historical"],
+    ["abstain", "abstain", "uncertain"],
+    ["romance", "build", "current"],
+    ["romance", "build", "current"],
+  ].map(([category, phase, eventKind], id) => ({id, category, phase, eventKind, shape: "unspecified", confidence: 95}));
+  model.nocturneContext = validateNocturneContext(labels.map(({id}) => ({id})), {
+    version: NOCTURNE_CONTEXT_VERSION, labels, usage: null,
+  }).labels;
+  const preferences = {...DEFAULT_EXPERIENCE, nocturne: true};
+  const levels = model.effectiveLevels(preferences);
+  const profiles = model.effectiveProfiles(preferences);
+  assert.deepEqual(levels, [0, 1, 2, 0, 0, 0, 0, 0, 1]);
+  for (const index of [3, 4, 5]) {
+    assert.equal(model.contextualAnnotation(index).eventKind, labels[index].eventKind);
+    assert.deepEqual(profiles[index], model.effectiveProfile(index));
+  }
+  assert.equal(model.contextualAnnotation(6), null);
+  assert.equal(model.contextualAnnotation(7), null);
+  assert.equal(scenePatternChanged(profiles[1], profiles[2], false, true), false);
+  assert.equal(scenePatternChanged(profiles[1], profiles[2]), true);
+  assert.notEqual(profiles[8].simulatorSceneId, profiles[2].simulatorSceneId);
+
+  const clock = new SimulationClock();
+  const controller = new ReaderDeviceController(clock);
+  t.after(() => controller.destroy());
+  controller.setReadingDefaults(DEFAULT_EXPERIENCE);
+  controller.setStory(levels, profiles);
+  await controller.beginConnection({mode: "simulator", model: "lush"});
+  await controller.selectDevice("sim-lush");
+  const {ceiling, calibration} = controller.snapshot();
+  assert.deepEqual([calibration.channels.vibrate.background, calibration.channels.vibrate.preferred, ceiling], [1, 3, 10]);
+  assert.equal(controller.start(), true);
+  assert.equal(controller.snapshot().output, 1);
+  controller.setPosition(1);
+  await clock.advance(4000);
+  assert.equal(controller.snapshot().output, 2);
+  controller.setPosition(2);
+  assert.equal(controller.snapshot().output, 2, "A compatible contextual paragraph keeps the completed build step.");
+  controller.setPosition(3);
+  await clock.advance(1000);
+  assert.equal(controller.snapshot().output, 1);
+  controller.setPosition(7);
+  assert.equal(controller.snapshot().output, 0);
+  controller.pause();
+  await clock.advance(4000);
+  assert.equal(controller.snapshot().output, 0);
+});
+
+test("label-only context preserves a locally vetted current cue and legacy labels keep their old mapping", () => {
+  const model = new ReaderModel();
+  model.load([
+    "Mara was attracted to him, and held his gaze.",
+    "***",
+    "The traffic light changed.",
+  ].join("\n\n"));
+  assert.equal(model.effectiveProfile(0).currentCue, true);
+  model.nocturneContext.set(0, {id: 0, category: "romance", phase: "build", shape: "unspecified", confidence: 95, eventKind: "reported"});
+  model.nocturneContext.set(2, {id: 2, category: "romance", phase: "build", shape: "unspecified", confidence: 95});
+  const preferences = {nocturne: true};
+  assert.deepEqual(model.effectiveProfile(0, preferences), model.effectiveProfile(0));
+  assert.equal(model.effectiveLevels(preferences)[2], 1);
+  assert.equal(model.effectiveProfile(2, preferences).currentCue, undefined);
+  const feel = new ReadingFeel({rhythm: DEFAULT_EXPERIENCE.rhythm, maximum: DEFAULT_EXPERIENCE.maximum});
+  feel.configure({mode: DEFAULT_EXPERIENCE.quiet});
+  for (const options of [{}, preferences]) {
+    const base = model.effectiveLevels(options)[0];
+    const scene = model.effectiveProfile(0, options);
+    assert.equal(feel.desired({base, scene, simulatorStagePatterns: true}), 2);
+    assert.equal(feel.desired({base, scene}), 1);
+  }
+  model.setOverride(0, 0);
+  assert.equal(model.contextualAnnotation(0), null);
+  assert.equal(model.effectiveProfile(0, preferences).currentCue, undefined);
+  assert.equal(model.effectiveLevels(preferences)[0], 0);
 });
 
 test("Nocturne maps edging to active buildup while keeping climax and quiet boundaries separate", () => {

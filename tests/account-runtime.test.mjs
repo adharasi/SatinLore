@@ -20,7 +20,7 @@ test("accounts and cloud libraries use real SQLite transactions, cross-user isol
       }};` },
     { type: "ESModule", path: root + "deploy/cloudflare/accounts.mjs", contents: await readFile(new URL("../deploy/cloudflare/accounts.mjs", import.meta.url), "utf8") },
     { type: "ESModule", path: root + "app/static/devices/toy-profiles.mjs", contents: await readFile(new URL("../app/static/devices/toy-profiles.mjs", import.meta.url), "utf8") },
-    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences"].map(async name => {
+    ...await Promise.all(["storage", "import", "model", "scoring", "folders", "identity", "calibration", "experience-preferences", "nocturne-context-contract"].map(async name => {
       const path = root + `app/static/reader/${name}.mjs`;
       return { type: "ESModule", path, contents: await readFile(path, "utf8") };
     })),
