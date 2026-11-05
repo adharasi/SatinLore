@@ -28,7 +28,7 @@ class VectorBridge {
   dispose(){this.selected=null;this.toys=[];this.notify();}
   destroy(){this.dispose();}
 }
-function fixture(){const clock=new SimulationClock(),bridge=new VectorBridge(),controller=new ReaderDeviceController({bridge,now:clock.now,setTimer:clock.setTimer,clearTimer:clock.clearTimer});return{clock,bridge,c:controller};}
+function fixture(options={}){const clock=new SimulationClock(),bridge=new VectorBridge(),controller=new ReaderDeviceController({bridge,now:clock.now,setTimer:clock.setTimer,clearTimer:clock.clearTimer,...options});return{clock,bridge,c:controller};}
 const settings=value=>({...DEFAULT_CHANNEL_CALIBRATION,...value});
 async function select(f,mode="lovense"){
   f.c.setStory([5,0,3]);await f.c.beginConnection({mode,model:"flexer"});await f.c.selectDevice(mode==="lovense"?"physical-fixture":"sim-flexer");
@@ -274,6 +274,35 @@ test("inline edits affect only the chosen combined action and its own maximum",a
   await f.clock.advance(1000);assert.deepEqual(f.c.snapshot().channelOutputs,{vibrate:5,fingering:2});
   assert.equal(f.c.snapshot().ceiling,10,"A movement maximum is independent of the global ceiling.");
   f.c.setPosition(1);await f.clock.advance(1000);assert.deepEqual(f.c.snapshot().channelOutputs,{vibrate:1,fingering:2});f.c.destroy();
+});
+
+test("the reader can vary vibration while renewing steady flexing, but a lower maximum still stops immediately", async t => {
+  const f = fixture({storyRhythms:true, independentRhythms:true}), {c, bridge, clock} = f;
+  t.after(() => c.destroy());
+  await select(f);
+  await check(f,"vibrate");
+  await check(f,"fingering");
+  c.setCalibration("vibrate",settings({rhythm:"steady"}));
+  c.setCalibration("fingering",settings({rhythm:"steady"}));
+  await c.applyChannels(["vibrate","fingering"]);
+  assert.equal(c.start(),true);
+  await clock.advance(2200);
+  const stopCount = bridge.stops.length;
+  c.setChannelFeel("vibrate",{rhythm:"dynamic"},{rhythmOnly:true});
+  await clock.advance(6600);
+  const vectors = vectorCalls(f);
+  assert.ok(new Set(vectors.map(({levels})=>levels.vibrate)).size > 1,"Vibration actually changed.");
+  assert.ok(vectors[0].levels.fingering > 0);
+  assert.ok(vectors.every(({frame,levels})=>levels.fingering === vectors[0].levels.fingering &&
+    frame.deviceId === "physical-fixture" && frame.durationMs === 2000));
+  assert.equal(bridge.stops.length,stopCount);
+  c.setChannelFeel("fingering",{maximum:0},{rhythmOnly:true});
+  await settle();
+  assert.equal(bridge.stops.length,stopCount + 1,"A maximum edit cannot use the rhythm-only path.");
+  c.pause();
+  await clock.advance(2200);
+  assert.equal(c.snapshot().running,false);
+  assert.deepEqual(bridge.physical,{vibrate:0,fingering:0});
 });
 
 test("Follow story returns from recovery by at most two levels per renewal and Stop still wins",async()=>{

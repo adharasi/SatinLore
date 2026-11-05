@@ -77,10 +77,13 @@ test("accounts and cloud libraries use real SQLite transactions, cross-user isol
   const saveExperience = (value, version) => save({ action: "savePreferences", preferences: { ...prefs, experience: value } }, version);
   assert.equal((await saveExperience({ ...experience, maximum: 21 }, 1)).status, 400);
   assert.equal((await saveExperience({ ...experience, armed: true }, 1)).status, 400);
+  assert.equal((await saveExperience({ ...experience, edgePattern: "unknown" }, 1)).status, 400);
   assert.deepEqual(await (await saveExperience(experience, 1)).json(), { preferences: { ...prefs, experience, revision: 2 } });
+  experience.edgePattern = "off";
+  assert.deepEqual(await (await saveExperience(experience, 2)).json(), { preferences: { ...prefs, experience, revision: 3 } });
   const updatedAppearance = { ...prefs, appearance: "system" };
-  const savedAppearance = await save({ action: "savePreferences", preferences: updatedAppearance }, 2);
-  assert.deepEqual(await savedAppearance.json(), { preferences: { ...updatedAppearance, experience, revision: 3 } });
+  const savedAppearance = await save({ action: "savePreferences", preferences: updatedAppearance }, 3);
+  assert.deepEqual(await savedAppearance.json(), { preferences: { ...updatedAppearance, experience, revision: 4 } });
   const edited = await save({ action: "updateStory", id: story.id, changes: { position: 1, corrections: [null, 0], description: "", favorite: true } }, 1);
   assert.equal(edited.status, 200);
   const metadata = await edited.json();
@@ -90,7 +93,7 @@ test("accounts and cloud libraries use real SQLite transactions, cross-user isol
   assert.equal(read.stories[0].text, story.text); assert.equal(read.stories[0].position, 1);
   assert.deepEqual(read.stories[0].corrections, [null, 0]); assert.equal(read.stories[0].description, undefined);
   assert.equal(read.stories[0].favorite, true);
-  assert.deepEqual(read.preferences, { ...updatedAppearance, experience, revision: 3 });
+  assert.deepEqual(read.preferences, { ...updatedAppearance, experience, revision: 4 });
   assert.equal((await (await cloud("/api/account")).json()).library, undefined, "Preset reads don't carry saved story text.");
   const download = await (await cloud("/api/account/data")).json();
   assert.deepEqual(download.library, { revision: read.revision, stories: read.stories, preferences: read.preferences });

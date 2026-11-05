@@ -21,7 +21,7 @@ import {mountExperienceDialog} from "./reader/experience-dialog.mjs";
 import {mountPublicAccount} from "./reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
-import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel, selectPeakPreset} from "./reader/calibration.mjs";
+import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "./reader/calibration.mjs";
 import {nocturneAvailable, nocturneCandidates, requestNocturne} from "./reader/nocturne.mjs";
 import {storyToyRecommendation} from "./reader/toy-recommendations.mjs";
 
@@ -37,8 +37,8 @@ let simulatorView = null;
 let setupFlow = null;
 let accountClient = null, accountWorkspace = null, betaRecorder = null;
 let publicAccount = null, publicSignedIn = false;
-let peakChoice = {peakPattern: "auto", edging: false};
-let savingPeakChoice = false;
+let patternChoices = {peakPattern: "auto", edgePattern: "auto", edging: false};
+let savingPatternChoice = false;
 let recordedDevice = "", recordedStory = "", recordedStep = "", feelChannelSignature = "", feelEditingChannel = null, combinationSignature = "";
 let connection = {mode: "simulator", model: "lush", toys: [], selectedId: null};
 const backupImporter = new BackupImporter();
@@ -133,29 +133,35 @@ function syncManualZeros(story) {
     (!story.controlled || story.explicitCorrections.has(index)) ? [index] : []));
 }
 function readerProfiles(story) {
-  return story.controlled ? undefined : story.model.effectiveProfiles({nocturne: story.sceneModel === "nocturne", ...peakChoice});
+  return story.controlled ? undefined : story.model.effectiveProfiles({nocturne: story.sceneModel === "nocturne", ...patternChoices});
 }
 function syncReaderMapping(story) {
   controller.updateLevels(story.model.effectiveLevels(), readerProfiles(story));
   syncManualZeros(story);
 }
 function applyReadingDefaults(values) {
-  const previous = peakChoice;
-  peakChoice = {peakPattern: values?.peakPattern ?? "auto", edging: values?.edging === true};
+  const previous = patternChoices;
+  patternChoices = {peakPattern: values?.peakPattern ?? "auto", edgePattern: values?.edgePattern ?? "auto", edging: values?.edging === true};
   cancelStart();
   controller.setReadingDefaults(values);
   const story = currentStory();
   if (story?.sceneModel === "nocturne" && !story.controlled &&
-      (previous.peakPattern !== peakChoice.peakPattern || previous.edging !== peakChoice.edging)) {
-    pause("Peak pattern changed. Choose Start when ready.");
+      Object.keys(patternChoices).some(key => previous[key] !== patternChoices[key])) {
+    pause("Nocturne patterns changed. Choose Start when ready.");
     syncReaderMapping(story);
   }
   display(controller.snapshot());
 }
 function renderNocturnePeakSettings(story) {
   $("nocturne-peak-settings").hidden = !story || story.controlled || story.sceneModel !== "nocturne";
-  $("nocturne-peak-pattern").value = peakChoice.peakPattern;
-  $("nocturne-peak-pattern").disabled = Boolean(savingPeakChoice || libraryMutation || story?.deleting);
+  $("nocturne-peak-pattern").value = patternChoices.peakPattern;
+  $("nocturne-edge-pattern").value = patternChoices.edgePattern;
+  const disabled = Boolean(savingPatternChoice || libraryMutation || story?.deleting);
+  $("nocturne-peak-pattern").disabled = disabled;
+  $("nocturne-edge-pattern").disabled = disabled;
+  const quiet = latest.feel?.mode !== "continuous" ? "Quiet passages stay still." : latest.feel.quietEdging && latest.mode === "simulator" ?
+    "Quiet passages use light pulses." : "Quiet passages use light, steady movement.";
+  text("nocturne-quiet-pattern", `${quiet} Change this in Reading controls.`);
 }
 function selectedSettings(state = latest,channel = feelEditingChannel || state.channel) {
   const stored = state.calibration?.channels?.[channel] || {minimum:0,background:1,preferred:3,maximum:5,recovery:0,gain:1,rhythm:"steady"};
@@ -446,10 +452,12 @@ function updateCurrentCorrection(story) {
   $("level").setAttribute("aria-valuetext", `${base} out of 20`);
   $("level").disabled = !paragraph || libraryMutation || story?.deleting;
   $("reset-level").disabled = !paragraph || paragraph.override === null || libraryMutation || story?.deleting;
-  const pattern = story?.sceneModel === "nocturne" ? story.model.nocturneLabels.get(latest.position) : undefined;
-  const preset = story?.sceneModel === "nocturne" ? selectPeakPreset(paragraph?.phase, pattern, peakChoice.peakPattern, peakChoice.edging) : undefined;
-  const stagePattern = latest.mode === "simulator" && (selectedSettings().rhythm === "scene" || preset) ? sceneStagePatternLabel(paragraph?.phase, pattern, preset) : null;
-  const rhythm = stagePattern ?? {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[paragraph?.rhythm];
+  const profile = paragraph?.analysed && !story.controlled ?
+    story.model.effectiveProfile(latest.position, {nocturne: story.sceneModel === "nocturne", ...patternChoices}) : undefined;
+  const movementRhythm = selectedSettings().rhythm;
+  const stagePattern = latest.mode === "simulator" ? simulatorScenePatternLabel(profile, movementRhythm) : undefined;
+  const rhythm = stagePattern ?? {steady: "Steady", gentle: "Gentle variation", dynamic: "More variation"}[
+    movementRhythm === "scene" ? paragraph?.rhythm : movementRhythm];
   const endedMovements = paragraph?.endedMovements?.length ? `${paragraph.endedMovements.map(channelLabel).join(" + ")} paused in this scene` : null;
   const movements = paragraph?.movements?.length ? `Movement cue: ${paragraph.movements.map(channelLabel).join(" + ")}` :
     endedMovements ? null : "Default movement";
@@ -587,6 +595,7 @@ function controlRecovery(state) {
   show("The controls could not update. Reconnect; your story remains readable.");
 }
 const controller = new ReaderDeviceController({document, window, navigator, storyRhythms: true, allowGuestSimulation: publicMode,
+  independentRhythms: !hostedMode || window.location?.hostname === "app.satinlore.com",
   authorize: async () => !hostedMode || Boolean(await hostedAccess?.check({fresh: true}) && hasVerifiedAccess()),
   onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
   onInterfaceError: controlRecovery, onChange: state => {
@@ -622,8 +631,8 @@ function renderStoryModel(story) {
   $("scene-model").value = selected;
   $("scene-model").disabled = Boolean(story?.deleting || libraryMutation);
   text("scene-model-help", story?.controlled ? "This calibration story keeps its fixed levels. Choose a model for your next story, or open a model practice story to try it now." :
-    analysedStory ? "Both models follow the scene’s pacing. Nocturne adds more ways to shape the peaks." :
-    "Choose a model for your next story. Nocturne adds more ways to shape the peaks.");
+    analysedStory ? "Both models follow the scene’s pacing. Nocturne adds build-up and climax patterns in the simulator." :
+    "Choose a model for your next story. Nocturne adds build-up and climax patterns in the simulator.");
   $("model-practice-shortcut").hidden = !story?.controlled;
   $("model-practice-shortcut").disabled = libraryMutation || story?.deleting;
   $("nocturne-panel").hidden = selected !== "nocturne" || !analysedStory;
@@ -631,9 +640,10 @@ function renderStoryModel(story) {
   $("nocturne-run").hidden = signInNeeded;
   $("nocturne-run").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
   text("nocturne-run", nocturneReady === false ? "Check availability" : "Analyse with Nocturne");
-  text("nocturne-status", !hostedMode ? "Nocturne is available in the hosted SatinLore app." :
-    signInNeeded ? "Sign in to compare Nocturne. Loom is ready as a guest." : checkingNocturne ? "Checking Nocturne availability…" : busy ? "Nocturne is reviewing eligible cues. Playback is paused." :
-    story?.nocturneMessage || (nocturneReady === false ? "Nocturne is unavailable right now. Loom is ready." : "Choose Analyse with Nocturne when you’re ready."));
+  text("nocturne-status", !hostedMode ? "Your patterns follow Loom’s scene cues. Further analysis is available in the hosted app." :
+    signInNeeded ? "Your patterns are ready. Sign in to let Nocturne review scene cues." :
+    checkingNocturne ? "Checking analysis availability…" : busy ? "Nocturne is reviewing eligible cues. Playback is paused." :
+    story?.nocturneMessage || (nocturneReady === false ? "Further analysis is unavailable. Your patterns follow Loom’s scene cues." : "Choose Analyse with Nocturne when you’re ready."));
 }
 
 async function checkNocturne() {
@@ -649,7 +659,7 @@ function cancelNocturne() {
   if (!operation) return;
   nocturneOperation = null;
   operation.abort.abort();
-  operation.story.nocturneMessage = "Nocturne stopped. Loom patterns are ready.";
+  operation.story.nocturneMessage = "Analysis stopped. Your patterns still follow Loom’s scene cues.";
 }
 
 async function runNocturne() {
@@ -663,7 +673,7 @@ async function runNocturne() {
   const kept = [excluded ? `${excluded} ${excluded === 1 ? "section stayed" : "sections stayed"} with Loom because of content or context.` : "",
     limited ? `${limited} additional ${limited === 1 ? "section used" : "sections used"} Loom.` : ""].filter(Boolean).join(" ");
   if (!cues.length) {
-    story.nocturneMessage = `Loom is ready. This story has no eligible Nocturne cues. ${kept}`.trim();
+    story.nocturneMessage = `This story has no eligible Nocturne cues. Your patterns still follow Loom’s scene cues. ${kept}`.trim();
     display(); return;
   }
   const operation = {story, abort: new AbortController(), generation: story.model.analysisGeneration};
@@ -694,13 +704,13 @@ async function runNocturne() {
       };
       const reason = Object.hasOwn(messages, code) ? messages[code] :
         labels ? "Nocturne left these cues as they were." : "Nocturne is temporarily unavailable.";
-      story.nocturneMessage = `${reason} Loom patterns are ready. ${kept}`.trim();
+      story.nocturneMessage = `${reason} Your patterns still follow Loom’s scene cues. ${kept}`.trim();
     }
   } catch {
     if (nocturneOperation === operation) {
       story.model.nocturneLabels.clear();
       syncReaderMapping(story);
-      story.nocturneMessage = `Nocturne couldn’t finish. Loom patterns are ready. ${kept}`.trim();
+      story.nocturneMessage = `Analysis couldn’t finish. Your patterns still follow Loom’s scene cues. ${kept}`.trim();
     }
   } finally {
     if (nocturneOperation === operation) { nocturneOperation = null; display(); }
@@ -1169,7 +1179,7 @@ function selectedPracticeStory() {
 function updatePracticeChoice() {
   const story = selectedPracticeStory();
   text("practice-story-description", story?.description ?? "");
-  const notes = (story?.checkpoints ?? ["Follow the story’s instructions and compare what you see with the simulator output."]).map(checkpoint => {
+  const notes = (story?.checkpoints ?? ["Follow the story’s instructions and watch how the simulator’s level changes."]).map(checkpoint => {
     const item = document.createElement("li"); item.textContent = checkpoint; return item;
   });
   $("practice-story-checkpoints").replaceChildren(...notes);
@@ -1411,6 +1421,8 @@ $("open-app-settings")?.addEventListener("click", () => openDialog("app-settings
 for (const id of ["close-app-settings", "app-settings-close"]) $(id)?.addEventListener("click", () => closeDialog("app-settings-dialog"));
 $("open-experience").addEventListener("click", () => experienceDialog.open({values: currentExperience(), account: publicSignedIn,
   opener: $("open-experience"), canStop: latest.connected}));
+$("preview-experience").addEventListener("click", () => experienceDialog.open({values: DEFAULT_EXPERIENCE, preview: true,
+  opener: $("preview-experience"), canStop: latest.connected}));
 $("experience-stop").addEventListener("click", stopEverything);
 for (const id of ["open-setup", "empty-setup", "choose-toy"]) $(id)?.addEventListener("click", () => {recordAllowedEvent({type:"step",step:"choose"});setupFlow?.open();});
 $("open-calibration")?.addEventListener("click",()=>{recordAllowedEvent({type:"step",step:"calibration"});setupFlow?.openCalibration();});
@@ -1423,17 +1435,21 @@ $("feel-channel")?.addEventListener("change",async()=>{
   catch(error){show(error.message||"The movement could not be changed.");}display();
 });
 $("feel-mode")?.addEventListener("change",()=>{const quietEdging=$("feel-mode").value==="edging",mode=quietEdging?"continuous":$("feel-mode").value;cancelStart();controller.setFeel({mode,quietEdging});recordAllowedEvent({type:"control",control:"continuity",value:mode});});
-$("nocturne-peak-pattern").addEventListener("change", async () => {
-  const choice = $("nocturne-peak-pattern").value;
-  if (savingPeakChoice || currentStory()?.sceneModel !== "nocturne" || !["auto", "crest", "accents", "ease"].includes(choice)) return;
-  savingPeakChoice = true;
+for (const [id, field, choices] of [
+  ["nocturne-peak-pattern", "peakPattern", ["auto", "crest", "accents", "ease"]],
+  ["nocturne-edge-pattern", "edgePattern", ["auto", "ease", "off"]],
+]) $(id).addEventListener("change", async () => {
+  const choice = $(id).value;
+  if (savingPatternChoice || currentStory()?.sceneModel !== "nocturne" || !choices.includes(choice)) return;
+  savingPatternChoice = true;
   $("nocturne-peak-pattern").disabled = true;
-  text("nocturne-peak-status", "Saving your peak pattern…");
+  $("nocturne-edge-pattern").disabled = true;
+  text("nocturne-peak-status", "Saving your pattern…");
   try {
-    const saved = await savePlaybackPreferences({peakPattern: choice});
-    text("nocturne-peak-status", saved ? publicSignedIn ? "Saved to your account." : "Set for this visit." : "Could not save your peak pattern. Try again.");
-  } catch { text("nocturne-peak-status", "Could not save your peak pattern. Try again."); }
-  finally { savingPeakChoice = false; renderNocturnePeakSettings(currentStory()); }
+    const saved = await savePlaybackPreferences({[field]: choice});
+    text("nocturne-peak-status", saved ? publicSignedIn ? "Saved to your account." : "Set for this visit." : "Could not save your pattern. Try again.");
+  } catch { text("nocturne-peak-status", "Could not save your pattern. Try again."); }
+  finally { savingPatternChoice = false; renderNocturnePeakSettings(currentStory()); }
 });
 for(const key of ["minimum","background","preferred","recovery","maximum"])$("feel-"+key)?.addEventListener("input",()=>{
   try{
@@ -1446,7 +1462,13 @@ for(const key of ["minimum","background","preferred","recovery","maximum"])$("fe
     recordAllowedEvent({type:"control",control:key,channel:feelEditingChannel || latest.channel,value});
   }catch(error){show(error.message||"Check the movement settings.");display();}
 });
-$("feel-rhythm")?.addEventListener("change",()=>{try{const settings={...selectedSettings(),rhythm:$("feel-rhythm").value};controller.setChannelFeel(feelEditingChannel || latest.channel,settings);recordAllowedEvent({type:"control",control:"rhythm",channel:feelEditingChannel || latest.channel,value:settings.rhythm});}catch(error){show(error.message);} });
+$("feel-rhythm")?.addEventListener("change",()=>{
+  const channel = feelEditingChannel || latest.channel, rhythm = $("feel-rhythm").value;
+  try {
+    controller.setChannelFeel(channel, {rhythm}, {rhythmOnly:true});
+    recordAllowedEvent({type:"control",control:"rhythm",channel,value:rhythm});
+  } catch(error) { show(error.message); }
+});
 for (const id of ["scene-preferred-movement", "scene-auto-movement"]) {
   $(id)?.addEventListener("change", () => {
     cancelStart();
@@ -1461,7 +1483,7 @@ for(const[id,value]of[["mark-good",5],["mark-uncomfortable",1]])$(id)?.addEventL
   text("beta-feedback-status","Marked in this beta recording. Your controls are unchanged.");
 });
 $("apply-combined")?.addEventListener("click",async()=>{try{const channels=Array.from($("combination-choices").querySelectorAll('input:checked')).map(input=>input.value);if(!channels.length)throw Error("Choose at least one movement.");const mode=latest.feel?.mode||"story";pause("Applying movement choices.");if(channels.length===1){await controller.applyCalibration(channels[0]);controller.setFeel({mode});}else await controller.applyChannels(channels,{mode});display(controller.snapshot());}catch(error){show(error.message||"The movements could not be combined.");}});
-$("control-playground")?.addEventListener("click", openPracticePicker);
+for (const id of ["control-playground", "empty-practice"]) $(id)?.addEventListener("click", openPracticePicker);
 $("model-practice-shortcut")?.addEventListener("click", () => openPracticePicker({models: true}));
 $("practice-story-choice").addEventListener("change", updatePracticeChoice);
 $("practice-story-open").addEventListener("click", openSelectedPracticeStory);

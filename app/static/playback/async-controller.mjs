@@ -322,7 +322,7 @@ export class AsyncPlaybackController {
     if (!this.visible || !this.authorized || this.now() - this.lastActivity >= this.inactivityMs || this.now() - this.lastTick >= 2000) { void this.pause("Playback was interrupted or idle. Confirm a new Start."); return; }
     this.lastTick = this.now();
     const desired = this.intent();
-    // Alpha's bounded combined command replaces all movement levels together.
+    // A bounded combined command replaces all movement levels together.
     // A rhythm dip can therefore retain other active movements without a toy-wide Stop.
     if (!this.canReplaceRhythmVector(desired)) {
       const excessivePending = [...this.requests.values()].some(value => !value.rawSettled && value.frame.kind === "command" && this.vectorReduction(value.levels, desired.levels));

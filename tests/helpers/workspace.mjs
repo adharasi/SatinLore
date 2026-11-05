@@ -24,7 +24,7 @@ import {DEFAULT_EXPERIENCE, validateExperience} from "../../app/static/reader/ex
 import {mountExperienceDialog} from "../../app/static/reader/experience-dialog.mjs";
 import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
-import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, sceneStagePatternLabel, selectPeakPreset} from "../../app/static/reader/calibration.mjs";
+import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "../../app/static/reader/calibration.mjs";
 import {nocturneCandidates, nocturneAvailable, requestNocturne} from "../../app/static/reader/nocturne.mjs";
 import {storyToyRecommendation} from "../../app/static/reader/toy-recommendations.mjs";
 
@@ -150,7 +150,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
     WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORIES,
-    ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, sceneStagePatternLabel, selectPeakPreset,
+    ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, simulatorScenePatternLabel,
     AccountLibrary: class extends AccountLibrary { constructor() { super({request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates, nocturneAvailable, requestNocturne, storyToyRecommendation, channelLabel,

@@ -375,7 +375,7 @@ export function createSetupFlow({document = globalThis.document, window = global
         if (result === false || current.selectedId !== id || !effectiveConnected()) throw new Error();
         if (enableCalibration && !quickSetup) { openCalibration(); return; }
         resetTest(); channel.replaceChildren(...channels().map(name => option(name, CHANNEL_LABELS[name])));
-        channel.value = channels()[0] || ""; phase = "test"; status.textContent = "Selected. Output is paused.";
+        channel.value = channels()[0] || ""; phase = "test"; status.textContent = "Ready for the movement check.";
       } catch { if (activeEpoch === epoch) status.textContent = "Selection did not complete. Refresh the connection and choose a toy again."; }
       finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
       return;

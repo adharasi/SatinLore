@@ -64,7 +64,10 @@
       <div class="draft-actions"><button id="open-draft" class="primary">Read story <span aria-hidden="true">→</span></button><button id="empty-link-import" class="quiet-control">Import from a link</button><button id="empty-new-story" class="quiet-control">Upload a story</button></div>
       <p id="draft-help" class="note draft-help">AO3, Literotica, or a story of your own. Your text stays private.</p>
       <p id="draft-status" class="note" role="status" aria-live="polite"></p>
-      <button id="empty-setup" class="quiet-control empty-setup-button">Set up a toy or try a test read <span aria-hidden="true">→</span></button>
+      <div class="draft-actions">
+        <button id="empty-setup" class="quiet-control empty-setup-button">Set up a toy <span aria-hidden="true">→</span></button>
+        <button id="empty-practice" class="quiet-control empty-setup-button">Try a practice story <span aria-hidden="true">→</span></button>
+      </div>
     </section>
     <section id="reading-workspace" class="reading-workspace" role="tabpanel" aria-labelledby="story-title" hidden>
       <div class="story-heading"><h1 id="story-title" tabindex="-1">Your story</h1><div class="story-meta"><span id="save-status" role="status" aria-live="polite">Session only</span><span class="meta-divider" aria-hidden="true">·</span><span id="analysis-status" role="status" aria-live="polite">Preparing suggestions</span></div><button id="save-account-story" class="quiet-control" hidden>Save to my account</button></div>
@@ -93,7 +96,7 @@
           <h3 id="scene-model-heading">Story model</h3>
           <label class="visually-hidden" for="scene-model">Story model</label>
           <select id="scene-model" aria-describedby="scene-model-help"><option value="loom">Loom</option><option value="nocturne">Nocturne · Advanced</option></select>
-          <p id="scene-model-help" class="note">Both models follow the scene’s pacing. Nocturne adds more ways to shape the peaks.</p>
+          <p id="scene-model-help" class="note">Both models follow the scene’s pacing. Nocturne adds build-up and climax patterns in the simulator.</p>
           <button id="model-practice-shortcut" type="button" class="setup-button" hidden>Open a model practice story <span aria-hidden="true">→</span></button>
           <div id="nocturne-panel" hidden>
             <p class="note">Nocturne sends up to 16 sets of scene labels and section numbers to OpenAI. These requests exclude story text, titles and toy settings.</p>
@@ -168,9 +171,15 @@
           </div>
         </details>
         <section id="nocturne-peak-settings" class="sidebar-section" aria-labelledby="nocturne-peak-heading" hidden>
-          <h3 id="nocturne-peak-heading">Nocturne peak patterns</h3>
-          <label for="nocturne-peak-pattern">At a scene’s peak</label><select id="nocturne-peak-pattern" aria-describedby="nocturne-peak-help"><option value="auto">Automatic</option><option value="crest">Sustained crest</option><option value="accents">Peak pulses</option><option value="ease">Build and ease</option></select>
-          <p id="nocturne-peak-help" class="note">Automatic uses your edging preference and the scene’s cues. Preview these patterns in the simulator. Your maximum and manual corrections still apply.</p>
+          <h3 id="nocturne-peak-heading">Nocturne patterns</h3>
+          <p id="nocturne-pattern-help" class="note">Try these patterns in the simulator. Your maximum and section corrections still apply.</p>
+          <label for="nocturne-edge-pattern">During the build-up</label>
+          <select id="nocturne-edge-pattern" aria-describedby="nocturne-edge-help nocturne-pattern-help"><option value="auto">Automatic</option><option value="ease">Build and ease</option><option value="off">No edging pattern</option></select>
+          <p id="nocturne-edge-help" class="note">Build and ease rises, backs off, then rises again. A movement set to Steady keeps its level during the build-up.</p>
+          <label for="nocturne-peak-pattern">At a scene’s climax</label>
+          <select id="nocturne-peak-pattern" aria-describedby="nocturne-peak-help nocturne-pattern-help"><option value="auto">Automatic</option><option value="crest">Sustained crest</option><option value="accents">Peak pulses</option><option value="ease">Build and ease</option></select>
+          <p id="nocturne-peak-help" class="note">Automatic uses your rhythm choice for each movement. Follow scene rhythm uses the scene’s cues.</p>
+          <p id="nocturne-quiet-pattern" class="note"></p>
           <p id="nocturne-peak-status" class="note" role="status"></p>
         </section>
         <section class="sidebar-section feel-adjustments" aria-labelledby="movement-tuning-heading">
@@ -210,7 +219,7 @@
   <dialog id="app-settings-dialog" class="app-settings-dialog" aria-labelledby="app-settings-heading">
     <div class="dialog-heading"><div><p class="eyebrow">SATINLORE</p><h2 id="app-settings-heading">Settings</h2></div><button id="close-app-settings" class="icon-button" aria-label="Close settings">×</button></div>
     <section class="app-settings-section"><h3>Appearance</h3><label for="reading-appearance">Colour theme</label><select id="reading-appearance"><option value="system">Use device setting</option><option value="light">Satin Editorial · light</option><option value="dark">Midnight Ink · dark</option></select><p id="appearance-note" class="note" role="status" aria-live="polite"></p></section>
-    <section class="app-settings-section"><h3>Device preferences</h3><p class="note">Set your default intensity, quiet scenes and rhythms.</p><button id="open-experience" type="button" class="quiet-control">Edit device preferences</button></section>
+    <section class="app-settings-section"><h3>Device preferences</h3><p class="note">Set your default intensity, quiet scenes and rhythms. Preview the first-time questions whenever you like.</p><div class="experience-settings-actions"><button id="open-experience" type="button" class="quiet-control">Edit device preferences</button><button id="preview-experience" type="button" class="quiet-control">Preview onboarding</button></div></section>
     <section class="app-settings-section"><h3>Account &amp; storage</h3><p id="account-storage-description">Save toy presets to your account. Stories can be kept for this visit or saved on this browser.</p><div id="account-settings-mount" class="account-data-controls"></div><button id="open-account-welcome" class="quiet-control">Open account setup</button></section>
     <div class="library-footer">
       <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up local library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">Backups contain your story text. Keep them private. Restoring adds copies for this visit under Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
@@ -222,13 +231,18 @@
   </dialog>
   <dialog id="experience-dialog" class="story-dialog public-account-dialog experience-dialog" aria-labelledby="experience-heading">
     <div class="dialog-heading"><h2 id="experience-heading">Device preferences</h2><button id="experience-close" type="button" class="icon-button" aria-label="Close device preferences">×</button></div>
+    <p id="experience-preview-note" class="note" hidden>Preview only. Your saved preferences stay as they are.</p>
     <p id="experience-intro" class="note">These choices apply for this visit.</p>
     <form id="experience-form">
-      <label for="experience-quiet">When the story is quiet</label><select id="experience-quiet" aria-describedby="experience-quiet-help"><option value="off">Keep the toy off</option><option value="continuous">Keep it moving gently</option><option value="edging">Use light pulses with breaks</option></select>
-      <p id="experience-quiet-help" class="note">You can try light pulses with breaks in the simulator. A connected toy uses a gentle steady level for this choice.</p>
-      <label for="experience-edging">Do you like edging?</label><select id="experience-edging"><option value="no">No, follow the story as it builds</option><option value="yes">Yes, ease off briefly at peaks</option></select>
-      <label for="experience-maximum">Preferred maximum <output id="experience-maximum-value" for="experience-maximum">10</output> / 20</label><input id="experience-maximum" type="range" min="1" max="20" value="10" aria-describedby="experience-maximum-help"><p id="experience-maximum-help" class="note">A connected toy may use a lower limit based on its available range and your checks.</p>
-      <label for="experience-rhythm">Which rhythm do you prefer?</label><select id="experience-rhythm"><option value="scene">Follow the scene</option><option value="steady">Steady</option><option value="gentle">Gentle waves</option><option value="dynamic">More variation</option></select>
+      <div id="experience-questions" class="experience-questions">
+        <label for="experience-quiet">What should happen in quiet passages?</label><select id="experience-quiet"><option value="off">Keep the toy off</option><option value="continuous">Keep it moving gently</option><option value="edging">Light pulses with breaks</option></select>
+        <p id="experience-quiet-help" class="note" hidden>Try light pulses with breaks in the simulator. A connected toy uses a gentle steady level for this choice.</p>
+        <label for="experience-edging">Do you like edging?</label><select id="experience-edging"><option value="no">No, keep building</option><option value="yes">Yes, build and ease</option></select>
+        <p id="experience-edging-help" class="note" hidden>In Nocturne’s simulator, a scene can build, ease off briefly, then build again.</p>
+        <label for="experience-maximum">How strong should it get? <output id="experience-maximum-value" for="experience-maximum">10</output> / 20</label><input id="experience-maximum" type="range" min="1" max="20" value="10" aria-describedby="experience-maximum-help"><p id="experience-maximum-help" class="note">This sets your highest level. A connected toy may start with a lower limit until you’ve tested it.</p>
+        <label for="experience-rhythm">Which rhythm do you like?</label><select id="experience-rhythm"><option value="scene">Follow the scene</option><option value="steady">Steady</option><option value="gentle">Gentle waves</option><option value="dynamic">More variation</option></select>
+        <p id="experience-next" class="note" hidden>Next, pair a toy or try the simulator.</p>
+      </div>
       <p id="experience-status" class="note" role="status" aria-live="polite"></p>
       <div class="dialog-actions"><button id="experience-stop" type="button" class="stop" hidden>Stop</button><button id="experience-reset" type="button" class="quiet-control" hidden>Reset to defaults</button><button id="experience-later" type="button" class="quiet-control">Not now</button><button id="experience-save" type="submit" class="primary">Save and continue</button></div>
     </form>
