@@ -1665,7 +1665,7 @@ $("feel-channel")?.addEventListener("change",async()=>{
 });
 $("feel-mode")?.addEventListener("change",()=>{const quietEdging=$("feel-mode").value==="edging",mode=quietEdging?"continuous":$("feel-mode").value;cancelStart();controller.setFeel({mode,quietEdging});recordAllowedEvent({type:"control",control:"continuity",value:mode});});
 for (const [id, field, choices] of [
-  ["nocturne-peak-pattern", "peakPattern", ["auto", "crest", "accents", "ease"]],
+  ["nocturne-peak-pattern", "peakPattern", ["auto", "steady", "crest", "accents", "ease"]],
   ["nocturne-edge-pattern", "edgePattern", ["auto", "ease", "off"]],
 ]) $(id).addEventListener("change", async () => {
   const choice = $(id).value;

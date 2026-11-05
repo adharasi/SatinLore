@@ -1,4 +1,4 @@
-import {DEFAULT_SIMULATOR_MAXIMUM, normalizeSceneProfiles, ReadingFeel, scenePatternChanged, simulatorScenePatternLabel, stepSectionLevel} from "../reader/calibration.mjs";
+import {DEFAULT_SIMULATOR_MAXIMUM, normalizeSceneProfiles, ReadingFeel, repeatingSimulatorScenePattern, scenePatternChanged, simulatorScenePatternLabel, stepSectionLevel} from "../reader/calibration.mjs";
 // Continuous reading playback for the synchronous simulator only.
 // A real asynchronous transport needs a separately qualified controller/adapter.
 export const COMMAND_SECONDS = 2;
@@ -176,9 +176,13 @@ export class PlaybackController {
     const next = this._position(index);
     if (next !== this.position) {
       this.levelAdjustment = 0;
-      if (this.state === "PLAYING" && !this.readingSeeking && (scenePatternChanged(this.sceneProfiles[this.position], this.sceneProfiles[next], this.feel.automaticMovement, true) ||
+      const previousProfile = this.sceneProfiles[this.position], nextProfile = this.sceneProfiles[next];
+      const patternChanged = scenePatternChanged(previousProfile, nextProfile, this.feel.automaticMovement, true);
+      if (this.state === "PLAYING" && !this.readingSeeking && (patternChanged ||
           this.sceneProfiles[next]?.phase && this.levels[this.position] !== this.levels[next])) {
-        this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output);
+        const keepStageTime = !patternChanged && repeatingSimulatorScenePattern(previousProfile, "scene") &&
+          repeatingSimulatorScenePattern(nextProfile, "scene");
+        this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output, keepStageTime);
       }
     }
     this.position = next;

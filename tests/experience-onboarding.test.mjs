@@ -98,3 +98,47 @@ test("private or local readers can edit session-only preferences without cloud s
   assert.equal(app.nodes.get("experience-dialog").open, false);
   assert.equal(app.read("latest.output"), 0);
 });
+
+test("editing restored device preferences preserves the saved steady pattern and stays paused", async t => {
+  let signedIn = false;
+  const owner = "00000000-0000-4000-8000-000000000001";
+  let stored = {appearance: "dark", width: "wide", fontSize: "normal", spacing: "normal", follow: true,
+    experience: {...DEFAULT_EXPERIENCE, peakPattern: "steady"}, revision: 4};
+  const app = workspace({publicAuth: true,
+    authRequest: async action => {
+      signedIn = action === "login";
+      return {authenticated: signedIn, expiresAt: signedIn ? app.now() + 60_000 : null};
+    },
+    libraryRequest: async (_path, options) => {
+      if (options.method === "GET") return Response.json({owner, revision: 0, stories: [], preferences: stored});
+      const body = JSON.parse(options.body);
+      assert.equal(body.action, "savePreferences");
+      assert.equal(body.expectedOwner, owner);
+      assert.equal(body.expectedRevision, stored.revision);
+      stored = {...body.preferences, revision: stored.revision + 1};
+      return Response.json({preferences: stored});
+    },
+  });
+  t.after(() => app.destroy());
+  const node = id => app.nodes.get(id);
+  app.access(async () => Response.json({authenticated: signedIn, expiresAt: signedIn ? app.now() + 60_000 : null}));
+  await app.settle();
+  await app.click("public-account");
+  node("public-email").value = "onboarding@example.invalid";
+  node("public-password").value = "sample onboarding passphrase";
+  await node("public-login-form").dispatch("submit");
+  await app.settle();
+  assert.equal(node("experience-dialog").open, false, "A saved steady choice is valid account data and needs no first-time prompt.");
+  assert.equal(app.read("currentExperience().peakPattern"), "steady");
+  await app.click("open-app-settings");
+  await app.click("open-experience");
+  node("experience-maximum").value = "12";
+  await node("experience-form").dispatch("submit");
+  assert.equal(stored.revision, 5);
+  assert.equal(stored.experience.maximum, 12);
+  assert.equal(stored.experience.peakPattern, "steady", "Changing another preference retains the independent pattern choice.");
+  assert.equal(app.read("currentExperience().peakPattern"), "steady");
+  assert.equal(app.read("latest.ceiling"), 12);
+  assert.equal(app.read("latest.running"), false);
+  assert.deepEqual(app.errors, []);
+});

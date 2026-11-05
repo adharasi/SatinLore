@@ -117,6 +117,19 @@ try {
   assert.equal(await page.locator("#capValue").textContent(), "10");
   await checkPeakMeter(page, 7);
 
+  await page.locator("#nocturne-peak-pattern").selectOption("steady");
+  await page.waitForFunction(() => /Steady hold/i.test(document.querySelector("#nocturne-current-pattern")?.textContent));
+  assert.equal(await page.locator("#output").textContent(), "0 / 20", "Choosing a profile stays paused.");
+  await page.locator("#start").click();
+  await page.locator("#confirm-start").click();
+  await page.clock.runFor(1000);
+  await page.waitForFunction(() => document.querySelector("#output")?.textContent === "7 / 20");
+  await page.clock.runFor(12000);
+  assert.equal(await page.locator("#output").textContent(), "7 / 20", "Steady hold retains the calibrated simulator level.");
+  await page.locator("#stop").click();
+  assert.equal(await page.locator("#output").textContent(), "0 / 20");
+  await page.locator("#nocturne-peak-pattern").selectOption("auto");
+
   // Switching back to Loom restores the local stage even after a valid response.
   await model.selectOption("loom");
   assert.equal(posts.length, 1);
@@ -162,7 +175,7 @@ try {
   assert.deepEqual(errors, [], "No reader runtime errors.");
   assert.deepEqual(external, [], "No external browser calls.");
   assert.equal(leaked, false, "No browser request contains the story canary.");
-  console.log(`Nocturne browser checks passed in Chromium ${browser.version()}: explicit opt-in, cue-only requests, protected exclusions, 7/20 Nocturne versus 4/20 Loom peak at four seconds with the same settings, refusal fallback, Stop, and unavailable state.`);
+  console.log(`Nocturne browser checks passed in Chromium ${browser.version()}: explicit opt-in, cue-only requests, protected exclusions, 7/20 Nocturne versus 4/20 Loom peak at four seconds with the same settings, explicit steady selection/hold, refusal fallback, Stop, and unavailable state.`);
 } finally {
   releasePending?.();
   await browser.close();

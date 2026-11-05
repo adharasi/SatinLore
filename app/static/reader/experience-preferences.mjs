@@ -4,7 +4,7 @@ export const DEFAULT_EXPERIENCE = Object.freeze({
 
 const quietModes = new Set(["off", "continuous", "edging"]);
 const rhythms = new Set(["scene", "steady", "gentle", "dynamic"]);
-const peakPatterns = new Set(["auto", "crest", "accents", "ease"]);
+const peakPatterns = new Set(["auto", "steady", "crest", "accents", "ease"]);
 const edgePatterns = new Set(["auto", "ease", "off"]);
 
 export function validateExperience(value) {

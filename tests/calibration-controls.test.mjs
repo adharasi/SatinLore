@@ -246,6 +246,44 @@ test("simulator stage rhythms rise, accent, and taper once within the chosen ran
   assert.deepEqual(samples("peak", 5), [11, 11, 11, 11, 11, 11]);
 });
 
+test("sustained simulator rhythms repeat through long dwell while other stages hold their final step", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({preferred: 6, maximum: 8, mode: "continuous", minimum: 1, background: 2});
+  feel.start(100);
+  const times = Array.from({length: 11}, (_, index) => 100 + index * 2000);
+  const wave = {phase: "sustain", rhythm: "steady", quiet: false, pattern: "wave"};
+  const trace = (scene, options = {}) => times.map(now =>
+    feel.desired({base: 3, ceiling: 8, scene, now, simulatorStagePatterns: true, ...options}));
+  assert.deepEqual(trace(wave), [4, 6, 4, 5, 4, 6, 4, 5, 4, 6, 4]);
+  const pulses = {...wave, pattern: undefined, shape: "accented"};
+  assert.deepEqual(trace(pulses), [6, 3, 6, 3, 5, 6, 3, 6, 3, 5, 6]);
+  assert.deepEqual(trace({...pulses, shape: "alternating"}), [4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4]);
+  assert.deepEqual(trace({...pulses, phase: "build"}), [6, 3, 6, 3, 5, 5, 5, 5, 5, 5, 5]);
+  assert.deepEqual(trace(wave, {preview: true}), times.map(() => 4));
+  assert.deepEqual(trace(wave, {ceiling: 1}), times.map(() => 1));
+  assert.deepEqual(trace(wave, {manualZero: true}), times.map(() => 0));
+  assert.deepEqual(trace(wave, {ceiling: 0}), times.map(() => 0));
+  assert.deepEqual(trace({...wave, quiet: true}, {base: 0}), times.map(() => 0));
+  assert.deepEqual(trace({...wave, endedMovements: ["vibrate"]}, {movement: "vibrate"}), times.map(() => 0));
+  assert.deepEqual(trace({...wave, manual: true}), times.map(() => 3));
+  assert.deepEqual(trace(wave, {simulatorStagePatterns: false}), times.map(() => 6));
+});
+
+test("the explicit steady simulator preset holds within bounds and cannot bypass corrections", () => {
+  const feel = new ReadingFeel({rhythm: "dynamic"});
+  feel.configure({preferred: 5});
+  const scene = {phase: "peak", rhythm: "dynamic", quiet: false, peakPreset: "steady"};
+  const trace = options => [0, 2000, 6000, 16000].map(now =>
+    feel.desired({base: 5, ceiling: 8, scene, now, simulatorStagePatterns: true, ...options}));
+  assert.deepEqual(trace({}), [7, 7, 7, 7]);
+  assert.deepEqual(trace({preview: true}), [7, 7, 7, 7]);
+  assert.deepEqual(trace({ceiling: 1}), [1, 1, 1, 1]);
+  assert.deepEqual(trace({manualZero: true}), [0, 0, 0, 0]);
+  assert.deepEqual(trace({ceiling: 0}), [0, 0, 0, 0]);
+  assert.deepEqual(trace({scene: {...scene, manual: true}}), [5, 3, 1, 5]);
+  assert.deepEqual(trace({simulatorStagePatterns: false}), [7, 4, 2, 7]);
+});
+
 test("a combined stage rhythm respects separate movement limits, floors, and a stopped channel", () => {
   const feel = new CombinedReadingFeel({
     vibrate: {preferred: 6, maximum: 8, rhythm: "scene"},

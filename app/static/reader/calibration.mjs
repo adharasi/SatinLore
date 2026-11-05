@@ -23,10 +23,11 @@ const stagePatterns = {
 };
 const nocturnePatterns = {
   crest: {label: "Sustained crest", levels: [.75, .9, 1, 1, .55]},
-  wave: {label: "Rolling wave", levels: [.8, 1, .75, .9]},
+  wave: {label: "Rolling wave", levels: [.8, 1, .75, .9], repeat: true},
   steady: {label: "Steady hold", levels: [1]},
 };
 const peakPresets = {
+  steady: nocturnePatterns.steady,
   crest: nocturnePatterns.crest,
   accents: {label: "Peak pulses", levels: [.85, .55, 1, .55, .85, .7]},
   ease: {label: "Build and ease", levels: [.55, .8, .5, .95, .6, 1, .45]},
@@ -34,8 +35,8 @@ const peakPresets = {
 const gentleCrest = {label: "Gentle crest", levels: [.85, .95, 1, 1, .85]};
 const edgingPattern = {label: "Build and ease", levels: [.65, .85, 1, .55, .85, .95, .65]};
 const describedPatterns = {
-  accented: {label: "Short pulses", levels: [1, .65, 1, .65, .85], accents: [0, 2]},
-  alternating: {label: "Alternating rhythm", levels: [.7, 1, .7, 1], accents: [1, 3]},
+  accented: {label: "Short pulses", levels: [1, .65, 1, .65, .85], accents: [0, 2], repeat: true},
+  alternating: {label: "Alternating rhythm", levels: [.7, 1, .7, 1], accents: [1, 3], repeat: true},
   sustained: nocturnePatterns.steady,
 };
 const sceneShapes = Object.keys(describedPatterns);
@@ -58,6 +59,8 @@ function simulatorScenePattern(scene, rhythm) {
   return rhythm === "scene" ? scenePattern(scene.phase, scene.pattern) : undefined;
 }
 export const simulatorScenePatternLabel = (scene, rhythm) => simulatorScenePattern(scene, rhythm)?.label;
+export const repeatingSimulatorScenePattern = (scene, rhythm) =>
+  scene?.phase === "sustain" && simulatorScenePattern(scene, rhythm)?.repeat === true;
 const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
   Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
@@ -92,10 +95,12 @@ export function normalizeSceneProfiles(profiles, length) {
 }
 
 export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
+  const sameRepeatingPattern = simulatorStagePatterns && repeatingSimulatorScenePattern(previous, "scene") &&
+    repeatingSimulatorScenePattern(next, "scene") && simulatorScenePattern(previous, "scene") === simulatorScenePattern(next, "scene");
   return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
-    next.rhythm !== previous?.rhythm || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
+    next.rhythm !== previous?.rhythm && !sameRepeatingPattern || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
       next.peakPreset !== previous?.peakPreset || next.automaticPeak !== previous?.automaticPeak || next.edging !== previous?.edging ||
-      next.shape !== previous?.shape) ||
+      next.shape !== previous?.shape || next.manual !== previous?.manual || next.quiet !== previous?.quiet) ||
     (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
     automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
@@ -178,8 +183,9 @@ export class ReadingFeel {
     const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
     const stage = simulatorStagePatterns ? simulatorScenePattern(scene, rhythm) : undefined;
-    const stageStep = stage ? Math.min(preview ? 0 : step, stage.levels.length - 1) : 0;
-    // A stage plays through once, then holds its last step until a new beat.
+    const stageStep = !stage || preview ? 0 : repeatingSimulatorScenePattern(scene, rhythm) ?
+      step % stage.levels.length : Math.min(step, stage.levels.length - 1);
+    // Sustained waves and described rhythms repeat; other stages play once and hold.
     const modulation = stage ? stage.levels[stageStep] :
       variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;
     // A temporary ceiling limits the final level without shrinking the
