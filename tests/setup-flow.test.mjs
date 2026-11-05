@@ -81,15 +81,14 @@ test("quick setup has one pairing step, one movement check and direct advanced c
   app.flow.open({model: "flexer"});
   assert.match(label.textContent, /Step 1 of 3/);
   await app.click("setup-primary");
-  assert.match(label.textContent, /Step 1 of 3/);
-  assert.equal(app.nodes.get("setup-pair-stage").hidden, false);
-  assert.equal(app.nodes.get("setup-pair-summary").textContent, "Flexer · Simulator");
-  assert.equal(primary.disabled, true);
-  await app.selectDevice("sim-flexer");
+  assert.deepEqual(app.requests, [{mode: "simulator", model: "flexer"}]);
+  assert.equal(app.flow.snapshot().selectedId, "sim-flexer");
+  assert.equal(app.calls.filter(call => call === "select").length, 1);
   assert.match(label.textContent, /Step 2 of 3/);
   assert.equal(app.nodes.get("setup-pair-stage").hidden, true);
   assert.equal(app.nodes.get("setup-calibration-mount").hidden, true);
   assert.equal(primary.textContent, "Open advanced controls");
+  assert.equal(primary.disabled, true);
   await app.click("setup-test");
   assert.equal(primary.disabled, true);
   await app.click("setup-stop");
@@ -101,12 +100,24 @@ test("quick setup has one pairing step, one movement check and direct advanced c
   assert.equal(app.calls.includes("start"), false);
 });
 
+test("quick physical setup still requires choosing the discovered device", async () => {
+  const app = harness({quickSetup: true});
+  app.flow.open({mode: "lovense", model: "flexer"});
+  await app.click("setup-primary");
+  assert.equal(app.flow.snapshot().phase, "select");
+  assert.equal(app.calls.includes("select"), false);
+  assert.equal(app.nodes.get("setup-primary").disabled, true);
+  await app.selectDevice("sim-flexer");
+  assert.equal(app.flow.snapshot().phase, "test");
+  assert.equal(app.calls.includes("start"), false);
+});
+
 test("stopping while quick setup is applying prevents late navigation", async () => {
   let confirm;
   const app = harness({quickSetup: true, onQuickTest: () => true,
     onConfirmQuickTest: () => new Promise(resolve => { confirm = resolve; }),
     onOpenAdvanced() { assert.fail("Stopped setup must not open Advanced controls."); }});
-  app.flow.open(); await app.click("setup-primary"); await app.selectDevice();
+  app.flow.open(); await app.click("setup-primary");
   const pending = app.checkedTest();
   for (let attempt = 0; attempt < 20 && !confirm; attempt++) await Promise.resolve();
   assert.equal(typeof confirm, "function");

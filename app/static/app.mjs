@@ -1,6 +1,6 @@
 import {ReaderDeviceController} from "./devices/reader-device.mjs";
 import {channelLabel} from "./devices/toy-profiles.mjs";
-import {TextImporter} from "./reader/import.mjs";
+import {preparePlainStoryText, TextImporter} from "./reader/import.mjs";
 import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
 import {StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "./reader/storage.mjs";
@@ -102,7 +102,7 @@ const experienceDialog = mountExperienceDialog({document,
 const hostedMode = publicMode || document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
 let nocturneReady = null, checkingNocturne = false, nocturneOperation = null;
 let nextStoryModel = "loom";
-let recommendationModel = null, recommendationGeneration = null;
+let analysisPresentation = {model: null, generation: null, hasActivity: false};
 let hostedAccess = null;
 let hostedAccessReady = !hostedMode;
 const hasVerifiedAccess = () => !hostedMode || Boolean(hostedAccessReady && hostedAccess?.isAuthorized());
@@ -523,6 +523,8 @@ function display(state = latest) {
   recordControlSnapshot(state);
   const story = currentStory();
   const finished = story && finishedStory === story.id;
+  const hasStoryActivity = renderToyRecommendation(story);
+  const quietSection = state.baseLevel === 0 && state.target === 0;
   readingFeedback.update(story, state);
   for (const id of ["new-story", "empty-new-story", "empty-link-import"]) $(id).disabled = libraryLoading || libraryMutation;
   $("draft-return").hidden = Boolean(story) || !stories.some(value => value.id === draftReturnStoryId);
@@ -557,9 +559,11 @@ function display(state = latest) {
   const reconnect = state.state === "ERROR_PAUSED";
   $("connect").disabled = state.connected && !reconnect;
   $("connect").hidden = state.connected && !reconnect;
-  text("connect", reconnect ? "Reconnect" : "Connect");
-  $("connect").setAttribute("aria-label", state.mode === "lovense" ? "Reconnect toy" : reconnect ? "Reconnect simulator" : "Connect simulator");
-  $("connect").title = state.mode === "lovense" ? "Reconnect toy" : reconnect ? "Reconnect simulator" : "Connect simulator";
+  const live = state.mode === "lovense";
+  const connectLabel = live ? (reconnect ? "Reconnect toy" : "Pair your toy") : `${reconnect ? "Reconnect" : "Connect"} ${state.deviceLabel ?? "Lush simulator"}`;
+  text("connect", reconnect ? "Reconnect" : live ? "Pair toy" : "Simulator");
+  $("connect").setAttribute("aria-label", connectLabel);
+  $("connect").title = connectLabel;
   $("disconnect").hidden = !state.connected || reconnect;
   $("disconnect").disabled = !state.connected && !pendingStart;
   $("start").disabled = !navigator.locks || !canStartHere() || !story?.model.analysisReady || importing || !!nocturneOperation || !state.connected || state.running ||
@@ -568,9 +572,9 @@ function display(state = latest) {
   let readiness;
   if (pendingStart) readiness = "Preparing this Start. Stop cancels it immediately.";
   else if (state.testing) readiness = "Wait for the two-second connection test to finish, then choose Start.";
-  else if (state.running) readiness = "Playback is running. Pause or Stop before starting again.";
+  else if (state.running) readiness = quietSection && state.feel?.playbackMode === "story" ? "This passage is quiet. Keep reading to follow the next section." : "Playback is running. Pause or Stop before starting again.";
+  else if (state.outputKnown === false) readiness = "Check that your toy has stopped, then reconnect before starting.";
   else if (state.state === "ERROR_PAUSED") readiness = "Reconnect, then confirm Start again.";
-  else if (state.outputKnown === false) readiness = "Output is unconfirmed. Check your toy and reconnect before starting.";
   else if (!canStartHere()) readiness = hostedAccess?.snapshot().state === "checking" ? "Checking sign-in. Start will be available when the check passes." :
     publicMode ? "Sign in to connect a physical toy. You can still try a simulator." : "Check your sign-in before starting. Your story is still readable.";
   else if (importing) readiness = "Opening your text. Start will be available after analysis and connection.";
@@ -578,10 +582,11 @@ function display(state = latest) {
   else if (!story) readiness = "Add a story, or choose Set up a toy for a guided test read.";
   else if (!story.model.analysisReady) readiness = story.model.analysisStatus === "error" ? "Analysis needs attention. Open Advanced in Reading controls and choose Analyse again." : "Preparing story suggestions. You can keep reading while you wait.";
   else if (nocturneOperation) readiness = "Nocturne is reviewing scene cues. Start is available when it finishes.";
-  else if (!state.connected) readiness = "Connect the simulator or set up a toy, then choose Start.";
+  else if (!state.connected) readiness = live ? "Choose Pair toy to connect through Lovense Remote." : "Choose Simulator to try this story, or open Toy setup to connect your own toy.";
   else if (!navigator.locks) readiness = "Start needs browser Web Locks. Use a current browser over HTTPS or localhost; reading still works here.";
   else if (state.mode === "lovense" && state.canStart === false) readiness = state.reason || "Complete Toy setup and confirm the short connection test before Start.";
   else if (finished) readiness = "Story finished. Replay returns to the first section and asks you to confirm playback.";
+  else if (!hasStoryActivity) readiness = "No scene changes detected. Choose a background level in Reading controls or adjust a section in Advanced.";
   else readiness = `Ready. Start asks you to confirm maximum ${state.ceiling}/20. Stop keeps your story and connection ready.`;
   text("start-help", readiness);
   if ($("retry-access")) {
@@ -612,17 +617,20 @@ function display(state = latest) {
     syncState.hidden = !story;
     const mode = state.feel?.playbackMode ?? "story";
     const following = $("follow-scroll").checked && mode === "story";
-    text("reading-sync-state", finished ? "Finished" : state.readingSeeking ? "Seeking" : following ? "Following" : "Manual");
+    const section = story?.model.paragraphs[state.position];
+    const followingLabel = state.running && state.ceiling === 0 ? "Maximum is 0" : state.running && quietSection ?
+      (section?.override === 0 ? "Section set to 0" : "Quiet passage") : "Following";
+    const syncLabel = !state.connected ? "Idle" : !state.running ? "Paused" : following ? followingLabel : "Manual";
+    text("reading-sync-state", finished ? "Finished" : state.readingSeeking ? "Seeking" : syncLabel);
   }
   text("finish-reading", finished ? "Back to beginning" : "Finish reading");
   const metadata = storyMetadata(story);
   text("story-word-count", story ? `${metadata.words.toLocaleString()} words` : "");
-  text("story-progress", story ? `${metadata.progressPercent}% · ${metadata.positionLabel}` : "");
+  text("story-progress", story ? finished ? "Finished" : metadata.positionLabel : "");
   const analysis = story?.model.analysisStatus ?? "pending";
   $("analysis-status").dataset.state = analysis;
-  text("analysis-status", !story ? "" : analysis === "ready" ? "Scene patterns ready · review is optional" :
-    analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Analysing quietly on this page… You can read now.");
-  renderToyRecommendation(story);
+  text("analysis-status", !story ? "" : analysis === "ready" ? (hasStoryActivity ? "Scene patterns ready" : "No scene changes detected") :
+    analysis === "error" ? "Suggestions need attention. You can keep reading or retry analysis." : "Finding scene changes…");
   renderStoryModel(story);
   renderNocturnePeakSettings(story);
   const saved = saveState(story);
@@ -676,11 +684,16 @@ function pause(reason) {
 function renderToyRecommendation(story) {
   const model = !story?.controlled && story?.model.analysisStatus === "ready" ? story.model : null;
   const generation = model?.analysisGeneration ?? null;
-  if (model === recommendationModel && generation === recommendationGeneration) return;
-  recommendationModel = model;
-  recommendationGeneration = generation;
-  $("story-toy-recommendations").hidden = !model;
-  text("story-toy-recommendations-summary", model ? storyToyRecommendation(model.paragraphs) : "");
+  if (model !== analysisPresentation.model || generation !== analysisPresentation.generation) {
+    const paragraphs = model?.paragraphs ?? [];
+    const suggestion = storyToyRecommendation(paragraphs);
+    analysisPresentation = {model, generation, hasActivity: paragraphs.some(paragraph => paragraph.analysed && paragraph.suggestedLevel > 0)};
+    const panel = $("story-toy-recommendations");
+    panel.open = false;
+    panel.hidden = !suggestion;
+    text("story-toy-recommendations-summary", suggestion);
+  }
+  return Boolean(story?.controlled || analysisPresentation.hasActivity);
 }
 
 function renderStoryModel(story) {
@@ -749,18 +762,9 @@ async function runNocturne() {
     } else {
       const messages = {
         refused: "Nocturne couldn’t process these cues.",
-        rate_limited: publicMode ? "Nocturne has reached its current usage limit." : "Nocturne’s beta limit has been reached.",
-        budget_unavailable: "Nocturne’s usage counter is unavailable. Check the Worker’s scene-analysis budget binding.",
-        provider_key_rejected: "OpenAI rejected the project key. Check the Worker’s OPENAI_API_KEY secret.",
-        provider_model_access: "OpenAI denied model access. Check the API project’s GPT-6 Luna and Responses permissions.",
-        provider_billing_limit: "OpenAI reported a quota or billing limit. Check API credits and the project spend limit.",
-        provider_rate_limit: "OpenAI reported a rate limit. Check the API project limits before trying again.",
-        provider_cache_option: "OpenAI rejected Nocturne’s prompt-cache option.",
-        provider_request_rejected: "OpenAI rejected Nocturne’s request format. Check the Responses API contract.",
-        provider_timeout: "Nocturne’s request to OpenAI timed out.",
-        provider_connection: "Nocturne couldn’t connect to OpenAI. Check the Worker’s outbound request and service status.",
-        provider_service_error: "OpenAI returned a service error. Check the provider status before trying again.",
-        provider_response_invalid: "OpenAI returned a result that didn’t match Nocturne’s scene-label format.",
+        rate_limited: "Nocturne has reached its usage limit. Try again later.",
+        provider_rate_limit: "Nocturne is busy. Try again in a moment.",
+        provider_timeout: "Nocturne took too long. Try again when you’re ready.",
       };
       const reason = Object.hasOwn(messages, code) ? messages[code] :
         labels ? "Nocturne left these cues as they were." : "Nocturne is temporarily unavailable.";
@@ -1113,22 +1117,14 @@ function scrollToCurrent(place = null) {
   resetScrollWindow();
   readingPlace = captureReadingPlace() ?? preserved;
 }
-function followPosition({explicit = false, fromScroll = false, bounds = readingBounds()} = {}) {
+function followPosition({explicit = false, bounds = readingBounds()} = {}) {
   const story = currentStory();
   if (!story || !readingIsVisible() || (!explicit && !$("follow-scroll").checked)) return false;
   // Short stories can fit entirely above the reading anchor. At the document
   // top, a layout change or Start is not evidence that the reader moved on.
   if (readingScrollTop() <= 1 && story.position === 0) return true;
   const currentId = story.model.paragraphs[latest.position]?.id;
-  let index = readingParagraphAt(bounds, explicit ? null : currentId);
-  // Short final paragraphs may never cross the anchor before the marker enters
-  // view. Select one while it is still visible and the end marker is in view.
-  if (fromScroll || explicit) {
-    const finalIndex = paragraphNodes.length - 1;
-    const final = paragraphNodes[finalIndex]?.getBoundingClientRect();
-    const end = $("reading-end")?.getBoundingClientRect();
-    if (final && end && final.bottom >= bounds.top && final.top <= bounds.bottom && end.top <= bounds.bottom) index = finalIndex;
-  }
+  const index = readingParagraphAt(bounds, explicit ? null : currentId);
   if (index < 0) return false;
   if (index !== latest.position) {
     finishedStory = null;
@@ -1187,14 +1183,14 @@ function settlePosition() {
     }
   } else if (!latest.readingSeeking && now - lastPositionSample >= 120 && readingIsVisible()) {
     lastPositionSample = now;
-    followPosition({bounds, fromScroll: true});
+    followPosition({bounds});
     readingPlace = captureReadingPlace(bounds) ?? readingPlace;
   }
   const operation = positionEpoch, storyId = activeId;
   positionTimer = setTimeout(() => {
     positionTimer = null;
     if (operation === positionEpoch && activeId === storyId) {
-      if (followPosition({fromScroll: true})) completeReadingSeek();
+      if (followPosition()) completeReadingSeek();
       else if (!latest.readingSeeking) resetScrollWindow();
       if (readingIsVisible()) readingPlace = captureReadingPlace() ?? readingPlace;
     }
@@ -1434,10 +1430,10 @@ async function openDraftText() {
   if (!source.trim()) { text("draft-status", "Write or paste your story first."); $("draft-story").focus(); return; }
   cancelImport(); pause("Opening your story.");
   try {
-    addPreparedStory({title: $("draft-title").value, text: source},
+    addPreparedStory({title: $("draft-title").value, text: preparePlainStoryText(source)},
       {folderId: folders.some(folder => folder.id === folderFilter) ? folderFilter : null});
     $("draft-story").value = ""; $("draft-title").value = ""; text("draft-status", "");
-    show("Your story is ready. Saved only if you choose to keep it on this browser.");
+    show(latest.connected ? "Story opened for this visit. Choose Start when you want to play along." : "Story opened for this visit. Try the simulator or use Toy setup to connect your own toy.");
   } catch (error) { text("draft-status", error.message || "Could not open your story. Your writing is still here."); }
 }
 
@@ -1795,7 +1791,7 @@ $("nocturne-sign-in").addEventListener("click", () => publicAccount?.open($("noc
 $("load").addEventListener("click", () => {
   const source = $("source").value;
   if (!source.trim()) { text("import-status", "Paste your story or choose a file."); $("source").focus(); return; }
-  void prepareText(() => source);
+  void prepareText(() => preparePlainStoryText(source));
 });
 $("file").addEventListener("change", event => { const file = event.target.files[0]; if (file) void prepareText(async () => { const record = await readStoryFile(file); if (record.title && !$("story-title-input").value.trim()) $("story-title-input").value = record.title; return record.text; }); });
 $("cancel-import").addEventListener("click", cancelNewStory);
@@ -1809,14 +1805,18 @@ for (const id of ["new-story-dialog", "start-dialog", "ceiling-dialog", "save-di
 $("start").addEventListener("click", () => {
   const story = currentStory();
   if (!canStartHere() || !story?.model.analysisReady || !latest.connected || latest.running || pendingStart || nocturneOperation || document.hidden) return;
+  const scrollPending = positionTimer !== null;
   cancelPosition();
   if (finishedStory === story.id) restartReading();
-  else followPosition();
+  else if (scrollPending) followPosition();
   resetScrollWindow();
   openDialog("start-dialog");
   startIntent = {id: story.id, ceiling: latest.ceiling, levelAdjustment: latest.levelAdjustment, device: playbackIdentity()};
   const movement = (latest.activeChannels || [latest.channel || "vibrate"]).map(channel=>`${latest.channels?.find(item=>item.id===channel)?.label || channel} · up to ${Math.min(latest.ceiling,selectedSettings(latest,channel).maximum)}/20`).join(" + ");
-  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · current level ${latest.target}/20.${latest.mode === "lovense" ? " Physical beta: commands expire after two seconds; output is not measured." : " Your story stays on this browser."}`);
+  const section = story.model.paragraphs[latest.position];
+  const quiet = latest.ceiling === 0 ? " The maximum is zero, so the toy will stay still." : latest.baseLevel === 0 && latest.target === 0 ?
+    (section?.override === 0 ? " You set this section to level zero." : " This section starts quiet. The level can change as you read.") : "";
+  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · current level ${latest.target}/20.${quiet}${latest.mode === "lovense" ? " Each command lasts up to two seconds. Check the movement on your toy." : ""}`);
   text("confirm-start", `Start with maximum ${latest.ceiling}/20`);
 });
 $("confirm-start").addEventListener("click", () => void confirmStart());
@@ -1826,7 +1826,12 @@ $("pause").addEventListener("click", () => {
   pause("Paused. Confirm Start to continue.");
   if (restore) ($("start").disabled ? $("stop") : $("start")).focus({preventScroll: true});
 });
-$("connect").addEventListener("click", () => { pause("Preparing connection."); if (latest.mode === "lovense") setupFlow?.open(); else controller.connect(); });
+$("connect").addEventListener("click", () => {
+  const restore = document.activeElement === $("connect");
+  pause("Preparing connection.");
+  if (latest.mode === "lovense") setupFlow?.open();
+  else if (controller.connect() && restore) ($("start").disabled ? $("stop") : $("start")).focus({preventScroll: true});
+});
 $("disconnect").addEventListener("click", () => { pause("Disconnecting."); controller.disconnect(); });
 $("cap").addEventListener("input", () => {
   const value = Number($("cap").value);

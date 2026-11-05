@@ -20,8 +20,8 @@ test("story recommendations match explicit movement cues to documented models", 
 
 test("quoted, speculative and unrelated motion does not become a model match", () => {
   const uncertain = ["“The toy flexed,” she read from the script.", "She imagined the toy rotating.", "The fan rotated above them."].join("\n\n");
-  assert.equal(recommendationFor(uncertain), "No model-specific movement was detected.");
-  assert.match(recommendationFor(`${uncertain}\n\nThey shared a tender kiss.`), /^Lush or another compatible vibration model.*No specific movement/);
+  assert.equal(recommendationFor(uncertain), "");
+  assert.equal(recommendationFor(`${uncertain}\n\nThey shared a tender kiss.`), "");
   assert.match(recommendationFor("They shared a tender kiss. The toy vibrated steadily."), /^Lush or another compatible vibration model matches/);
 });
 
@@ -33,10 +33,25 @@ test("the reader shows completed recommendations above the active story and clea
   assert.equal(panel.hidden, true);
   await app.add(flexerStory);
   assert.equal(panel.hidden, false);
+  assert.equal(panel.open, false);
   assert.match(summary.textContent, /Flexer.*fingering/);
-  await app.add("Rain tapped softly on the window.");
-  assert.equal(panel.hidden, false);
-  assert.equal(summary.textContent, "No model-specific movement was detected.");
+  panel.open = true;
+  await app.add("They shared a tender kiss.");
+  assert.equal(panel.hidden, true, "General intensity cues do not imply a toy recommendation.");
+  assert.equal(panel.open, false);
+  assert.equal(summary.textContent, "");
+  assert.equal(app.nodes.get("analysis-status").textContent, "Scene patterns ready");
+  await app.add("The receipt listed three cab fares and their payment dates.");
+  assert.equal(panel.hidden, true);
+  assert.equal(app.nodes.get("analysis-status").textContent, "No scene changes detected");
+  await app.click("connect");
+  assert.match(app.nodes.get("start-help").textContent, /Choose a background level/);
+  await app.click("start");
+  assert.match(app.nodes.get("start-summary").textContent, /This section starts quiet/);
+  await app.click("confirm-start");
+  await app.settle();
+  assert.equal(app.nodes.get("reading-sync-state").textContent, "Quiet passage");
+  await app.click("stop");
   await app.click("control-playground");
   app.nodes.get("practice-story-choice").value = "control-check-v1";
   await app.click("practice-story-open");

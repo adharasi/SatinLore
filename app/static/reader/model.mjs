@@ -3,7 +3,7 @@ import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v6.1";
+export const ANALYSIS_VERSION = "scene-rules-v6.2";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
@@ -165,6 +165,7 @@ export class ReaderModel {
     const buildAndEase = nocturne && !quiet && (phase === "build" || phase === "sustain") &&
       (edgePattern === "ease" || (edgePattern === "auto" && edging));
     return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
+      ...(!quiet && ["build", "sustain"].includes(phase) && shape && shape !== "unspecified" ? {shape} : {}),
       ...(pattern === undefined ? {} : {pattern}),
       ...(peak ? peakPattern === "auto" ? {automaticPeak: true} : {peakPreset: peakPattern} : {}),
       ...(buildAndEase ? {edging: true} : {})};

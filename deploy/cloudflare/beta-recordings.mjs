@@ -53,7 +53,7 @@ export function normalizeBetaEvent(value) {
       return { ...base, question: value.question, value: value.value, ...(value.channel === undefined ? {} : { channel: value.channel }), ...(value.field === undefined ? {} : { field: value.field }) };
     }
     case "reading-feedback":
-      only(["issue", "position"]); check(["too-strong", "wrong-moment", "wrong-movement"].includes(value.issue) && integer(value.position, 0, 1999));
+      only(["issue", "position"]); check(["too-strong", "too-weak", "missed-movement", "wrong-moment", "wrong-movement"].includes(value.issue) && integer(value.position, 0, 1999));
       return { ...base, issue: value.issue, position: value.position };
     case "preset": only(["event", "scope"]); check(["save", "apply", "delete"].includes(value.event) && ["account", "story"].includes(value.scope)); return { ...base, event: value.event, scope: value.scope };
     case "story": only(["fixture", "position"]); check(["practice", "harbour", "garden", "personal"].includes(value.fixture) && (value.position === undefined || integer(value.position, 0, 10000))); return { ...base, fixture: value.fixture, ...(value.position === undefined ? {} : { position: value.position }) };

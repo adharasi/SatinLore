@@ -69,6 +69,24 @@ test("the short-story top guard preserves manual Next/Previous and normal scroll
   assert.equal(app.read("latest.position"), 1, "A panned visual viewport is not mistaken for the document top.");
 });
 
+test("Start preserves an explicitly selected section when layout clamps its scroll position", async t => {
+  const app = await ready(t);
+  await app.click("next");
+  assert.equal(app.read("latest.position"), 1);
+  app.read("scrollY = 5");
+  await start(app);
+  assert.equal(app.read("latest.position"), 1);
+});
+
+test("a visible end marker does not pull playback past intermediate sections", async t => {
+  const app = workspace(); t.after(() => app.destroy());
+  await app.settle();
+  await app.add(Array.from({length: 4}, () => "They shared a tender kiss.").join("\n\n"));
+  app.read("scrollY = 340; followPosition({explicit: true})");
+  assert.equal(app.read("latest.position"), 2);
+  assert.ok(app.read('$("reading-end").getBoundingClientRect().top < readingBounds().bottom'));
+});
+
 test("Stop during confirmation leaves a fresh Start available", async t => {
   const app = await ready(t);
   await app.click("start");
@@ -240,10 +258,11 @@ test("direct typing opens a session-only story and keeps the existing library", 
   const app = await ready(t);
   await app.click("new-story");
   app.nodes.get("draft-title").value = "A new draft";
-  app.nodes.get("draft-story").value = "The clock moved slowly.\n\nThe train arrived.";
+  app.nodes.get("draft-story").value = "The clock moved slowly.\nThe train arrived.";
   await app.click("open-draft"); await app.settle();
   assert.equal(app.read("stories.length"), 2);
   assert.equal(app.read("currentStory().title"), "A new draft");
+  assert.equal(app.read("currentStory().model.paragraphs.length"), 2, "Pasted single-newline paragraphs each get a reading position.");
   assert.equal(app.read("currentStory().saved"), false);
   assert.equal(app.read("latest.running"), false);
   assert.equal(app.nodes.get("draft-story").value, "");

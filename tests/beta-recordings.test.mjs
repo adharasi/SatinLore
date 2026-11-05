@@ -24,6 +24,9 @@ test("beta event schema admits only fixed steps and numeric controls, rejecting 
   const mark = {t: 7, type: "reading-feedback", issue: "too-strong", position: 3};
   assert.deepEqual(normalizeBetaEvent(mark), mark);
   assert.equal(betaEventDescription(mark), "Reading feedback · Section 4 · Too strong");
+  for (const issue of ["too-weak", "missed-movement"]) {
+    assert.deepEqual(normalizeBetaEvent({...mark, issue}), {...mark, issue});
+  }
   for (const value of [
     { t: 0, type: "control", control: "maximum", value: 5, storyText: "private canary" },
     { t: 0, type: "output", channels: { email: "synthetic@example.invalid" }, state: "playing" },

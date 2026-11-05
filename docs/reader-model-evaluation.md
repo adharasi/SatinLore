@@ -1,5 +1,7 @@
 # Loom and Nocturne evaluation
 
+The [manuscript playback benchmark](reader-corpus-evaluation.md) adds independently sourced literary passages and author-separated results alongside these targeted fixtures.
+
 Run `node scripts/evaluate-reader-models.mjs` from the repository root. The JSON includes the expected and observed phase, movement cue, cue eligibility, rhythm label and simulator trace for every section. It prints the names of the original fixture sections and their numeric results. The [fixture annotations](../tests/reader-model-evaluation-fixtures.mjs) cover 25 sections across the Conservatory, Lantern room, Workshop notes and At the station stories. This is a small neutral corpus with targeted edge cases.
 
 The evaluator runs the actual browser `ReaderModel`, Nocturne client and Worker scene handler. A deterministic mock chooses labels from the same enums and section ordinals that a live provider would receive, independently of the annotations. The two runs then start the actual simulator controller from each section at a 10/20 maximum, strength 1.0, with Follow scene rhythm and automatic movement selection enabled where supported. Each run samples the movement vector at 0, 2, 4, 6 and 8 seconds. The start and Stop checks are separate from scene classification. The browser and Worker suites exercise UI opt-in, response validation, authorization and fallback independently.

@@ -57,7 +57,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   const header = make("div", {className: "setup-dialog-heading"});
   const headingBlock = make("div");
   const step = make("span", {id: "setup-step-label", className: "setup-step-label", value: "01 / Choose your toy"});
-  const heading = make("h2", {id: "setup-heading", value: "Set up your toy"});
+  const heading = make("h2", {id: "setup-heading", value: "Set up your toy", attrs: {tabindex: "-1"}});
   headingBlock.append(step, heading);
   const close = button("setup-close", "×", "icon-button"); close.setAttribute("aria-label", "Close setup");
   header.append(headingBlock, close);
@@ -304,8 +304,8 @@ export function createSetupFlow({document = globalThis.document, window = global
       clearQrImage();
     }
     if (phase === "connect") {
-      step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "01 / Choose your toy";
-      heading.textContent = quickSetup ? "Pair your toy" : "Set up your toy";
+      step.textContent = quickSetup ? `Step 1 of 3 · ${simulator ? "Choose" : "Pair"}` : "01 / Choose your toy";
+      heading.textContent = quickSetup && !simulator ? "Pair your toy" : "Set up your toy";
       intro.textContent = "Connect a toy through Lovense Remote or try the controls with a simulator.";
       primary.textContent = simulator ? "Connect " + label() + " simulator" : canConnectLive() ? "Connect " + label() : "Sign in to connect " + label();
     } else if (phase === "pair") {
@@ -346,7 +346,7 @@ export function createSetupFlow({document = globalThis.document, window = global
       primary.textContent = "Use this toy";
     } else if (phase === "test") {
       step.textContent = quickSetup ? "Step 2 of 3 · Quick test" : "04 / Check a movement";
-      heading.textContent = quickSetup ? "Check your toy’s movements" : "Try a two-second test";
+      heading.textContent = quickSetup ? simulator ? `Check the ${label()} simulator` : "Check your toy’s movements" : "Try a two-second test";
       intro.textContent = quickSetup ? "Run one quick test to check each available movement at level 1. Each movement runs for two seconds, with a short pause between checks." :
         "Start at level 1. Watch or feel for two seconds of movement, then check that it stops before you continue.";
       testMaximumNote.textContent = maximum === 0 ? "Testing is off at maximum 0. Close setup, adjust Maximum in the playback bar, then reopen setup." :
@@ -383,6 +383,17 @@ export function createSetupFlow({document = globalThis.document, window = global
     if (phase === "select") prepareDeviceList();
     render();
   };
+  const selectToy = async (id, activeEpoch) => {
+    stopped();
+    const result = await onSelectDevice(id);
+    if (activeEpoch !== epoch || disposed || !dialog.open) return;
+    safeSnapshot(result);
+    if (result === false || current.selectedId !== id || !effectiveConnected()) throw new Error();
+    if (enableCalibration && !quickSetup) { openCalibration(); return; }
+    resetTest(); channel.replaceChildren(...channels().map(name => option(name, CHANNEL_LABELS[name])));
+    channel.value = channels()[0] || ""; phase = "test"; status.textContent = "Ready for the movement check.";
+    heading.focus({preventScroll: true});
+  };
   const connect = async () => {
     if (mode === "lovense" && !canConnectLive()) {
       const options = {mode, model: preferredModel};
@@ -394,7 +405,14 @@ export function createSetupFlow({document = globalThis.document, window = global
       const result = await onConnect({mode, model: preferredModel});
       if (activeEpoch !== epoch || disposed || !dialog.open) return;
       if (result === false) throw new Error();
-      safeSnapshot(result); resetTest(); status.textContent = ""; enterPairOrSelect();
+      safeSnapshot(result); resetTest(); status.textContent = "";
+      const toys = onlineToys();
+      // Connect already names the chosen simulator. Only that exact simulator
+      // can skip the list. Physical pairing always requires a separate choice.
+      if (quickSetup && mode === "simulator" && discovered() && toys.length === 1 &&
+        toys[0].model === preferredModel && toys[0].id === `sim-${preferredModel}`) {
+        await selectToy(toys[0].id, activeEpoch);
+      } else enterPairOrSelect();
     } catch {
       if (activeEpoch !== epoch || disposed) return;
       status.textContent = mode === "simulator" ? "The simulator could not connect. Try again or keep reading." :
@@ -420,15 +438,9 @@ export function createSetupFlow({document = globalThis.document, window = global
     if (phase === "select") {
       const id = device.value;
       if (!onlineToys().some(toy => toy.id === id)) return;
-      const activeEpoch = ++epoch; setBusy(true); stopped();
+      const activeEpoch = ++epoch; setBusy(true);
       try {
-        const result = await onSelectDevice(id);
-        if (activeEpoch !== epoch || disposed || !dialog.open) return;
-        safeSnapshot(result);
-        if (result === false || current.selectedId !== id || !effectiveConnected()) throw new Error();
-        if (enableCalibration && !quickSetup) { openCalibration(); return; }
-        resetTest(); channel.replaceChildren(...channels().map(name => option(name, CHANNEL_LABELS[name])));
-        channel.value = channels()[0] || ""; phase = "test"; status.textContent = "Ready for the movement check.";
+        await selectToy(id, activeEpoch);
       } catch { if (activeEpoch === epoch) status.textContent = "Selection did not complete. Refresh the connection and choose a toy again."; }
       finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
       return;

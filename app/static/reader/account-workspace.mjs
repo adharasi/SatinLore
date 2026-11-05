@@ -45,9 +45,9 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
   const status=el(document,'p','','note');status.setAttribute('role','status');
   const adult=el(document,'input');adult.type='checkbox';adult.id='account-adult';
   const adultLabel=el(document,'label','','check-label');adultLabel.append(adult,document.createTextNode('I am 18 or over.'));
-  const create=button('Create my private account',async()=>{if(!adult.checked){note='Confirm that you are 18 or over to create an account.';render();return;}onStop();if(await client.create())onRegistered();},'primary');
+  const create=button('Set up saved presets',async()=>{if(!adult.checked){note='Confirm that you are 18 or over to set up your profile.';render();return;}onStop();if(await client.create())onRegistered();},'primary');
   const retry=button('Refresh account',()=>client.load());
-  const intro=el(document,'div','','account-intro');intro.append(el(document,'p','PRIVATE BETA','eyebrow'),el(document,'h2','Your private beta account'),el(document,'p','Create a private account with your verified email sign-in. Save toy presets across visits; your story text stays on this browser.'),adultLabel,create,retry,status);welcomeMount?.append(intro);
+  const intro=el(document,'div','','account-intro');intro.append(el(document,'p','PRIVATE PREVIEW','eyebrow'),el(document,'h2','Keep your toy presets'),el(document,'p','Add a profile to use your saved toy settings on future visits. You can add a story and try the simulator right away.'),adultLabel,create,retry,status);welcomeMount?.append(intro);
   const settingsStatus=el(document,'p','','note');settingsStatus.setAttribute('role','status');
   const deleteChoice=el(document,'input');deleteChoice.type='checkbox';deleteChoice.id='confirm-account-delete';
   const deleteLabel=el(document,'label','','check-label');deleteLabel.append(deleteChoice,document.createTextNode(publicMode?'I want to delete my SatinLore account.':'Remove my saved toy presets and app profile.'));
@@ -85,8 +85,8 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
     if(welcomeMount)welcomeMount.hidden=publicMode||!client.hosted||state.registered;
     create.disabled=state.busy;retry.disabled=state.busy;
     status.textContent=note||state.message||(state.state==='loading'?'Checking your account…':'Your email has already been verified by private sign-in.');
-    settingsStatus.textContent=publicMode?(state.registered?'You’re signed in. Session-only stories stay in this tab. Browser-saved stories stay in this browser.':'Sign in with your email to save stories, reading settings and toy presets to your account.'):
-      state.registered?'Private account ready. Toy presets sync across the app and beta. Stories are saved separately on this browser.':client.hosted?'Create your account from the welcome panel to save presets.':'Account presets are available in the signed-in hosted app.';
+    settingsStatus.textContent=publicMode?(state.registered?'Choose Save to my account to open a story on other devices. Session-only stories stay in this tab and browser-saved stories stay on this browser.':'Sign in with your email to save stories, reading settings and toy presets to your account.'):
+      state.registered?'Your toy presets sync across the app and beta. Use Save on this browser to keep a story.':client.hosted?'Set up saved presets from the welcome panel.':'Account presets are available in the signed-in hosted app.';
     if(publicMode){
       const guest=state.state==='local';
       if(guest&&lastRegistered){selected='';name.value='';scope.value='account';deleteChoice.checked=false;}

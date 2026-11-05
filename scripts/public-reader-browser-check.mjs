@@ -144,12 +144,8 @@ async function completeExperience(page) {
 async function checkQuickSimulatorSetup(page) {
   await page.locator("#setup-mode-simulator").click();
   await page.locator("#setup-primary").click();
-  const devices = page.locator("#setup-devices");
-  const flexer = devices.locator("option").filter({hasText: /Flexer/i});
-  await expect(devices).toBeVisible();
-  await expect(flexer).toHaveCount(1);
-  await devices.selectOption(await flexer.getAttribute("value"));
-  await page.locator("#setup-primary").click();
+  await expect(page.locator("#setup-devices")).toBeHidden();
+  await expect(page.locator("#setup-heading")).toHaveText("Check the Flexer simulator");
   const test = page.locator("#setup-test");
   const confirmation = page.locator("#setup-response-checked");
   await expect(page.locator("#setup-step-label")).toContainText(/quick test/i);
@@ -188,9 +184,12 @@ try {
   await expect(page.locator("#scene-model")).toBeEnabled();
   await expect(page.locator("#scene-model")).toHaveValue("loom");
   const recommendations = page.locator("#story-toy-recommendations-summary");
+  await expect(recommendations).toBeHidden();
+  await page.locator("#story-toy-recommendations-toggle").click();
   await expect(recommendations).toBeVisible();
   await expect(recommendations).toContainText("Flexer");
   await expect(recommendations).toContainText(/fingering/i);
+  await page.locator("#story-toy-recommendations-toggle").click();
   await page.locator("#connect").click();
   await page.locator("#start").click();
   await page.locator("#confirm-start").click();
@@ -369,6 +368,15 @@ try {
   await expect(mobile.page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
   await expect(mobile.page.locator("#setup-mode-lovense")).toHaveAttribute("aria-pressed", "true");
   await mobile.page.locator("#setup-close").click();
+  await mobile.page.setViewportSize({width: 320, height: 568});
+  await mobile.page.evaluate(() => window.scrollTo(0, 0));
+  const draftAction = await mobile.page.locator("#open-draft").boundingBox();
+  const dock = await mobile.page.locator("#transport").boundingBox();
+  assert.ok(draftAction.y + draftAction.height <= dock.y, `A short phone shows Read story above the dock (${draftAction.y + draftAction.height} ≤ ${dock.y}).`);
+  await mobile.page.locator("#draft-story").fill("The receipt listed three cab fares and their payment dates.");
+  await mobile.page.locator("#open-draft").click();
+  await expect(mobile.page.locator("#analysis-status")).toHaveText("No scene changes detected");
+  await expect(mobile.page.locator("#story-toy-recommendations")).toBeHidden();
   await mobile.page.goto(origin + "/help");
   await expect(mobile.page.locator("#help-signout")).not.toBeVisible();
   await expect(mobile.page.locator("#public-guides")).toHaveCount(0);
