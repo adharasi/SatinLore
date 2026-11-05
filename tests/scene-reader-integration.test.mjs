@@ -71,8 +71,8 @@ test("Nocturne picks a local simulator shape without changing levels, movements 
   model.nocturneLabels.set(1, "crest");
   const [profile] = normalizeSceneProfiles([model.effectiveProfiles({nocturne: true})[1]], 1);
   assert.deepEqual(profile, {...loom, pattern: "crest"});
-  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "auto"})[1].peakPreset, "crest");
-  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "auto", edging: true})[1].peakPreset, "ease");
+  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "auto"})[1].automaticPeak, true);
+  assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "auto", edging: true})[1].peakPreset, undefined);
   assert.equal(model.effectiveProfiles({nocturne: true, peakPattern: "accents", edging: true})[1].peakPreset, "accents");
   assert.equal(model.effectiveProfiles({peakPattern: "ease", edging: true})[1].peakPreset, undefined);
   assert.deepEqual(model.effectiveLevels(), before);
@@ -91,4 +91,34 @@ test("Nocturne picks a local simulator shape without changing levels, movements 
   assert.throws(() => normalizeSceneProfiles([{...profile, peakPreset: "unknown"}], 1), /supported scene stage/);
   await model.analyse({yieldTask: async () => {}});
   assert.equal(model.effectiveProfiles({nocturne: true})[1].pattern, undefined);
+});
+
+test("Nocturne maps edging to active buildup while keeping climax and quiet boundaries separate", () => {
+  const model = new ReaderModel();
+  model.load([
+    "Rain tapped the library window.",
+    "Their tender kiss and romantic embrace built gradually.",
+    "Their passionate, tender kiss and romantic embrace expressed affection.",
+    "Hours later, the library opened.",
+  ].join("\n\n"));
+  const preferences = {nocturne: true, edging: true, peakPattern: "auto"};
+  const profiles = normalizeSceneProfiles(model.effectiveProfiles(preferences), 4);
+  assert.deepEqual(profiles.map(profile => profile.phase), ["quiet", "sustain", "peak", "quiet"]);
+  assert.deepEqual(profiles.map(profile => profile.quiet), [false, false, false, true]);
+  assert.deepEqual(profiles.map(profile => profile.edging), [undefined, true, undefined, undefined]);
+  assert.deepEqual(profiles.map(profile => profile.automaticPeak), [undefined, undefined, true, undefined]);
+  assert.equal(model.effectiveProfile(1, {...preferences, edgePattern: "off"}).edging, undefined);
+  assert.equal(model.effectiveProfile(1, {...preferences, edging: false}).edging, undefined);
+  assert.equal(model.effectiveProfile(1, {...preferences, edging: false, edgePattern: "ease"}).edging, true);
+  assert.equal(model.effectiveProfile(1, {...preferences, nocturne: false}).edging, undefined);
+  assert.throws(() => normalizeSceneProfiles([{...profiles[2], edging: true}], 1), /supported scene stage/);
+  assert.throws(() => normalizeSceneProfiles([{...profiles[3], automaticPeak: true}], 1), /supported scene stage/);
+
+  model.load([
+    "Their tender kiss and romantic embrace built gradually.",
+    "Their passionate, tender kiss in short bursts and romantic embrace expressed affection.",
+  ].join("\n\n"));
+  assert.equal(model.effectiveProfile(1, preferences).pattern, "accents", "A clear local cue works before a hosted analysis.");
+  model.nocturneLabels.set(1, "crest");
+  assert.equal(model.effectiveProfile(1, preferences).pattern, "crest", "A valid hosted label can refine the local pattern.");
 });

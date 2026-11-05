@@ -10,6 +10,14 @@ The public reader offers four optional questions on quiet passages, edging, maxi
 
 The remaining release checks are real inbox delivery for public signup, physical movement and Stop qualification, and validation of the pattern defaults with consenting testers.
 
+## Reader movement and Nocturne patterns — 5 November 2026
+
+The main app uses the Alpha Flexer renewal behavior for identical, unexpired two-second commands. The documented socket path keeps vibration and flexing rhythm choices independent and retains targeted Stop. The simulator offers separate Nocturne choices for build-ups and climaxes based on onboarding preferences. Settings offers a first-time onboarding preview, and a practice story can be opened from an empty library.
+
+Local checks passed for 22 Python and 542 JavaScript tests. Chromium checks covered the reader, verified account fixture, onboarding preview, and the separate beta and Alpha journeys.
+
+Physical smoothness, expiry and interruption checks remain open for a Flexer connected through Lovense Remote. Simulator observations and transport fixtures establish software behavior.
+
 ## Flexer Alpha on the app host — 3 November 2026
 
 The first preference study has a separate manual-control route at `/alpha`, using Dilan and Sadie logins, and founder review at `/admin`. The study joins consented control events, optional marks, feedback and timestamped annotations by authenticated username. With consent, Alpha captures masked visual replays of each study screen for founder review. The reader and prior beta use their existing Access and storage rules.

@@ -195,7 +195,7 @@ export class LovenseSocket {
     if (now - this.lastCommand < 1000) throw Error("Wait for the next device tick.");
     const action = keys.sort().map(key => `${ACTIONS[key]}:${command[key]}`).join(",");
     const previous = this.lastFunction;
-    // A still-active identical Alpha Flexer renewal can keep the same movement
+    // A still-active identical Flexer renewal can keep the same movement
     // running. Any change replaces the old command, including any higher level.
     const preserve = this.preserveFlexerRenewals && toy.model === "flexer" && previous?.toyId === toy.id &&
       previous.action === action && now < previous.expiresAt;

@@ -51,7 +51,21 @@ test("first account sign-in asks for preferences and applies only an acknowledge
   assert.equal(app.read("latest.running"), false);
 
   await app.click("open-app-settings");
+  await app.click("preview-experience");
+  assert.equal(node("experience-dialog").open, true);
+  assert.equal(node("experience-preview-note").hidden, false);
+  assert.equal(node("experience-maximum").value, "10", "The preview starts with first-time defaults.");
+  node("experience-maximum").value = "20";
+  await node("experience-form").dispatch("submit");
+  assert.match(node("experience-heading").textContent, /preview complete/i);
+  assert.equal(stored.revision, 1);
+  assert.equal(app.read("currentExperience().maximum"), 16);
+  assert.equal(app.read("latest.ceiling"), 16);
+  await app.click("experience-later");
+  assert.equal(node("experience-dialog").open, false);
+  assert.equal(node("app-settings-dialog").open, true);
   await app.click("open-experience");
+  assert.equal(node("experience-preview-note").hidden, true);
   assert.equal(node("experience-maximum").value, "16");
   assert.equal(node("experience-reset").hidden, false);
   await app.click("experience-reset");

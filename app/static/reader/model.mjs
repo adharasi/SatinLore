@@ -1,6 +1,5 @@
 import {splitText} from "./import.mjs";
 import {groupScenes, scoreParagraph, SUGGESTION_LEVELS} from "./scoring.mjs";
-import {selectPeakPreset} from "./calibration.mjs";
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
@@ -158,14 +157,22 @@ export class ReaderModel {
 
   resetOverride(index) { this.paragraph(index).override = null; }
 
-  effectiveProfiles({nocturne = false, peakPattern, edging} = {}) {
+  effectiveProfile(index, {nocturne = false, peakPattern, edging = false, edgePattern = "auto"} = {}) {
+    const {rhythm, quiet, phase, sceneId, shape, override, movements = [], endedMovements = []} = this.paragraph(index);
+    const peak = nocturne && !quiet && phase === "peak" && peakPattern !== undefined;
+    const localPeak = peak && peakPattern === "auto" && (shape === "accented" || shape === "alternating") ? "accents" : undefined;
+    const pattern = nocturne ? this.nocturneLabels.get(index) ?? localPeak : undefined;
+    const buildAndEase = nocturne && !quiet && (phase === "build" || phase === "sustain") &&
+      (edgePattern === "ease" || (edgePattern === "auto" && edging));
+    return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
+      ...(pattern === undefined ? {} : {pattern}),
+      ...(peak ? peakPattern === "auto" ? {automaticPeak: true} : {peakPreset: peakPattern} : {}),
+      ...(buildAndEase ? {edging: true} : {})};
+  }
+
+  effectiveProfiles(options) {
     if (!this.analysisReady) return undefined;
-    return this.paragraphs.map(({rhythm, quiet, phase, sceneId, override, movements = [], endedMovements = []}, index) => {
-      const pattern = nocturne ? this.nocturneLabels.get(index) : undefined;
-      const peakPreset = nocturne ? selectPeakPreset(phase, pattern, peakPattern, edging) : undefined;
-      return {rhythm, quiet, phase, sceneId, manual: override !== null, movements: [...movements], endedMovements: [...endedMovements],
-        ...(pattern === undefined ? {} : {pattern}), ...(peakPreset === undefined ? {} : {peakPreset})};
-    });
+    return this.paragraphs.map((_, index) => this.effectiveProfile(index, options));
   }
 
   effectiveLevels() {

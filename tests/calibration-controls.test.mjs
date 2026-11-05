@@ -58,6 +58,41 @@ test("quiet defaults distinguish off, continuous and gentle simulator pulses wit
   const feel = new ReadingFeel();
   feel.configure({mode: "continuous", quietEdging: true, background: 1});
   assert.equal(feel.desired({base: 0, scene: ordinary, now: 2000}), 1, "The live policy keeps the existing steady background.");
+  feel.configure({minimum: 1, background: 2});
+  assert.equal(feel.desired({base: 0, scene: ordinary, now: 2000, simulatorStagePatterns: true}), 1,
+    "A gentle pulse leaves the personal minimum in place.");
+});
+
+test("Nocturne's automatic climax follows each movement's rhythm without overriding a correction", () => {
+  const feel = new ReadingFeel();
+  feel.configure({preferred: 5});
+  const peak = {phase: "peak", rhythm: "dynamic", quiet: false, automaticPeak: true};
+  const levels = (rhythm, scene = peak) => {
+    feel.configure({rhythm});
+    return [0, 2000, 4000, 6000, 8000].map(now =>
+      feel.desired({base: 5, ceiling: 8, scene, now, simulatorStagePatterns: true}));
+  };
+  assert.deepEqual(levels("steady"), [7, 7, 7, 7, 7]);
+  assert.deepEqual(levels("gentle"), [5, 6, 7, 7, 5]);
+  assert.deepEqual(levels("dynamic"), [5, 7, 4, 6, 3]);
+  assert.deepEqual(levels("scene"), [5, 6, 7, 7, 3]);
+  assert.deepEqual(levels("scene", {...peak, pattern: "accents"}), levels("dynamic"));
+  assert.deepEqual(levels("gentle", {...peak, manual: true}), [5, 5, 4, 4, 5]);
+});
+
+test("Nocturne edging backs off and rises again while an independent Steady movement holds", () => {
+  const feel = new CombinedReadingFeel({
+    vibrate: {preferred: 8, maximum: 8, rhythm: "gentle"},
+    fingering: {preferred: 4, maximum: 4, rhythm: "steady"},
+  }, {automaticMovement: true});
+  const scene = {phase: "sustain", rhythm: "steady", quiet: false, edging: true, movements: ["vibrate", "fingering"]};
+  const context = {base: 3, ceiling: 10, scene, simulatorStagePatterns: true};
+  const samples = [0, 2000, 4000, 6000, 8000, 12000, 16000].map(now => feel.vector({...context, now}));
+  assert.deepEqual(samples.map(sample => sample.vibrate), [5, 6, 8, 4, 6, 5, 5]);
+  assert.deepEqual(samples.map(sample => sample.fingering), [4, 4, 4, 4, 4, 4, 4]);
+  assert.deepEqual(feel.vector({...context, now: 6000, simulatorStagePatterns: false}), {vibrate: 6, fingering: 4});
+  assert.deepEqual(feel.vector({...context, manualZero: true}), {vibrate: 0, fingering: 0});
+  assert.deepEqual(feel.vector({...context, ceiling: 0}), {vibrate: 0, fingering: 0});
 });
 
 test("an explicit Nocturne peak shape applies in simulation despite ordinary rhythm, and stays out of live output", () => {

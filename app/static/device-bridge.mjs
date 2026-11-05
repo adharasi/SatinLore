@@ -3,7 +3,10 @@ import {LovenseCheck} from "./devices/lovense.mjs";
 // Runs in an opaque-origin sandbox. Hosted builds inline this trusted module and
 // its dependencies so Access cookies are never needed by opaque module requests.
 // Only connection/control messages cross the dedicated port; never reader text.
-const expectedParentOrigin = new URL(location.href).origin;
+const bridgeUrl = new URL(location.href);
+const expectedParentOrigin = bridgeUrl.origin;
+const preserveFlexerRenewals = expectedParentOrigin === "https://app.satinlore.com" &&
+  ["/device-bridge", "/device-bridge.html", "/alpha/device-bridge"].includes(bridgeUrl.pathname);
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,96}$/;
 const TOY_ID = /^[A-Za-z0-9_-]{1,128}$/;
 let connectedPort = null;
@@ -60,7 +63,7 @@ async function onCommand(event) {
         if(!document.querySelector('meta[name="satinlore-hosted-access"][content="true"]'))throw Error();
         const {LovenseSocket}=await import("./devices/lovense-socket.mjs");
         extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken}, {
-          preserveFlexerRenewals: location.pathname === "/alpha/device-bridge",
+          preserveFlexerRenewals,
         });
         preparingAdapter = extended;
         await extended.prepared;

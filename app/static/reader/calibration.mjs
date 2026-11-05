@@ -31,13 +31,23 @@ const peakPresets = {
   accents: {...stagePatterns.peak, label: "Peak pulses"},
   ease: {label: "Build and ease", levels: [.55, .8, .5, .95, .6, 1, .45]},
 };
+const gentleCrest = {label: "Gentle crest", levels: [.85, .95, 1, 1, .85]};
+const edgingPattern = {label: "Build and ease", levels: [.65, .85, 1, .55, .85, .95, .65]};
 const scenePattern = (phase, pattern, peakPreset) => peakPresets[peakPreset] ?? nocturnePatterns[pattern] ?? stagePatterns[phase];
 export const sceneStagePatternLabel = (phase, pattern, peakPreset) => scenePattern(phase, pattern, peakPreset)?.label;
-export function selectPeakPreset(phase, pattern, preference, edging) {
-  if (phase !== "peak" || preference === undefined) return undefined;
-  if (Object.hasOwn(peakPresets, preference)) return preference;
-  return edging ? "ease" : pattern === "crest" ? "crest" : "accents";
+
+function simulatorScenePattern(scene, rhythm) {
+  if (!scene || scene.manual) return undefined;
+  if (scene.peakPreset) return peakPresets[scene.peakPreset];
+  if (scene.automaticPeak) {
+    if (rhythm === "steady") return nocturnePatterns.steady;
+    if (rhythm === "gentle") return gentleCrest;
+    return rhythm === "dynamic" || scene.pattern === "accents" ? peakPresets.accents : peakPresets.crest;
+  }
+  if (scene.edging && rhythm !== "steady") return edgingPattern;
+  return rhythm === "scene" ? scenePattern(scene.phase, scene.pattern) : undefined;
 }
+export const simulatorScenePatternLabel = (scene, rhythm) => simulatorScenePattern(scene, rhythm)?.label;
 const validMovements = value => value === undefined || Array.isArray(value) && value.length <= movementIds.length &&
   Array.from(value).every(id => movementIds.includes(id)) && new Set(value).size === value.length;
 export function normalizeSceneProfiles(profiles, length) {
@@ -51,23 +61,28 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual, pattern, peakPreset} = profile;
+    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean" ||
         pattern !== undefined && (profile.quiet || pattern === "abstain" || !NOCTURNE_LABELS[phase]?.includes(pattern)) ||
-        peakPreset !== undefined && (profile.quiet || phase !== "peak" || !Object.hasOwn(peakPresets, peakPreset))) throw new RangeError("Use a supported scene stage.");
+        peakPreset !== undefined && (profile.quiet || phase !== "peak" || !Object.hasOwn(peakPresets, peakPreset)) ||
+        automaticPeak !== undefined && (automaticPeak !== true || profile.quiet || phase !== "peak" || peakPreset !== undefined) ||
+        edging !== undefined && (edging !== true || profile.quiet || (phase !== "build" && phase !== "sustain"))) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(pattern === undefined ? {} : {pattern}),
       ...(peakPreset === undefined ? {} : {peakPreset}),
+      ...(automaticPeak === undefined ? {} : {automaticPeak}),
+      ...(edging === undefined ? {} : {edging}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
 }
 
 export function scenePatternChanged(previous, next, automaticMovement = false, simulatorStagePatterns = false) {
   return !!next?.phase && (next.sceneId !== previous?.sceneId || next.phase !== previous?.phase ||
-    next.rhythm !== previous?.rhythm || simulatorStagePatterns && (next.pattern !== previous?.pattern || next.peakPreset !== previous?.peakPreset) ||
+    next.rhythm !== previous?.rhythm || simulatorStagePatterns && (next.pattern !== previous?.pattern ||
+      next.peakPreset !== previous?.peakPreset || next.automaticPeak !== previous?.automaticPeak || next.edging !== previous?.edging) ||
     (next.endedMovements || []).join(",") !== (previous?.endedMovements || []).join(",") ||
     automaticMovement && (next.movements || []).join(",") !== (previous?.movements || []).join(","));
 }
@@ -141,13 +156,15 @@ export class ReadingFeel {
     const step = Math.floor(Math.max(0, now - this.startedAt) / 2000);
     if (base === 0) {
       const level = mode === "continuous" ? Math.min(ceiling, Math.max(minimum, background)) : 0;
-      if (mode === "continuous" && quietEdging && simulatorStagePatterns) return step % 4 === 1 || step % 4 === 2 ? 0 : Math.min(2, adjust(level));
+      if (mode === "continuous" && quietEdging && simulatorStagePatterns) {
+        const floor = Math.min(ceiling, minimum);
+        return adjust(step % 4 === 1 || step % 4 === 2 ? floor : Math.max(floor, Math.min(2, level)));
+      }
       return adjust(level);
     }
     const phase = step % 4;
     const variation = rhythm === "scene" ? scene?.rhythm : rhythm;
-    const stages = simulatorStagePatterns && !scene?.manual && (rhythm === "scene" || scene?.peakPreset) ?
-      scenePattern(scene?.phase, scene?.pattern, scene?.peakPreset)?.levels : undefined;
+    const stages = simulatorStagePatterns ? simulatorScenePattern(scene, rhythm)?.levels : undefined;
     // A stage plays through once, then holds its last step until a new beat.
     const modulation = stages ? stages[Math.min(preview ? 0 : step, stages.length - 1)] :
       variation === "gentle" ? [1, 1, .8, .8][phase] : variation === "dynamic" ? [1, .6, 1, .35][phase] : 1;

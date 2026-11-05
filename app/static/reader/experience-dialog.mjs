@@ -9,15 +9,25 @@ export function mountExperienceDialog({document, openDialog, closeDialog, save, 
 
   function close({proceed = false, saved = false, restore = true} = {}) {
     if (!visit) return;
-    const {initial, continuation} = visit;
+    const {initial, continuation, preview} = visit;
     visit = null;
     closeDialog({restore});
-    if (proceed) finish({initial, saved, continuation});
+    if (proceed && !preview) finish({initial, saved, continuation});
   }
 
   function setBusy(busy) {
     for (const field of [...fields, node("save"), node("reset"), node("later"), node("close")]) field.disabled = busy;
     form.setAttribute("aria-busy", String(busy));
+  }
+
+  function updateHelp() {
+    for (const [id, choice] of [["quiet", "edging"], ["edging", "yes"]]) {
+      const field = node(id);
+      const help = node(`${id}-help`);
+      help.hidden = field.value !== choice;
+      if (help.hidden) field.removeAttribute("aria-describedby");
+      else field.setAttribute("aria-describedby", help.id);
+    }
   }
 
   function fill(values) {
@@ -27,18 +37,25 @@ export function mountExperienceDialog({document, openDialog, closeDialog, save, 
     maximum.value = String(values.maximum);
     rhythm.value = values.rhythm;
     node("maximum-value").textContent = maximum.value;
+    updateHelp();
   }
 
-  function open({values, account = false, initial = false, continuation = null, opener, canStop = false}) {
+  function open({values, account = false, initial = false, preview = false, continuation = null, opener, canStop = false}) {
     if (visit) return false;
-    visit = {initial, continuation, reset: false};
+    visit = {initial, preview, continuation, reset: false};
+    const onboarding = initial || preview;
     fill(values);
-    node("heading").textContent = initial ? "How should your toy feel?" : "Device preferences";
-    node("intro").textContent = account ? "These choices are saved to your account. You can change them in Settings whenever you like." :
+    node("heading").textContent = onboarding ? "How should your toy feel?" : "Device preferences";
+    node("intro").textContent = preview ? "Try the same questions a new reader sees." :
+      account ? "These choices are saved to your account. Change them anytime in Settings." :
       "These choices apply for this visit.";
-    node("save").textContent = initial ? "Save and continue" : "Save preferences";
-    node("later").textContent = initial ? "Not now" : "Cancel";
-    node("reset").hidden = initial;
+    node("preview-note").hidden = !preview;
+    node("questions").hidden = false;
+    node("next").hidden = !onboarding || Boolean(continuation);
+    node("save").hidden = false;
+    node("save").textContent = onboarding ? "Save and continue" : "Save preferences";
+    node("later").textContent = onboarding ? "Not now" : "Cancel";
+    node("reset").hidden = onboarding;
     node("stop").hidden = !canStop;
     node("status").textContent = "";
     setBusy(false);
@@ -47,6 +64,7 @@ export function mountExperienceDialog({document, openDialog, closeDialog, save, 
     return true;
   }
 
+  for (const id of ["quiet", "edging"]) node(id).addEventListener("change", updateHelp);
   node("maximum").addEventListener("input", () => { node("maximum-value").textContent = node("maximum").value; });
   node("reset").addEventListener("click", () => {
     if (!visit || node("save").disabled) return;
@@ -63,13 +81,22 @@ export function mountExperienceDialog({document, openDialog, closeDialog, save, 
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const active = visit;
-    if (!active || node("save").disabled) return;
+    if (!active || node("save").disabled || node("save").hidden) return;
+    if (active.preview) {
+      node("heading").textContent = "Onboarding preview complete";
+      node("intro").textContent = "In first-time setup, the next step offers a real toy connection or a simulator for a quick test.";
+      node("questions").hidden = true;
+      node("save").hidden = true;
+      node("later").textContent = "Back to Settings";
+      node("later").focus({preventScroll: true});
+      return;
+    }
     const [quiet, edging, maximum, rhythm] = fields.map(field => field.value);
     setBusy(true);
     node("status").textContent = "Saving your preferences…";
     try {
       if (await save({quiet, edging: edging === "yes", maximum: Number(maximum), rhythm,
-        ...(active.reset ? {peakPattern: DEFAULT_EXPERIENCE.peakPattern} : {})})) {
+        ...(active.reset ? {edgePattern: "auto", peakPattern: DEFAULT_EXPERIENCE.peakPattern} : {})})) {
         if (visit === active) close({proceed: true, saved: true});
         return;
       }

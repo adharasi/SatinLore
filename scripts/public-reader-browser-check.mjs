@@ -217,6 +217,9 @@ try {
   await expect(page.locator("#nocturne-peak-pattern")).toHaveValue("auto");
   await page.locator("#nocturne-peak-pattern").selectOption("accents");
   await expect.poll(() => desktop.account.preferences?.experience?.peakPattern).toBe("accents");
+  await expect(page.locator("#nocturne-edge-pattern")).toHaveValue("auto");
+  await page.locator("#nocturne-edge-pattern").selectOption("off");
+  await expect.poll(() => desktop.account.preferences?.experience?.edgePattern).toBe("off");
   await page.locator("#settings-reader-tab").click();
   await expect(page.locator("#feel-mode")).toHaveValue("continuous");
   await expect(page.locator("#public-account")).toHaveAccessibleName("Account, signed in");
@@ -290,7 +293,22 @@ try {
   await expect(second.page.locator("#font-size")).toHaveValue("large");
   await expect(second.page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(second.page.locator("#experience-dialog")).toBeHidden();
+  await expect(second.page.locator("#nocturne-edge-pattern")).toHaveValue("off");
   await second.page.locator("#open-app-settings").click();
+  const preview = second.page.getByRole("button", {name: "Preview onboarding"});
+  const savedExperience = {...second.account.preferences.experience};
+  await preview.click();
+  await expect(second.page.getByRole("heading", {name: "How should your toy feel?"})).toBeVisible();
+  await expect(second.page.locator("#experience-maximum")).toHaveValue("10");
+  await expect(second.page.locator("#experience-quiet-help")).toBeHidden();
+  await second.page.locator("#experience-quiet").selectOption("edging");
+  await expect(second.page.locator("#experience-quiet-help")).toBeVisible();
+  await second.page.locator("#experience-save").click();
+  await expect(second.page.getByRole("heading", {name: "Onboarding preview complete"})).toBeVisible();
+  await expect(second.page.locator("#setup-dialog")).toBeHidden();
+  assert.deepEqual(second.account.preferences.experience, savedExperience, "The onboarding preview does not write account preferences.");
+  await second.page.getByRole("button", {name: "Back to Settings"}).click();
+  await expect(preview).toBeFocused();
   await second.page.locator("#open-experience").click();
   await expect(second.page.locator("#experience-dialog")).toBeVisible();
   await expect(second.page.locator("#experience-quiet")).toHaveValue("continuous");
@@ -303,7 +321,7 @@ try {
   await expect(second.page.locator("#experience-dialog")).toBeHidden();
   await expect(second.page.locator("#setup-dialog")).toBeHidden();
   await expect.poll(() => second.account.preferences?.experience).toEqual({
-    quiet: "edging", edging: true, maximum: 7, rhythm: "steady", peakPattern: "accents",
+    quiet: "edging", edging: true, maximum: 7, rhythm: "steady", peakPattern: "accents", edgePattern: "off",
   });
   if (await second.page.locator("#app-settings-dialog").isVisible()) await second.page.locator("#close-app-settings").click();
   const sibling = await second.context.newPage();

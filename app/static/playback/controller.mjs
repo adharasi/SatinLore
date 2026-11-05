@@ -192,8 +192,10 @@ export class PlaybackController {
     if (seeking) this.seekStartPosition = this.position;
     else if (this.state === "PLAYING") {
       const profile = this.sceneProfiles[this.position];
-      const sameStage = this.position === this.seekStartPosition && !profile?.manual && !!sceneStagePatternLabel(profile?.phase);
-      this.feel.reanchor(this.now(), undefined, sameStage, !!profile?.peakPreset);
+      const advancedStage = Boolean(profile?.peakPreset || profile?.automaticPeak || profile?.edging);
+      const sameStage = this.position === this.seekStartPosition && !profile?.manual &&
+        (advancedStage || Boolean(sceneStagePatternLabel(profile?.phase, profile?.pattern)));
+      this.feel.reanchor(this.now(), undefined, sameStage, advancedStage);
     }
     return this._desiredChanged();
   }
