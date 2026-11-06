@@ -296,7 +296,9 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <p>Compare the joint-label Decisions prompt with a version that evaluates boundaries separately. Choose the prepared calibration or holdout JSON. The run sends only the approved story sentences to OpenAI and returns aggregate metrics.</p>
 <form method="post" enctype="multipart/form-data"><label for="study-payload">Prepared story study JSON</label>
 <input id="study-payload" name="payload" type="file" accept=".json,application/json" required>
-<button>Run story comparison</button></form></main></html>`;
+<button>Run story comparison</button>
+<button name="mode" value="grounded-calibration">Retest grounded candidate on calibration</button>
+<button name="mode" value="grounded">Run grounded candidate comparison</button></form></main></html>`;
 
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -316,6 +318,8 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   const readSignal = AbortSignal.any([signal, AbortSignal.timeout(4000)]);
   let payload;
   let jointRetest = false;
+  let groundedCandidate = false;
+  let candidateOnly = false;
   try {
     if (storyStudy && !corpus) throw new TypeError("Invalid study form.");
     if (corpus) {
@@ -323,11 +327,14 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
       const form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
       const file = form.get("payload");
       const mode = form.get("mode");
-      if ((mode !== null && (mode !== "joint" || storyStudy)) || [...form.keys()].length !== (mode === null ? 1 : 2) ||
+      const modes = storyStudy ? [null, "grounded", "grounded-calibration"] : [null, "joint"];
+      if (!modes.includes(mode) || [...form.keys()].length !== (mode === null ? 1 : 2) ||
           !(file instanceof File)) throw new TypeError("Invalid corpus form.");
       jointRetest = mode === "joint";
+      candidateOnly = mode === "grounded-calibration";
+      groundedCandidate = candidateOnly || mode === "grounded";
       payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()));
-      if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS);
+      if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS, { candidateOnly });
       else await validateDecisionsCorpusPayload(payload);
     } else {
       const body = await readBoundedText(request, 64, readSignal, "application/x-www-form-urlencoded");
@@ -353,7 +360,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
   try {
     const run = storyStudy ? runDecisionsStoryStudy : corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
-    const result = await run({ key, payload, jointRetest, pins: DECISIONS_STORY_STUDY_PINS,
+    const result = await run({ key, payload, jointRetest, groundedCandidate, candidateOnly, pins: DECISIONS_STORY_STUDY_PINS,
       signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
       if (!await authorized()) deny(expired());
       options.signal.throwIfAborted();

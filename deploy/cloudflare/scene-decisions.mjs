@@ -56,6 +56,8 @@ const jointLabels = new Map([
 const jointChoices = [...jointLabels.keys(), "uncertain"].map(value => ({value}));
 const jointCueChoices = jointChoices.filter(({value}) => value !== "boundary");
 const boundaryChoices = ["boundary", "no-boundary", "uncertain"].map(value => ({value}));
+const groundedBoundaryChoices = ["ends-beat", "returns-to-present", "no-boundary", "uncertain"].map(value => ({value}));
+const noncurrentFrames = new Set(["reported", "imagined", "historical"]);
 const definitions = entries => entries.map(([value, description]) => `${value}: ${description}`).join(" ");
 const jointDefinitions = [
   `Active phases. ${definitions(Object.keys(emphasisForPhase).map(phase => [phase, rubrics.phase.values[phase]]))}`,
@@ -73,6 +75,11 @@ const separateBoundaryInstructions = [instructions,
   "Boundary question. Decide independently whether this sentence marks a clear scene cut, an interruption or withdrawal that ends an established beat, a definite time jump, or an explicit shift out of or return from a reported, imagined or historical frame. Mark the transition sentence itself. An atmospheric pause, incidental action or minor pacing change within the same beat is no-boundary. Use uncertain when the transition cannot be established.",
   ...jointDefinitions,
 ].join("\n");
+const groundedBoundaryInstructions = [instructions,
+  "Cue question. Label the exact present sentence that invites or reciprocates clearly romantic interest, advances a mutual affectionate action, or explicitly eases an established romantic beat. A meaningful reply, gesture or invitation can be supported by directly adjacent confirmation even if the target comes first. Enacted dialogue can invite a future meeting. A simile, negative phrasing or brief memory does not make an enacted main clause noncurrent. Do not label an entire exchange as active. Practical care, occupational contact, ordinary kindness and routine activity after a stop are quiet. An explicit stop or external redirect is quiet even if it mentions the preceding closeness. Only a fresh reciprocal action can resume a stopped beat. A narrated past tense can be current. A character's report, fantasy or enacted flashback is quiet in its own frame. When present actors resume real action after a story within the story, classify their new action in the present frame. Use uncertain when support or framing is unresolved.",
+  "Boundary question. Use ends-beat only for the first actual interruption, withdrawal or decisive cut that ends a specific nearby established relationship beat. An unrelated sound, a clock or time marker alone, a pause, a plan to stop, routine task completion, or the partner's later confirmation of a stop is no-boundary. Use returns-to-present only for the first sentence that explicitly resumes the immediate scene after a distinct imagined, reported or remembered event. Do not mark entering the noncurrent frame. Require evidence in the same story, never across an ID gap. If you cannot identify the preceding beat or frame that ends, use no-boundary or uncertain.",
+  ...jointDefinitions,
+].join("\n");
 const validCount = value => Number.isSafeInteger(value) && value >= 0;
 const probability = value => Number.isFinite(value) && value >= 0 && value <= 1;
 
@@ -88,11 +95,12 @@ function selectApprovedUnits(units, approvedIds) {
   return selected.map(unit => ({...unit}));
 }
 
-function makeRequest(source, targets, joint, separateBoundary) {
+function makeRequest(source, targets, joint, separateBoundary, groundedBoundary) {
   const questions = joint ? targets.flatMap(({id}) => {
     if (separateBoundary) return [
       {type: "choice", name: `u${id}-joint`, instructions: `Classify the cue or quiet frame of source unit ${id}.`, choices: jointCueChoices},
-      {type: "choice", name: `u${id}-boundary`, instructions: `Does source unit ${id} itself mark a boundary?`, choices: boundaryChoices},
+      {type: "choice", name: `u${id}-boundary`, instructions: `Does source unit ${id} itself mark a boundary?`,
+        choices: groundedBoundary ? groundedBoundaryChoices : boundaryChoices},
     ];
     return [{type: "choice", name: `u${id}-joint`,
       instructions: `Classify source unit ${id} using the shared rubric.`, choices: jointChoices}];
@@ -105,7 +113,8 @@ function makeRequest(source, targets, joint, separateBoundary) {
   return {
     model: MODEL,
     input: [
-      {type: "message", role: "developer", content: separateBoundary ? separateBoundaryInstructions : joint ? jointInstructions : instructions},
+      {type: "message", role: "developer", content: groundedBoundary ? groundedBoundaryInstructions :
+        separateBoundary ? separateBoundaryInstructions : joint ? jointInstructions : instructions},
       {type: "message", role: "user", content: [{type: "input_json", data: {units: source}}]},
     ],
     questions,
@@ -230,7 +239,18 @@ function recordJointAnswers(batch, answers, labels, trace) {
   }
 }
 
-function recordSeparateBoundaryAnswers(batch, answers, labels, trace, boundaryIds) {
+function corroboratesBoundary(id, reason, labels) {
+  const returning = reason === "returns-to-present";
+  if (returning && noncurrentFrames.has(labels.get(id)?.frame)) return false;
+  for (let previous = id - 1; previous >= 0 && previous >= id - 4; previous--) {
+    const prior = labels.get(previous);
+    if (!prior || prior.phase === "boundary") break;
+    if (returning ? noncurrentFrames.has(prior.frame) : Object.hasOwn(emphasisForPhase, prior.phase)) return true;
+  }
+  return false;
+}
+
+function recordSeparateBoundaryAnswers(batch, answers, labels, trace, boundaryIds, groundedBoundary) {
   recordJointAnswers(batch, answers.filter((_, index) => index % 2 === 0), labels, trace);
   for (const [index, {id}] of batch.entries()) {
     const answer = answers[index * 2 + 1];
@@ -238,11 +258,12 @@ function recordSeparateBoundaryAnswers(batch, answers, labels, trace, boundaryId
     trace.answeredQuestions++;
     trace.boundaryAnsweredQuestions++;
     if (answer === "uncertain") { trace.boundaryUncertainUnits++; continue; }
-    if (answer !== "boundary") continue;
+    if (answer === "no-boundary") continue;
     boundaryIds.push(id);
     const cue = labels.get(id);
     if (cue && cue.phase !== "quiet") { trace.boundaryConflicts++; continue; }
     if (answers[index * 2] === null) continue;
+    if (groundedBoundary && !corroboratesBoundary(id, answer, labels)) { trace.boundaryUncorroboratedUnits++; continue; }
     labels.set(id, {frame: cue?.frame ?? "current", phase: "boundary", category: "neutral"});
     trace.appliedBoundaryUnits++;
   }
@@ -268,9 +289,11 @@ function assembleMap(selected, labels) {
 }
 
 /** Evaluate explicitly approved units. The caller owns authorization and transport. */
-export async function analyzeNocturneDecisions({units, approvedIds, provider, signal, joint = false, separateBoundary = false} = {}) {
+export async function analyzeNocturneDecisions({units, approvedIds, provider, signal, joint = false, separateBoundary = false,
+  groundedBoundary = false} = {}) {
   if (typeof provider !== "function" || typeof joint !== "boolean" || typeof separateBoundary !== "boolean" ||
-      separateBoundary && !joint || (signal !== undefined && !(signal instanceof AbortSignal))) {
+      typeof groundedBoundary !== "boolean" || groundedBoundary && !separateBoundary || separateBoundary && !joint ||
+      (signal !== undefined && !(signal instanceof AbortSignal))) {
     throw new TypeError("Provide the Decisions provider and options.");
   }
   const selected = selectApprovedUnits(units, approvedIds);
@@ -284,6 +307,7 @@ export async function analyzeNocturneDecisions({units, approvedIds, provider, si
   const boundaryIds = [];
   if (separateBoundary) Object.assign(trace, {boundaryConflicts: 0, boundaryAnsweredQuestions: 0, boundaryRefusedQuestions: 0,
     boundaryUncertainUnits: 0, appliedBoundaryUnits: 0});
+  if (groundedBoundary) trace.boundaryUncorroboratedUnits = 0;
   if (signal?.aborted || !selected.length) {
     if (signal?.aborted) trace.status = "aborted";
     return empty;
@@ -294,7 +318,7 @@ export async function analyzeNocturneDecisions({units, approvedIds, provider, si
   const record = separateBoundary ? recordSeparateBoundaryAnswers : joint ? recordJointAnswers : recordAnswers;
   for (let start = 0; start < targets.length; start += DECISIONS_TARGETS_PER_CALL) {
     const batch = targets.slice(start, start + DECISIONS_TARGETS_PER_CALL);
-    const request = makeRequest(source, batch, joint, separateBoundary);
+    const request = makeRequest(source, batch, joint, separateBoundary, groundedBoundary);
     if (encoder.encode(JSON.stringify(request)).byteLength > MAX_WIRE_BYTES) {
       trace.status = "input_limit";
       return empty;
@@ -304,7 +328,7 @@ export async function analyzeNocturneDecisions({units, approvedIds, provider, si
       trace.status = "aborted";
       return empty;
     }
-    if (answers) record(batch, answers, labels, trace, boundaryIds);
+    if (answers) record(batch, answers, labels, trace, boundaryIds, groundedBoundary);
     else {
       // A failed request may indicate an upstream outage. Preserve preceding
       // validated batches and leave subsequent units without automatic labels.

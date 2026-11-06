@@ -151,7 +151,7 @@ The same upload offers a **Run joint-label Decisions retest** action. It runs on
 
 ### Run the founder story study
 
-Open `/api/scene-analysis/decisions-story-study` on the signed-in app origin. Submit the prepared calibration JSON from the 20-story evaluation bundle first. Freeze the candidate before submitting the holdout JSON. The same approved sentences go to both Decisions prompts in bounded batches with gaps between stories. Every uploaded story must match its approved digest. Results contain scores and provider usage without source sentences.
+Open `/api/scene-analysis/decisions-story-study` on the signed-in app origin. Submit the prepared calibration JSON from the 20-story evaluation bundle first. The grounded candidate supports a candidate-only calibration retest and a matched comparison with v2. Freeze the candidate before submitting the holdout JSON. The same approved sentences go to both prompts in matched runs, with gaps between stories. Every uploaded story must match its approved digest. Results contain scores and provider usage without source sentences.
 
 This fixed suite has a founder-only allowance of 20 calls per UTC day. It uses the same deployment-wide daily and monthly counters. The reader and the earlier benchmark keep their ordinary per-reader limit. A study call still needs a signed founder session, exact origin and a validated upload. The study is separate from reader playback.
 

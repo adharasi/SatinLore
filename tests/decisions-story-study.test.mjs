@@ -111,3 +111,48 @@ test("story study rejects text or order changes before calling either prompt", a
   }
   assert.equal(calls, 0);
 });
+
+test("grounded retest spends one call per calibration batch and keeps holdout matched", async () => {
+  const held = makeStory("held", ["They drew together.", "The bell ended the moment."], [0], [1]);
+  const options = await fixtures([makeStory("first", [sentence, "The alarm interrupted them."], [0], [1])], [held]);
+  const holdout = {version, split: "holdout", stories: [{id: held.id, units: held.units}]};
+  const calls = [];
+  const analysisFetcher = (_, init) => {
+    const {input, questions} = JSON.parse(init.body);
+    const candidate = questions.some(question => question.name.endsWith("-boundary"));
+    calls.push({candidate, units: input[1].content[0].data.units});
+    const answers = questions.map(question => {
+      if (question.name.endsWith("-boundary")) {
+        assert.deepEqual(question.choices.map(choice => choice.value), ["ends-beat", "returns-to-present", "no-boundary", "uncertain"]);
+        return answer(question, question.name.startsWith("u1-") ? "ends-beat" : "no-boundary");
+      }
+      return answer(question, question.name.startsWith("u0-") ? "build-romance" : "quiet-current");
+    });
+    return Response.json({model: "gpt-6-luna", answers});
+  };
+
+  await assert.rejects(runDecisionsStoryStudy({key, ...options, analysisFetcher, candidateOnly: true}), TypeError);
+  await assert.rejects(runDecisionsStoryStudy({key, ...options, payload: holdout, analysisFetcher,
+    groundedCandidate: true, candidateOnly: true}), TypeError);
+  assert.equal(calls.length, 0);
+  const planned = await validateStoryStudyPayload(options.payload, options.pins, {candidateOnly: true});
+  assert.equal(planned.plannedProviderCalls, 1);
+  const retest = await runDecisionsStoryStudy({key, ...options, analysisFetcher, groundedCandidate: true, candidateOnly: true});
+  assert.deepEqual(retest.prompts, {candidate: "joint-label-v4-grounded-boundary"});
+  assert.deepEqual(Object.keys(retest.totals), ["candidate"]);
+  assert.equal(retest.totals.candidate.parsedCalls, 1);
+  assert.equal(retest.totals.candidate.independentBoundaryVotes.found, 1);
+  assert.equal(retest.stories[0].baseline, undefined);
+  assert.equal(retest.batches[0].baseline, undefined);
+  assert.equal(calls[0].units[0].text, sentence);
+  assert.equal(calls.length, 1);
+
+  const matched = await runDecisionsStoryStudy({key, ...options, payload: holdout, analysisFetcher, groundedCandidate: true});
+  assert.deepEqual(matched.prompts, {baseline: "joint-label-v2", candidate: "joint-label-v4-grounded-boundary"});
+  assert.equal(matched.plannedProviderCalls, 2);
+  assert.equal(matched.totals.baseline.parsedCalls, 1);
+  assert.equal(matched.totals.candidate.parsedCalls, 1);
+  assert.deepEqual(calls.map(call => call.candidate), [true, false, true]);
+  assert.deepEqual(calls[1].units, calls[2].units);
+  assert.equal(calls[1].units[0].text, held.units[0].text);
+});

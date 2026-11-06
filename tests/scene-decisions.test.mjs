@@ -156,6 +156,27 @@ test("separate boundary mode rejects reversed, missing and invalid cue answers",
   }
 });
 
+test("grounded boundary decisions require nearby prior evidence and stop at an applied boundary or gap", async () => {
+  const units = buildSceneUnits(["The bell sounded.", "He accepted the invitation.", "A visitor interrupted them.",
+    "They moved away.", "She remembered his words.", "She turned back to him.", "He asked her to stay.",
+    "Private excluded text.", "The weather changed."]);
+  const result = await analyzeNocturneDecisions({units, approvedIds: [0, 1, 2, 3, 4, 5, 6, 8], joint: true,
+    separateBoundary: true, groundedBoundary: true, provider: async request => {
+      assert.deepEqual(request.questions[1].choices.map(({value}) => value),
+        ["ends-beat", "returns-to-present", "no-boundary", "uncertain"]);
+      const choices = ["quiet-current", "ends-beat", "build-romance", "no-boundary", "quiet-current", "ends-beat",
+        "quiet-current", "ends-beat", "quiet-historical", "no-boundary", "quiet-current", "returns-to-present",
+        "build-romance", "ends-beat", "quiet-neutral", "ends-beat"];
+      return Response.json({model: "gpt-6-luna", usage,
+        answers: request.questions.map(({name}, index) => answer(name, choices[index]))});
+    }});
+  assert.deepEqual(result.boundaryIds, [0, 2, 3, 5, 6, 8]);
+  assert.equal(result.trace.boundaryUncorroboratedUnits, 3);
+  assert.equal(result.trace.boundaryConflicts, 1);
+  assert.equal(result.trace.appliedBoundaryUnits, 2);
+  assert.deepEqual(compileSceneMap(result.accepted, units).filter(row => row.boundary).map(row => row.id), [2, 5]);
+});
+
 test("Decisions rejects missing, reordered, out-of-domain and invalid probability answers", async () => {
   const units = buildSceneUnits(["The group returned."]);
   for (const mutate of [
