@@ -6,7 +6,8 @@ import {
 } from "../../app/static/reader/nocturne-context-contract.mjs";
 import { runDecisionsBenchmark } from "./decisions-benchmark.mjs";
 import { runDecisionsCorpusBenchmark, validateDecisionsCorpusPayload } from "./decisions-corpus-benchmark.mjs";
-import { runDecisionsStoryStudy, STORY_STUDY_MAX_TOTAL_REQUESTS, validateStoryStudyPayload } from "./decisions-story-study.mjs";
+import { CUE_CONTINUITY_STUDY_REQUESTS, CUE_CONTINUITY_STUDY_SUITE, runDecisionsStoryStudy,
+  STORY_STUDY_MAX_TOTAL_REQUESTS, validateStoryStudyPayload } from "./decisions-story-study.mjs";
 import { DECISIONS_STORY_STUDY_PINS } from "./decisions-story-study-pins.mjs";
 import { runDecisionsTransitionStudy } from "./decisions-transition-study.mjs";
 
@@ -261,13 +262,13 @@ function checkedContext(response, { version, paragraphs }, session) {
   } : null };
 }
 
-async function reserveBudget(namespace, config, session, storyStudy = false) {
+async function reserveBudget(namespace, config, session, suite) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:scene-budget:v1:${config.issuer}:${session.subject}`));
   const reader = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   const stub = namespace.get(namespace.idFromName("scene-analysis:v1"));
   return stub.fetch(new Request(BUDGET_URL, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reader, ...(storyStudy ? { suite: DECISIONS_STORY_STUDY_PINS.version } : {}) }),
+    body: JSON.stringify({ reader, ...(suite ? { suite } : {}) }),
   }));
 }
 
@@ -302,7 +303,8 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <button name="mode" value="grounded">Run grounded candidate comparison</button>
 <button name="mode" value="transitions">Run dedicated transition test</button>
 <button name="mode" value="transitions-state">Run transition state-check candidate</button>
-<p>Each dedicated test uses one API request for the selected split and scores transitions only.</p></form></main></html>`;
+<button name="mode" value="cue-continuity">Compare cue continuity on calibration</button>
+<p>Each dedicated transition test uses one API request for the selected split. The cue continuity comparison uses two requests on the first approved calibration batch, with one comparison allowed per UTC day.</p></form></main></html>`;
 
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -326,6 +328,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   let candidateOnly = false;
   let transitionOnly = false;
   let requireStateEvidence = false;
+  let cueContinuity = false;
   try {
     if (storyStudy && !corpus) throw new TypeError("Invalid study form.");
     if (corpus) {
@@ -333,7 +336,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
       const form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
       const file = form.get("payload");
       const mode = form.get("mode");
-      const modes = storyStudy ? [null, "grounded", "grounded-calibration", "transitions", "transitions-state"] : [null, "joint"];
+      const modes = storyStudy ? [null, "grounded", "grounded-calibration", "transitions", "transitions-state", "cue-continuity"] : [null, "joint"];
       if (!modes.includes(mode) || [...form.keys()].length !== (mode === null ? 1 : 2) ||
           !(file instanceof File)) throw new TypeError("Invalid corpus form.");
       jointRetest = mode === "joint";
@@ -341,8 +344,9 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
       groundedCandidate = candidateOnly || mode === "grounded";
       requireStateEvidence = mode === "transitions-state";
       transitionOnly = mode === "transitions" || requireStateEvidence;
+      cueContinuity = mode === "cue-continuity";
       payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()));
-      if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS, { candidateOnly });
+      if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS, { candidateOnly, cueContinuity });
       else await validateDecisionsCorpusPayload(payload);
     } else {
       const body = await readBoundedText(request, 64, readSignal, "application/x-www-form-urlencoded");
@@ -366,18 +370,24 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   let blocked;
   const deny = response => { blocked = response; stop.abort(); throw new Error("Benchmark blocked."); };
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
+  const suite = cueContinuity ? CUE_CONTINUITY_STUDY_SUITE : storyStudy ? DECISIONS_STORY_STUDY_PINS.version : undefined;
+  let pairReserved = false;
   try {
     const run = transitionOnly ? runDecisionsTransitionStudy : storyStudy ? runDecisionsStoryStudy :
       corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
-    const result = await run({ key, payload, jointRetest, groundedCandidate, candidateOnly, requireStateEvidence, pins: DECISIONS_STORY_STUDY_PINS,
+    const result = await run({ key, payload, jointRetest, groundedCandidate, candidateOnly, requireStateEvidence, cueContinuity,
+      pins: DECISIONS_STORY_STUDY_PINS,
       signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
       if (!await authorized()) deny(expired());
       options.signal.throwIfAborted();
-      let permission;
-      try { permission = await reserveBudget(budget, config, session, storyStudy); }
-      catch { deny(providerUnavailable(session, "budget_unavailable")); }
-      if (permission.status === 429) deny(budgetLimited(permission));
-      if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
+      if (!pairReserved) {
+        let permission;
+        try { permission = await reserveBudget(budget, config, session, suite); }
+        catch { deny(providerUnavailable(session, "budget_unavailable")); }
+        if (permission.status === 429) deny(budgetLimited(permission));
+        if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
+        pairReserved = cueContinuity;
+      }
       if (Date.now() >= session.expiresAt || request.signal.aborted) deny(expired());
       options.signal.throwIfAborted();
       return analysisFetcher(url, options);
@@ -472,8 +482,10 @@ export class SceneAnalysisBudget {
     if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
     try {
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
-      const storyStudy = exactObject(value, ["reader", "suite"]) && value.suite === DECISIONS_STORY_STUDY_PINS.version;
-      if ((!storyStudy && !exactObject(value, ["reader"])) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) {
+      const suite = exactObject(value, ["reader", "suite"]) ? value.suite : null;
+      const storyStudy = suite === DECISIONS_STORY_STUDY_PINS.version;
+      const paired = suite === CUE_CONTINUITY_STUDY_SUITE;
+      if ((!storyStudy && !paired && !exactObject(value, ["reader"])) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) {
         return new Response(null, { status: 400 });
       }
       const now = Date.now();
@@ -481,16 +493,20 @@ export class SceneAnalysisBudget {
       const dayEnds = (Math.floor(now / DAY) + 1) * DAY;
       const monthEnds = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
       const windows = [
-        storyStudy ? { key: `study:${value.suite}`, expires: dayEnds, limit: STORY_STUDY_MAX_TOTAL_REQUESTS } :
+        paired ? { key: `study:${suite}`, expires: dayEnds, limit: CUE_CONTINUITY_STUDY_REQUESTS } :
+          storyStudy ? { key: `study:${suite}`, expires: dayEnds, limit: STORY_STUDY_MAX_TOTAL_REQUESTS } :
           { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 },
         { key: "global-day", expires: dayEnds, limit: 100 },
         { key: "global-month", expires: monthEnds, limit: 1000 },
       ];
+      const attempts = paired ? CUE_CONTINUITY_STUDY_REQUESTS : 1;
       const retryAt = this.storage.transactionSync(() => {
         this.sql.exec("DELETE FROM quota WHERE expires_at<=?", now);
-        const limited = windows.filter(({ key, limit }) => (this.sql.exec("SELECT count FROM quota WHERE key=?", key).toArray()[0]?.count ?? 0) >= limit);
+        const limited = windows.filter(({ key, limit }) =>
+          (this.sql.exec("SELECT count FROM quota WHERE key=?", key).toArray()[0]?.count ?? 0) + attempts > limit);
         if (limited.length) return Math.max(...limited.map(window => window.expires));
-        for (const { key, expires } of windows) this.sql.exec("INSERT INTO quota(key,expires_at,count) VALUES(?,?,1) ON CONFLICT(key) DO UPDATE SET count=count+1", key, expires);
+        for (const { key, expires } of windows) this.sql.exec("INSERT INTO quota(key,expires_at,count) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET count=count+excluded.count",
+          key, expires, attempts);
         return 0;
       });
       await this.scheduleExpiry();

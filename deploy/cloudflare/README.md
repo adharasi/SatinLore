@@ -159,6 +159,8 @@ Open `/api/scene-analysis/decisions-story-study` on the signed-in app origin. Su
 
 This fixed suite has a founder-only allowance of 20 calls per UTC day. It uses the same deployment-wide daily and monthly counters. The reader and the earlier benchmark keep their ordinary per-reader limit. A study call still needs a signed founder session, exact origin and a validated upload. The study is separate from reader playback.
 
+**Compare cue continuity on calibration** validates the same pinned calibration upload and uses the first fixed batch only. The two arms use the same source units, labels and boundary question. The candidate tests whether a sentence materially sustains an already grounded active beat without a new escalation. Routine text remains quiet, and unclear age, mutuality, framing, a stop or a change in scope prevents cue carryover. The Worker reserves both calls together, allows one comparison per UTC day and counts both reservations against the same global spending limits. This small original-story batch is a prompt smoke test. Graphic coverage needs its own approved fixtures and rubric.
+
 ## Enable real Lovense pairing for the beta
 
 The simulator path is usable immediately. The real path deliberately reports unavailable until all three runtime settings below are valid. Never put these values into GitHub, build variables, browser code, feedback or chat.

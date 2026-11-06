@@ -156,3 +156,42 @@ test("grounded retest spends one call per calibration batch and keeps holdout ma
   assert.deepEqual(calls[1].units, calls[2].units);
   assert.equal(calls[1].units[0].text, held.units[0].text);
 });
+
+test("cue continuity compares only the first pinned calibration batch with identical source and questions", async () => {
+  const first = makeStory("first", ["The adults shared a mutual moment.", "They held their embrace.",
+    "The alarm made them pull apart.", ...Array(23).fill(sentence)], [0, 1], [2]);
+  const second = makeStory("second", Array(22).fill(sentence));
+  const later = makeStory("later", Array(23).fill("Only a later calibration batch contains this."));
+  const held = makeStory("held", ["Held-out text."]);
+  const options = await fixtures([first, second, later], [held]);
+  const holdout = {version, split: "holdout", stories: [{id: held.id, units: held.units}]};
+  const calls = [];
+  const analysisFetcher = (_, init) => {
+    const {input, questions} = JSON.parse(init.body);
+    const candidate = /without a new act/u.test(input[0].content);
+    calls.push({input, questions, candidate});
+    const answers = questions.map(question => answer(question, question.name.endsWith("-boundary") ?
+      question.name === "u2-boundary" ? "ends-beat" : "no-boundary" :
+      question.name === "u0-joint" || candidate && question.name === "u1-joint" ? "sustain-romance" : "quiet-current"));
+    return Response.json({model: "gpt-6-luna", answers});
+  };
+
+  const changed = structuredClone(options.payload);
+  changed.stories[2].units[0].text = "Unapproved text.";
+  for (const payload of [holdout, changed]) {
+    await assert.rejects(runDecisionsStoryStudy({key, ...options, payload, analysisFetcher, cueContinuity: true}), TypeError);
+  }
+  assert.equal(calls.length, 0);
+  const result = await runDecisionsStoryStudy({key, ...options, analysisFetcher, cueContinuity: true});
+  assert.deepEqual(result.prompts, {baseline: "joint-label-v4-grounded-boundary", candidate: "joint-label-v5-cue-continuity"});
+  assert.equal(result.plannedProviderCalls, 2);
+  assert.deepEqual(result.stories.map(story => story.story), ["first", "second"]);
+  assert.deepEqual(calls.map(call => call.candidate), [false, true]);
+  assert.deepEqual(calls[0].input[1], calls[1].input[1]);
+  assert.deepEqual(calls[0].questions, calls[1].questions);
+  assert.match(calls[1].input[0].content, /does not establish adulthood, consent, current frame or phase/u);
+  assert.doesNotMatch(JSON.stringify(calls), /Only a later calibration batch|Held-out text/u);
+  assert.equal(result.totals.baseline.sentenceCues.found, 1);
+  assert.equal(result.totals.candidate.sentenceCues.found, 2);
+  assert.equal(result.totals.candidate.sentenceBoundaries.found, 1);
+});

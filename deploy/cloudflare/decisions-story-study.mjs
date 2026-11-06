@@ -4,6 +4,8 @@ import {analyzeNocturneDecisions, DECISIONS_TARGETS_PER_CALL} from "./scene-deci
 
 export const STORY_STUDY_MAX_REQUESTS = 12;
 export const STORY_STUDY_MAX_TOTAL_REQUESTS = 20;
+export const CUE_CONTINUITY_STUDY_SUITE = "nocturne-cue-continuity-pair";
+export const CUE_CONTINUITY_STUDY_REQUESTS = 2;
 
 const DECISIONS_URL = "https://api.openai.com/v1/decisions";
 const MAX_BATCH_SOURCE_BYTES = 32_000;
@@ -67,12 +69,13 @@ function validatePins(pins) {
 }
 
 /** Check the complete pin plan and the submitted split before any provider calls. */
-export async function validateStoryStudyPayload(payload, pins, {candidateOnly = false} = {}) {
+export async function validateStoryStudyPayload(payload, pins, {candidateOnly = false, cueContinuity = false} = {}) {
   validatePins(pins);
   if (!exactFields(payload, ["version", "split", "stories"]) || payload.version !== pins.version ||
       !validId(payload.split) || !Object.hasOwn(pins, payload.split) || !Array.isArray(pins[payload.split]) ||
       !Array.isArray(payload.stories) || payload.stories.length !== pins[payload.split].length ||
-      typeof candidateOnly !== "boolean" || candidateOnly && payload.split !== "calibration") throw invalidPayload();
+      typeof candidateOnly !== "boolean" || typeof cueContinuity !== "boolean" || candidateOnly && cueContinuity ||
+      (candidateOnly || cueContinuity) && payload.split !== "calibration") throw invalidPayload();
   const stories = await Promise.all(pins[payload.split].map(async (pin, index) => {
     const story = payload.stories[index];
     if (!exactFields(story, ["id", "units"]) || story.id !== pin.id || !Array.isArray(story.units) ||
@@ -92,6 +95,8 @@ export async function validateStoryStudyPayload(payload, pins, {candidateOnly = 
       ({id, text, structuralBoundary})))).length;
     if (bytes > MAX_BATCH_SOURCE_BYTES || serialized > MAX_BATCH_SERIALIZED_SOURCE_BYTES) throw invalidPayload();
   }
+  if (cueContinuity) return {split: payload.split, stories: batches[0].stories,
+    plannedProviderCalls: CUE_CONTINUITY_STUDY_REQUESTS};
   return {split: payload.split, stories, plannedProviderCalls: batches.length * (candidateOnly ? 1 : arms.length)};
 }
 
@@ -176,13 +181,13 @@ function summarize(stories, batches, arm) {
 
 /** Score matched Decisions prompts or the grounded calibration retest without exposing provider bodies. */
 export async function runDecisionsStoryStudy({key, analysisFetcher = fetch, signal, payload, pins,
-  groundedCandidate = false, candidateOnly = false} = {}) {
+  groundedCandidate = false, candidateOnly = false, cueContinuity = false} = {}) {
   if (typeof key !== "string" || !/^sk-[A-Za-z0-9_-]{12,512}$/u.test(key) || key.startsWith("sk-admin-") ||
       typeof analysisFetcher !== "function" || (signal !== undefined && !(signal instanceof AbortSignal)) ||
       typeof groundedCandidate !== "boolean" || typeof candidateOnly !== "boolean" || candidateOnly && !groundedCandidate) {
     throw new TypeError("Invalid story study benchmark configuration.");
   }
-  const validated = await validateStoryStudyPayload(payload, pins, {candidateOnly});
+  const validated = await validateStoryStudyPayload(payload, pins, {candidateOnly, cueContinuity});
   const selectedArms = candidateOnly ? ["candidate"] : arms;
   let attempts = 0;
   const batches = [];
@@ -193,9 +198,10 @@ export async function runDecisionsStoryStudy({key, analysisFetcher = fetch, sign
     const approvedIds = units.map(unit => unit.id);
     const report = {stories: stories.map(({story}) => story.id)};
     for (const arm of index % 2 ? [...selectedArms].reverse() : selectedArms) {
-      const separateBoundary = arm === "candidate";
+      const separateBoundary = cueContinuity || arm === "candidate";
       const {accepted, trace, boundaryIds} = await analyzeNocturneDecisions({units, approvedIds, signal, joint: true, separateBoundary,
-        groundedBoundary: separateBoundary && groundedCandidate,
+        groundedBoundary: cueContinuity || separateBoundary && groundedCandidate,
+        cueContinuity: cueContinuity && arm === "candidate",
         provider: (request, options) => {
           options.signal.throwIfAborted();
           if (attempts >= validated.plannedProviderCalls) throw new RangeError("Story study request limit reached.");
@@ -214,8 +220,9 @@ export async function runDecisionsStoryStudy({key, analysisFetcher = fetch, sign
   }
   const stories = [...scored.values()];
   return {version: pins.version, split: validated.split, model: "gpt-6-luna", storyCount: stories.length,
-    prompts: {...(candidateOnly ? {} : {baseline: "joint-label-v2"}),
-      candidate: groundedCandidate ? "joint-label-v4-grounded-boundary" : "joint-label-v3-separate-boundary"},
+    prompts: cueContinuity ? {baseline: "joint-label-v4-grounded-boundary", candidate: "joint-label-v5-cue-continuity"} :
+      {...(candidateOnly ? {} : {baseline: "joint-label-v2"}),
+        candidate: groundedCandidate ? "joint-label-v4-grounded-boundary" : "joint-label-v3-separate-boundary"},
     aborted: signal?.aborted === true, plannedProviderCalls: validated.plannedProviderCalls, stories, batches,
     totals: Object.fromEntries(selectedArms.map(arm => [arm, summarize(stories, batches, arm)]))};
 }

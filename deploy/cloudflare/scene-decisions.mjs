@@ -75,11 +75,17 @@ const separateBoundaryInstructions = [instructions,
   "Boundary question. Decide independently whether this sentence marks a clear scene cut, an interruption or withdrawal that ends an established beat, a definite time jump, or an explicit shift out of or return from a reported, imagined or historical frame. Mark the transition sentence itself. An atmospheric pause, incidental action or minor pacing change within the same beat is no-boundary. Use uncertain when the transition cannot be established.",
   ...jointDefinitions,
 ].join("\n");
-const groundedBoundaryInstructions = [instructions,
-  "Cue question. Label the exact present sentence that invites or reciprocates clearly romantic interest, advances a mutual affectionate action, or explicitly eases an established romantic beat. A meaningful reply, gesture or invitation can be supported by directly adjacent confirmation even if the target comes first. Enacted dialogue can invite a future meeting. A simile, negative phrasing or brief memory does not make an enacted main clause noncurrent. Do not label an entire exchange as active. Practical care, occupational contact, ordinary kindness and routine activity after a stop are quiet. An explicit stop or external redirect is quiet even if it mentions the preceding closeness. Only a fresh reciprocal action can resume a stopped beat. A narrated past tense can be current. A character's report, fantasy or enacted flashback is quiet in its own frame. When present actors resume real action after a story within the story, classify their new action in the present frame. Use uncertain when support or framing is unresolved.",
-  "Boundary question. Use ends-beat only for the first actual interruption, withdrawal or decisive cut that ends a specific nearby established relationship beat. An unrelated sound, a clock or time marker alone, a pause, a plan to stop, routine task completion, or the partner's later confirmation of a stop is no-boundary. Use returns-to-present only for the first sentence that explicitly resumes the immediate scene after a distinct imagined, reported or remembered event. Do not mark entering the noncurrent frame. Require evidence in the same story, never across an ID gap. If you cannot identify the preceding beat or frame that ends, use no-boundary or uncertain.",
+const groundedCue = "Cue question. Label the exact present sentence that invites or reciprocates clearly romantic interest, advances a mutual affectionate action, or explicitly eases an established romantic beat. A meaningful reply, gesture or invitation can be supported by directly adjacent confirmation even if the target comes first. Enacted dialogue can invite a future meeting. A simile, negative phrasing or brief memory does not make an enacted main clause noncurrent. Do not label an entire exchange as active. Practical care, occupational contact, ordinary kindness and routine activity after a stop are quiet. An explicit stop or external redirect is quiet even if it mentions the preceding closeness. Only a fresh reciprocal action can resume a stopped beat. A narrated past tense can be current. A character's report, fantasy or enacted flashback is quiet in its own frame. When present actors resume real action after a story within the story, classify their new action in the present frame. Use uncertain when support or framing is unresolved.";
+const continuityCue = [
+  "Cue question. Label the action or reply expressed by the exact target in its current scene. A target may invite, reciprocate, advance, concretely sustain, culminate or ease an established mutual romantic or consensual adult intimate beat. An active beat can continue without a new act, a new escalation or a fresh statement of mutuality in every sentence. A meaningful reply or concrete continuation can use adjacent evidence from the same uninterrupted interaction. An unrelated sentence remains quiet even inside an active scene.",
+  "Direct detail identifies the kind of event. It does not establish adulthood, consent, current frame or phase. An established context applies only to the same participants and scope while it remains supported. A stop, change in scope, pressure, unclear adulthood or mutuality, or unresolved shift in frame prevents carrying an active label forward. A stop or external redirect is quiet, and resumption needs fresh clear support. Practical care, ordinary kindness and occupational contact are quiet without clear romantic context.",
+  "Enacted dialogue can invite a future meeting. Past tense, a simile or a brief memory does not make an enacted main clause noncurrent. A report, fantasy or distinct flashback is quiet in its own frame. If an embedded event ends, classify present actions as current. Use uncertain when the evidence does not support an active or quiet frame confidently.",
+].join(" ");
+const groundedBoundary = "Boundary question. Use ends-beat only for the first actual interruption, withdrawal or decisive cut that ends a specific nearby established relationship beat. An unrelated sound, a clock or time marker alone, a pause, a plan to stop, routine task completion, or the partner's later confirmation of a stop is no-boundary. Use returns-to-present only for the first sentence that explicitly resumes the immediate scene after a distinct imagined, reported or remembered event. Do not mark entering the noncurrent frame. Require evidence in the same story, never across an ID gap. If you cannot identify the preceding beat or frame that ends, use no-boundary or uncertain.";
+const groundedBoundaryInstructions = [instructions, groundedCue, groundedBoundary,
   ...jointDefinitions,
 ].join("\n");
+const cueContinuityInstructions = [instructions, continuityCue, groundedBoundary, ...jointDefinitions].join("\n");
 const validCount = value => Number.isSafeInteger(value) && value >= 0;
 const probability = value => Number.isFinite(value) && value >= 0 && value <= 1;
 
@@ -95,7 +101,7 @@ function selectApprovedUnits(units, approvedIds) {
   return selected.map(unit => ({...unit}));
 }
 
-function makeRequest(source, targets, joint, separateBoundary, groundedBoundary) {
+function makeRequest(source, targets, joint, separateBoundary, groundedBoundary, cueContinuity) {
   const questions = joint ? targets.flatMap(({id}) => {
     if (separateBoundary) return [
       {type: "choice", name: `u${id}-joint`, instructions: `Classify the cue or quiet frame of source unit ${id}.`, choices: jointCueChoices},
@@ -113,7 +119,7 @@ function makeRequest(source, targets, joint, separateBoundary, groundedBoundary)
   return {
     model: MODEL,
     input: [
-      {type: "message", role: "developer", content: groundedBoundary ? groundedBoundaryInstructions :
+      {type: "message", role: "developer", content: cueContinuity ? cueContinuityInstructions : groundedBoundary ? groundedBoundaryInstructions :
         separateBoundary ? separateBoundaryInstructions : joint ? jointInstructions : instructions},
       {type: "message", role: "user", content: [{type: "input_json", data: {units: source}}]},
     ],
@@ -290,9 +296,10 @@ function assembleMap(selected, labels) {
 
 /** Evaluate explicitly approved units. The caller owns authorization and transport. */
 export async function analyzeNocturneDecisions({units, approvedIds, provider, signal, joint = false, separateBoundary = false,
-  groundedBoundary = false} = {}) {
+  groundedBoundary = false, cueContinuity = false} = {}) {
   if (typeof provider !== "function" || typeof joint !== "boolean" || typeof separateBoundary !== "boolean" ||
       typeof groundedBoundary !== "boolean" || groundedBoundary && !separateBoundary || separateBoundary && !joint ||
+      typeof cueContinuity !== "boolean" || cueContinuity && !groundedBoundary ||
       (signal !== undefined && !(signal instanceof AbortSignal))) {
     throw new TypeError("Provide the Decisions provider and options.");
   }
@@ -318,7 +325,7 @@ export async function analyzeNocturneDecisions({units, approvedIds, provider, si
   const record = separateBoundary ? recordSeparateBoundaryAnswers : joint ? recordJointAnswers : recordAnswers;
   for (let start = 0; start < targets.length; start += DECISIONS_TARGETS_PER_CALL) {
     const batch = targets.slice(start, start + DECISIONS_TARGETS_PER_CALL);
-    const request = makeRequest(source, batch, joint, separateBoundary, groundedBoundary);
+    const request = makeRequest(source, batch, joint, separateBoundary, groundedBoundary, cueContinuity);
     if (encoder.encode(JSON.stringify(request)).byteLength > MAX_WIRE_BYTES) {
       trace.status = "input_limit";
       return empty;
