@@ -283,7 +283,9 @@ const BENCHMARK_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><ti
 <h2>Approved corpus comparison</h2><p>This run sends only the approved source windows to OpenAI, uses up to six API calls and returns aggregate metrics.</p>
 <form method="post" enctype="multipart/form-data"><label for="corpus-payload">Prepared corpus JSON</label>
 <input id="corpus-payload" name="payload" type="file" accept=".json,application/json" required>
-<button>Run corpus comparison</button></form></main></html>`;
+<button>Run corpus comparison</button>
+<button name="mode" value="joint">Run joint-label Decisions retest</button>
+<p>The joint-label retest runs Decisions on two approved passages in up to two API calls.</p></form></main></html>`;
 
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -300,12 +302,16 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(corpus ? 180_000 : 120_000)]);
   const readSignal = AbortSignal.any([signal, AbortSignal.timeout(4000)]);
   let payload;
+  let jointRetest = false;
   try {
     if (corpus) {
       const bytes = await readBoundedBody(request, 32_768, readSignal, "multipart/form-data");
       const form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
       const file = form.get("payload");
-      if ([...form.keys()].length !== 1 || !(file instanceof File)) throw new TypeError("Invalid corpus form.");
+      const mode = form.get("mode");
+      if ((mode !== null && mode !== "joint") || [...form.keys()].length !== (mode === null ? 1 : 2) ||
+          !(file instanceof File)) throw new TypeError("Invalid corpus form.");
+      jointRetest = mode === "joint";
       payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()));
       await validateDecisionsCorpusPayload(payload);
     } else {
@@ -332,7 +338,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
   try {
     const run = corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
-    const result = await run({ key, payload, signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
+    const result = await run({ key, payload, jointRetest, signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
       if (!await authorized()) deny(expired());
       options.signal.throwIfAborted();
       let permission;

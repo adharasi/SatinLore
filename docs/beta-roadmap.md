@@ -137,6 +137,8 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 A founder-only hosted benchmark compares sentence-level Luna Decisions with Luna Responses using fixed fixtures and a digest-pinned approved calibration corpus. It uses the existing Worker key and quota. Compare live coverage, precision, recall, latency and token usage before considering playback integration. [Hosted benchmark](../deploy/cloudflare/README.md#run-the-founder-luna-decisions-benchmark)
 
+On 6 November, both endpoints returned valid maps on all three calibration passages. Responses recovered 36 of 36 cues with 12 false cues and recovered three of three boundaries with two false boundaries. Decisions recovered 27 of 36 cues with one false cue and recovered one of three boundaries with one false boundary. Median request time was 12.006 seconds for Responses and 0.706 seconds for Decisions. Decisions used 74,389 input tokens with zero output tokens. Responses used 4,199 input and 3,769 output tokens. The joint-label experiment targets the 12 contradictory labels recorded by Decisions and the overhead of its repeated rubric.
+
 The controlled-release milestone has a dedicated set of acceptance gates for story coverage, independent annotations, classification, output and reader use. [Release acceptance](release-acceptance.md)
 
 Keep the local rules as the baseline and retain suggestions **0, 1, 2, 3 and 5 out of 20**. Visual labels never authorise stronger output. Prepare a versioned, rights-cleared evaluation set and rubric, split by story/source, with held-out material and independent labels on a subset. A proposed pilot is 200–500 paragraphs; that size is a starting hypothesis, not coverage evidence.

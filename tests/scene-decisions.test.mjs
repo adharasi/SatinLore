@@ -63,6 +63,37 @@ test("Decisions preserves valid partial coverage and separates refusals, uncerta
     ["build", "unmapped", "unmapped", "unmapped", "boundary", "build"]);
 });
 
+test("joint Decisions maps one allowed label per approved target and preserves local breaks and omissions", async () => {
+  const units = buildSceneUnits(["She offered to stay.", "She moved the lamp.", "Private excluded text.", "***",
+    "The door opened abruptly.", "They sat for a while.", "Her thoughts were elsewhere.", "They greeted the guests."]);
+  const result = await analyzeNocturneDecisions({units, approvedIds: [0, 1, 3, 4, 5, 6, 7], joint: true, provider: async request => {
+    assert.deepEqual(request.questions.map(({name}) => name), ["u0-joint", "u1-joint", "u4-joint", "u5-joint", "u6-joint", "u7-joint"]);
+    assert.ok(request.questions.every(({type, choices}) => type === "choice" && choices.length === 32 &&
+      choices.every(choice => Object.keys(choice).length === 1 && typeof choice.value === "string")));
+    assert.match(request.input[0].content, /clearly reciprocates the immediate current exchange/);
+    assert.match(request.input[0].content, /explicit return from reported/);
+    assert.doesNotMatch(JSON.stringify(request), /Private excluded text/);
+    const choices = ["build-flirting", "quiet-reported", "boundary", null, "uncertain", "quiet-current"];
+    return Response.json({model: "gpt-6-luna", usage, answers: request.questions.map(({name}, index) => answer(name, choices[index]))});
+  }});
+  assert.equal(result.trace.status, "completed");
+  assert.equal(result.trace.excludedUnits, 1);
+  assert.equal(result.trace.structuralUnits, 1);
+  assert.equal(result.trace.answeredQuestions, 5);
+  assert.equal(result.trace.refusedQuestions, 1);
+  assert.equal(result.trace.answeredUnits, 5);
+  assert.equal(result.trace.refusedUnits, 1);
+  assert.equal(result.trace.uncertainUnits, 1);
+  assert.equal(result.trace.inconsistentUnits, 0);
+  assert.equal(result.trace.mappedUnits, 5);
+  assert.deepEqual(compileSceneMap(result.accepted, units).map(({frame, phase, category, boundary}) =>
+    [frame, phase, category, boundary]), [
+    ["current", "build", "flirting", null], ["reported", "quiet", "neutral", null], [null, "unmapped", "neutral", null],
+    ["neutral", "boundary", "neutral", "structural"], ["current", "boundary", "neutral", "model"],
+    [null, "unmapped", "neutral", null], [null, "unmapped", "neutral", null], ["current", "quiet", "neutral", null],
+  ]);
+});
+
 test("Decisions rejects missing, reordered, out-of-domain and invalid probability answers", async () => {
   const units = buildSceneUnits(["The group returned."]);
   for (const mutate of [

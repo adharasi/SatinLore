@@ -147,7 +147,7 @@ Use the existing founder Cloudflare Access session on the app origin and open `/
 
 For the approved corpus comparison, prepare the pinned upload locally with `node scripts/prepare-decisions-hosted-corpus.mjs MANIFEST` and redirect the output to a private file outside Git. Upload that prepared file under **Approved corpus comparison** and select **Run corpus comparison**. Every window must match its approved digest before any provider call. The comparison sends 109 approved units out of 116 across three calibration passages, uses up to six calls and returns aggregate metrics. The existing reader quota applies to both runs.
 
-The benchmark is separate from playback. Keep the current reader analysis until a candidate clears the release checks on a representative holdout. [Release acceptance](../../docs/release-acceptance.md)
+The same upload offers a **Run joint-label Decisions retest** action. It runs one combined label per sentence on the first and third passages in up to two calls. Use these same passages from the full benchmark for comparison. The standard run keeps the three-question Decisions baseline reproducible. The benchmark is separate from playback. [Release acceptance](../../docs/release-acceptance.md)
 
 ## Enable real Lovense pairing for the beta
 

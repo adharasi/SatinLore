@@ -28,14 +28,16 @@ export async function validateDecisionsCorpusPayload(payload) {
   }));
 }
 
-export async function runDecisionsCorpusBenchmark({key, analysisFetcher = fetch, signal, payload} = {}) {
+export async function runDecisionsCorpusBenchmark({key, analysisFetcher = fetch, signal, payload, jointRetest = false} = {}) {
   if (typeof analysisFetcher !== "function") throw new TypeError("Invalid Nocturne benchmark configuration.");
-  const cases = await validateDecisionsCorpusPayload(payload);
+  const validated = await validateDecisionsCorpusPayload(payload);
+  const cases = jointRetest ? [validated[0], validated[2]] : validated;
+  const requestLimit = jointRetest ? 2 : DECISIONS_CORPUS_MAX_REQUESTS;
   const approvedUnits = cases.reduce((sum, {units}) => sum + units.length, 0);
   const excludedUnits = cases.reduce((sum, {unitCount, units}) => sum + unitCount - units.length, 0);
   let attempts = 0;
-  const result = await runMatchedDecisionsBenchmark({key, signal, cases, analysisFetcher: (url, init) => {
-    if (attempts >= DECISIONS_CORPUS_MAX_REQUESTS) throw new RangeError("Corpus benchmark request limit reached.");
+  const result = await runMatchedDecisionsBenchmark({key, signal, cases, jointRetest, analysisFetcher: (url, init) => {
+    if (attempts >= requestLimit) throw new RangeError("Corpus benchmark request limit reached.");
     attempts++;
     return analysisFetcher(url, init);
   }});

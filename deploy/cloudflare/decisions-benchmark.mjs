@@ -104,21 +104,22 @@ function summarize(rows, variant) {
 }
 
 // Caller owns approval, authentication, quota reservations and revalidation.
-export async function runMatchedDecisionsBenchmark({key, analysisFetcher = fetch, signal, cases} = {}) {
+export async function runMatchedDecisionsBenchmark({key, analysisFetcher = fetch, signal, cases, jointRetest = false} = {}) {
   if (typeof key !== "string" || !/^sk-[A-Za-z0-9_-]{12,512}$/.test(key) || key.startsWith("sk-admin-") ||
       typeof analysisFetcher !== "function" || (signal !== undefined && !(signal instanceof AbortSignal))) {
     throw new TypeError("Invalid Nocturne benchmark configuration.");
   }
   const rows = [];
+  const arms = jointRetest ? ["decisions"] : variants;
   for (const [index, fixture] of cases.entries()) {
     const {units} = fixture;
     const row = {fixture: fixture.id, sourceUnits: fixture.unitCount};
     const approvedIds = units.map(unit => unit.id);
     // Counterbalance the order to reduce the effect of always testing one
     // endpoint first. Two samples still constitute a smoke test.
-    for (const variant of index % 2 ? [...variants].reverse() : variants) {
+    for (const variant of index % 2 ? [...arms].reverse() : arms) {
       const analyze = variant === "responses" ? analyzeNocturneSceneMap : analyzeNocturneDecisions;
-      const result = await analyze({units, approvedIds, signal, provider: (body, options) => {
+      const result = await analyze({units, approvedIds, signal, joint: jointRetest, provider: (body, options) => {
         options.signal.throwIfAborted();
         return analysisFetcher(endpoints[variant], {
           method: "POST", redirect: "manual", signal: options.signal,
@@ -132,8 +133,9 @@ export async function runMatchedDecisionsBenchmark({key, analysisFetcher = fetch
   }
   return {
     model: "gpt-6-luna", fixtureCount: cases.length,
+    decisionsPrompt: jointRetest ? "joint-label-v2" : "split-label-v1",
     aborted: signal?.aborted === true, fixtures: rows,
-    totals: Object.fromEntries(variants.map(variant => [variant, summarize(rows, variant)])),
+    totals: Object.fromEntries(arms.map(variant => [variant, summarize(rows, variant)])),
   };
 }
 
