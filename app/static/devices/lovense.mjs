@@ -13,10 +13,11 @@ const submittedResult = result => result !== false && (!result || typeof result 
 const stopResult = result => ({status: submittedResult(result) ? "submitted" : "unconfirmed"});
 
 export class LovenseCheck {
-  constructor({sdkFactory, emit, now = Date.now,
+  constructor({sdkFactory, emit, alpha = false, now = Date.now,
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = timer => clearTimeout(timer)}) {
     this.sdkFactory = sdkFactory;
+    this.alpha = alpha;
     this.emit = emit;
     this.now = now;
     this.setTimer = setTimer;
@@ -121,7 +122,7 @@ export class LovenseCheck {
     const connected = this.sdk.getAppStatus() === true;
     if (!connected) { this.connectionLost(); return; }
     this.connected = true;
-    const toys = supportedToys(this.sdk.getOnlineToys(), {transport:this.sdk.controlTransport});
+    const toys = supportedToys(this.sdk.getOnlineToys(), {transport:this.sdk.controlTransport,alpha:this.alpha});
     if (this.selected && !toys.some(toy => toy.id === this.selected && this.activeChannels.every(channel=>toy.capabilities.includes(channel)))) this.stop(true);
     this.toys = toys;
     for (const toy of toys) if (this.knownIds.size < 50) this.knownIds.add(toy.id);
@@ -155,7 +156,7 @@ export class LovenseCheck {
       throw new Error("Use the movement's enabled range and a finite duration of at most two seconds.");
     }
     // Re-read current state: a stale list must never authorise a disconnected toy.
-    const toys = supportedToys(this.sdk.getOnlineToys(), {transport:this.sdk.controlTransport});
+    const toys = supportedToys(this.sdk.getOnlineToys(), {transport:this.sdk.controlTransport,alpha:this.alpha});
     const toy = toys.find(toy => toy.id === this.selected);
     if (this.sdk.getAppStatus() !== true || !toy) {
       this.connectionLost();
@@ -178,7 +179,11 @@ export class LovenseCheck {
     const keys=Object.keys(levels);
     if(!keys.length||keys.length>5||Object.keys(ceilings).length!==keys.length||keys.some(key=>!Object.hasOwn(ceilings,key)))throw Error("Choose supported movement limits.");
     const bounded={};
-    for(const channel of keys){this.validateOutput(levels[channel],ceilings[channel],channel,seconds);bounded[channel]=Math.min(levels[channel],ceilings[channel]);}
+    for (const channel of keys) {
+      const toy = this.validateOutput(levels[channel], ceilings[channel], channel, seconds);
+      if (keys.length > 1 && !toy.supportsCombined) throw Error("This toy uses one movement at a time.");
+      bounded[channel] = Math.min(levels[channel], ceilings[channel]);
+    }
     if(Object.values(bounded).every(value=>value===0))return this.stop().then(result=>({...result,level:0,levels:bounded}));
     return this.dispatch(bounded,seconds,null);
   }
@@ -305,7 +310,7 @@ export class LovenseCheck {
     if(confirmedStopped!==true||!Array.isArray(channels)||!channels.length||channels.length>5||new Set(channels).size!==channels.length||
       !this.active()||!this.ready||!this.connected||!this.selected||this.commandTimer!==null||this.pendingCommand||
       this.lastStopSubmitted?.id!==this.selected||this.lastStopSubmitted?.generation!==this.generation)throw Error("Complete a gentle two-second check, observe Stop and confirm it before enabling your personal range.");
-    const toy=supportedToys(this.sdk.getOnlineToys(),{transport:this.sdk.controlTransport}).find(toy=>toy.id===this.selected);
+    const toy=supportedToys(this.sdk.getOnlineToys(),{transport:this.sdk.controlTransport,alpha:this.alpha}).find(toy=>toy.id===this.selected);
     if(!toy||channels.some(channel=>!toy.capabilities.includes(channel)||this.gentleTests.get(channel)?.id!==this.selected||this.gentleTests.get(channel)?.generation!==this.generation))throw Error("Check and confirm each selected movement first.");
     const next=[...new Set([...this.personalRangeChannels,...channels])];
     this.sdk.enablePersonalRange?.(this.selected,next);

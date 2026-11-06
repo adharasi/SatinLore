@@ -1,4 +1,5 @@
 import { ALPHA_SCREEN_ITEM_LIMIT, ALPHA_SCREEN_LABELS, ALPHA_SCREEN_STAGES, ALPHA_SCREEN_STATES } from "../../app/static/alpha-screen-schema.mjs";
+import { ALPHA_TOY_PROFILES, channelMaximum } from "../../app/static/devices/toy-profiles.mjs";
 
 export const ALPHA_ORIGIN = "https://app.satinlore.com";
 export const ALPHA_CONSENT = "alpha-controls-2026-11-03-v2";
@@ -14,7 +15,9 @@ export const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-
 export const HASH = /^[a-f0-9]{64}$/;
 export const USERNAMES = ["Dilan", "Sadie"];
 export const MODES = ["simulator", "live"];
-const CHANNELS = ["vibrate", "fingering"];
+const profiles = new Map(ALPHA_TOY_PROFILES.map(profile => [profile.id, profile]));
+const CHANNELS = [...new Set(ALPHA_TOY_PROFILES.flatMap(profile => profile.simChannels))];
+export const validAlphaModel = model => profiles.has(model);
 const encoder = new TextEncoder();
 
 export class AlphaError extends Error {
@@ -76,9 +79,17 @@ function researchText(value, limit) {
 }
 
 const feedbackChoices = {
-  minimum: ["yes", "no", "depends"], preferredMovement: ["vibration", "flexing", "both", "neither"],
+  minimum: ["yes", "no", "depends"],
+  preferredMovement: ["vibration", "flexing", "rotation", "thrusting", "oscillation", "pumping", "suction", "both", "together", "neither"],
 };
-const feedbackNumbers = { vibrationMaximum: 20, flexingMaximum: 20, enjoyment: 10, comfort: 10, easeOfUse: 10, connectionEase: 10 };
+const movementMaximumFields = {
+  vibrationMaximum: "vibrate", flexingMaximum: "fingering", rotationMaximum: "rotate", thrustingMaximum: "thrusting",
+  oscillationMaximum: "oscillate", pumpingMaximum: "pump", suctionMaximum: "suction",
+};
+const feedbackNumbers = {
+  ...Object.fromEntries(Object.entries(movementMaximumFields).map(([field, channel]) => [field, channelMaximum(channel)])),
+  enjoyment: 10, comfort: 10, easeOfUse: 10, connectionEase: 10,
+};
 const feedbackText = ["bestMoment", "setupFeedback", "improvements", "overallNotes"];
 export function normalizeFeedback(value) {
   check(exact(value, [...Object.keys(feedbackChoices), ...Object.keys(feedbackNumbers), ...feedbackText], []));
@@ -112,8 +123,8 @@ const enumEvents = {
   lifecycle: ["event", ["hidden", "visible", "recording-paused", "recording-resumed", "screen-started", "screen-ended"]],
 };
 const controls = ["vibration", "flexing", "vibrationMaximum", "flexingMaximum", "minimum", "rhythm", "start", "stop", "hold", "easeOff", "pause", "test", "finish", "connect", "select", "range", "choose", "easeoff", "resume", "disconnect", "level", "maximum", "recovery"];
-const controlValues = ["steady", "gentle", "dynamic", "vibrate", "fingering", "vibration", "flexing", "both", "simulator", "live", "on", "off"];
-const valueLevel = value => value === null || integer(value, 0, 20);
+const controlValues = ["steady", "gentle", "dynamic", ...CHANNELS, "vibration", "flexing", "both", "simulator", "live", "on", "off"];
+const valueLevel = (value, maximum = 20) => value === null || integer(value, 0, maximum);
 const normalizedCoordinate = value => integer(value, 0, 1000);
 
 function normalizeScreen(value, base) {
@@ -152,13 +163,16 @@ export function normalizeAlphaEvent(value) {
   if (value.type === "control") {
     check(only(["control", "channel", "value"], ["control"]) && controls.includes(value.control));
     if (Object.hasOwn(value, "channel")) check(CHANNELS.includes(value.channel));
-    if (Object.hasOwn(value, "value")) check(integer(value.value, 0, 20) || typeof value.value === "boolean" || controlValues.includes(value.value));
+    if (Object.hasOwn(value, "value")) check(integer(value.value, 0, value.channel ? channelMaximum(value.channel) : 20) ||
+      typeof value.value === "boolean" || controlValues.includes(value.value));
     return { ...base, control: value.control, ...(value.channel === undefined ? {} : { channel: value.channel }), ...(value.value === undefined ? {} : { value: value.value }) };
   }
   if (value.type === "output" && Object.hasOwn(value, "channels")) {
     check(only(["mode", "stage", "channels", "durationMs", "commandId"], ["mode", "stage", "channels"]) && MODES.includes(value.mode) &&
       ["requested", "submitted", "simulated", "failed", "unknown"].includes(value.stage));
-    check(exact(value.channels, CHANNELS, []) && Object.values(value.channels).every(valueLevel));
+    check(exact(value.channels, CHANNELS, []) &&
+      Object.entries(value.channels).every(([channel, level]) => valueLevel(level, channelMaximum(channel))));
+    check(value.mode === "simulator" || !Object.hasOwn(value.channels, "pump"));
     check(value.durationMs === undefined || integer(value.durationMs, 0, 2000));
     check(value.commandId === undefined || integer(value.commandId, 1, 1000000));
     return { ...base, mode: value.mode, stage: value.stage, channels: value.channels,
@@ -170,9 +184,14 @@ export function normalizeAlphaEvent(value) {
     return { ...base, state: value.state, ...(value.vibration === undefined ? {} : { vibration: value.vibration }), ...(value.flexing === undefined ? {} : { flexing: value.flexing }) };
   }
   if (value.type === "device") {
-    check(only(["mode", "channels"]) && MODES.includes(value.mode) && Array.isArray(value.channels) && value.channels.length <= 2 &&
-      new Set(value.channels).size === value.channels.length && value.channels.every(channel => CHANNELS.includes(channel)));
-    return { ...base, mode: value.mode, channels: value.channels };
+    check(only(["mode", "channels", "model"], ["mode", "channels"]) && MODES.includes(value.mode) && Array.isArray(value.channels) &&
+      value.channels.length <= CHANNELS.length && new Set(value.channels).size === value.channels.length);
+    const profile = profiles.get(value.model);
+    const supported = value.model === undefined ? CHANNELS : profile && (value.mode === "live" ?
+      [...profile.physicalChannels, ...profile.socketChannels, ...profile.reportedChannels] : profile.simChannels);
+    check(supported && value.channels.every(channel => supported.includes(channel)));
+    check(value.mode === "simulator" || !value.channels.includes("pump"));
+    return { ...base, mode: value.mode, channels: value.channels, ...(value.model === undefined ? {} : { model: value.model }) };
   }
   if (value.type === "verification") {
     check(only(["mode", "channel", "response", "stopped"]) && MODES.includes(value.mode) && CHANNELS.includes(value.channel) &&

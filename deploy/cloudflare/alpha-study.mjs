@@ -1,7 +1,7 @@
 import {
   ALPHA_ORIGIN, ALPHA_COOKIE, ALPHA_CONSENT, LEGACY_ALPHA_CONSENT, ALPHA_CLIP_CONSENT, AUTH_MS, STUDY_MS, RETENTION_MS,
   CLIP_RETENTION_MS, CLIP_LIMIT, USERNAMES, MODES, UUID, HASH, AlphaError, json, check, exact, integer,
-  bytes, hex, digest, readBody, readJson, normalizeAlphaEvent, normalizeFeedback, normalizeAnnotation,
+  bytes, hex, digest, readBody, readJson, normalizeAlphaEvent, normalizeFeedback, normalizeAnnotation, validAlphaModel,
 } from "./alpha-contract.mjs";
 
 const INTERNAL = "https://alpha-study.internal";
@@ -106,6 +106,7 @@ function authInfo(auth) {
 
 function studySummary(row, now = Date.now()) {
   return { id: row.id, username: row.username, mode: row.mode, state: row.finished_at || row.expires_at <= now ? "finished" : "active",
+    ...(validAlphaModel(row.model) ? { model: row.model } : {}),
     consentVersion: row.consent_version, createdAt: row.created_at, expiresAt: row.expires_at, retainedUntil: row.retained_until,
     lastEventAt: row.last_event_at, eventCount: row.event_count, hasFeedback: row.feedback !== null, hasClip: Boolean(row.has_clip) };
 }
@@ -150,7 +151,10 @@ export class AlphaStudy {
     this.sql.exec("PRAGMA foreign_keys=ON");
     this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_auth (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, credential_tag TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, request_id TEXT NOT NULL, mode TEXT NOT NULL, consent_version TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, retained_until INTEGER NOT NULL, finished_at INTEGER, seq INTEGER NOT NULL DEFAULT 0, last_event_at INTEGER NOT NULL DEFAULT 0, event_count INTEGER NOT NULL DEFAULT 0, event_bytes INTEGER NOT NULL DEFAULT 0, feedback TEXT, UNIQUE(username, request_id))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, request_id TEXT NOT NULL, mode TEXT NOT NULL, consent_version TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, retained_until INTEGER NOT NULL, finished_at INTEGER, seq INTEGER NOT NULL DEFAULT 0, last_event_at INTEGER NOT NULL DEFAULT 0, event_count INTEGER NOT NULL DEFAULT 0, event_bytes INTEGER NOT NULL DEFAULT 0, feedback TEXT, model TEXT, UNIQUE(username, request_id))");
+    if (!this.rows("PRAGMA table_info(alpha_sessions)").some(column => column.name === "model")) {
+      this.sql.exec("ALTER TABLE alpha_sessions ADD COLUMN model TEXT");
+    }
     this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_batches (session_id TEXT NOT NULL REFERENCES alpha_sessions(id) ON DELETE CASCADE, seq INTEGER NOT NULL, events TEXT NOT NULL, PRIMARY KEY(session_id, seq))");
     this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_annotations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES alpha_sessions(id) ON DELETE CASCADE, t INTEGER NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(session_id, t, text))");
     this.sql.exec("CREATE TABLE IF NOT EXISTS alpha_clips (session_id TEXT PRIMARY KEY REFERENCES alpha_sessions(id) ON DELETE CASCADE, media_type TEXT NOT NULL, bytes INTEGER NOT NULL, hash TEXT NOT NULL, duration_ms INTEGER NOT NULL, offset_ms INTEGER NOT NULL, consent_version TEXT NOT NULL, created_at INTEGER NOT NULL, retained_until INTEGER NOT NULL)");
@@ -243,21 +247,22 @@ export class AlphaStudy {
   }
 
   async start(username, value) {
-    check(exact(value, ["consentVersion", "mode", "idempotencyKey"]) && value.consentVersion === ALPHA_CONSENT,
+    check(exact(value, ["consentVersion", "mode", "idempotencyKey", "model"], ["consentVersion", "mode", "idempotencyKey"]) && value.consentVersion === ALPHA_CONSENT,
       "Choose alpha recording explicitly before starting.");
-    check(MODES.includes(value.mode) && typeof value.idempotencyKey === "string" && UUID.test(value.idempotencyKey));
+    check(MODES.includes(value.mode) && typeof value.idempotencyKey === "string" && UUID.test(value.idempotencyKey) &&
+      (value.model === undefined || validAlphaModel(value.model)));
     const now = Date.now(), requestId = value.idempotencyKey;
     const result = this.storage.transactionSync(() => {
       const old = this.one("SELECT * FROM alpha_sessions WHERE username=? AND request_id=?", username, requestId);
       if (old) {
-        check(old.mode === value.mode && old.consent_version === ALPHA_CONSENT, "This session start was already used.", 409);
+        check(old.mode === value.mode && old.model === (value.model ?? null) && old.consent_version === ALPHA_CONSENT, "This session start was already used.", 409);
         return { row: old, duplicate: true };
       }
       check(!this.one("SELECT id FROM alpha_withdrawals WHERE username=? AND request_id=?", username, requestId), "This session was deleted.", 410);
       check(this.one("SELECT COUNT(*) count FROM alpha_sessions").count < GLOBAL_LIMIT, "Alpha storage is full. Delete an earlier session to continue.", 507);
       const id = crypto.randomUUID();
-      this.sql.exec("INSERT INTO alpha_sessions(id,username,request_id,mode,consent_version,created_at,expires_at,retained_until) VALUES(?,?,?,?,?,?,?,?)",
-        id, username, requestId, value.mode, ALPHA_CONSENT, now, now + STUDY_MS, now + RETENTION_MS);
+      this.sql.exec("INSERT INTO alpha_sessions(id,username,request_id,mode,consent_version,created_at,expires_at,retained_until,model) VALUES(?,?,?,?,?,?,?,?,?)",
+        id, username, requestId, value.mode, ALPHA_CONSENT, now, now + STUDY_MS, now + RETENTION_MS, value.model ?? null);
       return { row: this.getSession(id), duplicate: false };
     });
     await this.schedule(now);

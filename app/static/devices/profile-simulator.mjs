@@ -1,4 +1,4 @@
-import {getToyProfile} from "./toy-profiles.mjs";
+import {channelMaximum, getToyProfile} from "./toy-profiles.mjs";
 
 // Deterministic software output. It cannot certify a physical model's motion,
 // strength, transport timing, stopping behaviour or firmware compatibility.
@@ -8,12 +8,13 @@ export class ProfileSimulator {
     this.now = options.now || options.clock || (() => performance.now());
     this.connected = false; this.strength = 0; this.activeChannels = {}; this.deadline = 0;
     this.failure = null;
+    this.alpha = options.alpha === true;
     this.setModel(options.model || "lush");
     if (options.channel) this.setChannel(options.channel);
   }
-  get profile() { return getToyProfile(this.model); }
+  get profile() { return getToyProfile(this.model, {alpha: this.alpha}); }
   setModel(model) {
-    const profile = getToyProfile(model);
+    const profile = getToyProfile(model, {alpha: this.alpha});
     if (!profile) throw new Error("Choose a supported toy model.");
     this.disconnect(); this.model = model; this.channel = profile.simChannels[0];
   }
@@ -25,7 +26,7 @@ export class ProfileSimulator {
   disconnect() { this.stop(); this.connected = false; }
   command(level, seconds = 2) {
     if (!this.connected) throw new Error("Connect the simulator first.");
-    if (!Number.isInteger(level) || level < 0 || level > 20 || !Number.isFinite(seconds) || seconds <= 1 || seconds > 2) {
+    if (!Number.isInteger(level) || level < 0 || level > channelMaximum(this.channel) || !Number.isFinite(seconds) || seconds <= 1 || seconds > 2) {
       throw new Error("Use a bounded level and a finite command of at most two seconds.");
     }
     if (this.failure === "command") {
@@ -38,7 +39,8 @@ export class ProfileSimulator {
   commandVector(levels,seconds=2) {
     if(!this.connected)throw new Error("Connect the simulator first.");
     if(!levels || typeof levels!=="object" || Array.isArray(levels) || !Object.keys(levels).length ||
-        Object.keys(levels).some(id=>!this.profile.simChannels.includes(id)||!Number.isInteger(levels[id])||levels[id]<0||levels[id]>20) ||
+        this.profile.supportsCombined === false && Object.keys(levels).length > 1 ||
+        Object.keys(levels).some(id=>!this.profile.simChannels.includes(id)||!Number.isInteger(levels[id])||levels[id]<0||levels[id]>channelMaximum(id)) ||
         !Number.isFinite(seconds)||seconds<=1||seconds>2)throw new Error("Use available simulator movements and a finite two-second vector.");
     if(this.failure==="command"){this.failure=null;this.stop();throw new Error("Simulated command failure.");}
     const maximum=Math.max(...Object.values(levels));

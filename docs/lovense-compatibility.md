@@ -17,9 +17,13 @@ The reader has 33 selectable simulation profiles. The list includes grouped gene
 
 Remote can narrow the movements in any row. A device may be absent from the discovered list if Remote only reports movements SatinLore cannot use. The extended socket route can combine supported movements on one selected device. It sends targeted two-second commands and uses the existing per-movement calibration and Stop checks.
 
+## Alpha study
+
+Alpha includes the reader's 33 profiles and adds Tenera, Tenera 2 and Fizz for 36 simulator choices. Original Tenera suction can use the documented Standard JS SDK or Socket connection. Tenera 2 suction and Fizz suction or oscillation require the corresponding function report over Standard Socket. Fizz checks and controls one movement at a time. The Max / Max 2 simulator also offers pumping on the manufacturer's 0–3 scale. Max pumping is simulation-only because the pressure-release behavior needs separate verification. [Alpha setup](alpha-setup.md) · [Max 2 pressure release](https://www.lovense.com/guide/max2)
+
 ## Remaining compatibility work
 
-- Fizz, Tenera and Tenera 2 use suction or tapping. Their primary motions require a separate reader control and physical qualification.
+- Fizz, Tenera and Tenera 2 suction or oscillation controls are currently scoped to Alpha. The reader and physical qualification are separate milestones.
 - Pumping on Max / Max 2, Solace depth and stroke positioning, heating, motion sensing, and separately addressed motors are outside the supported reader movements.
 - Valor appears in Lovense’s native developer matrix. The public Lovense Remote guide does not list it, and a corresponding Remote profile remains unverified.
 - Test model, generation, firmware, Remote version and browser on real hardware. A software test verifies selection, movement checks, command limits and targeted Stop requests. Physical testing verifies what actually moves and stops.

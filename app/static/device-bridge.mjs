@@ -5,6 +5,7 @@ import {LovenseCheck} from "./devices/lovense.mjs";
 // Only connection/control messages cross the dedicated port; never reader text.
 const bridgeUrl = new URL(location.href);
 const expectedParentOrigin = bridgeUrl.origin;
+const alpha = bridgeUrl.pathname === "/alpha/device-bridge";
 const preserveFlexerRenewals = expectedParentOrigin === "https://app.satinlore.com" &&
   ["/device-bridge", "/device-bridge.html", "/alpha/device-bridge"].includes(bridgeUrl.pathname);
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,96}$/;
@@ -64,7 +65,7 @@ async function onCommand(event) {
         const {LovenseSocket}=await import("./devices/lovense-socket.mjs");
         const {renderPairingImage} = await import("./devices/qr-renderer.mjs");
         extended = new LovenseSocket({platform:command.session.platform,authToken:command.session.authToken}, {
-          preserveFlexerRenewals, renderPairingImage,
+          preserveFlexerRenewals, renderPairingImage, alpha,
         });
         preparingAdapter = extended;
         await extended.prepared;
@@ -83,6 +84,7 @@ async function onCommand(event) {
       preparingAdapter = null;
       if (closed || document.hidden) { extended?.destroy(); close(); return; }
       controller = new LovenseCheck({
+        alpha,
         sdkFactory: options => extended || new globalThis.LovenseBasicSdk(options),
         emit: message => { if (!closed) connectedPort?.postMessage(message); },
       });

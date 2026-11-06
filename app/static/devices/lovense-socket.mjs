@@ -6,7 +6,7 @@ import {safeQrUrl, safeGeneratedQrImage} from "./pairing-image.mjs";
 // connection frame. It accepts no story text, account identity or developer key.
 export const SOCKET_AUTH_URL = "https://api.lovense-api.com/api/basicApi/getSocketUrl";
 export const SOCKET_TRANSPORT = "standard-socket-v1";
-const ACTIONS = Object.freeze({vibrate:"Vibrate",rotate:"Rotate",fingering:"Fingering",thrusting:"Thrusting",oscillate:"Oscillate"});
+const ACTIONS = Object.freeze({vibrate:"Vibrate",rotate:"Rotate",fingering:"Fingering",thrusting:"Thrusting",oscillate:"Oscillate",suction:"Suction"});
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const plain = value => value && typeof value === "object" && !Array.isArray(value);
 const level = value => Number.isInteger(value) && value >= 0 && value <= 20;
@@ -53,9 +53,10 @@ export class LovenseSocket {
   constructor(options, {fetcher = (...args) => globalThis.fetch(...args), socketFactory = io, now = Date.now,
     setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
     clearTimer = timer => globalThis.clearTimeout(timer), randomId = () => crypto.randomUUID(), preserveFlexerRenewals = false,
-    renderPairingImage = () => null} = {}) {
+    alpha = false, renderPairingImage = () => null} = {}) {
     Object.assign(this,{fetcher,socketFactory,now,setTimer,clearTimer,randomId,renderPairingImage});
     this.platform = options?.platform;
+    this.alpha = alpha;
     this.controlTransport = SOCKET_TRANSPORT;
     this.handlers = new Map(); this.toys = []; this.knownIds = new Set();
     this.destroyed = false; this.socket = null; this.online = false; this.ready = false;
@@ -196,8 +197,8 @@ export class LovenseSocket {
   sendToyCommand(command) {
     if(!plain(command)||!ID.test(command.toyId||"")||command.time!==2||!this.getAppStatus())throw Error("Use a selected toy and a two-second command.");
     const keys=Object.keys(command).filter(key=>!["toyId","time"].includes(key));
-    const toy=supportedToys(this.toys,{transport:SOCKET_TRANSPORT}).find(toy=>toy.id===command.toyId);
-    if(!toy||!keys.length||keys.length>5||keys.some(key=>!Object.hasOwn(ACTIONS,key)||!toy.capabilities.includes(key)||!level(command[key])||command[key]>5&&!this.personalRanges.get(toy.id)?.has(key)))throw Error("The requested movement is unavailable or outside its enabled range.");
+    const toy=supportedToys(this.toys,{transport:SOCKET_TRANSPORT,alpha:this.alpha}).find(toy=>toy.id===command.toyId);
+    if(!toy||!keys.length||keys.length>5||keys.length>1&&!toy.supportsCombined||keys.some(key=>!Object.hasOwn(ACTIONS,key)||!toy.capabilities.includes(key)||!level(command[key])||command[key]>5&&!this.personalRanges.get(toy.id)?.has(key)))throw Error("The requested movement is unavailable or outside its enabled range.");
     if(keys.every(key=>command[key]===0))return this.stopToyAction(command.toyId);
     const now = this.now();
     if (now - this.lastCommand < 1000) throw Error("Wait for the next device tick.");
@@ -220,7 +221,7 @@ export class LovenseSocket {
     return {status:"submitted"};
   }
   enablePersonalRange(id,channels) {
-    const toy=supportedToys(this.toys,{transport:SOCKET_TRANSPORT}).find(toy=>toy.id===id);
+    const toy=supportedToys(this.toys,{transport:SOCKET_TRANSPORT,alpha:this.alpha}).find(toy=>toy.id===id);
     if(!this.getAppStatus()||!toy||!Array.isArray(channels)||!channels.length||channels.some(channel=>!toy.capabilities.includes(channel)))throw Error("The selected movement is unavailable.");
     this.personalRanges.set(id,new Set(channels));
   }

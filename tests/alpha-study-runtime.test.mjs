@@ -20,7 +20,7 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
     export class AlphaStudy extends Study {
       async fetch(request) {
         if (new URL(request.url).pathname !== '/fixture-seed-legacy') return super.fetch(request);
-        this.initialize();
+        this.sql.exec("CREATE TABLE alpha_sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, request_id TEXT NOT NULL, mode TEXT NOT NULL, consent_version TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, retained_until INTEGER NOT NULL, finished_at INTEGER, seq INTEGER NOT NULL DEFAULT 0, last_event_at INTEGER NOT NULL DEFAULT 0, event_count INTEGER NOT NULL DEFAULT 0, event_bytes INTEGER NOT NULL DEFAULT 0, feedback TEXT, UNIQUE(username, request_id))");
         const now = Date.now(), id = crypto.randomUUID();
         this.sql.exec('INSERT INTO alpha_sessions(id,username,request_id,mode,consent_version,created_at,expires_at,retained_until) VALUES(?,?,?,?,?,?,?,?)', id,'Sadie',crypto.randomUUID(),'simulator',LEGACY_ALPHA_CONSENT,now,now+3600000,now+86400000);
         return Response.json({id});
@@ -32,7 +32,7 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
       if (path === '/fixture-seed-legacy') return env.ALPHA_STUDY.get(env.ALPHA_STUDY.idFromName('alpha-study-v1')).fetch('https://alpha-study.internal/fixture-seed-legacy');
       return await handleAlphaApi(request, env) ?? new Response(null,{status:404});
     }};`;
-  const paths = ["deploy/cloudflare/alpha-study.mjs", "deploy/cloudflare/alpha-contract.mjs", "app/static/alpha-screen-schema.mjs"];
+  const paths = ["deploy/cloudflare/alpha-study.mjs", "deploy/cloudflare/alpha-contract.mjs", "app/static/alpha-screen-schema.mjs", "app/static/devices/toy-profiles.mjs"];
   const sources = await Promise.all(paths.map(async path => ({
     type: "ESModule", path: `${root}${path}`, contents: await readFile(`${root}${path}`, "utf8"),
   })));
@@ -58,6 +58,7 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
     return set.split(";", 1)[0];
   };
 
+  const legacy = await (await get("/fixture-seed-legacy")).json();
   assert.equal((await (await get("/api/alpha/auth")).json()).authenticated, false);
   assert.equal((await post("/api/alpha/login", { username: "Dilan" })).status, 400);
   assert.equal((await post("/api/alpha/login", { username: "Dilan", password: passwords.Sadie })).status, 401);
@@ -67,7 +68,8 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
   assert.equal((await get("/api/alpha/admin/sessions", sadie)).status, 403);
   assert.equal((await get("/api/alpha/admin/sessions", undefined, { "X-Alpha-Session": dilan.split("=")[1] })).status, 401);
 
-  const start = { consentVersion: ALPHA_CONSENT, mode: "simulator", idempotencyKey: crypto.randomUUID() };
+  const start = { consentVersion: ALPHA_CONSENT, mode: "simulator", idempotencyKey: crypto.randomUUID(), model: "max" };
+  assert.equal((await post("/api/alpha/sessions", { ...start, model: "private toy name" }, sadie)).status, 400);
   assert.equal((await post("/api/alpha/sessions", { ...start, consentVersion: "unaccepted" }, sadie)).status, 400);
   assert.equal((await post("/api/alpha/sessions", { ...start, consentVersion: LEGACY_ALPHA_CONSENT }, sadie)).status, 400);
   const started = await post("/api/alpha/sessions", start, sadie);
@@ -77,6 +79,7 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
   const own = `/api/alpha/sessions/${id}`, admin = `/api/alpha/admin/sessions/${id}`;
   assert.equal((await (await post("/api/alpha/sessions", start, sadie)).json()).id, id);
   assert.equal((await post("/api/alpha/sessions", { ...start, mode: "live" }, sadie)).status, 409);
+  assert.equal((await post("/api/alpha/sessions", { ...start, model: "fizz" }, sadie)).status, 409);
   assert.equal((await get("/api/alpha/sessions", sadie)).status, 403);
   assert.equal((await get(own, sadie)).status, 403);
   assert.equal((await get(own, dilan)).status, 403);
@@ -88,8 +91,11 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
   const pointer = { t: 5, type: "pointer", x: 110, y: 155, action: "click" };
   const batch = { seq: 1, events: [
     { t: 0, type: "step", step: "connect" },
-    { t: 1, type: "device", mode: "simulator", channels: ["vibrate", "fingering"] },
-    { t: 2, type: "output", mode: "simulator", stage: "simulated", channels: { vibrate: 1, fingering: null }, durationMs: 2000, commandId: 1 },
+    { t: 1, type: "device", mode: "simulator", channels: ["vibrate", "pump"], model: "max" },
+    { t: 2, type: "output", mode: "simulator", stage: "simulated", channels: { vibrate: 1, pump: 3 }, durationMs: 2000, commandId: 1 },
+    { t: 2, type: "control", control: "maximum", channel: "pump", value: 3 },
+    { t: 3, type: "device", mode: "simulator", channels: ["oscillate", "suction"], model: "fizz" },
+    { t: 3, type: "verification", mode: "simulator", channel: "suction", response: true, stopped: true },
     { t: 3, type: "mark", mark: "good" },
     screen, pointer,
   ] };
@@ -102,6 +108,12 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
     { ...screen, items: [{ ...item, text: "rejected fixture" }] },
     { ...screen, items: [{ ...item, y: 1001 }] },
     { ...pointer, target: "rejected fixture" },
+    { ...batch.events[1], channels: ["vibrate", "fingering"] },
+    { ...batch.events[1], mode: "live" },
+    { ...batch.events[1], model: "vendor-device-id" },
+    { ...batch.events[2], channels: { pump: 4 } },
+    { ...batch.events[2], mode: "live" },
+    { ...batch.events[3], value: 4 },
   ]) assert.equal((await post(`${own}/events`, { ...batch, events: [invalid] }, sadie)).status, 400);
   assert.equal((await post(`${own}/events`, batch, sadie)).status, 200);
   assert.equal((await (await post(`${own}/events`, batch, sadie)).json()).duplicate, true);
@@ -115,7 +127,11 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
     assert.equal(rejected.status, 400);
     assert.match((await rejected.json()).error, explanation);
   }
-  assert.equal((await post(`${own}/feedback`, { minimum: "depends", flexingMaximum: 2, vibrationMaximum: 3, connectionEase: 7, easeOfUse: 0, improvements: "Synthetic note" }, sadie)).status, 200);
+  const feedback = { minimum: "depends", preferredMovement: "suction", flexingMaximum: 2, vibrationMaximum: 3,
+    rotationMaximum: 4, thrustingMaximum: 5, oscillationMaximum: 6, pumpingMaximum: 3, suctionMaximum: 7,
+    connectionEase: 7, easeOfUse: 0, improvements: "Synthetic note" };
+  assert.equal((await post(`${own}/feedback`, { ...feedback, pumpingMaximum: 4 }, sadie)).status, 400);
+  assert.equal((await post(`${own}/feedback`, feedback, sadie)).status, 200);
   const note = { t: 2, text: "Synthetic timeline marker" };
   assert.equal((await post(`${own}/annotations`, { ...note, t: 6 }, sadie)).status, 400);
   assert.equal((await post(`${own}/annotations`, note, sadie)).status, 201);
@@ -123,11 +139,15 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
   assert.equal((await post(`${own}/finish`, {}, sadie)).status, 200);
   assert.equal((await post(`${own}/events`, { ...batch, seq: 2 }, sadie)).status, 409);
 
-  const legacy = await (await get("/fixture-seed-legacy")).json();
   const legacyOwn = `/api/alpha/sessions/${legacy.id}`, legacyAdmin = `/api/alpha/admin/sessions/${legacy.id}`;
   assert.equal((await post(`${legacyOwn}/events`, { seq: 1, events: [screen] }, sadie)).status, 403);
-  assert.equal((await post(`${legacyOwn}/events`, { seq: 1, events: [batch.events[0]] }, sadie)).status, 200);
+  const oldEvents = [batch.events[0], { t: 1, type: "device", mode: "simulator", channels: ["vibrate", "fingering"] },
+    { t: 2, type: "output", state: "playing", vibration: 1, flexing: 2 }];
+  assert.equal((await post(`${legacyOwn}/events`, { seq: 1, events: oldEvents }, sadie)).status, 200);
   assert.equal((await post(`${legacyOwn}/finish`, {}, sadie)).status, 200);
+  const oldDetail = await (await get(legacyAdmin, dilan)).json();
+  assert.equal(oldDetail.session.model, undefined);
+  assert.deepEqual(oldDetail.events, oldEvents);
 
   const clip = Buffer.alloc(540000, 0x11);
   clip.set([0x1a, 0x45, 0xdf, 0xa3]);
@@ -155,9 +175,10 @@ test("alpha auth and study data stay isolated in the real SQLite Durable Object"
 
   const detail = await (await get(admin, dilan)).json();
   assert.equal(detail.session.username, "Sadie");
+  assert.equal(detail.session.model, "max");
   assert.equal(detail.session.state, "finished");
   assert.equal(detail.session.hasClip, false);
-  assert.equal(detail.feedback.easeOfUse, 0);
+  assert.deepEqual(detail.feedback, feedback);
   assert.deepEqual(detail.events, batch.events);
   assert.equal(detail.annotations.length, 1);
   assert.equal((await (await get("/api/alpha/admin/sessions?username=Dilan", dilan)).json()).sessions.length, 0);

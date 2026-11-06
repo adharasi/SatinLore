@@ -1,3 +1,5 @@
+import {channelMaximum, MOVEMENT_IDS} from "../devices/toy-profiles.mjs";
+
 // User-selected control preferences only. No story text, identity, transport token
 // or playback arming is part of this schema. Persistence is a separate explicit action.
 export const CALIBRATION_VERSION = 1;
@@ -223,8 +225,8 @@ export class ReadingFeel {
 export class CombinedReadingFeel {
   constructor(channels, {mode = "story", automaticMovement = false, preferredMovement = Object.keys(channels || {})[0]} = {}) {
     if(!channels || typeof channels!=="object" || Array.isArray(channels) || Object.keys(channels).length<2 || Object.keys(channels).length>5 ||
-        Object.keys(channels).some(key=>!movementIds.includes(key)))throw new TypeError("Choose two or more available movements on one toy.");
-    this.channels=Object.fromEntries(Object.entries(channels).map(([id,value])=>[id,{...normalizeChannelCalibration(value)}]));
+        Object.keys(channels).some(key=>!MOVEMENT_IDS.includes(key)))throw new TypeError("Choose two or more available movements on one toy.");
+    this.channels=Object.fromEntries(Object.entries(channels).map(([id,value])=>[id,{...clampCalibration(value, channelMaximum(id))}]));
     this.policies=Object.fromEntries(Object.entries(this.channels).map(([id,{maximum,...value}])=>{
       const policy=new ReadingFeel();policy.configure({mode,maximum,...value});return[id,policy];
     }));
@@ -249,7 +251,7 @@ export class CombinedReadingFeel {
   configure(value){for(const [id,policy] of Object.entries(this.policies)){policy.configure(value);if(value.maximum!==undefined)this.channels[id].maximum=value.maximum;}return this.snapshot();}
   updateChannel(id,value){
     if(!Object.hasOwn(this.channels,id))throw new RangeError("Choose an active movement.");
-    const checked=normalizeChannelCalibration(value);this.channels[id]=checked;
+    const checked=clampCalibration(value,channelMaximum(id));this.channels[id]=checked;
     this.policies[id].configure(checked);return this.snapshot();
   }
   followStory(from){for(const [id,policy] of Object.entries(this.policies))policy.followStory(from?.[id]);}

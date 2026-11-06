@@ -1,4 +1,5 @@
 import { ALPHA_SCREEN_LABELS, ALPHA_SCREEN_STAGES } from "./alpha-screen-schema.mjs";
+import { ALPHA_TOY_PROFILES, channelLabel, channelMaximum } from "./devices/toy-profiles.mjs";
 
 const API = "/alpha/api/alpha";
 const ADMIN = `${API}/admin/sessions`;
@@ -7,26 +8,32 @@ const TESTERS = new Set(["Dilan", "Sadie"]);
 const EVENT_PAGE = 50;
 const REPLAY_SCREENS = new Set(ALPHA_SCREEN_STAGES);
 const REPLAY_STEPS = new Set([...REPLAY_SCREENS, "welcome", "complete"]);
-const CHANNELS = [
-  { key: "vibrate", alias: "vibration", label: "Vibration", className: "alpha-chart-vibrate" },
-  { key: "fingering", alias: "flexing", label: "Flexing", className: "alpha-chart-flex" }
+const CHANNELS = ["vibrate", "fingering", "rotate", "thrusting", "oscillate", "pump", "suction"].map(key => ({
+  key, label: channelLabel(key), maximum: channelMaximum(key),
+  alias: key === "vibrate" ? "vibration" : key === "fingering" ? "flexing" : null,
+}));
+const models = new Map(ALPHA_TOY_PROFILES.map(profile => [profile.id, profile.label]));
+const movementFields = [
+  ["vibrationMaximum", "vibrate"], ["flexingMaximum", "fingering"], ["rotationMaximum", "rotate"],
+  ["thrustingMaximum", "thrusting"], ["oscillationMaximum", "oscillate"], ["pumpingMaximum", "pump"], ["suctionMaximum", "suction"],
 ];
 const LABELS = {
   good: "Good moment", tooMuch: "Too much", change: "Wanted a change", finished: "Finished", climax: "Marked climax",
-  yes: "Yes", no: "No", depends: "Depends", vibration: "Vibration", flexing: "Flexing", vibrate: "Vibration",
-  fingering: "Flexing", both: "Both", neither: "Neither", live: "Physical toy", simulator: "Simulator",
+  yes: "Yes", no: "No", depends: "Depends", vibration: "Vibration", flexing: "Flexing",
+  rotation: "Rotation", oscillation: "Oscillation", pumping: "Pumping",
+  ...Object.fromEntries(CHANNELS.map(({ key, label }) => [key, label])),
+  both: "Both", together: "Together", neither: "Neither", live: "Physical toy", simulator: "Simulator",
   unknown: "Unknown output", submitted: "Submitted to bridge", acknowledged: "Acknowledged by software",
   clamped: "Limits applied", requested: "Requested", observed: "Tester observed", easeOff: "Ease off",
   verification: "Hardware check", verify: "Hardware check", step: "Setup step", output: "Output",
-  vibrationMaximum: "Vibration maximum", flexingMaximum: "Flexing maximum", failed: "Failed",
+  ...Object.fromEntries(movementFields.map(([field, channel]) => [field, `${channelLabel(channel)} maximum`])), failed: "Failed",
   welcome: "Welcome", connect: "Connect", controls: "Control lab", feedback: "Feedback", complete: "Session complete",
   start: "Start", stop: "Stop", hold: "Hold", easeoff: "Ease off", minimum: "Minimum", rhythm: "Rhythm",
   "screen-started": "Screen capture started", "screen-ended": "Screen capture ended"
 };
 const FEEDBACK = [
   ["minimum", "Preferred a constant minimum"],
-  ["vibrationMaximum", "Preferred vibration maximum", 20],
-  ["flexingMaximum", "Preferred flexing maximum", 20],
+  ...movementFields.map(([field, channel]) => [field, `Preferred ${channelLabel(channel).toLowerCase()} maximum`, channelMaximum(channel)]),
   ["preferredMovement", "Preferred movement"],
   ["enjoyment", "Enjoyment", 10], ["comfort", "Comfort", 10],
   ["easeOfUse", "Ease of control", 10], ["connectionEase", "Ease of connection", 10],
@@ -41,10 +48,25 @@ const time = value => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 };
 const date = value => isNumber(value) ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(value) : "Unknown date";
-const getLevels = event => Object.fromEntries(CHANNELS.map(({ key, alias }) => {
-  const value = event.channels?.[key] ?? event[alias];
-  return [key, Number.isInteger(value) && value >= 0 && value <= 20 ? value : null];
-}));
+function recordedLevel(event, { key, alias, maximum }) {
+  const value = event.channels?.[key] ?? (alias ? event[alias] : undefined);
+  return Number.isInteger(value) && value >= 0 && value <= maximum ? value : null;
+}
+function recordedChannels(events) {
+  const keys = new Set();
+  for (const event of events) {
+    if (event.type === "device") for (const key of event.channels) keys.add(key);
+    if (event.type !== "output") continue;
+    for (const key of Object.keys(event.channels ?? {})) keys.add(key);
+    if (Object.hasOwn(event, "vibration")) keys.add("vibrate");
+    if (Object.hasOwn(event, "flexing")) keys.add("fingering");
+  }
+  return CHANNELS.filter(({ key }) => keys.has(key));
+}
+const sessionModel = ({ session, events }) =>
+  models.get(events.findLast(event => event.type === "device" && models.has(event.model))?.model) ??
+  models.get(session.model) ??
+  (recordedChannels(events).some(({ key }) => key === "fingering") ? "Flexer" : "Lovense");
 const isOutput = event => event.type === "output";
 const isMarker = event => event.type === "mark";
 const hasKnownOutput = event => isOutput(event) && event.state !== "unknown" && !["unknown", "failed"].includes(event.stage);
@@ -67,12 +89,14 @@ function eventDescription(event) {
     return `${human(event.mode)} check · ${human(event.channel)} · Response ${event.response ? "observed" : "unconfirmed"} · Stop ${event.stopped ? "observed" : "unconfirmed"}`;
   }
   if (event.type === "verify") return `Hardware check · ${human(event.movement)} · ${human(event.outcome)}`;
-  if (event.type === "device") return `Device selected · ${human(event.mode)} · ${event.channels.map(human).join(", ")}`;
+  if (event.type === "device") {
+    return [event.channels.length ? "Device selected" : "Device unavailable", models.get(event.model), human(event.mode),
+      event.channels.map(human).join(", ")].filter(Boolean).join(" · ");
+  }
   if (event.type === "output" || event.type === "command") {
-    const levels = getLevels(event);
-    const states = CHANNELS.map(({ key, label }) => {
-      const value = levels[key];
-      return value === null ? "" : `${label} ${value}/20`;
+    const states = CHANNELS.map(channel => {
+      const value = recordedLevel(event, channel);
+      return value === null ? "" : `${channel.label} ${value}/${channel.maximum}`;
     }).filter(Boolean);
     return [
       human(event.stage ?? event.state ?? event.type), ...states,
@@ -118,7 +142,8 @@ export function deriveAlphaMovementPattern(events, durationMs, mode) {
   const traceEnd = Math.min(durationMs, events.at(-1)?.t ?? 0);
   const channels = {};
   const positive = [];
-  for (const { key } of CHANNELS) {
+  for (const channel of recordedChannels(events)) {
+    const { key } = channel;
     const segments = [];
     let previous = null, latestRequest = 0;
     function close(at) {
@@ -142,7 +167,7 @@ export function deriveAlphaMovementPattern(events, durationMs, mode) {
       latestRequest = Math.max(latestRequest, event.commandId ?? 0);
       if (event.stage === "requested") continue;
       close(event.t);
-      const level = hasKnownOutput(event) ? getLevels(event)[key] : null;
+      const level = hasKnownOutput(event) ? recordedLevel(event, channel) : null;
       const live = (event.mode ?? mode) === "live" || event.stage === "submitted";
       previous = level === null || live && level > 0 && !(event.durationMs > 0) ? null : {
         startMs: event.t, level, endMs: live && level > 0 ? event.t + event.durationMs : durationMs
@@ -167,7 +192,7 @@ export function deriveAlphaMovementPattern(events, durationMs, mode) {
   }
   return {
     format: "satinlore-alpha-movement-pattern-v1", durationMs, activeMs,
-    levelSeconds: channels.vibrate.levelSeconds + channels.fingering.levelSeconds, channels
+    levelSeconds: Object.values(channels).reduce((total, channel) => total + channel.levelSeconds, 0), channels
   };
 }
 const seconds = value => (value / 1000).toFixed(1) + " s";
@@ -273,7 +298,7 @@ export function initializeAlphaAdmin() {
       button.type = "button";
       button.setAttribute("aria-current", String(current?.session.id === session.id));
       button.append(
-        el("strong", `${session.username} · ${human(session.mode)}`),
+        el("strong", [session.username, models.get(session.model), human(session.mode)].filter(Boolean).join(" · ")),
         el("span", date(session.createdAt)),
         el("span", [session.state === "active" ? "In progress" : "Finished", `${session.eventCount ?? 0} records`, session.hasFeedback ? "Feedback" : "", session.hasClip ? "Clip" : ""].filter(Boolean).join(" · "))
       );
@@ -309,21 +334,22 @@ export function initializeAlphaAdmin() {
     }
   }
   const xFor = t => 34 + Math.max(0, Math.min(1, t / Math.max(1, duration))) * 590;
-  const yFor = level => 116 - level * 4.9;
+  const yFor = ratio => 116 - ratio * 98;
   function drawChart() {
     const nodes = [];
-    for (const level of [0, 5, 10, 15, 20]) {
-      const y = yFor(level);
+    for (const ratio of [0, .25, .5, .75, 1]) {
+      const y = yFor(ratio);
       nodes.push(svg("line", { class: "alpha-chart-grid", x1: 34, x2: 624, y1: y, y2: y }));
       const label = svg("text", { class: "alpha-chart-text", x: 26, y: y + 3, "text-anchor": "end" });
-      label.textContent = level;
+      label.textContent = `${ratio * 100}%`;
       nodes.push(label);
     }
-    for (const { key, className } of CHANNELS) {
+    const recorded = CHANNELS.filter(({ key }) => Object.hasOwn(pattern.channels, key));
+    for (const { key, maximum } of recorded) {
       const path = pattern.channels[key].segments.map(({ startMs, endMs, level }) =>
-        `M${xFor(startMs).toFixed(2)},${yFor(level).toFixed(2)}H${xFor(endMs).toFixed(2)}`
+        `M${xFor(startMs).toFixed(2)},${yFor(level / maximum).toFixed(2)}H${xFor(endMs).toFixed(2)}`
       ).join("");
-      if (path) nodes.push(svg("path", { class: className, d: path }));
+      if (path) nodes.push(svg("path", { class: "alpha-chart-movement", "data-channel": key, d: path }));
     }
     for (const marker of current.events.filter(isMarker)) {
       const x = xFor(marker.t);
@@ -336,6 +362,13 @@ export function initializeAlphaAdmin() {
       nodes.push(tick);
     }
     $("chart").replaceChildren(...nodes);
+    const legend = recorded.map(({ key, label }) => {
+      const item = el("span", label);
+      item.dataset.channel = key;
+      return item;
+    });
+    if (current.events.some(isMarker)) legend.push(el("span", "Marked moment", "alpha-legend-marker"));
+    $("legend").replaceChildren(...legend);
   }
   function clipOffset() {
     return isNumber(current?.clip?.offsetMs) ? current.clip.offsetMs : null;
@@ -417,9 +450,9 @@ export function initializeAlphaAdmin() {
     const playhead = $("chart").querySelector("[data-playhead]");
     playhead?.setAttribute("x1", xFor(at));
     playhead?.setAttribute("x2", xFor(at));
-    $("levels").replaceChildren(...CHANNELS.map(({ key, label }) => {
+    $("levels").replaceChildren(...CHANNELS.filter(({ key }) => Object.hasOwn(pattern.channels, key)).map(({ key, label, maximum }) => {
       const segment = pattern.channels[key].segments.findLast(entry => entry.startMs <= at && at < entry.endMs);
-      return el("span", `${label} · ${segment ? `${segment.level}/20` : "No known level"}`);
+      return el("span", `${label} · ${segment ? `${segment.level}/${maximum}` : "No known level"}`);
     }));
     if (moveClip) {
       const index = Math.max(0, viewEvents.findLastIndex(event => event.t <= at));
@@ -512,20 +545,22 @@ export function initializeAlphaAdmin() {
       pattern = deriveAlphaMovementPattern(data.events, duration, data.session.mode);
       const rows = [
         ["Total movement", pattern.activeMs, pattern.levelSeconds],
-        ...CHANNELS.map(({ key, label }) => [label, pattern.channels[key].activeMs, pattern.channels[key].levelSeconds, pattern.channels[key].peakLevel])
+        ...CHANNELS.filter(({ key }) => Object.hasOwn(pattern.channels, key)).map(({ key, label, maximum }) => [
+          label, pattern.channels[key].activeMs, pattern.channels[key].levelSeconds, pattern.channels[key].peakLevel, maximum
+        ])
       ];
-      $("pattern-summary").replaceChildren(...rows.map(([label, activeMs, amount, peak]) => {
+      $("pattern-summary").replaceChildren(...rows.map(([label, activeMs, amount, peak, maximum]) => {
         const row = el("div");
         const details = [seconds(activeMs) + " active", amount.toFixed(1) + " level × seconds"];
-        if (peak !== undefined) details.push(peak === null ? "No recorded level" : peak + "/20 peak");
+        if (peak !== undefined) details.push(peak === null ? "No recorded level" : `${peak}/${maximum} peak`);
         row.append(el("dt", label), el("dd", details.join(" · ")));
         return row;
       }));
-      $("pattern-play").disabled = !CHANNELS.some(({ key }) => pattern.channels[key].segments.length);
+      $("pattern-play").disabled = !Object.values(pattern.channels).some(channel => channel.segments.length);
       $("empty").hidden = true;
       $("detail").hidden = false;
       document.getElementById("alpha-detail-meta").textContent = `${data.session.username} · ${date(data.session.createdAt)}`;
-      document.getElementById("alpha-detail-title").textContent = `Flexer · ${human(data.session.mode)}`;
+      document.getElementById("alpha-detail-title").textContent = `${sessionModel(data)} · ${human(data.session.mode)}`;
       document.getElementById("alpha-detail-subtitle").textContent =
         `${data.events.filter(event => !isReplayEvent(event)).length} actions · ${time(duration)} elapsed${isNumber(data.session.retainedUntil) ? ` · Retained until ${date(data.session.retainedUntil)}` : ""}`;
       $("position").max = String(Math.max(1, duration));

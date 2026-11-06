@@ -1,4 +1,5 @@
-import {ALPHA_SCREEN_ITEM_LIMIT, ALPHA_SCREEN_LABELS} from "./alpha-screen-schema.mjs";
+import {ALPHA_SCREEN_ITEM_LIMIT, ALPHA_SCREEN_LABELS, ALPHA_SCREEN_MAXIMUM_FIELDS} from "./alpha-screen-schema.mjs";
+import {MOVEMENT_IDS} from "./devices/toy-profiles.mjs";
 
 const ids = {
   theme: "theme", title: "study-title", intro: "study-intro", progress: "progress-connect",
@@ -15,12 +16,12 @@ const selectors = Object.fromEntries(Object.entries(ids).map(([key, id]) => [key
 selectors.instructions = "#alpha-live-instructions:not([hidden]), #alpha-simulator-instructions:not([hidden])";
 selectors["save-note"] = "#alpha-annotation-form button[type=submit]";
 for (const mark of ["good", "tooMuch", "change"]) selectors["mark-" + mark] = `[data-alpha-mark="${mark}"]`;
-for (const channel of ["vibrate", "fingering"]) {
+for (const channel of MOVEMENT_IDS) {
   const verification = `#alpha-verification-movements [data-channel="${channel}"]`;
   const card = `#alpha-movement-cards [data-channel="${channel}"]`;
   selectors["verify-" + channel] = verification + " button";
   selectors["check-" + channel] = verification + " input";
-  selectors[channel + "-toggle"] = card + ' input[type="checkbox"]';
+  selectors[channel + "-toggle"] = card + " [data-movement-toggle]";
   for (const setting of ["level", "maximum", "minimum", "recovery", "rhythm", "range"]) {
     selectors[`${channel}-${setting}`] = `${card} [data-setting="${setting}"]`;
   }
@@ -29,7 +30,7 @@ for (const key of Object.keys(ALPHA_SCREEN_LABELS)) {
   selectors[key] ??= `#alpha-feedback-form [name="${key}"]`;
 }
 
-const mask = new Set(["qr", "picker", "minimum", "preferredMovement", "vibrationMaximum", "flexingMaximum",
+const mask = new Set(["qr", "picker", "minimum", "preferredMovement", ...ALPHA_SCREEN_MAXIMUM_FIELDS,
   "enjoyment", "comfort", "connectionEase", "easeOfUse", "bestMoment", "setupFeedback",
   "improvements", "overallNotes", "annotation"]);
 const bound = (value, size) => Math.round(Math.max(0, Math.min(1, value / size)) * 1000);

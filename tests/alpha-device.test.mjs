@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createAlphaDevice} from "../app/static/alpha-device.mjs";
+import {ALPHA_TOY_PROFILES, channelMaximum} from "../app/static/devices/toy-profiles.mjs";
 
 async function settle() {
   for (let index = 0; index < 25; index++) await Promise.resolve();
@@ -120,8 +121,9 @@ test("Alpha enables the full range for checked live movements without starting t
   const bridge = new FakeBridge(), app = fixture({bridge}), device = app.device;
   t.after(() => device.destroy());
   assert.equal(await device.connect("live"), true);
-  assert.deepEqual(device.snapshot().toys, [{id: "one-flexer", label: "Flexer"}]);
-  assert.throws(() => device.select("another-toy"), /discovered Flexer/);
+  assert.deepEqual(device.snapshot().toys, [{id: "one-flexer", label: "Flexer", model: "flexer"},
+    {id: "another-toy", label: "Nora", model: "nora"}]);
+  assert.throws(() => device.select("not-discovered"), /discovered Lovense toy/);
   await device.select("one-flexer");
   assert.equal(await device.choose(["vibrate"]), false);
   assert.deepEqual(bridge.grants, []);
@@ -245,10 +247,59 @@ test("a Flexer reporting only flexing can qualify and start only that movement",
   assert.equal(await device.select("one-flexer"), true);
   assert.deepEqual(device.snapshot().channels, ["fingering"]);
   assert.equal(device.snapshot().supportsCombined, false);
-  assert.throws(() => device.test("vibrate"), /available Flexer movement/);
+  assert.throws(() => device.test("vibrate"), /available movement/);
   await app.checkMovement("fingering");
   assert.equal(await device.choose(["fingering"]), true);
   assert.equal(await device.start(), true);
   await settle();
   assert.equal(bridge.commands.at(-1).channel, "fingering");
+});
+
+test("every Alpha simulator exposes only its actual controls and resets after changing models", async t => {
+  const {device, checkMovement, advance, events} = fixture();
+  t.after(() => device.destroy());
+  for (const profile of ALPHA_TOY_PROFILES) {
+    assert.equal(await device.connect("simulator", profile.id), true);
+    assert.equal(await device.start(), false);
+    await device.select(`sim-${profile.id}`);
+    const initial = device.snapshot();
+    assert.equal(initial.model, profile.id);
+    assert.deepEqual(initial.channels, profile.simChannels);
+    assert.deepEqual(Object.keys(initial.settings), profile.simChannels);
+    assert.deepEqual(initial.verifiedChannels, []);
+    for (const channel of profile.simChannels) {
+      await checkMovement(channel);
+      assert.equal(device.snapshot().settings[channel].maximum, channelMaximum(channel));
+    }
+    if (profile.id === "max") {
+      assert.throws(() => device.set("pump", "maximum", 4), /within its range/);
+      device.set("pump", "level", 3);
+    }
+    if (profile.id === "fizz") assert.equal(await device.choose(profile.simChannels), false);
+    const active = initial.supportsCombined ? profile.simChannels : profile.simChannels.slice(0, 1);
+    assert.equal(await device.choose(active), true);
+    assert.equal(await device.start(), true);
+    await advance(1100);
+    assert.ok(active.every(channel => device.snapshot().output[channel] > 0));
+    device.stop();
+    assert.ok(Object.values(device.snapshot().output).every(level => level === 0));
+  }
+  assert.ok(events.some(event => event.type === "device" && event.model === "max" && event.channels.includes("pump")));
+});
+
+test("Alpha accepts a single live rotation and will not combine channels on a narrower transport", async t => {
+  const bridge = new FakeBridge(), {device, checkMovement} = fixture({bridge});
+  t.after(() => device.destroy());
+  await device.connect("live");
+  await device.select("another-toy");
+  assert.equal(device.snapshot().model, "nora");
+  assert.deepEqual(device.snapshot().channels, ["vibrate", "rotate"]);
+  await checkMovement("vibrate");
+  await checkMovement("rotate");
+  assert.equal(await device.choose(["vibrate", "rotate"]), false);
+  assert.equal(await device.choose(["rotate"]), true);
+  assert.equal(await device.start(), true);
+  await settle();
+  assert.ok(bridge.commands.every(frame => frame.deviceId === "another-toy" && frame.durationMs === 2000));
+  assert.equal(bridge.commands.at(-1).channel, "rotate");
 });

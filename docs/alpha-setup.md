@@ -1,6 +1,6 @@
 # SatinLore Alpha setup
 
-Alpha runs at `https://app.satinlore.com/alpha`. It is a Flexer study with a simulator and a separate username/password session for **Dilan** and **Sadie**. Dilan reviews both users at `https://app.satinlore.com/admin`. Study sessions are available for review only in Dilan’s admin panel. Alpha credentials cannot sign into the reader or the beta host.
+Alpha runs at `https://app.satinlore.com/alpha`. It is a device study with 36 Lovense simulator profiles and a separate username/password session for **Dilan** and **Sadie**. Dilan reviews both users at `https://app.satinlore.com/admin`. Study sessions are available for review only in Dilan’s admin panel. Alpha credentials cannot sign into the reader or the beta host.
 
 ## Owner setup after the Worker deployment
 
@@ -27,13 +27,15 @@ Alpha runs at `https://app.satinlore.com/alpha`. It is a Flexer study with a sim
 
 ## First rehearsal and live visit
 
-1. Open Alpha, choose **Simulator**, confirm you are 18 or older and choose **Allow data collection**. Connect and select the simulator. Test each movement, tick the check only after it starts and stops, then continue to the controls.
-2. Follow **What to try**. Try each movement on its own, then combine the two if both are available. The personal maximum starts at 20/20 and the starting movement level is 1/20. Lower the maximum and verify the minimum drops with it. **Stop** stops the movements. **Finish & stop** also opens the feedback page.
+1. Open Alpha, choose **Simulator** and select a model. Confirm you are 18 or older and make your data collection choice. Connect and select the simulator. Test the movements you want to use, tick each check after it starts and stops, then continue to the controls.
+2. Follow **What to try**. Try each checked movement separately and combine them if the connection supports it. Most movements start at level 1 with a 20/20 personal maximum. Max pumping in the simulator uses levels 0–3. Lower the maximum and verify the minimum drops with it. **Stop** stops the simulator or requests a targeted stop for your toy. **Finish & stop** also opens the feedback page.
 3. Save the three required answers and any optional feedback or timestamped notes, then choose **Back to study home**. As Dilan, open the session in `/admin` and check separate replays of pairing, movement checks, controls and feedback. Review the control timeline, marks and submitted answers there. To delete a synthetic rehearsal, use the admin session’s delete action.
-4. For a real Flexer, turn on Bluetooth and pair your Flexer in the **Lovense Remote** phone app. Open Alpha on a second screen, choose **My Flexer** and **Connect**. In Remote choose **+ → Scan QR**. Scan the code, keep Remote open and choose your Flexer in Alpha.
-5. Set the Flexer down and check each movement separately at level 1. **Continue to controls** makes the full range available for each checked movement. Controls stay paused until you press **Start**. Lower the personal maximum if you want a tighter limit. If the Flexer keeps moving after **Stop**, stop it in Lovense Remote or on the device.
+4. For a physical toy, turn on Bluetooth and pair it in the **Lovense Remote** phone app. Open Alpha on a second screen, choose **My Lovense toy** and **Connect**. In Remote choose **+ → Scan QR**. Scan the code, keep Remote open and choose your device in Alpha.
+5. Set the device down and check each movement separately at level 1. **Continue to controls** makes the full range available for each checked movement. Controls stay paused until you press **Start**. Lower the personal maximum if you want a tighter limit. If the toy keeps moving after **Stop**, stop it in Lovense Remote or on the device.
 
-To check the live integration without a toy, sign in as Dilan on a desktop, choose **My Flexer** and select **Connect**. A QR code should appear before a Flexer is paired. Seeing it verifies the live token exchange and QR setup. Device discovery, movement and Stop still need a physical Flexer.
+To check live pairing without a toy, sign in as Dilan on a desktop, choose **My Lovense toy** and select **Connect**. A QR code should appear before a toy is paired. Seeing it verifies the live token exchange and QR setup. Device discovery, movement and Stop still need physical verification.
+
+Alpha offers vibration, rotation, flexing, thrusting, oscillation and suction where the connection supports them. Fizz and Tenera 2 require a compatible extended connection report, and Fizz offers one movement at a time. Max pumping is simulation-only. Lovense documents pressure release separately on Max 2. Other features such as heat, independent motors, and depth or stroke positioning are outside Alpha's current controls. [Compatibility matrix](lovense-compatibility.md) · [Max 2 guide](https://www.lovense.com/guide/max2)
 
 If no QR code appears, open the browser's **Developer Tools → Network**, filter for `lovense` and retry from the signed-in Alpha tab. The `status` response's `available: true` reports valid runtime configuration without contacting Lovense. A `session` response with HTTP 502 as Dilan includes a `diagnostic` with a fixed stage and numeric upstream status/code where available. Copy only that object. Request headers, successful session responses and the QR code contain private pairing or sign-in material. Record simulator and physical observations separately. [Physical qualification record](hardware-test-record.md)
 

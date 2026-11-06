@@ -1,7 +1,7 @@
 import {PlaybackController} from "../playback/controller.mjs";
 import {AsyncPlaybackController} from "../playback/async-controller.mjs";
 import {ProfileSimulator} from "./profile-simulator.mjs";
-import {getToyProfile} from "./toy-profiles.mjs";
+import {channelMaximum, getToyProfile} from "./toy-profiles.mjs";
 import {BridgeTransport} from "./bridge-transport.mjs";
 import {CALIBRATION_VERSION, DEFAULT_CHANNEL_CALIBRATION, DEFAULT_SIMULATOR_MAXIMUM, RHYTHMS, normalizeChannelCalibration, normalizeSceneProfiles, clampCalibration, ReadingFeel, CombinedReadingFeel} from "../reader/calibration.mjs";
 
@@ -12,8 +12,8 @@ export class ReaderDeviceController {
   constructor({now = () => performance.now(), setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer),
     onChange = () => {}, onSetupChange = () => {}, onInterfaceError = () => {}, authorize = async () => true,
     document = globalThis.document, window = globalThis.window, navigator = globalThis.navigator,
-    bridge = null, simulator = null, storyRhythms = false, allowGuestSimulation = false, independentRhythms = false, ...controllerOptions} = {}) {
-    Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator,allowGuestSimulation,independentRhythms});
+    bridge = null, simulator = null, storyRhythms = false, allowGuestSimulation = false, independentRhythms = false, alpha = false, ...controllerOptions} = {}) {
+    Object.assign(this,{now,setTimer,clearTimer,onChange,onSetupChange,onInterfaceError,authorize,document,window,navigator,allowGuestSimulation,independentRhythms,alpha});
     this.channelDefaults = {...DEFAULT_CHANNEL_CALIBRATION, rhythm: storyRhythms ? "scene" : "steady"};
     this.factoryRhythm = this.channelDefaults.rhythm;
     this.readingDefaults = null;
@@ -25,14 +25,14 @@ export class ReaderDeviceController {
     this.operation = 0; this.testSerial = 0; this.testing = false; this.quickCheck = null; this.visible = true; this.authorized = true;
     this.toys = []; this.selectedId = null; this.connectionState = "disconnected"; this.connectionMessage = "Choose a toy to rehearse or connect.";
     this.liveConfigured = null; this.lastTest = null; this.verifiedTest = null; this.levels = []; this.ready = false; this.bridge = bridge; this.real = null;
-    this.simulator = simulator || new ProfileSimulator({now});
+    this.simulator = simulator || new ProfileSimulator({now, alpha});
     this.sim = new PlaybackController({...controllerOptions,device:this.simulator,now,setTimer,clearTimer,
       onChange: () => this.notify(),onInterfaceError: () => this.onInterfaceError(this.snapshot()),getMovement: () => this.channel});
     this.sim.feel = new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum: DEFAULT_SIMULATOR_MAXIMUM});
     this.ready = true;
   }
   get active() { return this.mode === "lovense" && this.real ? this.real : this.sim; }
-  get profile() { return getToyProfile(this.model); }
+  get profile() { return getToyProfile(this.model, {alpha: this.alpha}); }
   get playbackAuthorized() { return this.authorized || this.allowGuestSimulation && this.mode === "simulator"; }
   newReadingFeel(maximum = 20) {
     const feel = new ReadingFeel({rhythm: this.channelDefaults.rhythm, maximum});
@@ -123,7 +123,7 @@ export class ReaderDeviceController {
       this.connectionState = state.connectionState; this.connectionMessage = state.connectionMessage;
       const selected = this.selectedToy();
       if(!selected)this.personalRangeChannels.clear();
-      if (selected?.model && getToyProfile(selected.model)) this.model = selected.model;
+      if (selected?.model && getToyProfile(selected.model, {alpha: this.alpha})) this.model = selected.model;
       if (!selected && this.real?.connected) {this.cancelTest();void this.real.pause("Connection lost. Reconnect and confirm Start.");}
       if(selected && this.real?.connected && (this.activeChannels().some(channel=>!selected.capabilities.includes(channel)) || this.combinedChannels.length && !this.supportsCombined())) {
         this.cancelTest();this.personalRangeChannels.clear();this.verifiedChannels.clear();this.verifiedTest=null;
@@ -137,7 +137,7 @@ export class ReaderDeviceController {
     this.real.setVisible(this.visible); this.real.setAuthorized(this.authorized);
   }
   async beginConnection({mode = "simulator",model = "lush"} = {}) {
-    const profile = getToyProfile(model);
+    const profile = getToyProfile(model, {alpha: this.alpha});
     if (!["simulator","lovense"].includes(mode) || !profile) throw new Error("Choose a supported toy and connection.");
     const previous = this.snapshot();
     this.disconnect();
@@ -371,7 +371,9 @@ export class ReaderDeviceController {
   }
   setCalibration(channel,value,{apply=false}={}) {
     if(!this.channels().some(item=>item.id===channel))throw new RangeError("Choose a movement exposed by the selected toy.");
-    const checked=normalizeChannelCalibration(value);this.calibrations.set(this.calibrationKey(channel),checked);
+    const checked=normalizeChannelCalibration(value);
+    if (checked.maximum > channelMaximum(channel)) throw new RangeError("Choose a maximum within this movement’s range.");
+    this.calibrations.set(this.calibrationKey(channel),checked);
     if(apply)return this.applyCalibration(channel);
     this.notify();return this.calibrationSnapshot();
   }
@@ -413,7 +415,7 @@ export class ReaderDeviceController {
     this.notify();return true;
   }
   activeChannels(){return this.combinedChannels.length?[...this.combinedChannels]:[this.channel];}
-  supportsCombined(){return this.mode==="simulator"?this.channels().length>1:this.selectedToy()?.supportsCombined===true && this.selectedToy()?.controlTransport==="standard-socket-v1";}
+  supportsCombined(){return this.mode==="simulator"?this.profile?.supportsCombined!==false&&this.channels().length>1:this.selectedToy()?.supportsCombined===true && this.selectedToy()?.controlTransport==="standard-socket-v1";}
   async applyChannels(channels,{mode="story",preserveCeiling=false}={}) {
     if(!Array.isArray(channels)||channels.length<2||channels.length>5||new Set(channels).size!==channels.length||channels.some(id=>!this.channels().some(item=>item.id===id))||!this.supportsCombined())throw new RangeError("This connection does not expose those movements together.");
     if(!["story","continuous"].includes(mode))throw new RangeError("Choose a reading mode.");
@@ -438,7 +440,7 @@ export class ReaderDeviceController {
     if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).some(key=>!names.includes(key)))throw new RangeError("Use the available movement controls.");
     const active=this.active.feel.snapshot(),source=active.combined?active.channels[channel]:active;
     const current=Object.fromEntries(names.map(key=>[key,source[key]??DEFAULT_CHANNEL_CALIBRATION[key]]));
-    const merged={...current,...value},cap=this.mode==="lovense"?(this.personalRangeChannels.has(channel)?20:5):20;
+    const merged={...current,...value},cap=Math.min(channelMaximum(channel),this.mode==="lovense"?(this.personalRangeChannels.has(channel)?20:5):20);
     if(value.maximum!==undefined && (!Number.isInteger(value.maximum)||value.maximum<0||value.maximum>cap))throw new RangeError(`This movement's available maximum is ${cap}.`);
     // A deliberate range edit keeps its dependent preference values coherent.
     if(Number.isInteger(merged.maximum)&&merged.maximum>=0&&merged.maximum<=20 && Number.isInteger(merged.minimum)&&merged.minimum>=0&&merged.minimum<=20){

@@ -77,7 +77,7 @@ export const ALPHA_ASSETS = Object.freeze([
     "alpha-admin.css", "alpha-admin.mjs", "theme.css", "favicon.svg",
     "devices/reader-device.mjs", "devices/bridge-transport.mjs", "devices/pairing-image.mjs",
     "devices/profile-simulator.mjs", "devices/toy-profiles.mjs",
-    "playback/controller.mjs", "playback/async-controller.mjs", "reader/calibration.mjs",
+    "playback/controller.mjs", "playback/async-controller.mjs", "reader/calibration.mjs", "reader/simulator-view.mjs",
   ].map(source => [source, `/alpha/static/${source}`]),
 ].map(entry => Object.freeze(entry)));
 export const ALPHA_STATIC_PATHS = Object.freeze(ALPHA_ASSETS.map(([, path]) => path).filter(path => path.startsWith("/alpha/static/")));
