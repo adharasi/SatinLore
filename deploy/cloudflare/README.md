@@ -141,6 +141,14 @@ SQLite Durable Objects are supported on Workers Free. A Free-plan resource/quota
 
 The Worker accepts signed, exact-origin requests from the admitted private reader audience. Its quota allows 12 attempts per reader per UTC day, 100 per deployment per UTC day and 1,000 per UTC month. Cue-only calls contain up to 16 derived records and allow 600 model output tokens. Separately enabled `context-v2` calls contain at most 64 complete nearby paragraphs, with 3,000 UTF-8 bytes each, 12,000 source bytes total and a 16,384-byte request body. V2 allows up to 4,096 model output tokens and returns validated labels and token usage when available. Older v1 clients retain the eight-paragraph and 1,000-output-token limits. After initial enablement, the browser requests new windows during visible active reading and shows partial coverage. Each loaded story has a browser allowance of 12 attempts and 60,000 attempted source bytes. The Worker stores expiring quota counters and sets `store: false` on provider requests. OpenAI abuse-monitoring retention follows its separate policy. Contextual consent and labels remain in memory for the visit. [Contextual implementation and verification](../../docs/nocturne-context-phase.md)
 
+### Run the founder Luna Decisions benchmark
+
+Use the existing founder Cloudflare Access session on the app origin and open `/api/scene-analysis/decisions-benchmark`. The beta origin also supports the route when its Cloudflare Access application is active. **Run benchmark** submits two original fixed fixtures in up to four quota-counted calls. Results compare sentence cue and boundary precision and recall, refusal and coverage counts, latency and token usage for Luna Responses and Decisions.
+
+For the approved corpus comparison, prepare the pinned upload locally with `node scripts/prepare-decisions-hosted-corpus.mjs MANIFEST` and redirect the output to a private file outside Git. Upload that prepared file under **Approved corpus comparison** and select **Run corpus comparison**. Every window must match its approved digest before any provider call. The comparison sends 109 approved units out of 116 across three calibration passages, uses up to six calls and returns aggregate metrics. The existing reader quota applies to both runs.
+
+The benchmark is separate from playback. Keep the current reader analysis until a candidate clears the release checks on a representative holdout. [Release acceptance](../../docs/release-acceptance.md)
+
 ## Enable real Lovense pairing for the beta
 
 The simulator path is usable immediately. The real path deliberately reports unavailable until all three runtime settings below are valid. Never put these values into GitHub, build variables, browser code, feedback or chat.

@@ -135,6 +135,8 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 ## F5 — measurable scoring evaluation
 
+A founder-only hosted benchmark compares sentence-level Luna Decisions with Luna Responses using fixed fixtures and a digest-pinned approved calibration corpus. It uses the existing Worker key and quota. Compare live coverage, precision, recall, latency and token usage before considering playback integration. [Hosted benchmark](../deploy/cloudflare/README.md#run-the-founder-luna-decisions-benchmark)
+
 The controlled-release milestone has a dedicated set of acceptance gates for story coverage, independent annotations, classification, output and reader use. [Release acceptance](release-acceptance.md)
 
 Keep the local rules as the baseline and retain suggestions **0, 1, 2, 3 and 5 out of 20**. Visual labels never authorise stronger output. Prepare a versioned, rights-cleared evaluation set and rubric, split by story/source, with held-out material and independent labels on a subset. A proposed pilot is 200–500 paragraphs; that size is a starting hypothesis, not coverage evidence.
