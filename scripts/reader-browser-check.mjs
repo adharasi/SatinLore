@@ -445,6 +445,9 @@ async function toyConnectionChecks(page) {
       await analysed(page); await output(page, 0);
       assert.equal(await page.locator("#save-status").getAttribute("data-state"), "session");
       assert.equal(await page.locator(".simulator-view").getAttribute("data-model"), profile.id);
+      // Reconnecting reapplies the default quiet background. Check the authored
+      // zero in the same explicit quiet mode as the first rehearsal.
+      await page.locator("#feel-mode").selectOption("story");
       await start(page); await output(page, 0);
       await page.locator("#next").click(); await current(page, 1);
       await page.clock.runFor(1100); await output(page, 2);
