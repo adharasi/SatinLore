@@ -19,6 +19,11 @@ const SHAPES = {
 const FAMILY_SHAPES = {egg: SHAPES.lush, dual: SHAPES.flexer, rabbit: SHAPES.nora,
   wand: SHAPES.domi, shaft: SHAPES.spinel, plug: SHAPES.hush};
 
+export function simulatorToyOutline(model) {
+  const profile = getToyProfile(model, {alpha: true});
+  return profile ? SHAPES[profile.id] || FAMILY_SHAPES[profile.shape] || SHAPES.lush : SHAPES.lush;
+}
+
 // Project only known, currently active movements. Neither an arbitrary report
 // key nor an inactive movement is permission to display a commanded channel.
 export function simulatorChannelReadings(snapshot = {}) {

@@ -1,3 +1,4 @@
+import {channelMaximum, MOVEMENT_IDS} from "../devices/toy-profiles.mjs";
 import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged, stepSectionLevel} from "../reader/calibration.mjs";
 /** Experimental async contract for the deterministic lab only; not a qualified hardware adapter. */
 export const ASYNC_COMMAND_MS = 2000;
@@ -94,7 +95,7 @@ export class AsyncPlaybackController {
     if (kind === "command" && (!Number.isInteger(extra.level) || extra.level < 1 || extra.level > this.ceiling || extra.durationMs !== ASYNC_COMMAND_MS)) return Promise.reject(new RangeError("Use the confirmed ceiling and a finite two-second command."));
     const vector=kind === "command" && extra.levels;
     if(vector && (!this.transport.commandVector || !extra.ceilings || Array.isArray(vector) || Object.keys(vector).length<2 || Object.keys(vector).length>5 ||
-        Object.keys(vector).length!==Object.keys(extra.ceilings).length || Object.keys(vector).some(id=>!["vibrate","fingering","rotate","thrusting","oscillate"].includes(id)||!Number.isInteger(vector[id])||vector[id]<0||vector[id]>this.ceiling||!Number.isInteger(extra.ceilings[id])||extra.ceilings[id]<0||extra.ceilings[id]>this.ceiling||vector[id]>extra.ceilings[id]) ||
+        Object.keys(vector).length!==Object.keys(extra.ceilings).length || Object.keys(vector).some(id=>!MOVEMENT_IDS.includes(id)||!Number.isInteger(vector[id])||vector[id]<0||vector[id]>this.ceiling||!Number.isInteger(extra.ceilings[id])||extra.ceilings[id]<0||extra.ceilings[id]>Math.min(this.ceiling,channelMaximum(id))||vector[id]>extra.ceilings[id]) ||
         Math.max(...Object.values(vector))!==extra.level))return Promise.reject(new RangeError("Use individually bounded, supported movement controls."));
     const frame = { kind, deviceId, operationId: `request-${++this.sequence}`, generation: this.generation,
       ...(kind === "command" ? { level: extra.level, durationMs: ASYNC_COMMAND_MS } : {}) };
@@ -159,7 +160,7 @@ export class AsyncPlaybackController {
   devices() { return this.transport.discover().map(value => ({ id: value.id, name: value.name, vibration: value.vibration === true })); }
   selectDevice(deviceId) {
     const device = this.transport.discover().find(value => value.id === deviceId && (value.vibration === true ||
-      Array.isArray(value.capabilities) && value.capabilities.some(channel => ["vibrate", "rotate", "fingering", "thrusting", "oscillate"].includes(channel))));
+      Array.isArray(value.capabilities) && value.capabilities.some(channel => MOVEMENT_IDS.includes(channel))));
     if (!device) { void this.pause("Choose a supported device."); throw new RangeError("Choose a device with an available movement."); }
     if (deviceId === this.selected) return this.notify();
     void this.disconnect("Selection changed. Connect the selected device explicitly.");

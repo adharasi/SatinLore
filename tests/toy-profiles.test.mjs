@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {TOY_PROFILES,getToyProfile,normaliseToy,supportedToys} from "../app/static/devices/toy-profiles.mjs";
+import {ALPHA_TOY_PROFILES,TOY_PROFILES,getToyProfile,normaliseToy,supportedToys} from "../app/static/devices/toy-profiles.mjs";
 import {ProfileSimulator} from "../app/static/devices/profile-simulator.mjs";
 
 const raw = (model, extra = {}) => ({id: `toy-${model}`, toyType:model, connected:true, ...extra});
@@ -67,6 +67,21 @@ test("additional motions need the extended socket and a matching provider report
   for (const model of ["fizz","tenera","tenera2","valor","unknown"]) {
     assert.equal(normaliseToy(raw(model,{fullFunctionNames:["Vibrate","Suction","Thrusting"]}),socket),null);
   }
+});
+
+test("Alpha adds suction models and simulator-only Max pumping without changing reader discovery", () => {
+  const socket = {alpha: true, transport: "standard-socket-v1"};
+  assert.equal(ALPHA_TOY_PROFILES.length, 36);
+  assert.deepEqual(getToyProfile("max", {alpha: true}).simChannels, ["vibrate", "pump"]);
+  assert.deepEqual(normaliseToy(raw("Max 2", {id: "fixture-max", fullFunctionNames: ["Vibrate", "Pump"]}), socket).capabilities, ["vibrate"]);
+  assert.deepEqual(normaliseToy(raw("tenera"), {alpha: true}).capabilities, ["suction"]);
+  assert.equal(normaliseToy(raw("tenera2"), socket), null);
+  assert.deepEqual(normaliseToy(raw("Tenera 2", {id: "fixture-tenera", shortFunctionNames: ["s"]}), socket).capabilities, ["suction"]);
+  const fizz = raw("fizz", {fullFunctionNames: ["Suction", "Oscillate", "Heating"]});
+  assert.equal(normaliseToy(fizz), null);
+  assert.equal(normaliseToy(fizz, {alpha: true}), null);
+  assert.deepEqual(normaliseToy(fizz, socket).capabilities, ["suction", "oscillate"]);
+  assert.equal(normaliseToy(fizz, socket).supportsCombined, false);
 });
 
 test("Osci 3 is identified separately from older Osci models and keeps oscillation on the socket", () => {

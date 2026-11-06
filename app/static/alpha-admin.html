@@ -78,11 +78,11 @@
           <section class="surface alpha-review-card" aria-labelledby="alpha-timeline-heading">
             <div class="alpha-card-heading"><h3 id="alpha-timeline-heading">Control timeline</h3><output id="alpha-review-time">0:00 / 0:00</output></div>
             <h4 id="alpha-movement-heading">Movement pattern</h4>
-            <p class="note">Active time follows the recorded simulator state or submitted live commands. The total counts overlapping movements once. Level × seconds describes the recorded command envelope. Physical responses appear separately as tester observations.</p>
+            <p class="note">Active time follows the recorded simulator state or submitted live commands. The total counts overlapping movements once. The chart shows each level as a percentage of that movement’s scale. Level × seconds uses the recorded levels. Tester observations appear separately.</p>
             <dl id="alpha-review-pattern-summary" class="alpha-pattern-summary" aria-labelledby="alpha-movement-heading"></dl>
             <button id="alpha-review-pattern-play" class="alpha-pattern-play" type="button" disabled>Play movement</button>
             <svg id="alpha-review-chart" class="alpha-review-chart" viewBox="0 0 640 146" aria-hidden="true"></svg>
-            <div class="alpha-review-legend"><span class="alpha-legend-vibrate">Vibration</span><span class="alpha-legend-flex">Flexing</span><span class="alpha-legend-marker">Marked moment</span></div>
+            <div id="alpha-review-legend" class="alpha-review-legend"></div>
             <label for="alpha-review-position">Session position</label>
             <input id="alpha-review-position" type="range" min="0" max="1" step="1" value="0">
             <div id="alpha-review-levels" class="alpha-review-levels"></div>

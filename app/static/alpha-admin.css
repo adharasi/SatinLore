@@ -1,12 +1,22 @@
 :root {
   --alpha-vibrate: #7554a7;
   --alpha-flex: #087d73;
+  --alpha-rotate: #315fa8;
+  --alpha-thrusting: #a34a4a;
+  --alpha-oscillate: #607023;
+  --alpha-pump: #914274;
+  --alpha-suction: #427d96;
   --alpha-marker: #a25c1a;
   --dock-space: 0px;
 }
 :root[data-theme="dark"] {
   --alpha-vibrate: #cbb3f3;
   --alpha-flex: #6bd0c2;
+  --alpha-rotate: #9cbcff;
+  --alpha-thrusting: #ffa3a3;
+  --alpha-oscillate: #c4d782;
+  --alpha-pump: #ef9ed3;
+  --alpha-suction: #a3daef;
   --alpha-marker: #f1c18c;
 }
 .alpha-review-header {
@@ -53,16 +63,19 @@
 .alpha-review-chart { width: 100%; height: auto; display: block; background: var(--page); border: 1px solid var(--separator); border-radius: 8px; margin-bottom: .6rem; }
 .alpha-chart-grid { stroke: var(--separator); }
 .alpha-chart-text { fill: var(--secondary); font-size: 10px; font-family: var(--sans); }
-.alpha-chart-vibrate, .alpha-chart-flex { stroke-width: 2; fill: none; vector-effect: non-scaling-stroke; }
-.alpha-chart-vibrate { stroke: var(--alpha-vibrate); }
-.alpha-chart-flex { stroke: var(--alpha-flex); stroke-dasharray: 5 2; }
+.alpha-chart-movement { stroke: var(--movement-color); stroke-dasharray: var(--movement-dash, none); stroke-width: 2; fill: none; vector-effect: non-scaling-stroke; }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="vibrate"] { --movement-color: var(--alpha-vibrate); }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="fingering"] { --movement-color: var(--alpha-flex); --movement-dash: 5 2; --legend-style: dashed; }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="rotate"] { --movement-color: var(--alpha-rotate); --movement-dash: 3 2; --legend-style: dashed; }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="thrusting"] { --movement-color: var(--alpha-thrusting); --movement-dash: 1 2; --legend-style: dotted; }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="oscillate"] { --movement-color: var(--alpha-oscillate); --movement-dash: 7 2 1 2; --legend-style: dashed; }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="pump"] { --movement-color: var(--alpha-pump); --movement-dash: 7 3; --legend-style: dashed; }
+:is(.alpha-chart-movement, .alpha-review-legend span)[data-channel="suction"] { --movement-color: var(--alpha-suction); --movement-dash: 2 3; --legend-style: dotted; }
 .alpha-chart-marker { stroke: var(--alpha-marker); stroke-width: 1; stroke-dasharray: 3 3; }
 .alpha-chart-playhead { stroke: var(--text); stroke-width: 1.5; }
 .alpha-review-legend, .alpha-review-levels { display: flex; flex-wrap: wrap; gap: .55rem .9rem; margin-bottom: .55rem; color: var(--secondary); font-size: .84rem; }
-.alpha-review-legend span::before { content: ""; display: inline-block; width: .9rem; margin: 0 .35rem .2rem 0; border-bottom: 2px solid; }
-.alpha-legend-vibrate::before { color: var(--alpha-vibrate); }
-.alpha-legend-flex::before { color: var(--alpha-flex); border-bottom-style: dashed !important; }
-.alpha-legend-marker::before { color: var(--alpha-marker); border-bottom-style: dotted !important; }
+.alpha-review-legend span::before { content: ""; display: inline-block; width: .9rem; margin: 0 .35rem .2rem 0; border-bottom: 2px var(--legend-style, solid) var(--movement-color, currentColor); }
+.alpha-legend-marker { --movement-color: var(--alpha-marker); --legend-style: dotted; }
 .alpha-review-levels span { border: 1px solid var(--separator); border-radius: 6px; padding: .2rem .55rem; }
 .alpha-review-markers { display: flex; gap: .45rem; flex-wrap: wrap; }
 .alpha-review-markers button { border-color: var(--alpha-marker); padding-inline: .65rem; }

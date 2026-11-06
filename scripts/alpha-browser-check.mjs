@@ -110,6 +110,8 @@ try {
       })),
       { type: "ESModule", path: path.join(ROOT, "app/static/alpha-screen-schema.mjs"),
         contents: await readFile(path.join(ROOT, "app/static/alpha-screen-schema.mjs"), "utf8") },
+      { type: "ESModule", path: path.join(ROOT, "app/static/devices/toy-profiles.mjs"),
+        contents: await readFile(path.join(ROOT, "app/static/devices/toy-profiles.mjs"), "utf8") },
     ],
     compatibilityDate: "2026-05-22",
     cf: false,
@@ -147,7 +149,8 @@ try {
   const worker = createPrivateAppWorker({
     lovenseFetcher: async () => Response.json({code: 0, data: {authToken: "synthetic-user-token"}}),
   });
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({headless: true,
+    ...(process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH ? {executablePath: process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH} : {})});
 
   async function openContext() {
     // Fresh fixture contexts have no worker registrations. Playwright's block
@@ -384,6 +387,54 @@ try {
 
   const reader = await tester.newPage();
   assert.equal((await reader.goto(`${APP}/`)).status(), 403, "An Alpha cookie cannot grant access to the ordinary reader.");
+
+  begin("checking model-specific simulator controls and feedback");
+  await page.setViewportSize({width: 390, height: 844});
+  for (const {model, movements, feedback, combined} of [
+    {model: "max", movements: ["vibrate", "pump"], feedback: ["vibrationMaximum", "pumpingMaximum"], combined: true},
+    {model: "fizz", movements: ["suction", "oscillate"], feedback: ["suctionMaximum", "oscillationMaximum"], combined: false},
+    {model: "solacepro", movements: ["thrusting"], feedback: ["thrustingMaximum"], combined: false},
+  ]) {
+    await page.goto(`${APP}/alpha`);
+    await page.locator('input[name="alpha-mode"][value="simulator"]').check();
+    const models = page.locator("#alpha-simulator-model");
+    assert.equal(await models.locator("option").count(), 36);
+    await models.selectOption(model);
+    await page.locator("#alpha-adult").check();
+    await page.locator("#alpha-unrecorded-start").click();
+    await page.locator("#alpha-device-connect").click();
+    await select.selectOption(`sim-${model}`);
+    await page.locator("#alpha-device-select-confirm").click();
+    const rows = page.locator("#alpha-verification-movements [data-channel]");
+    await rows.first().waitFor({state: "visible"});
+    assert.deepEqual(await rows.evaluateAll(elements => elements.map(row => row.dataset.channel)), movements);
+    for (const channel of movements) {
+      const check = page.locator(`#alpha-verification-movements [data-channel="${channel}"]`);
+      await check.locator("button").click();
+      await check.locator('input[type="checkbox"]').check();
+    }
+    await page.locator("#alpha-verify-continue").click();
+    const cards = page.locator("#alpha-movement-cards [data-channel]:visible");
+    await cards.first().waitFor({state: "visible"});
+    assert.deepEqual(await cards.evaluateAll(elements => elements.map(card => card.dataset.channel)), movements);
+    if (movements.length > 1) {
+      const toggles = cards.locator("[data-movement-toggle]");
+      assert.equal(await toggles.first().getAttribute("type"), combined ? "checkbox" : "radio");
+      if (!combined) await toggles.last().check();
+    }
+    const pump = cards.filter({has: page.getByRole("heading", {name: "Pumping", exact: true})});
+    if (model === "max") {
+      assert.equal(await pump.locator('[data-setting="maximum"]').inputValue(), "3");
+      assert.equal(await preview.locator('[data-preview-channel="pump"] meter').getAttribute("max"), "3");
+    }
+    await checkViewport(page, 390);
+    await page.locator("#alpha-device-start").click();
+    await page.waitForFunction(() => document.getElementById("alpha-dock-state").textContent === "Movements active");
+    await page.locator("#alpha-finish").click();
+    await form.waitFor({state: "visible"});
+    assert.deepEqual(await form.locator("#alpha-feedback-maximums input").evaluateAll(fields => fields.map(field => field.name)), feedback);
+  }
+
   assert.equal(outsideRequests, 0, "The simulator path requires no outside requests.");
   assert.ok(!calls.some(call => call.path === "/alpha/api/lovense/session"), "The simulator never requests live credentials.");
 

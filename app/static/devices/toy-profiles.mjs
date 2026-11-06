@@ -1,12 +1,16 @@
 // Product names and movements are bounded by the vendor compatibility audit
 // in docs/lovense-compatibility.md. A runtime report may narrow any profile.
-const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting", oscillate: "Oscillation"});
+const labels = Object.freeze({vibrate: "Vibration", rotate: "Rotation", fingering: "Flexing", thrusting: "Thrusting",
+  oscillate: "Oscillation", suction: "Suction", pump: "Pumping"});
+export const MOVEMENT_IDS = Object.freeze(Object.keys(labels));
+export const channelMaximum = id => id === "pump" ? 3 : 20;
 function profile(id, label, shape, {
-  physicalChannels = ["vibrate"], socketChannels = [], reportedChannels = [], physicalNotes = "", pickerLabel = label,
+  physicalChannels = ["vibrate"], socketChannels = [], reportedChannels = [], simulationOnly = [],
+  supportsCombined = true, physicalNotes = "", pickerLabel = label,
 } = {}) {
-  const simChannels = [...physicalChannels, ...socketChannels, ...reportedChannels];
+  const simChannels = [...physicalChannels, ...socketChannels, ...reportedChannels, ...simulationOnly];
   return Object.freeze({
-    id, model: id, label, shape, physicalNotes, pickerLabel,
+    id, model: id, label, shape, physicalNotes, pickerLabel, supportsCombined,
     physicalChannels: Object.freeze(physicalChannels),
     socketChannels: Object.freeze(socketChannels),
     reportedChannels: Object.freeze(reportedChannels),
@@ -60,11 +64,26 @@ export const TOY_PROFILES = Object.freeze([
   profile("xmachine", "Lovense Sex Machine", "shaft", {physicalChannels: ["thrusting"]}),
 ]);
 
-export const getToyProfile = id => TOY_PROFILES.find(item => item.id === id) || null;
+const alphaAdditions = [
+  profile("fizz", "Fizz", "wand", {physicalChannels: [], reportedChannels: ["suction", "oscillate"], supportsCombined: false,
+    physicalNotes: "Choose one movement at a time. Live movements require an extended connection report."}),
+  profile("tenera", "Tenera", "wand", {physicalChannels: ["suction"]}),
+  profile("tenera2", "Tenera 2", "wand", {physicalChannels: [], reportedChannels: ["suction"],
+    physicalNotes: "Live suction needs a function report from the extended Lovense connection."}),
+];
+const maxProfile = TOY_PROFILES.find(item => item.id === "max");
+export const ALPHA_TOY_PROFILES = Object.freeze([
+  ...TOY_PROFILES.map(item => item.id === "max" ? profile(item.id, item.label, item.shape, {
+    ...maxProfile, simulationOnly: ["pump"], physicalNotes: "Pumping is available in the simulator. A live connection offers vibration.",
+  }) : item),
+  ...alphaAdditions,
+]);
+
+export const getToyProfile = (id, {alpha = false} = {}) => (alpha ? ALPHA_TOY_PROFILES : TOY_PROFILES).find(item => item.id === id) || null;
 export const channelLabel = id => labels[id] || "Unavailable";
 
 const validId = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
-const functionNames = Object.freeze({v: "vibrate", vibrate: "vibrate", r: "rotate", rotate: "rotate", f: "fingering", fingering: "fingering", t: "thrusting", thrusting: "thrusting", o:"oscillate",oscillate:"oscillate"});
+const functionNames = Object.freeze({v: "vibrate", vibrate: "vibrate", r: "rotate", rotate: "rotate", f: "fingering", fingering: "fingering", t: "thrusting", thrusting: "thrusting", o:"oscillate",oscillate:"oscillate", s:"suction",suction:"suction"});
 
 const variants = Object.freeze({
   lush: ["Lush 1", "Lush 2", "Lush 3", "Lush 4"],
@@ -82,7 +101,7 @@ const variants = Object.freeze({
   minixmachine: ["Mini Sex Machine", "Lovense Mini Sex Machine"],
 });
 const modelKey = name => name.toLowerCase().replace(/[ _-]/g, "");
-const models = new Map(TOY_PROFILES.map(item => [item.id, {model: item.id, label: item.label}]));
+const models = new Map(ALPHA_TOY_PROFILES.map(item => [item.id, {model: item.id, label: item.label}]));
 for (const [model, names] of Object.entries(variants)) {
   for (const label of names) models.set(modelKey(label), {model, label});
 }
@@ -106,12 +125,13 @@ function report(toy) {
     .map(value => functionNames[value.toLowerCase()]).filter(Boolean));
 }
 
-export function normaliseToy(toy, {transport = "basic-sdk"} = {}) {
+export function normaliseToy(toy, {transport = "basic-sdk", alpha = false} = {}) {
   if (!toy || typeof toy !== "object" || Array.isArray(toy) || !validId(toy.id) || toy.connected !== true) return null;
   // toyType is authoritative when supplied; do not promote an arbitrary nickname.
   const identity = modelIdentity(toy.toyType === undefined ? toy.name : toy.toyType, toy.hVersion);
   if (!identity) return null;
-  const {model, label} = identity, current = getToyProfile(model);
+  const {model, label} = identity, current = getToyProfile(model, {alpha});
+  if (!current) return null;
   const reported = report(toy);
   const extended = transport === "standard-socket-v1";
   const documented = [...current.physicalChannels, ...(extended ? current.socketChannels : [])];
@@ -119,7 +139,7 @@ export function normaliseToy(toy, {transport = "basic-sdk"} = {}) {
     [...documented, ...(extended ? current.reportedChannels : [])].filter(channel => reported.has(channel));
   if (!capabilities.length) return null;
   return {id: toy.id, label, model, capabilities,
-    ...(extended ? {controlTransport:"standard-socket-v1",supportsCombined:true} : {}),
+    ...(extended ? {controlTransport:"standard-socket-v1",supportsCombined:current.supportsCombined} : {}),
     capabilitySource: reported === null ? "documented-model" : "reported",
     battery: Number.isInteger(toy.battery) && toy.battery >= 0 && toy.battery <= 100 ? toy.battery : null};
 }

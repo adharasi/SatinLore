@@ -4,14 +4,14 @@ import {LovenseSocket,SOCKET_AUTH_URL,socketAddress,remoteCommandAddress} from "
 import {LovenseCheck} from "../app/static/devices/lovense.mjs";
 
 const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
-function fixture({authentication,metadata,socketPath="/fixture/socket",preserveFlexerRenewals=false,renderPairingImage}={}){
+function fixture({authentication,metadata,socketPath="/fixture/socket",preserveFlexerRenewals=false,renderPairingImage,alpha=false}={}){
   const outgoing=[],requests=[],listeners=new Map();let time=0;
   const socket={connected:false,on(name,callback){if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(callback);},
     emit(name,value){outgoing.push({name,value});},connect(){queueMicrotask(()=>{this.connected=true;incoming("connect");});},
     disconnect(){this.connected=false;},removeAllListeners(){listeners.clear();}};
   const incoming=(name,value)=>{for(const callback of listeners.get(name)||[])callback(value);};
   const fetcher=async(url,options)=>{requests.push({url,options});return url===SOCKET_AUTH_URL?authentication?authentication():Response.json({code:0,data:{socketIoUrl:"https://apps.lovense-api.com",socketIoPath:socketPath}}):metadata?metadata():Response.json({code:200,data:{toys:"{}"}});};
-  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,preserveFlexerRenewals,renderPairingImage,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
+  const sdk=new LovenseSocket({platform:"SatinLore neutral fixture",authToken:"private-user-token"},{fetcher,now:()=>time,preserveFlexerRenewals,renderPairingImage,alpha,randomId:()=>"synthetic-ack",socketFactory:(url,options)=>{assert.equal(url,"https://apps.lovense-api.com/");assert.equal(options.path,socketPath);assert.deepEqual(options.transports,["websocket"]);assert.equal(options.reconnection,false);assert.equal(options.autoConnect,false);return socket;}});
   const toys=(list,extras={})=>incoming("basicapi_update_device_info_tc",JSON.stringify({online:true,toyList:list,...extras}));
   const raw=(model,id=model)=>({id,toyType:model,connected:true,battery:71});
   return{sdk,socket,incoming,outgoing,requests,toys,raw,advance(ms){time+=ms;}};
@@ -153,6 +153,25 @@ test("reported thrust-only models issue only a targeted finite movement on the e
   assert.equal(f.outgoing.at(-1).value.action, "Stop");
   assert.equal(f.outgoing.at(-1).value.toy, "toy-one");
   f.sdk.destroy();
+});
+test("Alpha socket dispatch allows reported suction and keeps Max pump and unverified combinations out of live commands", async t => {
+  const f = fixture({alpha: true});
+  t.after(() => f.sdk.destroy());
+  await f.sdk.prepared;
+  const fizz = f.raw("fizz", "fixture-fizz");
+  const max = {...f.raw("max", "fixture-max"), fullFunctionNames: ["Vibrate", "Pump"]};
+  f.toys([fizz, max]);
+  assert.throws(() => f.sdk.sendToyCommand({suction: 1, time: 2, toyId: fizz.id}), /unavailable/);
+  assert.throws(() => f.sdk.sendToyCommand({pump: 1, time: 2, toyId: max.id}), /unavailable/);
+  f.toys([{...fizz, fullFunctionNames: ["Suction", "Oscillate"]}, max]);
+  assert.throws(() => f.sdk.sendToyCommand({suction: 1, oscillate: 1, time: 2, toyId: fizz.id}), /unavailable/);
+  assert.throws(() => f.sdk.sendToyCommand({suction: 6, time: 2, toyId: fizz.id}), /unavailable/);
+  assert.deepEqual(f.sdk.sendToyCommand({suction: 1, time: 2, toyId: fizz.id}), {status: "submitted"});
+  assert.deepEqual(f.outgoing.at(-1).value, {command: "Function", action: "Suction:1", timeSec: 2,
+    toy: fizz.id, stopPrevious: 1, apiVer: 1});
+  f.sdk.stopToyAction(fizz.id);
+  assert.equal(f.outgoing.at(-1).value.action, "Stop");
+  assert.equal(f.outgoing.at(-1).value.toy, fizz.id);
 });
 test("the real controller independently validates vector ceilings and stops on capability loss",async()=>{
   const f=fixture();await f.sdk.prepared;

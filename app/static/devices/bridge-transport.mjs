@@ -2,6 +2,7 @@ import {safeQrUrl, safeGeneratedQrImage} from "./pairing-image.mjs";
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CHANNELS = new Set(["vibrate", "rotate", "fingering", "thrusting", "oscillate"]);
+const ALPHA_CHANNELS = new Set([...CHANNELS, "suction"]);
 const validId = value => typeof value === "string" && ID.test(value);
 const validLevel = value => Number.isInteger(value) && value >= 0 && value <= 5;
 const personalLevel = value => Number.isInteger(value) && value >= 0 && value <= 20;
@@ -29,6 +30,7 @@ export class BridgeTransport {
     }), framePath = "/device-bridge", now = Date.now, setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer), onChange = () => {}} = {}) {
     if (!["/device-bridge", "/alpha/device-bridge"].includes(framePath)) throw new Error("Use the isolated SatinLore bridge.");
     Object.assign(this, {document, window, navigator, Channel, request, framePath, now, setTimer, clearTimer, onChange});
+    this.channels = framePath === "/alpha/device-bridge" ? ALPHA_CHANNELS : CHANNELS;
     this.listeners = new Set(); this.pending = new Map(); this.toys = []; this.selected = null;
     this.epoch = 0; this.serial = 0; this.frame = null; this.port = null; this.release = null;
     this.releasing = null;
@@ -148,9 +150,9 @@ export class BridgeTransport {
       this.notify();
     } else if (message.type === "toys" && Array.isArray(message.toys)) {
       const seen = new Set();
-      const toys = message.toys.slice(0,50).filter(toy => toy && validId(toy.id) && typeof toy.label === "string" && toy.label.length <= 100 && Array.isArray(toy.capabilities) && toy.capabilities.length<=5 && toy.capabilities.some(value=>CHANNELS.has(value)&&(value!=="oscillate"||toy.controlTransport==="standard-socket-v1")) && !seen.has(toy.id) && seen.add(toy.id)).map(toy => ({
+      const toys = message.toys.slice(0,50).filter(toy => toy && validId(toy.id) && typeof toy.label === "string" && toy.label.length <= 100 && Array.isArray(toy.capabilities) && toy.capabilities.length<=5 && toy.capabilities.some(value=>this.channels.has(value)&&(value!=="oscillate"||toy.controlTransport==="standard-socket-v1")) && !seen.has(toy.id) && seen.add(toy.id)).map(toy => ({
         id: toy.id, label: toy.label, model: typeof toy.model === "string" ? toy.model.slice(0,32) : "",
-        capabilities: [...new Set(toy.capabilities.filter(value => CHANNELS.has(value) && (value!=="oscillate"||toy.controlTransport==="standard-socket-v1")))],
+        capabilities: [...new Set(toy.capabilities.filter(value => this.channels.has(value) && (value!=="oscillate"||toy.controlTransport==="standard-socket-v1")))],
         ...(toy.controlTransport==="standard-socket-v1" ? {controlTransport:"standard-socket-v1",supportsCombined:toy.supportsCombined===true} : {}),
         ...(Number.isFinite(toy.battery) ? {battery: Math.max(0,Math.min(100,toy.battery))} : {}),
       }));
@@ -222,7 +224,7 @@ export class BridgeTransport {
     const plain=value=>value&&typeof value==="object"&&!Array.isArray(value);
     if(!toy||toy.id!==this.selected||toy.controlTransport!=="standard-socket-v1"||toy.supportsCombined!==true||signal?.aborted||frame.durationMs!==2000||!plain(levels)||!plain(ceilings))throw Error("Independent movements need the selected extended connection.");
     const keys=Object.keys(levels);
-    if(!keys.length||keys.length>5||Object.keys(ceilings).length!==keys.length||keys.some(key=>!Object.hasOwn(ceilings,key)||!toy.capabilities.includes(key)||!CHANNELS.has(key)||!personalLevel(levels[key])||!personalLevel(ceilings[key])||ceilings[key]>this.maximumFor(key)||levels[key]>ceilings[key]||levels[key]>this.ceiling)||frame.level!==Math.max(...Object.values(levels)))throw Error("Use each movement's current enabled limit.");
+    if(!keys.length||keys.length>5||Object.keys(ceilings).length!==keys.length||keys.some(key=>!Object.hasOwn(ceilings,key)||!toy.capabilities.includes(key)||!this.channels.has(key)||!personalLevel(levels[key])||!personalLevel(ceilings[key])||ceilings[key]>this.maximumFor(key)||levels[key]>ceilings[key]||levels[key]>this.ceiling)||frame.level!==Math.max(...Object.values(levels)))throw Error("Use each movement's current enabled limit.");
     if(keys.every(key=>levels[key]===0))await this.send("stop",{toyId:toy.id});
     else {
       const result=await this.send("command-vector",{toyId:toy.id,levels:{...levels},ceilings:{...ceilings},seconds:2});
@@ -245,7 +247,7 @@ export class BridgeTransport {
     this.personalRangeChannels=new Set(result.channels);this.notify();return true;
   }
   setCeiling(value) { if (!personalLevel(value)||value>5&&!this.personalRangeChannels.size) throw new Error("Enable your personal range before choosing a maximum above 5."); this.ceiling = value; }
-  setChannel(channel) { if (!CHANNELS.has(channel)) throw new Error("Choose a supported channel."); this.channel = channel; }
+  setChannel(channel) { if (!this.channels.has(channel)) throw new Error("Choose a supported channel."); this.channel = channel; }
   dispose(message = "Disconnected. Reconnect explicitly.", {notify = true} = {}) {
     ++this.epoch;
     const id = this.selected, frame = this.frame, port = this.port, release = this.release;

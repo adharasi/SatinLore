@@ -44,6 +44,8 @@ The first preference study has a separate manual-control route at `/alpha`, usin
 
 Use the [Alpha setup and rehearsal runbook](alpha-setup.md) for the path-scoped Access settings, password provisioning and hardware checks. Acceptance requires a real simulator journey through both user roles and an independent physical Flexer qualification before interpreting live preferences. The study supplies candidate movement profiles for later reader experiments.
 
+**6 November catalog expansion.** Alpha now offers 36 simulator profiles and adapts verification, control cards, feedback and replay to the selected device. The automated controller check exercises every profile with finite simulated movement and Stop, and checks explicit live selection and transport limits with fixtures. Physical qualification remains open for each model and motion. [Alpha setup](alpha-setup.md) · [Compatibility matrix](lovense-compatibility.md)
+
 ## Accounts calibration and recorded beta sessions on 2 November 2026
 
 **Current requested scope:** verified-email hosted accounts, explicit 18+ registration, account/story presets, capability-led calibration, per-action and qualified combined controls, personal-range permission and a separate protected beta recording/admin host. This supersedes earlier account-backlog and blanket reader 5/20 statements; dated evidence below remains historical.

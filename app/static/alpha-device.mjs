@@ -1,12 +1,13 @@
 import {BridgeTransport} from "./devices/bridge-transport.mjs";
 import {ReaderDeviceController} from "./devices/reader-device.mjs";
+import {channelMaximum, getToyProfile, MOVEMENT_IDS} from "./devices/toy-profiles.mjs";
 
-export const FLEXER_CHANNELS = Object.freeze(["vibrate", "fingering"]);
 const RHYTHMS = ["steady", "gentle", "dynamic"];
-const DEFAULT = Object.freeze({level: 1, maximum: 20, minimum: 0, recovery: 0, rhythm: "steady"});
+const DEFAULT = Object.freeze({level: 1, minimum: 0, recovery: 0, rhythm: "steady"});
 const wholeLevel = value => Number.isInteger(value) && value >= 0 && value <= 20;
-const availableChannels = channels => FLEXER_CHANNELS.filter(channel => channels.includes(channel));
-const supportedToy = toy => toy.model === "flexer" && availableChannels(toy.capabilities).length > 0;
+const availableChannels = channels => [...new Set(channels.filter(channel => MOVEMENT_IDS.includes(channel)))];
+const alphaProfile = id => getToyProfile(id, {alpha: true});
+const supportedToy = toy => alphaProfile(toy.model) && availableChannels(toy.capabilities).length > 0;
 const waitMessage = "Stop and finish the current check before changing the setup.";
 
 class AlphaBridge extends BridgeTransport {
@@ -41,13 +42,14 @@ class AlphaBridge extends BridgeTransport {
 
   stop(frame) {
     const available = availableChannels(this.toys.find(toy => toy.id === frame.deviceId)?.capabilities || []);
-    const channels = Object.fromEntries((available.length ? available : FLEXER_CHANNELS).map(id => [id, 0]));
+    if (!available.length) return super.stop(frame);
+    const channels = Object.fromEntries(available.map(id => [id, 0]));
     return this.observed(channels, undefined, () => super.stop(frame));
   }
 }
 
 /** Story-free controls layered on the same bounded simulator and physical controller. */
-export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
+export function createAlphaDevice({onChange = () => {}, onEvent = () => {}, model = "flexer",
   fetchImpl = globalThis.fetch?.bind(globalThis),
   authorize = async () => (await fetchImpl("/alpha/api/access", {
     credentials: "same-origin", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(5000),
@@ -58,7 +60,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
   let mode = "simulator", activeChannels = [], settings = freshSettings(), busy = false;
   let epoch = 0, authorized = true, destroyed = false, interfaceFailed = false, initialized = false;
   let authorizationTimer = null, lastDevice = "", lastSimulated = "", lastUnknown = false;
-  let controller;
+  let controller, lastLiveChannels = [];
   const emit = event => { try { onEvent(event); } catch { /* Research capture cannot affect device output. */ } };
   const control = (name, channel, value) => emit({type: "control", control: name,
     ...(channel ? {channel} : {}), ...(value !== undefined ? {value} : {})});
@@ -68,32 +70,31 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
     })});
 
   function freshSettings() {
-    return Object.fromEntries(FLEXER_CHANNELS.map(channel => [channel, {...DEFAULT}]));
+    return Object.fromEntries(MOVEMENT_IDS.map(channel => [channel, {...DEFAULT, maximum: channelMaximum(channel)}]));
   }
 
   function snapshot() {
     const state = controller.setupSnapshot();
-    const toys = state.toys.filter(supportedToy).map(({id, label}) => ({id, label}));
-    const selected = toys.some(toy => toy.id === state.selectedId) && state.connected;
+    const toys = state.toys.filter(supportedToy).map(({id, label, model}) => ({id, label, model}));
+    const selected = state.connected ? toys.find(toy => toy.id === state.selectedId) : null;
     const channels = selected ? availableChannels(state.channels.map(({id}) => id)) : [];
     const verifiedChannels = availableChannels(state.verifiedChannels).filter(id => channels.includes(id));
     const chosen = activeChannels.filter(id => verifiedChannels.includes(id));
     const personalRangeChannels = selected ? availableChannels(state.personalRangeChannels) : [];
     const test = selected && state.lastTest ? {channel: state.lastTest.channel, simulated: state.lastTest.simulated} : null;
-    const running = selected && state.running;
-    const connectedMessage = mode === "live" && !selected && state.toys.length && !toys.length ?
-      "Connect a Flexer in Lovense Remote, then refresh the device list." : state.connectionMessage;
-    const output = Object.fromEntries(FLEXER_CHANNELS.map(channel => [channel,
-      mode === "live" && (!selected || !state.outputKnown) ? null :
+    const running = Boolean(selected && state.running);
+    const output = Object.fromEntries(channels.map(channel => [channel,
+      mode === "live" && !state.outputKnown ? null :
         wholeLevel(state.channelOutputs?.[channel]) ? state.channelOutputs[channel] : 0]));
-    return {mode, connectionState: state.connectionState, connectionMessage: connectedMessage,
+    return {mode, model: selected?.model ?? null, deviceLabel: selected?.label ?? null,
+      connectionState: state.connectionState, connectionMessage: state.connectionMessage,
       reason: running ? mode === "live" ? "Live controls active. Levels shown are requested." : "Simulator controls active." : state.reason,
       liveConfigured: state.liveConfigured, toys, selectedId: selected ? state.selectedId : null,
       qrUrl: mode === "live" && !selected ? state.qrUrl : null, channels, verifiedChannels, personalRangeChannels,
-      activeChannels: chosen, supportsCombined: selected && state.supportsCombined && channels.length === 2,
+      activeChannels: chosen, supportsCombined: Boolean(selected && state.supportsCombined && channels.length > 1),
       testing: state.testing, lastTest: test, running, busy, output, outputKnown: state.outputKnown,
-      playbackMode: state.feel.playbackMode, settings: Object.fromEntries(FLEXER_CHANNELS.map(id => [id, {...settings[id]}])),
-      canStart: !busy && !interfaceFailed && authorized && selected && chosen.length > 0 && chosen.length === activeChannels.length &&
+      playbackMode: state.feel.playbackMode, settings: Object.fromEntries(channels.map(id => [id, {...settings[id]}])),
+      canStart: !busy && !interfaceFailed && authorized && Boolean(selected) && chosen.length > 0 && chosen.length === activeChannels.length &&
         sameChannels(chosen, state.activeChannels) && (chosen.length === 1 || state.supportsCombined) &&
         chosen.some(id => settings[id].level > 0 && settings[id].maximum > 0) && state.canStart};
   }
@@ -105,10 +106,10 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
   function notify() {
     if (!initialized || destroyed || interfaceFailed) return;
     const state = snapshot();
-    const signature = `${mode}:${state.channels.join(",")}`;
+    const signature = `${mode}:${state.model ?? ""}:${state.channels.join(",")}`;
     if (signature !== lastDevice) {
       lastDevice = signature;
-      emit({type: "device", mode, channels: state.channels});
+      emit({type: "device", mode, channels: state.channels, ...(state.model ? {model: state.model} : {})});
     }
     if (mode === "simulator" && state.selectedId) {
       const signature = JSON.stringify(state.output);
@@ -121,7 +122,10 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
       lastSimulated = "";
     }
     const unknown = mode === "live" && !state.outputKnown && !state.testing;
-    if (unknown && !lastUnknown) emit({type: "output", mode, stage: "unknown", channels: {vibrate: null, fingering: null}});
+    if (mode === "live" && state.channels.length) lastLiveChannels = state.channels;
+    if (unknown && !lastUnknown && lastLiveChannels.length) {
+      emit({type: "output", mode, stage: "unknown", channels: Object.fromEntries(lastLiveChannels.map(id => [id, null]))});
+    }
     lastUnknown = unknown;
     scheduleAuthorization(state);
     try { onChange(state); }
@@ -154,7 +158,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
   }
 
   controller = new ReaderDeviceController({document, window, navigator, now, setTimer, clearTimer,
-    authorize: () => checkAuthorization(epoch), bridge: trackedBridge, simulator, independentRhythms: true,
+    authorize: () => checkAuthorization(epoch), bridge: trackedBridge, simulator, independentRhythms: true, alpha: true,
     onSetupChange: notify, onInterfaceError: () => { interfaceFailed = true; disconnect(); }});
   // A single fixed input lets the existing guarded controller apply independent
   // levels and its validated rhythm/hold/recovery policies without a story UI.
@@ -175,21 +179,22 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
 
   const still = token => token === epoch && !destroyed && authorized && !document?.hidden;
 
-  function connect(nextMode) {
-    if (!["simulator", "live"].includes(nextMode)) throw new Error("Choose a simulator or a physical Flexer.");
+  function connect(nextMode, simulatorModel = model) {
+    if (!["simulator", "live"].includes(nextMode) || !alphaProfile(simulatorModel)) throw new Error("Choose a supported simulator or a physical Lovense toy.");
     return action(async token => {
       control("connect");
       activeChannels = [];
       settings = freshSettings();
+      lastLiveChannels = [];
       mode = nextMode;
       notify();
-      const result = await controller.beginConnection({mode: mode === "live" ? "lovense" : "simulator", model: "flexer"});
+      const result = await controller.beginConnection({mode: mode === "live" ? "lovense" : "simulator", model: simulatorModel});
       return still(token) && Boolean(result);
     });
   }
 
   function select(id) {
-    if (!snapshot().toys.some(toy => toy.id === id)) throw new Error("Choose a discovered Flexer.");
+    if (!snapshot().toys.some(toy => toy.id === id)) throw new Error("Choose one discovered Lovense toy.");
     return action(async token => {
       control("select");
       activeChannels = [];
@@ -200,7 +205,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
   }
 
   function test(channel) {
-    if (!snapshot().channels.includes(channel)) throw new Error("Choose an available Flexer movement.");
+    if (!snapshot().channels.includes(channel)) throw new Error("Choose an available movement on this toy.");
     return action(async token => {
       if (!await checkAuthorization(token)) return false;
       control("test", channel, 1);
@@ -229,7 +234,7 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
 
   async function applyChoice(channels, token) {
     const state = snapshot();
-    if (!channels.every(id => state.verifiedChannels.includes(id)) || channels.length === 2 && !state.supportsCombined) return false;
+    if (!channels.every(id => state.verifiedChannels.includes(id)) || channels.length > 1 && !state.supportsCombined) return false;
     activeChannels = [];
     if (mode === "live") {
       if (!await checkAuthorization(token)) return false;
@@ -245,15 +250,15 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
       }
     }
     for (const channel of channels) controller.setCalibration(channel, calibration(channel));
-    const result = channels.length === 2 ? await controller.applyChannels(channels) : await controller.applyCalibration(channels[0]);
+    const result = channels.length > 1 ? await controller.applyChannels(channels) : await controller.applyCalibration(channels[0]);
     if (!result || !still(token)) return false;
     activeChannels = [...channels];
     return true;
   }
 
   function choose(channels) {
-    if (!Array.isArray(channels) || !channels.length || channels.length > 2 || new Set(channels).size !== channels.length ||
-        channels.some(channel => !FLEXER_CHANNELS.includes(channel))) throw new Error("Choose a checked Flexer movement.");
+    if (!Array.isArray(channels) || !channels.length || channels.length > 5 || new Set(channels).size !== channels.length ||
+        channels.some(channel => !snapshot().channels.includes(channel))) throw new Error("Choose an available movement on this toy.");
     return action(async token => {
       control("choose", channels.length === 1 ? channels[0] : undefined);
       return applyChoice(channels, token);
@@ -262,8 +267,10 @@ export function createAlphaDevice({onChange = () => {}, onEvent = () => {},
 
   function set(channel, field, value) {
     if (busy || controller.snapshot().testing) throw new Error(waitMessage);
-    if (!snapshot().verifiedChannels.includes(channel) || !Object.hasOwn(DEFAULT, field) ||
-        (field === "rhythm" ? !RHYTHMS.includes(value) : !wholeLevel(value))) throw new Error("Choose a checked movement and an available setting.");
+    if (!snapshot().verifiedChannels.includes(channel) || field !== "maximum" && !Object.hasOwn(DEFAULT, field) ||
+        (field === "rhythm" ? !RHYTHMS.includes(value) : !wholeLevel(value) || value > channelMaximum(channel))) {
+      throw new Error("Choose a checked movement and a level within its range.");
+    }
     const draft = settings[channel];
     if (field !== "maximum" && field !== "rhythm" && value > draft.maximum) {
       throw new Error(field === "minimum" ? "Keep the continuous minimum at or below your personal maximum." : "Keep the level within the chosen limit.");

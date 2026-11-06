@@ -2,17 +2,23 @@ import {AlphaTimeline} from "./alpha-timeline.mjs";
 import {createAlphaDevice} from "./alpha-device.mjs";
 import {captureAlphaScreen} from "./alpha-screen.mjs";
 import {createAlphaMovementView} from "./alpha-movement-view.mjs";
+import {ALPHA_TOY_PROFILES, channelLabel, channelMaximum, getToyProfile} from "./devices/toy-profiles.mjs";
 
 const $ = id => document.getElementById(id);
 const API = "/alpha/api/alpha";
 const MOVEMENTS = {
-  vibrate: {label: "Vibration", description: "Feel Flexer vibrate.", check: "It vibrated briefly, then stopped."},
-  fingering: {label: "Flexing", description: "Feel Flexer’s tip move.", check: "The tip moved briefly, then stopped."},
+  vibrate: {feedback: "vibration", description: "Adjust the strength and rhythm of the vibration.", check: "It vibrated briefly, then stopped."},
+  fingering: {feedback: "flexing", description: "Adjust how strongly the tip flexes.", check: "The tip flexed briefly, then stopped."},
+  rotate: {feedback: "rotation", description: "Adjust how fast the moving part turns.", check: "It turned briefly, then stopped."},
+  thrusting: {feedback: "thrusting", description: "Adjust the pace of the forward-and-back movement.", check: "It moved forward and back briefly, then stopped."},
+  oscillate: {feedback: "oscillation", description: "Adjust the pace of the side-to-side movement.", check: "It moved side to side briefly, then stopped."},
+  pump: {feedback: "pumping", description: "Try the simulator’s three pump levels.", check: "The pump level rose briefly, then returned to zero."},
+  suction: {feedback: "suction", description: "Adjust the strength and rhythm of the suction.", check: "The suction started briefly, then stopped."},
 };
 const MARKS = {good: "Good moment", tooMuch: "Too much", change: "Wanted a change", climax: "Climax", finished: "Finished"};
 const STAGES = {
-  connect: ["PHASE 01 · DEVICE SETUP", "Connect your Flexer", "Pair your Flexer, then check each movement you’d like to try."],
-  controls: ["PHASE 02 · EXPLORE", "Find your settings", "Try one movement at a time, then try them together if both passed the checks."],
+  connect: ["PHASE 01 · DEVICE SETUP", "Connect your toy", "Pair your Lovense toy, then check each movement you’d like to try."],
+  controls: ["PHASE 02 · EXPLORE", "Find your settings", "Explore the levels and rhythms for the movements you checked."],
   feedback: ["PHASE 03 · REFLECT", "What would you choose again?", "Tell us what felt right and where setup or controls could be easier."],
 };
 
@@ -92,8 +98,18 @@ function setAccount(value) {
   updateWelcome();
 }
 
+const selectedMode = () => document.querySelector("input[name='alpha-mode']:checked").value;
+const alphaProfile = model => getToyProfile(model, {alpha: true});
+const simulatorProfile = () => alphaProfile($("alpha-simulator-model").value);
+
 function updateWelcome() {
-  const disabled = busy || !account || !$("alpha-adult").checked;
+  const simulator = selectedMode() === "simulator";
+  const profile = simulator ? simulatorProfile() : null;
+  $("alpha-simulator-picker").hidden = !simulator;
+  $("alpha-simulator-model").disabled = busy || !simulator;
+  $("alpha-simulator-model-note").textContent = profile ? profile.simChannels.map(channelLabel).join(" · ") : "";
+  for (const radio of $("alpha-mode").querySelectorAll("input")) radio.disabled = busy;
+  const disabled = busy || !account || !$("alpha-adult").checked || simulator && !profile;
   $("alpha-consent-start").disabled = disabled || !account?.consentVersion;
   $("alpha-unrecorded-start").disabled = disabled;
 }
@@ -139,13 +155,15 @@ function showStage(next, {focus = true} = {}) {
   $("alpha-progress-" + next).setAttribute("aria-current", "step");
   const [kicker, title, description] = STAGES[next];
   $("alpha-study-kicker").textContent = kicker;
-  $("alpha-study-title").textContent = title;
-  $("alpha-study-intro").textContent = description;
+  const simulator = next === "connect" && session?.mode === "simulator";
+  $("alpha-study-title").textContent = simulator ? `Connect the ${alphaProfile(session.model)?.label ?? "device"} simulator` : title;
+  $("alpha-study-intro").textContent = simulator ? "Select the simulator and check each movement you’d like to try." : description;
   $("alpha-device-panel").hidden = next === "feedback";
   $("alpha-marks").hidden = next !== "controls";
   $("alpha-peak").hidden = next !== "controls";
   $("alpha-study-actions").hidden = next === "feedback";
   $("alpha-feedback").hidden = next !== "feedback";
+  if (next === "feedback") renderFeedbackMovements();
   renderDevice();
   renderRecord();
   updateFeedbackAccess();
@@ -155,7 +173,9 @@ function showStage(next, {focus = true} = {}) {
 
 async function startStudy(recorded) {
   if (busy || !account || !$("alpha-adult").checked) return;
-  const mode = document.querySelector("input[name='alpha-mode']:checked").value;
+  const mode = selectedMode();
+  const model = mode === "simulator" ? simulatorProfile()?.id : null;
+  if (mode === "simulator" && !model) return;
   busy = true;
   updateWelcome();
   const currentAccount = account;
@@ -163,28 +183,37 @@ async function startStudy(recorded) {
     let remote = null;
     if (recorded) {
       note("alpha-start-status", "Starting your study session…");
-      if (!startAttempt || startAttempt.mode !== mode || startAttempt.account !== account) {
-        startAttempt = {mode, account, key: crypto.randomUUID()};
+      if (!startAttempt || startAttempt.mode !== mode || startAttempt.model !== model || startAttempt.account !== account) {
+        startAttempt = {mode, model, account, key: crypto.randomUUID()};
       }
-      remote = await post("/sessions", {mode, consentVersion: account.consentVersion, idempotencyKey: startAttempt.key});
+      remote = await post("/sessions", {mode, ...(model ? {model} : {}), consentVersion: account.consentVersion, idempotencyKey: startAttempt.key});
       if (typeof remote.id !== "string" || !Number.isSafeInteger(remote.seq) || !Number.isSafeInteger(remote.expiresAt)) {
         throw new Error("Data collection could not be started.");
       }
       startAttempt = null;
     }
     if (account !== currentAccount) return;
-    session = {id: remote?.id ?? null, mode, finished: false, sealing: false, marks: [], annotations: [], controlDuration: 0};
+    session = {id: remote?.id ?? null, mode, model, reviewedDevice: null, finished: false, sealing: false, marks: [], annotations: [], controlDuration: 0};
     if (remote) {
       timeline = new AlphaTimeline({session: remote, append: (id, body, signal) => post(`${sessionPath(id)}/events`, body, signal, true), onChange: renderRecord});
       emit({type: "step", step: "welcome"});
     }
     const generation = ++deviceGeneration;
     device = createAlphaDevice({
+      ...(model ? {model} : {}),
       authorize: checkAccess,
       onChange(value) {
         if (generation !== deviceGeneration) return;
         const wasSelected = Boolean(deviceState?.selectedId);
         deviceState = value;
+        if (value.selectedId) {
+          const prior = session.reviewedDevice?.id === value.selectedId ? session.reviewedDevice.channels : [];
+          session.reviewedDevice = {
+            id: value.selectedId,
+            channels: [...new Set([...prior, ...(value.verifiedChannels ?? [])])],
+            supportsCombined: value.supportsCombined === true,
+          };
+        }
         if (Boolean(value.selectedId) !== wasSelected && stage === "connect") emit({type: "step", step: value.selectedId ? "verify" : "connect"});
         if (stage === "controls" && !value.selectedId) showStage("connect");
         else renderDevice();
@@ -228,12 +257,13 @@ function buildDeviceRows(channels) {
   for (const channel of channels) {
     const movement = MOVEMENTS[channel];
     if (!movement) continue;
+    const name = channelLabel(channel);
     const verification = $("alpha-verify-template").content.firstElementChild.cloneNode(true);
     verification.dataset.channel = channel;
-    verification.querySelector("h4").textContent = movement.label;
+    verification.querySelector("h4").textContent = name;
     verification.querySelector("[data-check-description]").textContent = movement.check;
     const test = verification.querySelector("button");
-    test.textContent = `Test ${movement.label.toLowerCase()}`;
+    test.textContent = `Test ${name.toLowerCase()}`;
     test.addEventListener("click", () => deviceAction(() => device.test(channel)));
     verification.querySelector("input").addEventListener("change", event => {
       if (event.target.checked) device.confirmTest(channel);
@@ -243,21 +273,21 @@ function buildDeviceRows(channels) {
 
     const card = $("alpha-movement-template").content.firstElementChild.cloneNode(true);
     card.dataset.channel = channel;
-    card.querySelector("h4").textContent = movement.label;
+    card.querySelector("h4").textContent = name;
     card.querySelector(".alpha-movement-heading .note").textContent = movement.description;
-    const toggle = card.querySelector("input[type=checkbox]");
-    toggle.setAttribute("aria-label", `Use ${movement.label.toLowerCase()}`);
-    toggle.addEventListener("change", () => {
+    const toggle = card.querySelector("[data-movement-toggle]");
+    toggle.setAttribute("aria-label", `Use ${name.toLowerCase()}`);
+    toggle.addEventListener("change", async () => {
       const active = deviceState.activeChannels;
       const chosen = toggle.checked ? [...new Set([...active, channel])] : active.filter(value => value !== channel);
       const next = deviceState.supportsCombined ? chosen : [channel];
-      if (next.length) deviceAction(() => device.choose(next));
-      else renderDevice();
+      if (next.length) await deviceAction(() => device.choose(next));
+      renderDevice();
     });
     for (const control of card.querySelectorAll("[data-setting]")) {
       const setting = control.dataset.setting;
       const label = control.closest("label");
-      if (label) control.setAttribute("aria-label", `${movement.label} ${label.firstChild.textContent.trim().toLowerCase()}`);
+      if (label) control.setAttribute("aria-label", `${name} ${label.firstChild.textContent.trim().toLowerCase()}`);
       control.addEventListener(control.type === "range" ? "input" : "change", () => {
         device.set(channel, setting, control.type === "range" ? Number(control.value) : control.value);
         renderDevice();
@@ -282,13 +312,16 @@ function renderDevice() {
   const ready = connected && !d.busy && !d.testing;
   const verifying = stage === "connect" && connected;
   const exploring = stage === "controls" && connected;
-  movementPreview.update(verifying || exploring ? d : null);
   const channels = d.channels ?? [];
   const checked = d.verifiedChannels ?? [];
   const active = d.activeChannels ?? [];
-  $("alpha-device-mode").textContent = simulator ? "FLEXER SIMULATOR" : "FLEXER · LOVENSE REMOTE";
+  movementPreview.update(verifying ? d : exploring ? {...d, channels: checked} : null);
+  const selectedToy = d.toys?.find(toy => toy.id === d.selectedId);
+  const profile = connected || simulator ? alphaProfile(d.model ?? selectedToy?.model ?? session.model) : null;
+  const deviceLabel = (connected ? d.deviceLabel ?? selectedToy?.label : null) ?? profile?.label;
+  $("alpha-device-mode").textContent = [deviceLabel, simulator ? "Simulator" : "Lovense Remote"].filter(Boolean).join(" · ").toUpperCase();
   $("alpha-device-title").textContent = verifying ? "Check your device" : exploring ? "Your movements" : simulator ? "Connect the simulator" : "Connect your toy";
-  $("alpha-connection-badge").textContent = connected ? "Device selected" : connecting ? "Connecting" : d.toys?.length ? "Choose your Flexer" : d.qrUrl ? "Scan the code" : "Disconnected";
+  $("alpha-connection-badge").textContent = connected ? "Device selected" : connecting ? "Connecting" : d.toys?.length ? "Choose a device" : d.qrUrl ? "Scan the code" : "Disconnected";
   note("alpha-device-status", d.connectionMessage || "");
   $("alpha-pairing").hidden = verifying || exploring;
   $("alpha-live-instructions").hidden = simulator;
@@ -317,7 +350,14 @@ function renderDevice() {
   $("alpha-device-select-confirm").disabled = picker.disabled || !picker.value;
   $("alpha-verification").hidden = !verifying;
   $("alpha-controls").hidden = !exploring;
-  $("alpha-verification-note").textContent = simulator ? "Watch each movement start and stop on screen before you tick the box." : "Set your Flexer down. Test one movement at a time, and tick the box only if it moved briefly and then stopped.";
+  $("alpha-verification-note").textContent = simulator ? "Watch each movement start and stop on screen before you tick the box." : "Set your toy down. Test one movement at a time, and tick the box only if it moved briefly and then stopped.";
+  const capabilityNote = !simulator && connected ? profile?.physicalNotes || "This connection controls only the movements shown below." : "";
+  $("alpha-capability-note").hidden = !capabilityNote;
+  note("alpha-capability-note", capabilityNote);
+  $("alpha-combined-guide").hidden = !d.supportsCombined || checked.length < 2;
+  $("alpha-controls-guidance").textContent = checked.length > 1 && !d.supportsCombined ?
+    "This connection runs one movement at a time. Choose a movement, set a low level, then press Start." :
+    "Set a low starting level for each movement you want to try, then press Start.";
   $("alpha-verify-continue").disabled = busy || !ready || !checked.length;
   $("alpha-device-disconnect").disabled = busy;
 
@@ -326,11 +366,13 @@ function renderDevice() {
     previousChannels = channelSignature;
     buildDeviceRows(channels);
   }
+  $("alpha-verification-movements").dataset.count = String(channels.length);
+  $("alpha-movement-cards").dataset.count = String(checked.length);
   for (const row of $("alpha-verification-movements").children) {
     const channel = row.dataset.channel;
     const passed = checked.includes(channel);
     const last = d.lastTest?.channel === channel;
-    row.querySelector("p").textContent = passed ? "Ready to use on the next page." : last ? "Tick the box if you saw it start and stop." : "This runs briefly at a low level.";
+    row.querySelector("p").textContent = passed ? "Ready to use on the next page." : last ? "Tick the box if the movement started and stopped." : "This runs briefly at a low level.";
     row.querySelector("button").disabled = busy || !ready;
     row.querySelector("label").hidden = !passed && (!last || !ready);
     const confirmation = row.querySelector("input");
@@ -341,18 +383,23 @@ function renderDevice() {
   const output = d.output ?? {};
   for (const card of $("alpha-movement-cards").children) {
     const channel = card.dataset.channel;
+    card.hidden = !checked.includes(channel);
     const settings = d.settings?.[channel];
     if (!settings) continue;
     const selected = active.includes(channel);
-    const toggle = card.querySelector("input[type=checkbox]");
+    const toggle = card.querySelector("[data-movement-toggle]");
+    toggle.type = d.supportsCombined ? "checkbox" : "radio";
+    toggle.name = d.supportsCombined ? "" : "alpha-active-movement";
+    toggle.closest("label").hidden = checked.length < 2;
     toggle.checked = selected;
-    toggle.disabled = busy || !ready || !checked.includes(channel) || (selected && active.length === 1);
-    card.querySelector(".alpha-output span").textContent = simulator ? "Simulator level" : "Level sent to Flexer";
-    card.querySelector(".alpha-output output").textContent = output[channel] === null || output[channel] === undefined ? "Not confirmed" : `${output[channel]} / 20`;
+    toggle.disabled = busy || !ready || !checked.includes(channel) || (d.supportsCombined && selected && active.length === 1);
+    card.querySelector(".alpha-output span").textContent = simulator ? "Simulator level" : "Level sent to device";
+    const maximum = channelMaximum(channel);
+    card.querySelector(".alpha-output output").textContent = output[channel] === null || output[channel] === undefined ? "Not confirmed" : `${output[channel]} / ${maximum}`;
     for (const control of card.querySelectorAll("[data-setting]")) {
       const field = control.dataset.setting;
       if (control.type === "range") {
-        if (field !== "maximum") control.max = String(settings.maximum);
+        control.max = String(field === "maximum" ? maximum : settings.maximum);
         control.closest("label").querySelector("output").value = String(settings[field]);
       }
       control.value = String(settings[field]);
@@ -365,7 +412,7 @@ function renderDevice() {
   $("alpha-back-to-checks").disabled = busy || d.testing;
   $("alpha-finish").disabled = busy;
   const unknown = selectedLiveDevice && !d.outputKnown;
-  const state = d.testing ? "Checking movement" : unknown ? "Check your Flexer" : d.running ? "Movements active" : "Movements paused";
+  const state = d.testing ? "Checking movement" : unknown ? "Check your toy" : d.running ? "Movements active" : "Movements paused";
   note("alpha-dock-state", state);
   note("alpha-dock-note", unknown ? "Check the device and use its own Stop if needed." : d.running ? "Stop is always available." : "Start when you’re ready.");
   note("alpha-playback-status", d.reason || "Change your settings while paused, then press Start.");
@@ -374,7 +421,35 @@ function renderDevice() {
 async function deviceAction(action) {
   if (!device) return false;
   try { return await action(); }
-  catch { note("alpha-device-status", "Check your Flexer and try again. If it keeps moving, stop it in Lovense Remote or on the device.", true); return false; }
+  catch {
+    note("alpha-device-status", session?.mode === "simulator" ? "Reconnect the simulator and try again." :
+      "Check your toy and try again. If it keeps moving, stop it in Lovense Remote or on the device.", true);
+    return false;
+  }
+}
+
+function renderFeedbackMovements() {
+  const reviewed = session?.reviewedDevice;
+  const channels = (reviewed?.channels ?? []).filter(channel => Object.hasOwn(MOVEMENTS, channel));
+  const preferred = $("alpha-feedback-form").elements.namedItem("preferredMovement");
+  const options = [new Option("Skip", ""), ...channels.map(channel => new Option(channelLabel(channel), MOVEMENTS[channel].feedback))];
+  if (reviewed?.supportsCombined && channels.length > 1) options.push(new Option("Movements together", "together"));
+  options.push(new Option("None of these", "neither"));
+  preferred.replaceChildren(...options);
+  preferred.closest(".alpha-field").hidden = !channels.length;
+  const fields = channels.map(channel => {
+    const label = channelLabel(channel).toLowerCase();
+    const field = $("alpha-feedback-maximum-template").content.firstElementChild.cloneNode(true);
+    const input = field.querySelector("input");
+    input.name = MOVEMENTS[channel].feedback + "Maximum";
+    input.max = String(channelMaximum(channel));
+    input.placeholder = `0–${input.max}`;
+    field.querySelector(".alpha-field-name").textContent = `Preferred ${label} maximum`;
+    field.querySelector("summary").setAttribute("aria-label", `About preferred ${label} maximum`);
+    field.querySelector(".alpha-tip p").textContent = `What’s the highest ${label} level you’d be comfortable using again? You can skip this question.`;
+    return field;
+  });
+  $("alpha-feedback-maximums").replaceChildren(...fields);
 }
 
 function updateFeedbackAccess() {
@@ -385,7 +460,7 @@ function updateFeedbackAccess() {
   if (!enabled && stage === "feedback") note("alpha-feedback-status", "This was a practice session. To share feedback, allow data collection when you start a session.");
 }
 
-const requiredFeedback = {minimum: "Continuous stimulation", connectionEase: "Connecting the Flexer", easeOfUse: "Using the controls"};
+const requiredFeedback = {minimum: "Continuous stimulation", connectionEase: "Connecting the device", easeOfUse: "Using the controls"};
 
 function clearFieldError(control) {
   control.removeAttribute("aria-invalid");
@@ -404,7 +479,7 @@ function feedbackValues(form) {
   const invalid = [];
   clearFeedbackErrors();
   for (const input of form.elements) {
-    if (!input.name) continue;
+    if (!input.name || input.disabled || input.closest("[hidden]")) continue;
     const raw = input.value.trim();
     const name = requiredFeedback[input.name] ?? input.labels?.[0]?.textContent.trim() ?? input.name;
     let message = "";
@@ -522,7 +597,7 @@ async function finishStudy() {
   if (current !== session) return;
   current.controlDuration = timeline?.lastTime ?? 0;
   if (liveDevice) {
-    note("alpha-stop-warning", "Check that your Flexer has stopped. If it is still moving, stop it in Lovense Remote or on the device.", true);
+    note("alpha-stop-warning", "Check that your toy has stopped. If it is still moving, stop it in Lovense Remote or on the device.", true);
     $("alpha-stop-warning").hidden = false;
   }
   teardownDevice();
@@ -548,7 +623,7 @@ async function signOut() {
     account = null;
     resetStudy();
     note("alpha-login-status", saved ? "Signed out." : "Signed out. Some pending session changes could not be confirmed.");
-    if (liveDevice) note("alpha-global-status", "Check that your Flexer has stopped. Use Lovense Remote or the device if needed.", true);
+    if (liveDevice) note("alpha-global-status", "Check that your toy has stopped. Use Lovense Remote or the device if needed.", true);
     focusHeading("alpha-login-title");
   } catch (error) { note("alpha-global-status", "Sign-out was not confirmed. Movements are paused. Try signing out again.", true); }
   finally { busy = false; $("alpha-logout").disabled = false; updateWelcome(); renderDevice(); }
@@ -584,6 +659,10 @@ $("alpha-login-form").addEventListener("submit", async event => {
 });
 
 $("alpha-adult").addEventListener("change", updateWelcome);
+$("alpha-mode").addEventListener("change", updateWelcome);
+$("alpha-simulator-model").replaceChildren(...ALPHA_TOY_PROFILES.map(profile => new Option(profile.pickerLabel, profile.id)));
+$("alpha-simulator-model").value = "flexer";
+$("alpha-simulator-model").addEventListener("change", updateWelcome);
 $("alpha-consent-start").addEventListener("click", () => void startStudy(true));
 $("alpha-unrecorded-start").addEventListener("click", () => void startStudy(false));
 $("alpha-logout").addEventListener("click", () => void signOut());
