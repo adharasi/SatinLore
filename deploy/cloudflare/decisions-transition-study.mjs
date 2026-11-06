@@ -1,5 +1,5 @@
 import {validateStoryStudyPayload} from "./decisions-story-study.mjs";
-import {analyzeStoryTransitions} from "./story-transition-analysis.mjs";
+import {analyzeStoryTransitions, STORY_TRANSITION_PROMPT} from "./story-transition-analysis.mjs";
 
 const RESPONSES_URL = "https://api.openai.com/v1/responses";
 const statuses = new Set(["completed", "partial", "aborted", "input_limit", "extraction_failed"]);
@@ -86,7 +86,7 @@ export async function runDecisionsTransitionStudy({key, analysisFetcher = fetch,
     const total = calls[0]?.usage?.[field] ?? null;
     return [field, {reportedCalls: total === null ? 0 : 1, total}];
   }));
-  return {version: pins.version, split: validated.split, model: "gpt-6-luna", study: "story-transition-evidence-v1",
+  return {version: pins.version, split: validated.split, model: "gpt-6-luna", study: STORY_TRANSITION_PROMPT,
     storyCount: stories.length, aborted: signal?.aborted === true, plannedProviderCalls, stories,
     provider: {status: statuses.has(trace.status) ? trace.status : "unavailable", calls,
       rejectedTransitions: count(trace.rejectedTransitions)},
