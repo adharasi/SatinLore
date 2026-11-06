@@ -104,7 +104,9 @@ test("the story study accepts only a signed founder and a pinned same-origin upl
   const f = fixture(), founder = await token(), tester = await token(TESTER_EMAIL);
   const page = await f.worker.fetch(benchmarkRequest(founder, { host: ORIGIN, path: STUDY, method: "GET" }), f.env);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Run transition state-check candidate/);
+  const html = await page.text();
+  assert.match(html, /Run transition state-check candidate/);
+  assert.match(html, /Compare cue continuity on calibration/);
   assert.equal((await f.worker.fetch(benchmarkRequest(tester, { path: STUDY, method: "GET" }), f.env)).status, 403);
   const body = new FormData();
   body.set("payload", new File(['{"version":"nocturne-story-study-20-2026-11-06-v1","split":"calibration","stories":[]}'], "study.json"));
@@ -112,6 +114,8 @@ test("the story study accepts only a signed founder and a pinned same-origin upl
   const submitted = (origin) => new Request(ORIGIN + STUDY, { method: "POST",
     headers: { "Cf-Access-Jwt-Assertion": founder, Origin: origin }, body });
   assert.equal((await f.worker.fetch(submitted(BETA), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(submitted(ORIGIN), f.env)).status, 400);
+  body.set("mode", "cue-continuity");
   assert.equal((await f.worker.fetch(submitted(ORIGIN), f.env)).status, 400);
   assert.deepEqual(f.reservations, []);
   assert.deepEqual(f.calls, []);
@@ -574,9 +578,12 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
   const study = await Promise.all(Array.from({ length: 22 }, () => reserve(1, "nocturne-story-study-20-2026-11-06-v1")));
   assert.equal(study.filter(response => response.status === 204).length, 20);
   assert.equal(study.filter(response => response.status === 429).length, 2);
+  const pairs = await Promise.all(Array.from({ length: 4 }, () => reserve(1, "nocturne-cue-continuity-pair")));
+  assert.equal(pairs.filter(response => response.status === 204).length, 1);
+  assert.equal(pairs.filter(response => response.status === 429).length, 3);
   assert.equal((await reserve(1)).status, 429);
   const rest = await Promise.all(Array.from({ length: 92 }, (_, index) => reserve(index + 2)));
-  assert.equal(rest.filter(response => response.status === 204).length, 68);
-  assert.equal(rest.filter(response => response.status === 429).length, 24);
+  assert.equal(rest.filter(response => response.status === 204).length, 66);
+  assert.equal(rest.filter(response => response.status === 429).length, 26);
   assert.match((await reserve(100)).headers.get("Retry-After"), /^\d+$/);
 });
