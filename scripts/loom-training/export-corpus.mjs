@@ -5,6 +5,8 @@ import {dirname, isAbsolute, relative, resolve, sep} from "node:path";
 import {ANALYSIS_VERSION, ReaderModel} from "../../app/static/reader/model.mjs";
 
 const validId = value => typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,119}$/.test(value);
+const frames = new Set(["current", "historical", "imagined", "reported", "neutral", "uncertain", "mixed"]);
+const phases = new Set(["quiet", "build", "sustain", "peak", "recover", "abstain"]);
 const digest = value => createHash("sha256").update(value).digest("hex");
 const inside = (root, file) => {
   const path = relative(root, file);
@@ -37,10 +39,12 @@ async function loadCorpus(manifestPath, split) {
       for (const [index, label] of excerpt.labels.entries()) {
         if (label?.paragraph !== index + 1 || typeof label.cueEligible !== "boolean" ||
             typeof label.boundary !== "boolean" ||
-            !validId(label.category)) throw new Error("Invalid or misaligned cue annotation.");
+            !validId(label.category) || (label.eventKind != null && !frames.has(label.eventKind)) ||
+            (label.phase != null && !phases.has(label.phase))) throw new Error("Invalid or misaligned cue annotation.");
         const paragraph = paragraphs[index];
         rows.push({work: work.id, author: work.authorId, excerpt: excerpt.id, excerptHash: excerpt.sha256,
           index, text: paragraph.text, unitHash: digest(paragraph.text), category: label.category,
+          eventKind: label.eventKind ?? null, phase: label.phase ?? null,
           cue: label.cueEligible, boundary: label.boundary, ruleCue: paragraph.suggestedLevel > 0});
       }
     }

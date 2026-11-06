@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from train import cached_encoder_features, choose_threshold, context_indices, counts, ensure_disjoint
+from train import cached_encoder_features, choose_threshold, context_indices, counts, ensure_disjoint, semantic_metrics
 
 
 def row(author, text, unit_hash):
@@ -51,3 +51,9 @@ class TrainingProtocolTests(unittest.TestCase):
         report = counts(np.array([True, False]), np.array([True, True]), np.array([True, True]))
         self.assertEqual(report["boundaryPositiveRows"], 1)
         self.assertEqual(report["boundaryFalseCues"], 1)
+
+    def test_semantic_metrics_count_unseen_holdout_classes_as_misses(self):
+        report = semantic_metrics(np.array(["neutral", "flirting"]), np.array(["neutral", "neutral"]), ["neutral"])
+        self.assertEqual(report["unseenLabelRows"], 1)
+        self.assertEqual(report["classes"]["flirting"], {"support": 1, "correct": 0})
+        self.assertAlmostEqual(report["macroF1"], 1 / 3)

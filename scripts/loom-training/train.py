@@ -12,8 +12,8 @@ import unicodedata
 import numpy as np
 from scipy.sparse import hstack
 from sklearn.feature_extraction.text import HashingVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.metrics import average_precision_score, f1_score
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import normalize
 from threadpoolctl import threadpool_limits
@@ -29,6 +29,7 @@ MIN_AUTHORS = 3
 BREAK = re.compile(r"^\s*(?:chapter\b|[\s*#\-–—―=~_]{3,}$)", re.IGNORECASE)
 WORD = {"analyzer": "word", "ngram_range": (1, 2), "token_pattern": r"(?u)\b\w[\w']*\b"}
 CHAR = {"analyzer": "char_wb", "ngram_range": (3, 5)}
+SEMANTIC_TARGETS = ("category", "eventKind", "phase")
 
 
 def read_corpus(path, split):
@@ -143,6 +144,48 @@ def metrics(rows, scores, threshold):
                                    for category in sorted(set(categories[actual]))}}
 
 
+def semantic_metrics(actual, predicted, known_classes):
+    labels, support = np.unique(actual, return_counts=True)
+    return {"macroF1": float(f1_score(actual, predicted, labels=labels, average="macro", zero_division=0)),
+            "accuracy": float(np.mean(actual == predicted)),
+            "unseenLabelRows": int(sum(count for label, count in zip(labels, support) if label not in known_classes)),
+            "classes": {label: {"support": int(count), "correct": int(((actual == label) & (predicted == label)).sum())}
+                        for label, count in zip(labels, support)}}
+
+
+def train_semantics(rows, matrix, evaluation=None, evaluation_matrix=None):
+    """Measure and export separate experimental heads without changing the cue gate."""
+    authors = np.array([row["author"] for row in rows])
+    folds = list(LeaveOneGroupOut().split(matrix, groups=authors))
+    report, weights = {}, {}
+
+    def fit_head(features, labels):
+        return SGDClassifier(loss="log_loss", class_weight="balanced", random_state=0, max_iter=2000,
+                             tol=1e-4).fit(features, labels)
+
+    with threadpool_limits(limits=1):
+        for target in SEMANTIC_TARGETS:
+            actual = np.array([row.get(target) for row in rows], dtype=object)
+            expected = np.array([row.get(target) for row in evaluation], dtype=object) if evaluation is not None else None
+            if any(not isinstance(label, str) for label in actual) or (expected is not None and
+                    any(not isinstance(label, str) for label in expected)) or len(set(actual)) < 2:
+                raise ValueError("Semantic training needs complete category, frame and phase labels and at least two classes per head.")
+            actual = actual.astype(str)
+            predicted = np.empty(len(rows), dtype=actual.dtype)
+            for training, validation in folds:
+                labels = actual[training]
+                classes = np.unique(labels)
+                predicted[validation] = (classes[0] if len(classes) == 1 else
+                                         fit_head(matrix[training], labels).predict(matrix[validation]))
+            model = fit_head(matrix, actual)
+            report[target] = {"calibration": semantic_metrics(actual, predicted, model.classes_)}
+            if expected is not None:
+                report[target]["evaluation"] = semantic_metrics(expected.astype(str), model.predict(evaluation_matrix), model.classes_)
+            weights[target] = {"classes": model.classes_.tolist(), "intercept": model.intercept_.tolist(),
+                               "coefficients": model.coef_.tolist()}
+    return report, weights
+
+
 def train(rows, matrices, evaluation=None, evaluation_matrices=None):
     cue = np.array([row["cue"] for row in rows])
     boundary = np.array([row["boundary"] for row in rows])
@@ -184,6 +227,7 @@ def main():
     parser.add_argument("--evaluation-manifest", type=Path, help="Disjoint evaluation corpus, never used to fit or select thresholds.")
     parser.add_argument("--train-vectors", type=Path, help="Optional frozen local encoder features in a private NPZ file.")
     parser.add_argument("--evaluation-vectors", type=Path)
+    parser.add_argument("--semantic-heads", action="store_true", help="Also train category, narrative frame and phase heads.")
     parser.add_argument("--weights-out", type=Path, help="Optional new file outside the repository for numeric weights.")
     args = parser.parse_args()
     if args.weights_out and args.weights_out.resolve().is_relative_to(REPO):
@@ -208,12 +252,22 @@ def main():
                 if other != fingerprint or evaluation_matrices["frozen-encoder-context"].shape[1] != matrices["frozen-encoder-context"].shape[1]:
                     raise ValueError("Both vector caches must use the same encoder and dimensions.")
         report, weights = train(rows, matrices, evaluation, evaluation_matrices)
+        semantic_report, semantic_weights = None, None
+        if args.semantic_heads:
+            arm = "frozen-encoder-context" if args.train_vectors else "adjacent-paragraphs"
+            heads, trained = train_semantics(rows, matrices[arm], evaluation,
+                                             evaluation_matrices[arm] if evaluation_matrices is not None else None)
+            semantic_report = {"featureArm": arm, "heads": heads}
+            semantic_weights = {"featureArm": arm, "heads": trained}
         feature_config = {"hashDimensions": FEATURES, "contextRadius": CONTEXT, "word": WORD, "character": CHAR,
                           "encoderFingerprint": fingerprint}
         if args.weights_out:
             # x prevents replacing prior weights and gives concurrent runs separate ownership.
             with open(args.weights_out, "x", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as file:
-                json.dump({"version": 1, "features": feature_config, "models": weights}, file, allow_nan=False)
+                payload = {"version": 1, "features": feature_config, "models": weights}
+                if semantic_weights is not None:
+                    payload["semanticHeads"] = semantic_weights
+                json.dump(payload, file, allow_nan=False)
     except ValueError as error:
         parser.error(str(error))
     except (OSError, KeyError, subprocess.TimeoutExpired):
@@ -223,7 +277,8 @@ def main():
                                              "minimumCorrectAuthors": MIN_AUTHORS, "boundaryFalseCues": 0},
                       "calibrationProtocol": "leave one author out; threshold selected on combined calibration predictions",
                       "evaluationProtocol": "untuned disjoint comparison; prior runs may have opened the corpus",
-                      "elapsedSeconds": round(perf_counter() - started, 3), "results": report}, indent=2))
+                      "elapsedSeconds": round(perf_counter() - started, 3), "results": report,
+                      **({"semanticHeads": semantic_report} if semantic_report is not None else {})}, indent=2))
 
 
 if __name__ == "__main__":

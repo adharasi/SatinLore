@@ -33,7 +33,13 @@ export function buildSceneUnits(paragraphs) {
       units.push({id: units.length, paragraph, start, end: start + content.length, text: content, structuralBoundary});
     };
     const segment = (start, end) => {
-      for (const {segment: source, index} of segmenter.segment(text.slice(start, end))) add(source, start + index, false);
+      // Printed line wraps are not sentence breaks. Preserve the original
+      // source and offsets by replacing each line-ending code unit in place.
+      const view = text.slice(start, end).replace(/[\r\n]/g, " ");
+      for (const {segment: sentence, index} of segmenter.segment(view)) {
+        const offset = start + index;
+        add(text.slice(offset, offset + sentence.length), offset, false);
+      }
     };
     let start = 0, offset = 0;
     for (const line of text.split("\n")) {

@@ -67,3 +67,11 @@ test("compiled shadow rows preserve sentence interruption and local zero without
     [["quiet", 0, true], ["quiet", 0, true], ["boundary", 0, true]]);
   assert.deepEqual(masked.slice(3), timeline.slice(3));
 });
+test("printed soft wraps preserve sentence identity and exact source offsets", () => {
+  const text = "The evening train\narrived on time.\nThey waved.\n***\nThe next day was clear.";
+  const units = buildSceneUnits([text]);
+  assert.deepEqual(units.map(unit => [unit.text, unit.structuralBoundary]), [
+    ["The evening train\narrived on time.", false], ["They waved.", false], ["***", true], ["The next day was clear.", false],
+  ]);
+  for (const unit of units) assert.equal(text.slice(unit.start, unit.end), unit.text);
+});
