@@ -139,6 +139,10 @@ The narrative-scope follow-up removes two previously observed false cues in the 
 
 The grounded review candidate adds a small set of local cues and makes Nocturne check GPT's cited paragraph links. The seven-author diagnostic found no Loom recall gain and exposed a gap in contextual exclusions. Keep the candidate in development until local recall and exclusion checks pass. Evaluate the v3 API with authorized credentials and approved excerpts, measuring accuracy, timing and tokens separately. [Grounded narrative review results](release-acceptance.md#grounded-narrative-review-candidate)
 
+The next recognition experiment uses a shared scene and beat map, with separate local Loom and GPT-assisted Nocturne implementations. Compare a larger-context single pass and targeted verification on approved text before replacing production analysis. Measure upload eligibility, usable coverage, classifier accuracy and calibrated output separately. [Architecture and promotion tests](reader-analysis-redesign.md)
+
+The experiment branch now trains author-separated CPU recognition baselines, accepts frozen local encoder vectors and runs the shared scene map through a bounded Luna extraction and verification comparison. The CPU baselines missed the development precision gate. The Nocturne fixtures exercise structure, exclusion and boundary handling with scripted responses. Run the pretrained encoder and live approved-text comparison before evaluating a promotion candidate. [Experiment results and training budget](reader-analysis-redesign.md)
+
 The controlled-release milestone has a dedicated set of acceptance gates for story coverage, independent annotations, classification, output and reader use. [Release acceptance](release-acceptance.md)
 
 Keep the local rules as the baseline and retain suggestions **0, 1, 2, 3 and 5 out of 20**. Visual labels never authorise stronger output. Prepare a versioned, rights-cleared evaluation set and rubric, split by story/source, with held-out material and independent labels on a subset. A proposed pilot is 200–500 paragraphs; that size is a starting hypothesis, not coverage evidence.
