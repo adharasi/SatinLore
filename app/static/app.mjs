@@ -802,7 +802,7 @@ async function runNocturneContext({automatic = false} = {}) {
     session.requests++;
     session.bytesAttempted += sourceBytes;
     for (const id of newIds) session.attempted.add(id);
-    const result = await requestNocturneContext(paragraphs, {consent: true, signal: operation.abort.signal});
+    const result = await requestNocturneContext(paragraphs, {consent: true, targets: newIds, signal: operation.abort.signal});
     if (!current()) return;
     if (result.labels) {
       for (const id of newIds) story.model.nocturneContext.set(id, result.labels.get(id));

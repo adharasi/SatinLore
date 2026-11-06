@@ -65,8 +65,8 @@ async function testPage() {
       const body = request.postDataJSON();
       posts.push(body);
       if (providerResult === "refused") return route.fulfill({status: 422, json: {code: "refused", error: canary}});
-      if (body.version === "context-v2") return route.fulfill({json: {version: "context-v2",
-        labels: body.paragraphs.map(({id}) => ({id, category: id === 2 ? "intimacy" : id === 6 ? "romance" : "neutral",
+      if (body.version === "context-v3") return route.fulfill({json: {version: "context-v3",
+        labels: body.targets.map(id => ({id, category: id === 2 ? "intimacy" : id === 6 ? "romance" : "neutral",
           phase: id === 2 ? "peak" : id === 6 ? "build" : "quiet", shape: "unspecified", confidence: 95,
           eventKind: id === 2 ? "historical" : id === 6 ? "current" : "neutral"})),
         usage: {inputTokens: 40, outputTokens: 20, totalTokens: 60}}});
@@ -222,9 +222,10 @@ try {
   assert.equal((await contextResponse).status(), 200);
   await contextPage.waitForFunction(() => /Nearby context reviewed/.test(document.querySelector("#nocturne-status")?.textContent));
   const contextBody = posts.at(-1);
-  assert.deepEqual(Object.keys(contextBody), ["version", "consent", "paragraphs"]);
-  assert.equal(contextBody.version, "context-v2");
+  assert.deepEqual(Object.keys(contextBody).sort(), ["consent", "paragraphs", "targets", "version"]);
+  assert.equal(contextBody.version, "context-v3");
   assert.equal(contextBody.consent, true);
+  assert.deepEqual(contextBody.targets, contextBody.paragraphs.map(({id}) => id));
   assert.ok(contextBody.paragraphs.some(p => p.id === 6 && p.text.includes("handwritten invitation")), "Unmatched source can reach the consented classifier.");
   assert.ok(contextBody.paragraphs.every(p => ![4, 5].includes(p.id)), "Protected content and hard boundaries remain excluded.");
   assert.ok(!JSON.stringify(contextBody).includes(canary));

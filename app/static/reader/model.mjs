@@ -4,7 +4,7 @@ import {LEGACY_NOCTURNE_CONTEXT_VERSION, MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEX
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v6.7";
+export const ANALYSIS_VERSION = "scene-rules-v6.8";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&

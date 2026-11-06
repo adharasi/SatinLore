@@ -9,7 +9,7 @@ import {waitForWorkspace, waitForContext} from "./helpers/workspace-wait.mjs";
 
 const paragraph = (text, extra = {}) => ({text, analysed: true, quiet: false, cloudExcluded: false, override: null, suggestedLevel: 0, ...extra});
 const annotation = (id, extra = {}) => ({id, category: "romance", phase: "build", shape: "unspecified", confidence: 90, eventKind: "current", ...extra});
-const response = paragraphs => ({version: "context-v2", labels: paragraphs.map(({id}) => annotation(id)), usage: {inputTokens: 10, outputTokens: 5, totalTokens: 15}});
+const response = (targets, version = "context-v3") => ({version, labels: targets.map(id => annotation(id)), usage: {inputTokens: 10, outputTokens: 5, totalTokens: 15}});
 
 test("context windows include unmatched sections but omit protected, manual, missing and oversized paragraphs", () => {
   const paragraphs = Array.from({length: 20}, (_, i) => paragraph(`Neutral section ${i}.`));
@@ -23,10 +23,10 @@ test("context windows include unmatched sections but omit protected, manual, mis
   assert.equal(result.excluded, 4);
   assert.equal(result.limited, 1);
   assert.deepEqual(Object.keys(result.paragraphs[0]), ["id", "text"]);
-  const escaped = nocturneContextCandidates(Array.from({length: 8}, () => paragraph("\\".repeat(3000))));
-  assert.equal(escaped.paragraphs.length, 2, "Escaping can hit the encoded body bound before the raw source bound.");
-  assert.ok(Buffer.byteLength(JSON.stringify({version: "context-v2", consent: true, paragraphs: escaped.paragraphs})) <= 16384);
-  assert.equal(escaped.sourceBytes, 6000);
+  const escaped = nocturneContextCandidates(Array.from({length: 3}, () => paragraph("\\".repeat(2710))));
+  assert.equal(escaped.paragraphs.length, 2, "The encoded bound includes the target IDs as well as escaped text.");
+  assert.ok(Buffer.byteLength(JSON.stringify({version: "context-v3", consent: true, paragraphs: escaped.paragraphs, targets: escaped.newIds})) <= 16384);
+  assert.equal(escaped.sourceBytes, 5420);
 });
 
 test("context requests require consent and pin the response to the current contract", async () => {
@@ -37,25 +37,46 @@ test("context requests require consent and pin the response to the current contr
   const result = await requestNocturneContext(paragraphs, {consent: true, request: async (path, init) => {
     assert.equal(path, "/api/scene-analysis");
     assert.equal(init.credentials, "same-origin"); assert.equal(init.redirect, "error");
-    assert.deepEqual(JSON.parse(init.body), {version: "context-v2", consent: true, paragraphs});
-    return Response.json(response(paragraphs));
+    assert.deepEqual(JSON.parse(init.body), {version: "context-v3", consent: true, paragraphs, targets: [0]});
+    return Response.json(response([0]));
   }});
   assert.equal(result.labels.get(0).category, "romance");
   assert.equal(result.usage.totalTokens, 15);
+  await assert.rejects(requestNocturneContext(paragraphs, {consent: true, request: async () => Response.json(response([0], "context-v2"))}), /Unexpected Nocturne/);
   await assert.rejects(requestNocturneContext(paragraphs, {consent: true, request: async () => Response.json({version: "context-v1",
     labels: [{id: 0, category: "romance", phase: "build", shape: "unspecified", confidence: 90}], usage: null})}), /Unexpected Nocturne/);
 });
 
+test("context-only rows cannot be annotated by a v3 response", async () => {
+  const paragraphs = [{id: 8, text: "A letter arrived."}, {id: 9, text: "She held it to the light."}];
+  const targets = [9];
+  const result = await requestNocturneContext(paragraphs, {consent: true, targets, request: async (_path, init) => {
+    assert.deepEqual(JSON.parse(init.body), {version: "context-v3", consent: true, paragraphs, targets});
+    return Response.json(response(targets));
+  }});
+  assert.deepEqual([...result.labels.keys()], [9]);
+  for (const unexpectedIds of [[8], [8, 9], [10], []]) {
+    await assert.rejects(requestNocturneContext(paragraphs, {consent: true, targets,
+      request: async () => Response.json(response(unexpectedIds))}), /Unexpected Nocturne/);
+  }
+  for (const invalidTargets of [[], [9, 9], [9, 8], [10]]) {
+    await assert.rejects(requestNocturneContext(paragraphs, {consent: true, targets: invalidTargets,
+      request: async () => assert.fail("Invalid targets must fail before transport.")}), /Unexpected Nocturne targets/);
+  }
+});
+
 test("context validation requires exact source IDs, coherent categories and bounded neutral metadata", () => {
   const paragraphs = [{id: 0, text: "A letter arrived."}];
-  assert.equal(validateNocturneContext(paragraphs, response(paragraphs)).labels.size, 1);
+  const valid = response([0]);
+  assert.equal(validateNocturneContext(paragraphs, valid).labels.size, 1);
+  assert.equal(validateNocturneContext(paragraphs, response([0], "context-v2")).labels.size, 1);
   for (const invalid of [
-    {...response(paragraphs), labels: [annotation(1)]},
-    {...response(paragraphs), labels: [annotation(0, {category: "neutral", phase: "peak"})]},
-    {...response(paragraphs), labels: [annotation(0, {confidence: 101})]},
-    {...response(paragraphs), labels: [annotation(0, {text: "Unexpected prose"})]},
-    {...response(paragraphs), usage: {inputTokens: 10, outputTokens: 5, totalTokens: 16}},
-    {...response(paragraphs), device: "Unexpected command"},
+    {...valid, labels: [annotation(1)]},
+    {...valid, labels: [annotation(0, {category: "neutral", phase: "peak"})]},
+    {...valid, labels: [annotation(0, {confidence: 101})]},
+    {...valid, labels: [annotation(0, {text: "Unexpected prose"})]},
+    {...valid, usage: {inputTokens: 10, outputTokens: 5, totalTokens: 16}},
+    {...valid, device: "Unexpected command"},
   ]) assert.throws(() => validateNocturneContext(paragraphs, invalid), /Unexpected Nocturne/);
 });
 
@@ -100,7 +121,7 @@ test("actual context UI needs explicit consent, remains paused, reuses coverage 
   const app = await contextWorkspace(t, async (path, init = {}) => {
     if (init.method !== "POST") return Response.json({available: true});
     const body = JSON.parse(init.body); posts.push(body);
-    const review = response(body.paragraphs);
+    const review = response(body.targets);
     review.labels[1].eventKind = "reported";
     return Response.json(review);
   });
@@ -111,6 +132,7 @@ test("actual context UI needs explicit consent, remains paused, reuses coverage 
   await app.nodes.get("nocturne-context-consent").dispatch("change");
   await app.click("nocturne-context-enable"); await waitForContext(app);
   assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].targets, posts[0].paragraphs.map(({id}) => id));
   assert.equal(app.read("latest.running"), false);
   assert.equal(app.read("currentStory().model.effectiveLevels({nocturne:true})[0]"), 1);
   assert.equal(app.read("currentStory().model.effectiveLevels()[0]"), 0);
@@ -128,6 +150,36 @@ test("actual context UI needs explicit consent, remains paused, reuses coverage 
   assert.equal(app.read("currentStory().nocturneContextSession.enabled"), false);
   assert.equal(app.nodes.get("nocturne-context-consent").checked, false);
   assert.equal(app.read("latest.running"), false);
+  assert.deepEqual(app.errors, []);
+});
+
+test("following windows include only permitted context and annotate new targets", async t => {
+  const posts = [];
+  const source = Array.from({length: 96}, (_, id) => id === 65 ?
+    "A folded underage warning card remained on the sill." : `Envelope ${id} rested beside the sealed parcel.`).join("\n\n");
+  const app = await contextWorkspace(t, async (_path, init = {}) => {
+    if (init.method !== "POST") return Response.json({available: true});
+    const body = JSON.parse(init.body);
+    posts.push(body);
+    const review = response(body.targets);
+    if (posts.length === 2) review.labels.forEach(label => { label.confidence = 91; });
+    return Response.json(review);
+  }, source);
+  app.nodes.get("nocturne-context-consent").checked = true;
+  await app.nodes.get("nocturne-context-consent").dispatch("change");
+  await app.click("nocturne-context-enable"); await waitForContext(app);
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].targets, Array.from({length: 64}, (_, id) => id));
+  app.read("latest = {...latest,running:true,position:64}; display()"); await waitForContext(app);
+  assert.equal(posts.length, 2);
+  const {paragraphs, targets} = posts[1];
+  assert.deepEqual(paragraphs.filter(({id}) => !targets.includes(id)).map(({id}) => id), [62, 63]);
+  assert.deepEqual(targets, [64, ...Array.from({length: 30}, (_, index) => index + 66)]);
+  assert.ok(paragraphs.every(({id, text}) => id !== 65 && !text.includes("underage warning")));
+  assert.equal(app.read("currentStory().model.nocturneContext.size"), 95);
+  assert.equal(app.read("currentStory().model.nocturneContext.get(63).confidence"), 90);
+  assert.equal(app.read("currentStory().model.nocturneContext.get(64).confidence"), 91);
+  assert.equal(app.read("currentStory().model.nocturneContext.has(65)"), false);
   assert.deepEqual(app.errors, []);
 });
 
@@ -169,7 +221,7 @@ test("dialogue-heavy coverage reaches later sections in five bounded requests", 
     assert.ok(batch.paragraphs.length <= 64);
     assert.ok(batch.sourceBytes <= 12000);
     assert.ok(batch.paragraphs.length - batch.newIds.length <= 2);
-    assert.ok(Buffer.byteLength(JSON.stringify({version: "context-v2", consent: true, paragraphs: batch.paragraphs})) <= 16384);
+    assert.ok(Buffer.byteLength(JSON.stringify({version: "context-v3", consent: true, paragraphs: batch.paragraphs, targets: batch.newIds})) <= 16384);
     requests.push(batch);
     bytes += batch.sourceBytes;
     batch.newIds.forEach(id => attempted.add(id));
@@ -185,6 +237,7 @@ test("a nearby review can fill gaps around an earlier seek in one request", () =
   for (let id = 4; id < 8; id++) paragraphs[id].text = "x".repeat(3000);
   const seek = nocturneContextCandidates(paragraphs, 4);
   assert.deepEqual(seek.newIds, [4, 5, 6, 7]);
+  assert.deepEqual(seek.paragraphs.map(({id}) => id), seek.newIds, "A first review after a seek leaves skipped text on the device.");
   paragraphs[3].cloudExcluded = true;
   paragraphs[8].override = 0;
   const attempted = new Set(seek.newIds);
@@ -201,7 +254,9 @@ test("automatic review leads the edge of a reviewed window during continuous rea
   const attempted = new Set(initial.newIds);
   assert.equal(nocturneContextNeedsReview(paragraphs, 20, {attempted}), false);
   assert.equal(nocturneContextNeedsReview(paragraphs, 40, {attempted}), true);
-  assert.equal(nocturneContextCandidates(paragraphs, 40, {attempted}).newIds[0], 64);
+  const next = nocturneContextCandidates(paragraphs, 40, {attempted});
+  assert.equal(next.newIds[0], 64);
+  assert.deepEqual(next.paragraphs.slice(0, 3).map(({id}) => id), [62, 63, 64]);
 });
 
 test("context byte allowance counts failed requests and survives a consent toggle", async t => {
@@ -234,7 +289,7 @@ test("a late contextual response after Stop and model switch cannot repopulate t
     if (init.method !== "POST") return Response.json({available: true});
     const body = JSON.parse(init.body);
     await new Promise(resolve => { release = resolve; });
-    return Response.json(response(body.paragraphs));
+    return Response.json(response(body.targets));
   });
   app.nodes.get("nocturne-context-consent").checked = true;
   await app.nodes.get("nocturne-context-consent").dispatch("change");
@@ -255,12 +310,12 @@ test("starting a seek cancels an already-dispatched automatic review", async t =
   let release, secondSignal, posts = 0;
   const app = await contextWorkspace(t, async (path, init = {}) => {
     if (init.method !== "POST") return Response.json({available: true});
-    const {paragraphs} = JSON.parse(init.body);
+    const {targets} = JSON.parse(init.body);
     if (++posts === 2) {
       secondSignal = init.signal;
       await new Promise(resolve => { release = resolve; });
     }
-    return Response.json(response(paragraphs));
+    return Response.json(response(targets));
   });
   app.nodes.get("nocturne-context-consent").checked = true;
   await app.nodes.get("nocturne-context-consent").dispatch("change");

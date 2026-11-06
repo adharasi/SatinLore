@@ -10,11 +10,11 @@ export const NOCTURNE_CONTEXT_SESSION_REQUESTS = 12;
 export const NOCTURNE_CONTEXT_SESSION_BYTES = 60_000;
 // Give the next window more lead time during fast, continuous reading.
 const PREFETCH_BYTES = 1_500;
-const OVERLAP_BYTES = 480;
+const OVERLAP_BYTES = 600;
 const encoder = new TextEncoder();
 const byteLength = value => encoder.encode(value).length;
-const contextBody = paragraphs => JSON.stringify({version: NOCTURNE_CONTEXT_VERSION, consent: true, paragraphs});
-const emptyBodyBytes = byteLength(contextBody([]));
+const contextBody = (paragraphs, targets) => JSON.stringify({version: NOCTURNE_CONTEXT_VERSION, consent: true, paragraphs, targets});
+const emptyBodyBytes = byteLength(contextBody([], []));
 
 function contextText(paragraph) {
   if (!paragraph?.analysed || paragraph.quiet || paragraph.cloudExcluded || paragraph.override !== null ||
@@ -26,11 +26,12 @@ function contextEntry(paragraphs, id) {
   const text = contextText(paragraphs[id]);
   if (text === null) return null;
   const paragraph = {id, text};
-  return {paragraph, sourceBytes: byteLength(text), bodyBytes: byteLength(JSON.stringify(paragraph))};
+  return {paragraph, sourceBytes: byteLength(text), bodyBytes: byteLength(JSON.stringify(paragraph)), idBytes: String(id).length};
 }
 
 function canFitEntry(entry, sourceLimit) {
-  return entry.sourceBytes <= Math.min(sourceLimit, MAX_PARAGRAPH_BYTES) && emptyBodyBytes + entry.bodyBytes <= MAX_CONTEXT_BODY_BYTES;
+  return entry.sourceBytes <= Math.min(sourceLimit, MAX_PARAGRAPH_BYTES) &&
+    emptyBodyBytes + entry.bodyBytes + entry.idBytes <= MAX_CONTEXT_BODY_BYTES;
 }
 
 function nextContextStart(paragraphs, position, attempted, sourceLimit, lookahead) {
@@ -54,25 +55,38 @@ export function nocturneContextNeedsReview(paragraphs, position, {attempted = ne
   return maxBytes > 0 && nextContextStart(paragraphs, position, attempted, maxBytes, PREFETCH_BYTES).id >= 0;
 }
 
-// Prefer new nearby text. A short already-attempted neighbour may provide
-// context if it fits without reducing the amount of new text in the batch.
+// Prefer new nearby text. Reuse up to two eligible preceding paragraphs
+// already submitted for review to preserve continuity across windows.
 export function nocturneContextCandidates(paragraphs, position = 0, {attempted = new Set(), maxBytes = MAX_CONTEXT_BYTES} = {}) {
   const sourceLimit = Math.min(MAX_CONTEXT_BYTES, maxBytes);
   const start = nextContextStart(paragraphs, position, attempted, sourceLimit, MAX_CONTEXT_BYTES);
   const result = [], newIds = [];
   let {excluded, limited} = start;
   let sourceBytes = 0, bodyBytes = emptyBodyBytes;
-  const fits = entry => result.length < MAX_CONTEXT_PARAGRAPHS && sourceBytes + entry.sourceBytes <= sourceLimit &&
-    bodyBytes + entry.bodyBytes + Number(result.length > 0) <= MAX_CONTEXT_BODY_BYTES;
+  const bodyCost = (entry, overlap) => entry.bodyBytes + Number(result.length > 0) +
+    (overlap ? 0 : entry.idBytes + Number(newIds.length > 0));
+  const fits = (entry, overlap = false) => result.length < MAX_CONTEXT_PARAGRAPHS && sourceBytes + entry.sourceBytes <= sourceLimit &&
+    bodyBytes + bodyCost(entry, overlap) <= MAX_CONTEXT_BODY_BYTES;
   function add(entry, overlap = false) {
-    bodyBytes += entry.bodyBytes + Number(result.length > 0);
+    bodyBytes += bodyCost(entry, overlap);
     sourceBytes += entry.sourceBytes;
     if (overlap) result.unshift(entry.paragraph);
     else { result.push(entry.paragraph); newIds.push(entry.paragraph.id); }
   }
   if (start.id >= 0) {
+    // The first target is known to fit. Keep a short lead-in ahead of
+    // additional targets so full batches still carry frame information.
+    add(contextEntry(paragraphs, start.id));
+    let overlapBytes = 0;
+    for (let id = start.id - 1; id >= 0 && id >= start.id - 2; id--) {
+      if (!attempted.has(id)) break;
+      const entry = contextEntry(paragraphs, id);
+      if (!entry || overlapBytes + entry.sourceBytes > OVERLAP_BYTES || !fits(entry, true)) break;
+      add(entry, true);
+      overlapBytes += entry.sourceBytes;
+    }
     const end = Math.min(paragraphs.length, start.id + MAX_CONTEXT_PARAGRAPHS);
-    for (let id = start.id; id < end; id++) {
+    for (let id = start.id + 1; id < end; id++) {
       if (attempted.has(id)) continue;
       const entry = contextEntry(paragraphs, id);
       if (!entry) { excluded++; continue; }
@@ -80,27 +94,23 @@ export function nocturneContextCandidates(paragraphs, position = 0, {attempted =
       if (!fits(entry)) { limited++; break; }
       add(entry);
     }
-    let overlapBytes = 0;
-    for (let id = start.id - 1; id >= 0 && id >= start.id - 2 && attempted.has(id); id--) {
-      const entry = contextEntry(paragraphs, id);
-      if (!entry || overlapBytes + entry.sourceBytes > OVERLAP_BYTES || !fits(entry)) break;
-      add(entry, true);
-      overlapBytes += entry.sourceBytes;
-    }
   }
   return {paragraphs: result, newIds, sourceBytes, excluded, limited};
 }
 
-export async function requestNocturneContext(paragraphs, {consent = false, signal, request = fetch} = {}) {
+export async function requestNocturneContext(paragraphs, {consent = false, targets = paragraphs.map(({id}) => id), signal, request = fetch} = {}) {
   if (consent !== true) throw new Error("Choose whether to send nearby story excerpts first.");
+  const sourceIds = new Set(paragraphs.map(({id}) => id));
+  if (!Array.isArray(targets) || !targets.length || targets.some((id, index) => !Number.isInteger(id) ||
+      !sourceIds.has(id) || index > 0 && id <= targets[index - 1])) throw new Error("Unexpected Nocturne targets.");
   const timeout = AbortSignal.timeout(NOCTURNE_CONTEXT_TIMEOUT_MS);
   const response = await request(endpoint, {method: "POST", cache: "no-store", credentials: "same-origin", redirect: "error",
-    headers: {"Content-Type": "application/json"}, body: contextBody(paragraphs),
+    headers: {"Content-Type": "application/json"}, body: contextBody(paragraphs, targets),
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout});
   const value = await response.json();
   if (!response.ok) return {labels: null, usage: null, code: value?.code};
   if (value?.version !== NOCTURNE_CONTEXT_VERSION) throw new Error("Unexpected Nocturne annotations.");
-  return {...validateNocturneContext(paragraphs, value), code: null};
+  return {...validateNocturneContext(targets.map(id => ({id})), value), code: null};
 }
 
 function nearbyPhase(paragraph, sceneId) {

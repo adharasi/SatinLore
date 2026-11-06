@@ -2,7 +2,7 @@ import {
   CATEGORY_PHASES, CONTEXT_EVENT_KINDS, CONTEXT_LABELS, CONTEXT_SHAPES,
   LEGACY_NOCTURNE_CONTEXT_VERSION, MAX_CONTEXT_BODY_BYTES, MAX_CONTEXT_BYTES,
   MAX_CONTEXT_OUTPUT_TOKENS, MAX_CONTEXT_PARAGRAPHS, MAX_PARAGRAPH_BYTES,
-  MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEXT_VERSION, validContextAnnotation, validContextUsage,
+  MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEXT_VERSION, PREVIOUS_NOCTURNE_CONTEXT_VERSION, validContextAnnotation, validContextUsage,
 } from "../../app/static/reader/nocturne-context-contract.mjs";
 
 const API_URL = "https://api.openai.com/v1/responses";
@@ -74,18 +74,35 @@ const CONTEXT_V2_INSTRUCTIONS = [
   "Choose shape unspecified unless the source clearly indicates sustained, alternating or accented narrative timing. Use unspecified for quiet and abstain. Never infer device actions, settings, intensity or a physical outcome.",
 ].join(" ");
 const CONTEXT_V2_FIELDS = ["id", "label", "eventKind", "shape", "confidence"];
-const CONTEXT_V2_FORMAT = {
-  type: "json_schema", name: "story_context_labels_v2", strict: true,
-  schema: { type: "object", additionalProperties: false, required: ["labels"], properties: {
-    labels: { type: "array", items: { type: "object", additionalProperties: false,
-      required: CONTEXT_V2_FIELDS, properties: {
-        id: { type: "integer" }, label: { type: "string", enum: CONTEXT_LABELS },
-        eventKind: { type: "string", enum: CONTEXT_EVENT_KINDS }, shape: { type: "string", enum: SHAPES },
-        confidence: { type: "integer", minimum: 0, maximum: 100 },
-      } },
-    },
-  } },
+const CONTEXT_V2_PROPERTIES = {
+  id: { type: "integer" }, label: { type: "string", enum: CONTEXT_LABELS },
+  eventKind: { type: "string", enum: CONTEXT_EVENT_KINDS }, shape: { type: "string", enum: SHAPES },
+  confidence: { type: "integer", minimum: 0, maximum: 100 },
 };
+
+function contextFormat(name, required, properties) {
+  return {
+    type: "json_schema", name, strict: true,
+    schema: { type: "object", additionalProperties: false, required: ["labels"], properties: {
+      labels: { type: "array", items: { type: "object", additionalProperties: false, required, properties } },
+    } },
+  };
+}
+
+const CONTEXT_V2_FORMAT = contextFormat("story_context_labels_v2", CONTEXT_V2_FIELDS, CONTEXT_V2_PROPERTIES);
+const CONTEXT_V3_EVIDENCE = ["direct", "exchange", "carry", "none", "boundary"];
+const CONTEXT_V3_FIELDS = [...CONTEXT_V2_FIELDS, "evidence", "supportId"];
+const CONTEXT_V3_INSTRUCTIONS = [
+  CONTEXT_V2_INSTRUCTIONS,
+  "Read the whole window in order before annotating. The input lists target IDs, but also annotate the other supplied rows so their evidence can be checked. Base each label on its own paragraph and the nearest relevant rows. Do not share a scene across omitted IDs or a change of narrative frame.",
+  "For a current beat, use direct and cite its own ID if the paragraph itself establishes the beat. This includes clearly current romantic dialogue even without physical action. Separate spoken or enacted evidence from a character quoting or recalling an earlier event.",
+  "Use exchange for current romance, flirting or romantic tension only when an immediately adjacent current paragraph supplies the matching cue or response. Cite that row's ID. If neither row independently establishes the exchange, the two rows must cite one another. Do not treat unrelated neighboring dialogue as an exchange.",
+  "Use carry for sustain or aftermath.recover only when the paragraph continues an established current beat without new direct evidence. Cite the closest preceding direct or exchange row in the same category for sustain. It must be one or two IDs earlier. If two IDs earlier, the intermediate row must be sustain carry from the same anchor. Avoid raising the category, predicting a peak or carrying through scenery, a stop, a time jump, or a noncurrent frame.",
+  "Use boundary with neutral.quiet for an explicit scene break, interruption or withdrawal. Use none for other quiet, noncurrent or abstain rows. For both, cite the row's own ID. For exchange and carry use shape unspecified. If the evidence or its source is unclear, abstain.",
+].join(" ");
+const CONTEXT_V3_FORMAT = contextFormat("story_context_evidence_v3", CONTEXT_V3_FIELDS, {
+  ...CONTEXT_V2_PROPERTIES, evidence: { type: "string", enum: CONTEXT_V3_EVIDENCE }, supportId: { type: "integer" },
+});
 
 function exactObject(value, keys) {
   return value && typeof value === "object" && !Array.isArray(value) &&
@@ -143,10 +160,13 @@ function normalizeCues(value) {
 }
 
 function normalizeContext(value) {
-  if (!exactObject(value, ["version", "consent", "paragraphs"]) || value.consent !== true ||
-      ![LEGACY_NOCTURNE_CONTEXT_VERSION, NOCTURNE_CONTEXT_VERSION].includes(value.version) ||
+  const version = value?.version;
+  const grounded = version === NOCTURNE_CONTEXT_VERSION;
+  const fields = grounded ? ["version", "consent", "paragraphs", "targets"] : ["version", "consent", "paragraphs"];
+  if (!exactObject(value, fields) || value.consent !== true ||
+      ![LEGACY_NOCTURNE_CONTEXT_VERSION, PREVIOUS_NOCTURNE_CONTEXT_VERSION, NOCTURNE_CONTEXT_VERSION].includes(version) ||
       !Array.isArray(value.paragraphs) || !value.paragraphs.length ||
-      value.paragraphs.length > (value.version === NOCTURNE_CONTEXT_VERSION ? MAX_CONTEXT_PARAGRAPHS : 8)) return null;
+      value.paragraphs.length > (version === LEGACY_NOCTURNE_CONTEXT_VERSION ? 8 : MAX_CONTEXT_PARAGRAPHS)) return null;
   const encoder = new TextEncoder();
   let previous = -1, size = 0;
   const paragraphs = [];
@@ -159,7 +179,15 @@ function normalizeContext(value) {
     previous = paragraph.id;
     paragraphs.push({ id: paragraph.id, text: paragraph.text });
   }
-  return { version: value.version, paragraphs };
+  if (!grounded) return { version, paragraphs };
+  const ids = new Set(paragraphs.map(({ id }) => id));
+  if (!Array.isArray(value.targets) || !value.targets.length || value.targets.length > ids.size) return null;
+  previous = -1;
+  for (const id of value.targets) {
+    if (!ids.has(id) || id <= previous) return null;
+    previous = id;
+  }
+  return { version, paragraphs, targets: [...value.targets] };
 }
 
 function failure(code, status, error, headers) {
@@ -221,30 +249,78 @@ function checkedLabels(response, cues, session) {
 
 function normalizeProviderAnnotation(item, version) {
   if (version === LEGACY_NOCTURNE_CONTEXT_VERSION) return item;
-  if (!exactObject(item, CONTEXT_V2_FIELDS) || !CONTEXT_LABELS.includes(item.label)) return null;
+  const fields = version === NOCTURNE_CONTEXT_VERSION ? CONTEXT_V3_FIELDS : CONTEXT_V2_FIELDS;
+  if (!exactObject(item, fields) || !CONTEXT_LABELS.includes(item.label)) return null;
   const [category, phase] = item.label.split(".");
   return { id: item.id, category, phase, shape: item.shape, confidence: item.confidence, eventKind: item.eventKind };
 }
 
-function checkedContext(response, { version, paragraphs }, session) {
+function currentBeat(row) {
+  return row?.item.eventKind === "current" && row.item.phase !== "quiet" && row.item.confidence >= MIN_CONTEXT_CONFIDENCE;
+}
+
+function directEvidence(row) {
+  return currentBeat(row) && row.evidence === "direct" && row.supportId === row.item.id;
+}
+
+function exchangeEvidence(row) {
+  return currentBeat(row) && row.evidence === "exchange" && Math.abs(row.supportId - row.item.id) === 1 &&
+    ["romance", "flirting", "tension"].includes(row.item.category);
+}
+
+function groundedEvidence(row, rows) {
+  if (directEvidence(row)) return true;
+  if (!exchangeEvidence(row)) return false;
+  const support = rows.get(row.supportId);
+  return directEvidence(support) && support.item.phase !== "recover" ||
+    exchangeEvidence(support) && support.supportId === row.item.id;
+}
+
+function supportedContext(row, rows) {
+  const { item, evidence, supportId } = row;
+  if (item.eventKind !== "current" || item.phase === "quiet") {
+    return supportId === item.id && (evidence === "none" || evidence === "boundary" && item.category === "neutral");
+  }
+  if (evidence !== "carry") return groundedEvidence(row, rows);
+  const distance = item.id - supportId;
+  const support = rows.get(supportId);
+  if ((distance !== 1 && distance !== 2) || !groundedEvidence(support, rows) || support.item.phase === "recover") return false;
+  if (!(item.phase === "sustain" && item.category === support.item.category ||
+        item.phase === "recover" && item.category === "aftermath")) return false;
+  if (distance === 1) return true;
+  const previous = rows.get(item.id - 1);
+  return currentBeat(previous) && previous.evidence === "carry" && previous.supportId === supportId &&
+    previous.item.phase === "sustain" && previous.item.category === support.item.category;
+}
+
+function checkedContext(response, { version, paragraphs, targets }, session) {
   const parsed = structuredResult(response, session);
   if (parsed.error) return parsed;
   const invalid = () => ({ error: invalidResult(session) });
   const result = parsed.value;
   if (result.labels.length !== paragraphs.length) return invalid();
-  const expected = new Set(paragraphs.map(paragraph => paragraph.id));
-  const labels = new Map();
+  const ids = paragraphs.map(({ id }) => id);
+  const expected = new Set(ids), supplied = new Set(ids);
+  const rows = new Map();
+  const grounded = version === NOCTURNE_CONTEXT_VERSION;
   for (const raw of result.labels) {
     const item = normalizeProviderAnnotation(raw, version);
     if (!validContextAnnotation(item, version) || !expected.delete(item.id)) return invalid();
-    labels.set(item.id, item.confidence < MIN_CONTEXT_CONFIDENCE ? {
-      id: item.id, category: "abstain", phase: "abstain", shape: "unspecified", confidence: item.confidence,
-      ...(version === NOCTURNE_CONTEXT_VERSION ? { eventKind: "uncertain" } : {}),
-    } : item);
+    const { evidence, supportId } = raw;
+    if (grounded && (!CONTEXT_V3_EVIDENCE.includes(evidence) || !supplied.has(supportId))) return invalid();
+    rows.set(item.id, { item, evidence, supportId });
   }
+  const labels = (targets ?? ids).map(id => {
+    const row = rows.get(id), { item } = row;
+    if (item.confidence < MIN_CONTEXT_CONFIDENCE || grounded && !supportedContext(row, rows)) return {
+      id, category: "abstain", phase: "abstain", shape: "unspecified", confidence: item.confidence,
+      ...(version !== LEGACY_NOCTURNE_CONTEXT_VERSION ? { eventKind: "uncertain" } : {}),
+    };
+    return grounded && (row.evidence === "carry" || row.evidence === "exchange") ? { ...item, shape: "unspecified" } : item;
+  });
   const usage = response.usage;
   const validUsage = usage && validContextUsage(usage.input_tokens, usage.output_tokens, usage.total_tokens, version);
-  return { labels: paragraphs.map(({ id }) => labels.get(id)), usage: validUsage ? {
+  return { labels, usage: validUsage ? {
     inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, totalTokens: usage.total_tokens,
   } : null };
 }
@@ -294,12 +370,15 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   }
   if (permission.status !== 204) return providerUnavailable(session, "budget_unavailable");
   if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
-  const contextualV2 = context?.version === NOCTURNE_CONTEXT_VERSION;
-  const timeout = AbortSignal.timeout(contextualV2 ? 24_000 : 9000);
+  const contextualV3 = context?.version === NOCTURNE_CONTEXT_VERSION;
+  const contextualV2 = context?.version === PREVIOUS_NOCTURNE_CONTEXT_VERSION;
+  const extendedContext = contextualV3 || contextualV2;
+  const timeout = AbortSignal.timeout(extendedContext ? 24_000 : 9000);
   const signal = AbortSignal.any([request.signal, timeout]);
-  const instructions = contextualV2 ? CONTEXT_V2_INSTRUCTIONS : context ? CONTEXT_INSTRUCTIONS : INSTRUCTIONS;
-  const format = contextualV2 ? CONTEXT_V2_FORMAT : context ? CONTEXT_FORMAT : FORMAT;
-  const outputTokens = contextualV2 ? MAX_CONTEXT_OUTPUT_TOKENS : context ? 1000 : 600;
+  const instructions = contextualV3 ? CONTEXT_V3_INSTRUCTIONS : contextualV2 ? CONTEXT_V2_INSTRUCTIONS : context ? CONTEXT_INSTRUCTIONS : INSTRUCTIONS;
+  const format = contextualV3 ? CONTEXT_V3_FORMAT : contextualV2 ? CONTEXT_V2_FORMAT : context ? CONTEXT_FORMAT : FORMAT;
+  const outputTokens = extendedContext ? MAX_CONTEXT_OUTPUT_TOKENS : context ? 1000 : 600;
+  const input = context ? { paragraphs: context.paragraphs, ...(contextualV3 ? { targets: context.targets } : {}) } : { cues };
   try {
     const response = await analysisFetcher(API_URL, {
       // Workers supports manual redirects. Non-2xx responses are rejected below
@@ -308,8 +387,8 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify({
         model: MODEL, instructions,
-        input: JSON.stringify(context ? { paragraphs: context.paragraphs } : { cues }), text: { format },
-        store: false, prompt_cache_options: { mode: "explicit" }, reasoning: { effort: "none" }, max_output_tokens: outputTokens,
+        input: JSON.stringify(input), text: { format },
+        store: false, prompt_cache_options: { mode: "explicit" }, reasoning: { effort: contextualV3 ? "low" : "none" }, max_output_tokens: outputTokens,
       }),
     });
     if (!response.ok) return await rejectedProviderResponse(response, session, signal);

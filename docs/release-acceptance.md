@@ -41,7 +41,7 @@ Measure story predictions before the renderer adds the background. A positive cu
 | Narrative boundaries | At least 85% precision and recall for phase transitions, matching each prediction to at most one reference transition within one paragraph. Preserve explicit stops and hard quiet. An excluded or invalid provider result cannot increase the local suggestion. Report imagined, reported and historical confusion separately. |
 | Usable contextual coverage | In each supported story slice, at least 80% of reference-eligible words in the first 3,600 traversed words have a valid, usable annotation by the time their paragraph is left at 240 words per minute. Require at least 70% at 120 and 420 words per minute. Use the remaining length when shorter, and repeat at middle-story starts. Count eligible material missed through false exclusion, skipping, refusal, timeout or budget exhaustion in the denominator. Show whole-story and prefix coverage separately. |
 | Hosted service and spend | On the authenticated candidate against the configured provider, at least 95% of ordinary eligible requests return usable labels within 8 seconds, including provider failures in the denominator. For the same 3,600-word comparison, p95 attempted usage stays within 25,000 input and 12,000 output tokens per session, and total submitted source bytes stay within 1.25 times unique submitted bytes on the sequential trace. Include repeat, failed and partial attempts in costs where billed usage is available. Record missing usage as unknown and leave the spend gate open if it cannot be reconciled. |
-| Consent and fallback | Zero unconsented excerpt requests, text leakage, out-of-bounds requests, persisted contextual consent or late application after cancellation. Exercise unsupported categories or combinations, missing and duplicate IDs, refusal, timeout, rate limit, authentication loss, story switch, seek, hide and quota exhaustion. The interface must report partial coverage and retain the applicable local fallback. |
+| Consent and fallback | Zero unconsented excerpt requests, reference-protected paragraphs included in a planned request, text leakage, out-of-bounds requests, persisted contextual consent or late application after cancellation. Exercise unsupported categories or combinations, missing and duplicate IDs, refusal, timeout, rate limit, authentication loss, story switch, seek, hide and quota exhaustion. The interface must report partial coverage and retain the applicable local fallback. |
 
 The cue-only path has a separate contract check. It should accept only eligible local cues and preserve its text-free payload. Use its results separately from contextual Nocturne when comparing accuracy or costs. [Nocturne evaluation protocol](reader-model-evaluation.md)
 
@@ -95,3 +95,21 @@ The guarded v6.7 candidate preserves Loom's existing cue classes and blocks clea
 The 10-work set has 460 privately labelled anchors from 10 previously unseen authors. Its reference labels were frozen before opening the v6.6 comparison. The narrower v6.7 rerun is diagnostic. None of the Loom results meet the release recall gate. With valid fixed labels supplied directly to the v6.6 simulator, 30/34 eligible episodes registered above background. That replay isolates the renderer from provider accuracy and timing. No reference quiet boundary, hard-quiet, ceiling or Stop violation appeared in the v6.7 simulator diagnostic.
 
 On the hosted `71c3d1f47344` build, the Lush simulator reached 5/20 on the bundled practice peak and returned to zero at Stop. One contextual request on an original six-paragraph rehearsal reviewed four eligible sections and reported 746 tokens. It marked the recalled dialogue as reported, suggested two current romance cues where Loom scored zero, and produced 2/20 on the simulator. Stop returned to zero. The hosted check covered one example on the merged build. Provider generalisation, the candidate's hosted behavior and physical hardware remain open.
+
+## Grounded narrative review candidate
+
+Loom v6.8 adds low-band cues for corroborated contact and reciprocal dialogue. Nocturne v3 uses a single GPT-6 Luna request per window. It asks the model to cite paragraph ordinals for direct, exchanged and continued cues, then checks the evidence links before applying the new target annotations. [Context review details and evaluator](nocturne-context-phase.md#contextual-annotation)
+
+| Check | v6.7 Loom or v2 Nocturne | v6.8 Loom or v3 Nocturne |
+| --- | ---: | ---: |
+| Loom cues found on development calibration | 4/367 | 10/367 |
+| Loom cues found on seven unseen authors | 2/82 | 2/82 |
+| False cues on unseen excerpts | 0/368 | 0/368 |
+| Simulator episodes above background on unseen excerpts | 2/28 | 2/28 |
+| Reference-protected paragraphs eligible in the offline request planner | 23/28 | 23/28 |
+| True cues kept in fixed Nocturne response fixtures | 4/4 | 4/4 |
+| Unsupported cues accepted in fixed Nocturne response fixtures | 2/2 | 0/2 |
+
+The author-separated diagnostic has 450 model-assisted paragraph labels across 16 excerpts from seven works. Its labels were frozen before scoring and cover historical romantic writing and two intimacy peaks. It has no explicit scenes. No reference boundary, ceiling, hard-quiet or Stop violations appeared in the simulator trace. With reference annotations applied directly, all 28 eligible episodes registered above background. Three reference-positive paragraphs were excluded locally. This replay isolates renderer behavior and omits provider accuracy and latency.
+
+The offline request audit marks a reference-protected paragraph eligible if the planner could include it in a window. No excerpts from this diagnostic went to the provider. The candidate limits the lead-in to previously submitted paragraphs. Loom recall and contextual exclusion remain release blockers. The fixed Nocturne fixtures measure Worker validation. Live v3 accuracy, latency and token usage still require a configured, authorized comparison on approved text.

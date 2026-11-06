@@ -311,6 +311,112 @@ test("context v2 falls back on incompatible labels and refuses without exposing 
   assert.doesNotMatch(JSON.stringify(result), /canary/);
 });
 
+const CONTEXT_V3 = { version: "context-v3", consent: true, paragraphs: [
+  { id: 3, text: "She asked him to dinner and said that she wanted to get to know him better." },
+  { id: 4, text: "He smiled and said he would love to." },
+  { id: 5, text: "They made plans together, both still smiling." },
+  { id: 6, text: "Neither of them wanted their conversation to end." },
+  { id: 7, text: "The scene ends here." },
+  { id: 8, text: "Years later, she remembered that invitation." },
+], targets: [4, 5, 6, 7, 8] };
+const evidenceRow = (id, patch = {}) => ({ id, label: "romance.build", eventKind: "current", shape: "unspecified",
+  confidence: 94, evidence: "direct", supportId: id, ...patch });
+const groundedRows = [
+  evidenceRow(3),
+  evidenceRow(4, { evidence: "exchange", supportId: 3, shape: "accented" }),
+  evidenceRow(5, { label: "romance.sustain", evidence: "carry", supportId: 4 }),
+  evidenceRow(6, { label: "romance.sustain", evidence: "carry", supportId: 4, shape: "alternating" }),
+  evidenceRow(7, { label: "neutral.quiet", eventKind: "neutral", evidence: "boundary" }),
+  evidenceRow(8, { label: "romance.build", eventKind: "historical", evidence: "none" }),
+];
+
+test("context v3 grounds exchanges and continuations with a single bounded call and returns only requested targets", async () => {
+  const f = fixture({ provider: async () => {
+    const result = await contextUpstream([...groundedRows].reverse()).json();
+    result.output.unshift({ type: "reasoning", summary: [{ type: "summary_text", text: "synthetic-canary" }] });
+    return Response.json(result);
+  } });
+  const response = await f.worker.fetch(request(await token(), { body: CONTEXT_V3 }), f.env);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  const targetRows = CONTEXT_V3.paragraphs.filter(({ id }) => CONTEXT_V3.targets.includes(id));
+  assert.deepEqual([...validateNocturneContext(targetRows, result).labels.keys()], CONTEXT_V3.targets);
+  assert.deepEqual(result.labels.map(({ category, phase, eventKind, shape }) => [category, phase, eventKind, shape]), [
+    ["romance", "build", "current", "unspecified"], ["romance", "sustain", "current", "unspecified"],
+    ["romance", "sustain", "current", "unspecified"], ["neutral", "quiet", "neutral", "unspecified"],
+    ["romance", "build", "historical", "unspecified"],
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /evidence|supportId|dinner|conversation|synthetic-canary/);
+  assert.deepEqual(result.usage, { inputTokens: 410, outputTokens: 102, totalTokens: 512 });
+  assert.equal(f.reservations.length, 1);
+  assert.equal(f.calls.length, 1);
+  const provider = JSON.parse(f.calls[0].options.body);
+  assert.deepEqual(JSON.parse(provider.input), { paragraphs: CONTEXT_V3.paragraphs, targets: CONTEXT_V3.targets });
+  assert.doesNotMatch(provider.input, /synthetic-subject|example\.test|consent/);
+  assert.equal(provider.store, false);
+  assert.equal(provider.text.format.strict, true);
+  assert.equal(provider.max_output_tokens, 4096);
+  assert.deepEqual(provider.reasoning, { effort: "low" });
+  assert.deepEqual(provider.text.format.schema.properties.labels.items.required,
+    ["id", "label", "eventKind", "shape", "confidence", "evidence", "supportId"]);
+  assert.match(provider.instructions, /The input lists target IDs/);
+  assert.match(provider.instructions, /Do not share a scene across omitted IDs/);
+});
+
+test("context v3 abstains on invented continuity, weak sources and unsupported stronger claims", async () => {
+  const jwt = await token();
+  const carry = (id, supportId, patch = {}) => evidenceRow(id, { label: "romance.sustain", evidence: "carry", supportId, ...patch });
+  const exchange = (id, supportId, patch = {}) => evidenceRow(id, { evidence: "exchange", supportId, ...patch });
+  const cases = [
+    [[evidenceRow(1), carry(3, 1)], [3]], // Omitted paragraph.
+    [[evidenceRow(1), evidenceRow(2, { label: "neutral.quiet", eventKind: "neutral", evidence: "boundary" }), carry(3, 1)], [3]],
+    [[evidenceRow(1, { confidence: 79 }), exchange(2, 1), carry(3, 2)], [1, 2, 3]],
+    [[evidenceRow(1, { eventKind: "reported", evidence: "none" }), exchange(2, 1)], [2]],
+    [[evidenceRow(1, { eventKind: "historical", evidence: "none" }), carry(2, 1)], [2]],
+    [[evidenceRow(1), exchange(2, 1, { label: "intimacy.build" })], [2]],
+    [[evidenceRow(1), carry(2, 1, { label: "intimacy.peak" })], [2]],
+    [[evidenceRow(1), carry(2, 1, { label: "intimacy.sustain" })], [2]],
+    [[evidenceRow(1), carry(2, 1), carry(3, 2)], [3]], // A carry cannot become a new anchor.
+    [[evidenceRow(1, { label: "aftermath.recover" }), exchange(2, 1)], [2]],
+    [[exchange(1, 2), exchange(2, 3), evidenceRow(3)], [1]],
+    [[evidenceRow(1, { supportId: 2 }), evidenceRow(2)], [1]],
+    [[evidenceRow(1, { evidence: "none" })], [1]],
+    [[exchange(1, 2), exchange(2, 1), carry(3, 2, { label: "aftermath.recover" })], []],
+  ];
+  for (const [rows, abstains] of cases) {
+    const paragraphs = rows.map(({ id }) => ({ id, text: "This is a synthetic paragraph." }));
+    const body = { ...CONTEXT_V3, paragraphs, targets: paragraphs.map(({ id }) => id) };
+    const f = fixture({ provider: () => contextUpstream(rows) });
+    const response = await f.worker.fetch(request(jwt, { body }), f.env);
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(result.labels.filter(({ category }) => category === "abstain").map(({ id }) => id), abstains);
+    assert.ok(result.labels.every(({ category, eventKind }) => category !== "abstain" || eventKind === "uncertain"));
+    assert.equal(f.calls.length, 1);
+  }
+});
+
+test("context v3 rejects invalid target lists before quota and never retries malformed support", async () => {
+  const jwt = await token(TESTER_EMAIL), f = fixture();
+  for (const targets of [undefined, [], [2], [4, 4], [5, 4], ["4"], [4, null], "4,5"]) {
+    const response = await f.worker.fetch(request(jwt, { body: { ...CONTEXT_V3, targets } }), f.env);
+    assert.equal(response.status, 400);
+  }
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.reservations, []);
+  for (const row of [
+    { ...groundedRows[0], supportId: 2 }, { ...groundedRows[0], supportId: "3" },
+    { ...groundedRows[0], evidence: "synthetic-canary" }, { ...groundedRows[0], evidence: undefined },
+    { ...groundedRows[0], evidence: "direct", explanation: "synthetic-canary" },
+  ]) {
+    const invalid = fixture({ provider: () => contextUpstream([row, ...groundedRows.slice(1)]) });
+    const response = await invalid.worker.fetch(request(jwt, { body: CONTEXT_V3 }), invalid.env);
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, "invalid_result");
+    assert.equal(invalid.calls.length, 1);
+  }
+});
+
 test("native Workers fetch accepts a Nocturne response and never forwards credentials on redirects", async t => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const source = "deploy/cloudflare/scene-analysis.mjs";
@@ -337,6 +443,10 @@ test("native Workers fetch accepts a Nocturne response and never forwards creden
     outbound.push({ url: request.url, method: request.method, authorization: request.headers.get("Authorization") });
     if (request.url !== upstreamURL) return Response.json({ error: "unexpected destination" }, { status: 400 });
     const input = JSON.parse((await request.json()).input);
+    if (input.targets) {
+      assert.deepEqual(input, { paragraphs: CONTEXT_V3.paragraphs, targets: CONTEXT_V3.targets });
+      return contextUpstream(groundedRows);
+    }
     if (input.paragraphs) {
       assert.deepEqual(input, { paragraphs: CONTEXT_V2.paragraphs });
       return contextUpstream(CONTEXT_V2_LABELS);
@@ -354,6 +464,10 @@ test("native Workers fetch accepts a Nocturne response and never forwards creden
   const contextResponse = await analyse(CONTEXT_V2);
   assert.equal(contextResponse.status, 200);
   assert.equal(validateNocturneContext(CONTEXT_V2.paragraphs, await contextResponse.json()).labels.size, 2);
+  const groundedResponse = await analyse(CONTEXT_V3);
+  assert.equal(groundedResponse.status, 200);
+  const targets = CONTEXT_V3.targets.map(id => ({ id }));
+  assert.deepEqual([...validateNocturneContext(targets, await groundedResponse.json()).labels.keys()], CONTEXT_V3.targets);
 
   redirect = true;
   const rejected = await analyse();
@@ -362,7 +476,7 @@ test("native Workers fetch accepts a Nocturne response and never forwards creden
   const result = await rejected.json();
   assert.ok(!JSON.stringify(result).includes(KEY));
   const expected = { url: upstreamURL, method: "POST", authorization: `Bearer ${KEY}` };
-  assert.deepEqual(outbound, [expected, expected, expected], "The redirect destination receives no request or credential.");
+  assert.deepEqual(outbound, [expected, expected, expected, expected], "The redirect destination receives no request or credential.");
 });
 
 test("Nocturne maps unavailable, rejected, and malformed upstream results without leaking provider data", async () => {
