@@ -43,6 +43,8 @@ Measure story predictions before the renderer adds the background. A positive cu
 | Hosted service and spend | On the authenticated candidate against the configured provider, at least 95% of ordinary eligible requests return usable labels within 8 seconds, including provider failures in the denominator. For the same 3,600-word comparison, p95 attempted usage stays within 25,000 input and 12,000 output tokens per session, and total submitted source bytes stay within 1.25 times unique submitted bytes on the sequential trace. Include repeat, failed and partial attempts in costs where billed usage is available. Record missing usage as unknown and leave the spend gate open if it cannot be reconciled. |
 | Consent and fallback | Zero unconsented excerpt requests, text leakage, out-of-bounds requests, persisted contextual consent or late application after cancellation. Exercise unsupported categories or combinations, missing and duplicate IDs, refusal, timeout, rate limit, authentication loss, story switch, seek, hide and quota exhaustion. The interface must report partial coverage and retain the applicable local fallback. |
 
+The [1,000-story qualification protocol](nocturne-release-qualification.md) defines the sealed corpus, slice floors, uncertainty bounds and paired reader trial. The [20-work published diagnostic](nocturne-published-diagnostic.md) supplies development evidence.
+
 The cue-only path has a separate contract check. It should accept only eligible local cues and preserve its text-free payload. Use its results separately from contextual Nocturne when comparing accuracy or costs. [Nocturne evaluation protocol](reader-model-evaluation.md)
 
 ## Output and user control gates
