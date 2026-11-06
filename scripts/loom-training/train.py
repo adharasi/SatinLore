@@ -14,7 +14,7 @@ from scipy.sparse import hstack
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.metrics import average_precision_score, f1_score
-from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
 from sklearn.preprocessing import normalize
 from threadpoolctl import threadpool_limits
 
@@ -23,6 +23,9 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 FEATURES = 2**14
 CONTEXT = 2
+SEQUENCE_FOLDS = 4
+SEQUENCE_SLOTS = ("centre",) + tuple(f"{side}-{distance}" for side in ("previous", "next")
+                                    for distance in range(1, CONTEXT + 1))
 PRECISION = 0.90
 MIN_CUES = 5
 MIN_AUTHORS = 3
@@ -136,12 +139,17 @@ def metrics(rows, scores, threshold):
     boundary = np.array([row["boundary"] for row in rows])
     predicted = scores >= threshold if threshold is not None else np.zeros(len(rows), dtype=bool)
     categories = np.array([row["category"] for row in rows])
+    category_counts = {}
+    for category in sorted(set(categories)):
+        mask = categories == category
+        category_counts[category] = counts(actual[mask], predicted[mask], boundary[mask])
     return {"rows": len(rows), "authors": len({row["author"] for row in rows}),
             "averagePrecision": float(average_precision_score(actual, scores)) if actual.any() else None,
             "decision": counts(actual, predicted, boundary),
             "positiveCategories": {category: {"found": int((actual & predicted & (categories == category)).sum()),
                                                "total": int((actual & (categories == category)).sum())}
-                                   for category in sorted(set(categories[actual]))}}
+                                   for category in sorted(set(categories[actual]))},
+            "byReferenceCategory": category_counts}
 
 
 def semantic_metrics(actual, predicted, known_classes):
@@ -151,6 +159,79 @@ def semantic_metrics(actual, predicted, known_classes):
             "unseenLabelRows": int(sum(count for label, count in zip(labels, support) if label not in known_classes)),
             "classes": {label: {"support": int(count), "correct": int(((actual == label) & (predicted == label)).sum())}
                         for label, count in zip(labels, support)}}
+
+
+def sequence_features(rows, evidence):
+    """Keep local model scores in order, with an explicit mask for absent context."""
+    width = evidence.shape[1] + 1
+    features = np.zeros((len(rows), len(SEQUENCE_SLOTS), width))
+    for i in range(len(rows)):
+        slots = [i]
+        for direction in (-1, 1):
+            neighbors = context_indices(rows, i, direction)
+            slots.extend(neighbors + [None] * (CONTEXT - len(neighbors)))
+        for slot, source in enumerate(slots):
+            if source is not None:
+                features[i, slot, :-1] = evidence[source]
+                features[i, slot, -1] = 1
+    return features.reshape(len(rows), -1)
+
+
+def fit_sequence(rows, matrix, cue, current, authors):
+    """Stack only scores from inner author-excluded fits when training the sequence head."""
+    labels = (cue, current)
+
+    def fit_evidence(features, targets):
+        return [fit(features, target) if np.unique(target).size == 2 else
+                float(np.log((target.sum() + .5) / ((~target).sum() + .5))) for target in targets]
+
+    def predict_evidence(features, heads):
+        logits = [np.full(features.shape[0], head) if isinstance(head, float) else
+                  head.decision_function(features) for head in heads]
+        return np.clip(np.column_stack(logits), -8, 8)
+
+    crossfit = np.empty((len(rows), len(labels)))
+    folds = GroupKFold(n_splits=min(SEQUENCE_FOLDS, len(set(authors))))
+    for train, validation in folds.split(matrix, groups=authors):
+        heads = fit_evidence(matrix[train], [label[train] for label in labels])
+        crossfit[validation] = predict_evidence(matrix[validation], heads)
+    context_head = fit(sequence_features(rows, crossfit), cue)
+    heads = fit_evidence(matrix, labels)
+
+    def predict(target_rows, target_matrix):
+        features = sequence_features(target_rows, predict_evidence(target_matrix, heads))
+        return context_head.predict_proba(features)[:, 1]
+
+    def weights(head):
+        if isinstance(head, float):
+            return {"constantLogit": head}
+        return {"intercept": float(head.intercept_[0]), "coefficients": head.coef_[0].tolist()}
+
+    return predict, {"cueHead": weights(heads[0]), "currentFrameHead": weights(heads[1]),
+                     "contextHead": weights(context_head)}
+
+
+def train_sequence(rows, matrix, evaluation=None, evaluation_matrix=None):
+    cue = np.array([row["cue"] for row in rows])
+    boundary = np.array([row["boundary"] for row in rows])
+    authors = np.array([row["author"] for row in rows])
+    if any(not isinstance(row.get("eventKind"), str) for row in rows):
+        raise ValueError("Sequence training needs complete calibration frame labels.")
+    current = np.array([row["eventKind"] == "current" for row in rows])
+    scores = np.empty(len(rows))
+    with threadpool_limits(limits=1):
+        for train, validation in LeaveOneGroupOut().split(matrix, groups=authors):
+            predict, _ = fit_sequence([rows[i] for i in train], matrix[train], cue[train], current[train], authors[train])
+            scores[validation] = predict([rows[i] for i in validation], matrix[validation])
+        threshold = choose_threshold(cue, scores, boundary, authors)
+        report = {"threshold": threshold, "calibration": metrics(rows, scores, threshold),
+                  "exploratoryCalibrationAtHalf": metrics(rows, scores, .5)}
+        predict, weights = fit_sequence(rows, matrix, cue, current, authors)
+        if evaluation is not None:
+            scores = predict(evaluation, evaluation_matrix)
+            report["evaluation"] = metrics(evaluation, scores, threshold)
+            report["exploratoryEvaluationAtHalf"] = metrics(evaluation, scores, .5)
+    return report, {"threshold": threshold, **weights}
 
 
 def train_semantics(rows, matrix, evaluation=None, evaluation_matrix=None):
@@ -228,6 +309,7 @@ def main():
     parser.add_argument("--train-vectors", type=Path, help="Optional frozen local encoder features in a private NPZ file.")
     parser.add_argument("--evaluation-vectors", type=Path)
     parser.add_argument("--semantic-heads", action="store_true", help="Also train category, narrative frame and phase heads.")
+    parser.add_argument("--sequence-context", action="store_true", help="Also test a nested author-excluded sequence head.")
     parser.add_argument("--weights-out", type=Path, help="Optional new file outside the repository for numeric weights.")
     args = parser.parse_args()
     if args.weights_out and args.weights_out.resolve().is_relative_to(REPO):
@@ -252,6 +334,19 @@ def main():
                 if other != fingerprint or evaluation_matrices["frozen-encoder-context"].shape[1] != matrices["frozen-encoder-context"].shape[1]:
                     raise ValueError("Both vector caches must use the same encoder and dimensions.")
         report, weights = train(rows, matrices, evaluation, evaluation_matrices)
+        if args.sequence_context:
+            sequence_arms = [("sequence-context", "paragraph", matrices["paragraph"],
+                              evaluation_matrices["paragraph"] if evaluation_matrices is not None else None)]
+            if args.train_vectors:
+                # The direct encoder comparator includes three equal blocks.
+                # Start each sequence slot from its centre vector only.
+                centre = np.split(matrices["frozen-encoder-context"], 3, axis=1)[0]
+                target = (np.split(evaluation_matrices["frozen-encoder-context"], 3, axis=1)[0]
+                          if evaluation_matrices is not None else None)
+                sequence_arms.append(("sequence-frozen-encoder-context", "frozen-encoder-centre", centre, target))
+            for name, base, matrix, target_matrix in sequence_arms:
+                report[name], weights[name] = train_sequence(rows, matrix, evaluation, target_matrix)
+                report[name]["baseArm"] = weights[name]["baseArm"] = base
         semantic_report, semantic_weights = None, None
         if args.semantic_heads:
             arm = "frozen-encoder-context" if args.train_vectors else "adjacent-paragraphs"
@@ -261,6 +356,10 @@ def main():
             semantic_weights = {"featureArm": arm, "heads": trained}
         feature_config = {"hashDimensions": FEATURES, "contextRadius": CONTEXT, "word": WORD, "character": CHAR,
                           "encoderFingerprint": fingerprint}
+        if args.sequence_context:
+            feature_config["sequenceContext"] = {"innerAuthorFoldsMax": SEQUENCE_FOLDS,
+                                                "slots": SEQUENCE_SLOTS, "featuresPerSlot": ["cueLogit", "currentFrameLogit", "present"],
+                                                "absoluteLogitLimit": 8}
         if args.weights_out:
             # x prevents replacing prior weights and gives concurrent runs separate ownership.
             with open(args.weights_out, "x", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as file:

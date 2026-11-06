@@ -1,10 +1,12 @@
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
-from train import cached_encoder_features, choose_threshold, context_indices, counts, ensure_disjoint, semantic_metrics
+from train import (cached_encoder_features, choose_threshold, context_indices, counts, ensure_disjoint,
+                   fit_sequence, semantic_metrics, sequence_features)
 
 
 def row(author, text, unit_hash):
@@ -26,6 +28,44 @@ class TrainingProtocolTests(unittest.TestCase):
                 row("first", "New chapter.", "c" * 64), row("second", "Another excerpt.", "d" * 64)]
         self.assertEqual(context_indices(rows, 2, -1), [])
         self.assertEqual(context_indices(rows, 2, 1), [])
+
+    def test_sequence_scores_stay_in_order_and_mask_context_across_breaks(self):
+        rows = [row("first", "Before the break.", "a" * 64), row("first", "CHAPTER TWO", "b" * 64),
+                row("first", "Opening paragraph.", "c" * 64), row("first", "Next paragraph.", "d" * 64),
+                row("second", "Another excerpt.", "e" * 64)]
+        scores = np.arange(10).reshape(5, 2)
+        features = sequence_features(rows, scores).reshape(5, 5, 3)
+        np.testing.assert_array_equal(features[2], [[4, 5, 1], [0, 0, 0], [0, 0, 0], [6, 7, 1], [0, 0, 0]])
+        np.testing.assert_array_equal(features[3], [[6, 7, 1], [4, 5, 1], [0, 0, 0], [0, 0, 0], [0, 0, 0]])
+
+    def test_sequence_meta_training_gets_author_excluded_evidence(self):
+        authors = np.repeat(np.arange(4), 2)
+        matrix = np.column_stack((authors, np.arange(8)))
+        rows = [row(str(author), "Text.", str(i)) for i, author in enumerate(authors)]
+        cue = np.tile([False, True], 4)
+        score_batches = []
+        case = self
+
+        class Head:
+            def __init__(self, features):
+                self.authors = set(features[:, 0])
+                self.coef_ = np.zeros((1, features.shape[1]))
+                self.intercept_ = np.zeros(1)
+
+            def decision_function(self, features):
+                scored_authors = set(features[:, 0])
+                case.assertFalse(scored_authors & self.authors)
+                score_batches.append(scored_authors)
+                return np.zeros(len(features))
+
+            def predict_proba(self, features):
+                return np.tile([.75, .25], (len(features), 1))
+
+        with patch("train.fit", side_effect=lambda features, _labels: Head(features)):
+            predict, _ = fit_sequence(rows, matrix, cue, cue, authors)
+            for author in range(4):
+                self.assertEqual(score_batches.count({author}), 2)
+            np.testing.assert_array_equal(predict([row("4", "Unseen.", "4")], np.array([[4, 9]])), [.25])
 
     def test_frozen_features_are_bound_to_exact_order_and_context(self):
         rows = [row("first", "First paragraph.", "a" * 64), row("first", "A continuation.", "b" * 64)]

@@ -80,8 +80,40 @@ The private annotation bundle extends the 1,366-label calibration set with 254 l
 
 A second blind model pass agreed on cue eligibility for 15/20 selected old literary rows, 13/16 new literary rows and 23/23 original rows. The corresponding all-field agreements were 4, 4 and 14. Treat these as targeted disagreement checks. The reference labels have no human adjudication. One exact literary map and its paragraph annotations differ on one boundary. Keep both frozen for diagnosis.
 
-**Loom** uses the labels as supervised targets. The offline trainer now optionally fits category, event-frame and phase heads in addition to the cue comparator. On the fresh set, the rules found 0/24 cues. At the exploratory threshold, the expanded paragraph model found 3/24 with six false cues and two boundary false cues. Neither lexical model passed the training precision and boundary gate. Holdout ranking average precision for the paragraph model was 0.256 with the old data and 0.248 with the expansion. The neighbor model changed from 0.138 to 0.152. A separate frozen static GloVe baseline with 87.2% holdout token coverage scored 0.111 and did not qualify. The expansion improves labelled coverage. This experiment does not show a recognition gain at the required operating point. MiniLM encoding remains to be run with a trusted local checkpoint and dependencies. [Training commands](../scripts/loom-training/README.md)
+**Loom** uses the labels as supervised targets. The offline trainer optionally fits category, event-frame and phase heads in addition to the cue comparator. On the fresh set, the rules found 0/24 cues. At the exploratory threshold, the expanded paragraph model found 3/24 with six false cues and two boundary false cues. Neither lexical model passed the training precision and boundary gate. Holdout ranking average precision for the paragraph model was 0.256 with the old data and 0.248 with the expansion. The neighbor model changed from 0.138 to 0.152. A separate frozen static GloVe baseline with 87.2% holdout token coverage scored 0.111 and did not qualify. The expansion improves labelled coverage. This experiment does not show a recognition gain at the required operating point. [Training commands](../scripts/loom-training/README.md)
 
 **Nocturne** uses the labels as a reference for testing Luna scene extraction and verification. `node scripts/evaluate-nocturne-corpus.mjs /private/holdout.json` validates and replays pinned excerpts locally. It reports exact sentence references and projected paragraph references separately. The two exact literary maps replayed all 13 reference cue units and three annotated boundaries. The eight exact calibration maps replayed all 102 reference cue units and eight annotated boundaries. These are reference-answer pipeline results. Protected spans excluded before review remain in the denominators. Printed line wrapping no longer creates sentence breaks in the experimental mapper, with the original UTF-16 source offsets preserved.
 
 `--validate-only` audits pins, references and coverage locally. `--live-provider` preflights the entire manifest against hosted scope, explicit unit approvals, source digests and exclusion flags before the first call. Run live only on the separately scoped original benchmark. That subset has three works, with 109 approved units out of 116. Live inference accuracy and latency are open. Experimental results remain separate from active reader playback and production release.
+
+## Integrated recognition, timing and simulator replay
+
+The next draft trains a local sequence head on out-of-fold cue probabilities and runs a real frozen MiniLM comparison. The pinned encoder produced 384-dimensional features on CPU in 47.5 seconds for the 1,726 calibration paragraphs and 12.0 seconds for the 250 diagnostic paragraphs. These are offline batch-encoding times. The sequence head fits on nested author folds and stops context at excerpt and structural boundaries. The encoder revision and checkpoint digest were verified locally. [Pinned MiniLM checkpoint](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/46605decb5369335a3847c9f41bb0b896c07dd1a) · [Training commands](../scripts/loom-training/README.md)
+
+| Loom arm | Calibration average precision | Opened diagnostic average precision | Correct cues at exploratory 0.5 | False cues | False boundary cues |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lexical paragraph | 0.408 | 0.248 | 3/24 | 6 | 2 |
+| Lexical sequence | 0.368 | 0.208 | 2/24 | 3 | 0 |
+| Frozen MiniLM with neighboring features | 0.509 | 0.147 | 1/24 | 16 | 3 |
+| Frozen MiniLM sequence | 0.442 | 0.150 | 0/24 | 12 | 2 |
+
+Average precision summarizes cue ranking across thresholds. Precision is the share of flagged cues that match the reference. Recall is the share of reference cues found. All four arms missed the calibration requirement of at least 90% precision, zero false boundary cues and sufficient support. Their gated policy abstains. On the opened diagnostic, the direct MiniLM semantic heads reached 0.271 category, 0.250 frame and 0.227 phase macro-F1. The cue prevalence was 27.2% in calibration and 9.6% in the diagnostic, so compare models on the same split. The pretrained ranking gain on calibration did not transfer to the diagnostic.
+
+The Nocturne timing evaluator runs approved reference windows through the existing validator and measures whether their accepted cues arrive before the reader enters or leaves each source unit. It models one in-flight window, at most one transient retry, a request/source/token budget and invalidation after seek or cancel. The offline cases assume an 8- or 24-second window completion time. Token reservations are synthetic. A cue available at entry can drive the software simulator through its actual controller. An unavailable cue falls back to Loom, and the candidate cannot inherit a boundary from the reference. The simulator uses an injected cursor, measured at paragraph or ideal sentence positions.
+
+| Two exact literary excerpts, 240 words/minute | Cues available by entry | Episodes with at least one dispatch interval above background |
+| --- | ---: | ---: |
+| Reactive requests, 24-unit stress windows, assumed 8-second completion | 8/13 | 4/6 |
+| 30-second lookahead, same stress windows | 12/13 | 4/6 |
+| Lookahead and simulated 8-second opening preparation | 13/13 | 5/6 |
+| Same preparation, assumed 24-second completion | 12/13 | 4/6 |
+
+The 24-unit setting forces multiple windows for the scheduling stress test. In the ordinary single-window case, the reactive result is 12/13 cues at entry and preparation increases that to 13/13. At 240 words per minute with ready reference labels, Loom produced contrast on 0/6 episodes. Paragraph and sentence mapping each produced contrast on 5/6. Sentence mapping reduced above-background time outside reference cues from 33.25 seconds to zero. One eligible episode coincides with local hard quiet and remains in the denominator. The conditional p95 dispatch delay was 1.0 second among the five successful sentence-level episodes. Positive-target zero gaps were 0.83% of positive-target time in this literary replay. They reached 3.88% at 420 words per minute in the three original fixtures with hosted approval, above the 2% limit. These software traces had zero hard-quiet, ceiling, command cadence, duration or Stop faults. Physical qualification and browser sentence tracking remain separate.
+
+```sh
+node scripts/evaluate-scene-map-playback.mjs /private/holdout.json
+node scripts/evaluate-nocturne-timing.mjs /private/holdout.json --window-units 24
+node scripts/evaluate-nocturne-timing.mjs /private/original-hosted.json --hosted-scope
+```
+
+The hosted-scope offline run applied the real benchmark preflight and planned 109/116 source units. Luna accuracy, latency and usage still require the configured provider. The latest release gate remains open for both models.

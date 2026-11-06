@@ -103,7 +103,7 @@ function approvedIds(work, excerpt, units, exact, mode) {
   return new Set(ids);
 }
 
-async function loadCorpus(manifestPath, mode) {
+export async function loadCorpus(manifestPath, mode = "validate-only") {
   const path = await realpath(manifestPath);
   const root = dirname(path);
   const manifest = JSON.parse(await boundedText(path, 12_000_000));
@@ -121,7 +121,8 @@ async function loadCorpus(manifestPath, mode) {
       excerptIds.add(excerpt.id);
       digests.add(excerpt.sha256);
       const text = await pinnedText(root, excerpt.file, excerpt.sha256, 500_000);
-      const paragraphs = new ReaderModel().load(text);
+      const model = new ReaderModel();
+      const paragraphs = model.load(text);
       check(paragraphs.length === excerpt.labels.length, "The reader and the corpus disagree on the paragraph count.");
       const units = buildSceneUnits(paragraphs);
       const exact = excerpt.sceneReference !== undefined;
@@ -134,7 +135,7 @@ async function loadCorpus(manifestPath, mode) {
       const allowedIds = approvedIds(work, excerpt, units, exact, mode);
       const {windows, oversized} = windowsFor(units, allowedIds);
       check(mode !== "live-provider" || oversized === 0, "An approved live source unit exceeds its request limits.");
-      passages.push({split: work.split, scope: exact ? "exact" : "projected", units, reference, windows, oversized,
+      passages.push({split: work.split, scope: exact ? "exact" : "projected", model, units, reference, windows, oversized,
         labels: excerpt.labels, excluded: units.length - allowedIds.size});
     }
   }
@@ -164,6 +165,11 @@ function windowReference(reference, window) {
     }
   }
   return {scenes};
+}
+
+export function reviewNocturneWindow(reference, window, provider) {
+  return analyzeNocturneSceneMap({units: window, approvedIds: window.map(unit => unit.id), verify: true,
+    provider: provider ?? replayProvider(windowReference(reference, window))});
 }
 
 function replayProvider(map) {
@@ -282,8 +288,7 @@ export async function evaluateNocturneCorpus(manifestPath, {mode = "reference-re
     if (mode === "validate-only") continue;
     const proposed = {scenes: []}, accepted = {scenes: []};
     for (const window of windows) {
-      const result = await analyzeNocturneSceneMap({units: window, approvedIds: window.map(unit => unit.id), verify: true,
-        provider: mode === "live-provider" ? provider : replayProvider(windowReference(reference, window))});
+      const result = await reviewNocturneWindow(reference, window, provider);
       recordTrace(group, result.trace);
       if (result.proposed) proposed.scenes.push(...result.proposed.scenes);
       if (result.accepted) accepted.scenes.push(...result.accepted.scenes);
