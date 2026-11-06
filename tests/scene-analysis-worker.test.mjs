@@ -12,6 +12,7 @@ const BETA = "https://beta.satinlore.com";
 const TESTER_EMAIL = "reader@example.test";
 const CONFIG = { PUBLIC_APP_ORIGIN: ORIGIN, PRIVATE_APP_ENABLED: "true", ACCESS_TEAM_DOMAIN: "fixture.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64), FOUNDER_EMAIL: "founder@example.test", BETA_TESTER_EMAILS: TESTER_EMAIL };
 const KEY = "sk-proj-synthetic_credential_for_tests";
+const BENCHMARK = "/api/scene-analysis/decisions-benchmark";
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
   { id: 9, phase: "sustain", rhythm: "steady", previous: "build", next: "sustain", movementCount: 1, shape: "sustained" },
@@ -36,16 +37,66 @@ function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaSt
   const calls = [], reservations = [];
   const worker = createPrivateAppWorker({ keyResolver, analysisFetcher: async (url, options) => {
     calls.push({ url, options });
-    return provider();
+    return provider(url, options);
   } });
   const env = { ...CONFIG, OPENAI_API_KEY: KEY, SCENE_ANALYSIS_BUDGET: {
     idFromName: value => value, get: name => ({ async fetch(request) {
       reservations.push({ name, url: request.url, method: request.method, body: await request.json() });
-      return new Response(null, { status: quotaStatus, headers: { "Retry-After": "66" } });
+      const status = typeof quotaStatus === "function" ? quotaStatus(reservations.length) : quotaStatus;
+      return new Response(null, { status, headers: { "Retry-After": "66" } });
     } }),
   } };
   return { worker, env, calls, reservations };
 }
+
+function benchmarkRequest(jwt, options = {}) {
+  return request(jwt, { host: BETA, path: BENCHMARK, body: "benchmark=luna-decisions-v1", ...options,
+    headers: { "Content-Type": "application/x-www-form-urlencoded", ...options.headers } });
+}
+
+test("the fixed Decisions benchmark requires the founder, beta origin and exact form", async () => {
+  const f = fixture(), founder = await token(), tester = await token(TESTER_EMAIL);
+  assert.equal((await f.worker.fetch(benchmarkRequest(null, { method: "GET" }), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(benchmarkRequest(tester), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(benchmarkRequest(founder, { host: ORIGIN }), f.env)).status, 404);
+  assert.equal((await f.worker.fetch(benchmarkRequest(founder, { origin: ORIGIN }), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(benchmarkRequest(founder, { headers: { "Sec-Fetch-Site": "same-site" } }), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(benchmarkRequest(founder, { path: `${BENCHMARK}?source=outside` }), f.env)).status, 400);
+  assert.equal((await f.worker.fetch(benchmarkRequest(founder, { body: "benchmark=luna-decisions-v1&source=outside" }), f.env)).status, 400);
+  assert.equal((await f.worker.fetch(benchmarkRequest(founder, { body: "x".repeat(65) }), f.env)).status, 413);
+  const page = await f.worker.fetch(benchmarkRequest(founder, { method: "GET", origin: null,
+    headers: { "Sec-Fetch-Site": "cross-site" } }), f.env);
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get("Cache-Control"), "no-store");
+  assert.equal(page.headers.get("Referrer-Policy"), "same-origin");
+  assert.match(await page.text(), /Run benchmark/);
+  assert.deepEqual(f.reservations, []);
+  assert.deepEqual(f.calls, []);
+});
+
+test("the Decisions benchmark reserves each call and stops before a denied request", async () => {
+  const f = fixture({ quotaStatus: attempts => attempts < 3 ? 204 : 429, provider: () => new Response("provider-only details", { status: 403 }) });
+  const response = await f.worker.fetch(benchmarkRequest(await token()), f.env);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("Retry-After"), "66");
+  assert.equal(f.reservations.length, 3);
+  assert.deepEqual(f.calls.map(call => call.url), ["https://api.openai.com/v1/responses", "https://api.openai.com/v1/decisions"]);
+  assert.doesNotMatch(await response.text(), /provider-only details/);
+});
+
+test("the Decisions benchmark returns safe counts and HTTP failure diagnostics on both endpoints", async () => {
+  const f = fixture({ provider: () => new Response("provider-only details", { status: 403 }) });
+  const response = await f.worker.fetch(benchmarkRequest(await token()), f.env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(f.reservations.length, 4);
+  assert.equal(f.calls.length, 4);
+  assert.ok(f.calls.every(call => call.options.redirect === "manual"));
+  const body = await response.text(), result = JSON.parse(body);
+  assert.equal(result.totals.decisions.sentenceCues.missed, 6);
+  assert.equal(result.fixtures[0].decisions.calls[0].status, 403);
+  assert.doesNotMatch(body, /provider-only details|synthetic_credential|Rain tapped/);
+});
 
 test("Nocturne requires Access and its exact origin, and readiness never calls OpenAI", async () => {
   const f = fixture(), jwt = await token();
@@ -125,6 +176,12 @@ const CONTEXT_V2_LABELS = [
   { id: 4, label: "neutral.quiet", eventKind: "neutral", shape: "unspecified", confidence: 99 },
 ];
 const CONTEXT_CONTRACT = "app/static/reader/nocturne-context-contract.mjs";
+const SCENE_ANALYSIS_MODULES = ["deploy/cloudflare/scene-analysis.mjs", CONTEXT_CONTRACT,
+  "deploy/cloudflare/decisions-benchmark.mjs", "deploy/cloudflare/scene-decisions.mjs",
+  "scripts/lib/nocturne-scene-analysis.mjs", "app/static/reader/scene-map.mjs", "app/static/reader/import.mjs"];
+const sceneModules = root => Promise.all(SCENE_ANALYSIS_MODULES.map(async source => ({
+  type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8"),
+})));
 function contextUpstream(labels = CONTEXT_LABELS, usage = { input_tokens: 410, output_tokens: 102, total_tokens: 512 }) {
   return Response.json({ status: "completed", usage,
     output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
@@ -434,8 +491,7 @@ test("native Workers fetch accepts a Nocturne response and never forwards creden
           session, reverify: () => session,
         });
       } };` },
-    { type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8") },
-    { type: "ESModule", path: root + CONTEXT_CONTRACT, contents: await readFile(root + CONTEXT_CONTRACT, "utf8") },
+    ...await sceneModules(root),
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
   bindings: { OPENAI_API_KEY: KEY },
   durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } },
@@ -583,8 +639,7 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
         const stub = env.SCENE_ANALYSIS_BUDGET.get(env.SCENE_ANALYSIS_BUDGET.idFromName("scene-analysis:v1"));
         return stub.fetch(new Request("https://scene-analysis.internal/reserve", request));
       } };` },
-    { type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8") },
-    { type: "ESModule", path: root + CONTEXT_CONTRACT, contents: await readFile(root + CONTEXT_CONTRACT, "utf8") },
+    ...await sceneModules(root),
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
   durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } } });
   t.after(() => mf.dispose());

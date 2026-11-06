@@ -52,6 +52,7 @@ function providerRequest(phase, input) {
     text: {format: {type: "json_schema", name: extract ? "nocturne_scene_map" : "nocturne_scene_review",
       strict: true, schema: extract ? sceneMap : review}},
     store: false,
+    prompt_cache_options: {mode: "explicit"},
     reasoning: {effort: "medium"},
     max_output_tokens: 8192,
   };

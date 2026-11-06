@@ -6,7 +6,7 @@ import {basename, join} from "node:path";
 import test from "node:test";
 import {ReaderModel} from "../app/static/reader/model.mjs";
 import {buildSceneUnits} from "../app/static/reader/scene-map.mjs";
-import {evaluateNocturneCorpus} from "../scripts/evaluate-nocturne-corpus.mjs";
+import {compareNocturneCorpus, evaluateNocturneCorpus} from "../scripts/evaluate-nocturne-corpus.mjs";
 
 const digest = value => createHash("sha256").update(value).digest("hex");
 const cue = (paragraph, extra) => ({paragraph, cueEligible: true, category: "romance", eventKind: "current",
@@ -146,4 +146,67 @@ test("bounded replay windows do not manufacture missing evidence at a window cut
   const group = result.groups["holdout/exact"];
   assert.equal(group.plannedWindows, 2);
   assert.deepEqual(group.accepted.cueUnits, {matched: 300, missed: 5, extra: 0});
+});
+
+test("comparison gives both providers identical approved context and preserves whole-reference denominators", async t => {
+  const f = await fixture(t);
+  const text = `They stayed together. ${"The lamp was dim. ".repeat(49).trim()}\n\nThe second cup waited by the door.`;
+  const work = await f.work({id: "matched", text, labels: [cue(1, {hostedEligible: true}), cue(2, {protected: true})],
+    map: {scenes: [scene(0, 49, [beat(0)]), scene(50, 50, [beat(50)])]}, approved: Array.from({length: 50}, (_, id) => id)});
+  const responsesInputs = [], decisionsInputs = [];
+  const result = await compareNocturneCorpus(await f.manifest([work]), {
+    responsesProvider(request, {phase}) {
+      responsesInputs.push({phase, units: JSON.parse(request.input).units});
+      return Response.json({status: "completed", output: [{type: "message", role: "assistant",
+        content: [{type: "output_text", text: JSON.stringify({scenes: [scene(0, 49, [beat(0)])]})}]}],
+      usage: {input_tokens: 80, output_tokens: 40, output_tokens_details: {reasoning_tokens: 20}}});
+    },
+    decisionsProvider(request) {
+      decisionsInputs.push({units: request.input[1].content[0].data.units, questions: request.questions.length});
+      const answers = request.questions.map(({name}) => {
+        if (name === "u49-frame") return {type: "refusal", name};
+        const field = name.split("-")[1];
+        const choice = name.startsWith("u0-") ? {frame: "current", phase: "build", category: "romance"}[field] :
+          {frame: "neutral", phase: "quiet", category: "neutral"}[field];
+        return {type: "choice", name, choice, confidence: 1, probabilities: [{value: choice, probability: 1}]};
+      });
+      return Response.json({model: "gpt-6-luna", answers, usage: {input_tokens: 100, output_tokens: 10}});
+    },
+  });
+  assert.deepEqual(result.plannedProviderCalls, {responses: 1, decisions: 2});
+  assert.deepEqual(responsesInputs.map(({phase}) => phase), ["extract"]);
+  assert.deepEqual(decisionsInputs.map(({questions}) => questions), [144, 6]);
+  for (const {units} of decisionsInputs) assert.deepEqual(units, responsesInputs[0].units);
+  assert.equal(responsesInputs[0].units.length, 50);
+  assert.doesNotMatch(JSON.stringify(responsesInputs), /second cup/);
+  for (const engine of ["responses", "decisions"]) {
+    const group = result[engine].groups["holdout/exact"];
+    assert.equal(group.excludedUnits, 1);
+    assert.deepEqual(group.accepted.cueUnits, {matched: 1, missed: 1, extra: 0});
+    assert.equal(group.windowTimingMs.windows, 1);
+  }
+  assert.equal(result.responses.groups["holdout/exact"].usage.reasoningTokens, 20);
+  const group = result.decisions.groups["holdout/exact"];
+  assert.equal(group.providerTimingMs.decisions.calls, 2);
+  assert.equal(group.decisions.refusedUnits, 1);
+  assert.deepEqual(group.httpStatus, {200: 2});
+  assert.doesNotMatch(JSON.stringify(result), /lamp|second cup|matched\.txt/);
+});
+
+test("comparison preflights later permissions and batched request costs before either provider is called", async t => {
+  const f = await fixture(t);
+  const works = await Promise.all(Array.from({length: 9}, (_, index) => f.work({id: `budget-${index}`,
+    text: `The clock showed ${index} minutes. ${"The lamp was dim. ".repeat(48).trim()}`,
+    labels: [quiet(1, {hostedEligible: true})], map: {scenes: [scene(0, 48, [], "neutral")]},
+    approved: Array.from({length: 49}, (_, id) => id)})));
+  let calls = 0;
+  const provider = () => { calls++; };
+  const options = {responsesProvider: provider, decisionsProvider: provider};
+  const last = works.at(-1);
+  const rights = last.rights;
+  delete last.rights;
+  await assert.rejects(compareNocturneCorpus(await f.manifest(works), options), /explicitly approved/);
+  last.rights = rights;
+  await assert.rejects(compareNocturneCorpus(await f.manifest(works), options), /comparison budget/);
+  assert.equal(calls, 0);
 });

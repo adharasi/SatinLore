@@ -1,5 +1,5 @@
 // Private corpus runner. Default replay exercises the pipeline with reference
-// answers supplied by a local fixture. Only explicit live mode can use fetch.
+// answers supplied by a local fixture. Only explicit hosted modes can use fetch.
 import {createHash} from "node:crypto";
 import {readFile, realpath, stat} from "node:fs/promises";
 import {dirname, isAbsolute, relative, resolve, sep} from "node:path";
@@ -7,6 +7,7 @@ import {pathToFileURL} from "node:url";
 import {ReaderModel} from "../app/static/reader/model.mjs";
 import {BEAT_CATEGORIES, BEAT_PHASES, SCENE_FRAMES, buildSceneUnits, compileSceneMap,
   validateSceneMap} from "../app/static/reader/scene-map.mjs";
+import {analyzeNocturneDecisions, DECISIONS_TARGETS_PER_CALL} from "../deploy/cloudflare/scene-decisions.mjs";
 import {analyzeNocturneSceneMap} from "./lib/nocturne-scene-analysis.mjs";
 
 const modes = ["reference-replay", "validate-only", "live-provider"];
@@ -17,6 +18,9 @@ const digest = value => createHash("sha256").update(value).digest("hex");
 const decoder = new TextDecoder("utf-8", {fatal: true});
 const isBooleanOrAbsent = value => value === undefined || typeof value === "boolean";
 const MAX_LIVE_WINDOWS = 12;
+const MAX_COMPARISON_CALLS = 24;
+const DECISIONS_COUNTS = ["targetedUnits", "structuralUnits", "answeredUnits", "mappedUnits", "refusedUnits",
+  "uncertainUnits", "inconsistentUnits", "failedUnits", "answeredQuestions", "refusedQuestions"];
 
 class CorpusError extends Error {}
 function check(condition, message) {
@@ -239,12 +243,15 @@ function summarizePassage(group, passage, reference) {
   group.plannedWindows += passage.windows.length;
 }
 
-function newGroup(mode) {
+function newGroup(mode, engine) {
   const group = {excerpts: 0, paragraphs: 0, units: 0, structuralBoundaries: 0, referenceCueUnits: 0, referenceCueParagraphs: 0,
     referenceBoundaryUnits: 0, referenceUnmappedUnits: 0, mixedParagraphs: 0, referenceCueParagraphDisagreements: 0,
     referenceBoundaryParagraphDisagreements: 0, excludedUnits: 0, oversizedUnits: 0, plannedWindows: 0};
+  const providerTimingMs = engine === "decisions" ? {decisions: []} : {extract: [], verify: []};
   return mode === "validate-only" ? group : {...group, windowStatus: {}, callStatus: {}, checkedBeats: 0, uncheckedBeats: 0,
-    usage: {callsReported: 0, inputTokens: 0, outputTokens: 0}, providerTimingMs: {extract: [], verify: []},
+    ...(engine ? {httpStatus: {}, windowTimingMs: []} : {}),
+    ...(engine === "decisions" ? {decisions: Object.fromEntries(DECISIONS_COUNTS.map(key => [key, 0]))} : {}),
+    usage: {callsReported: 0, inputTokens: 0, outputTokens: 0}, providerTimingMs,
     proposed: newScores(), accepted: newScores()};
 }
 
@@ -252,43 +259,58 @@ function recordTrace(group, trace) {
   group.windowStatus[trace.status] = (group.windowStatus[trace.status] ?? 0) + 1;
   group.checkedBeats += trace.keptBeats + trace.rejectedBeats + trace.uncertainBeats;
   group.uncheckedBeats += trace.unverifiedBeats;
+  if (group.decisions) {
+    for (const key of DECISIONS_COUNTS) group.decisions[key] += trace[key];
+  }
   for (const call of trace.calls) {
     group.callStatus[call.result] = (group.callStatus[call.result] ?? 0) + 1;
     group.providerTimingMs[call.phase].push(call.elapsedMs);
+    if (group.httpStatus && call.status !== null) group.httpStatus[call.status] = (group.httpStatus[call.status] ?? 0) + 1;
     if (call.usage) {
       group.usage.callsReported++;
       group.usage.inputTokens += call.usage.inputTokens;
       group.usage.outputTokens += call.usage.outputTokens;
+      if (group.httpStatus) {
+        for (const field of ["reasoningTokens", "cachedInputTokens", "cacheWriteInputTokens"]) {
+          if (Number.isSafeInteger(call.usage[field])) group.usage[field] = (group.usage[field] ?? 0) + call.usage[field];
+        }
+      }
     }
   }
+}
+
+function timingQuantiles(samples) {
+  const sorted = samples.sort((a, b) => a - b);
+  const quantile = fraction => sorted[Math.ceil(sorted.length * fraction) - 1] ?? null;
+  return {calls: sorted.length, p50: quantile(0.5), p95: quantile(0.95)};
 }
 
 function summarizeTimings(groups) {
   for (const group of Object.values(groups)) {
     for (const [phase, samples] of Object.entries(group.providerTimingMs)) {
-      const sorted = samples.sort((a, b) => a - b);
-      const quantile = fraction => sorted[Math.ceil(sorted.length * fraction) - 1] ?? null;
-      group.providerTimingMs[phase] = {calls: sorted.length, p50: quantile(0.5), p95: quantile(0.95)};
+      group.providerTimingMs[phase] = timingQuantiles(samples);
+    }
+    if (group.windowTimingMs) {
+      const {calls, p50, p95} = timingQuantiles(group.windowTimingMs);
+      group.windowTimingMs = {windows: calls, p50, p95};
     }
   }
 }
 
-export async function evaluateNocturneCorpus(manifestPath, {mode = "reference-replay", provider} = {}) {
-  check(modes.includes(mode) && (mode === "live-provider" ? typeof provider === "function" : provider === undefined), "Choose a supported private evaluation mode.");
-  // Complete permission, pin and label preflight for the entire manifest before
-  // constructing any analysis request, including the first live window.
-  const {passages, authors, works} = await loadCorpus(manifestPath, mode);
+async function evaluateLoadedCorpus({passages, authors, works}, {mode, analyzeWindow, engine}) {
   const groups = {};
   for (const passage of passages) {
     const {units, windows, labels, reference} = passage;
     const key = `${passage.split}/${passage.scope}`;
-    const group = groups[key] ??= newGroup(mode);
+    const group = groups[key] ??= newGroup(mode, engine);
     const expected = compileSceneMap(reference, units);
     summarizePassage(group, passage, expected);
     if (mode === "validate-only") continue;
     const proposed = {scenes: []}, accepted = {scenes: []};
     for (const window of windows) {
-      const result = await reviewNocturneWindow(reference, window, provider);
+      const started = performance.now();
+      const result = await analyzeWindow(reference, window);
+      if (group.windowTimingMs) group.windowTimingMs.push(Math.round(performance.now() - started));
       recordTrace(group, result.trace);
       if (result.proposed) proposed.scenes.push(...result.proposed.scenes);
       if (result.accepted) accepted.scenes.push(...result.accepted.scenes);
@@ -303,17 +325,55 @@ export async function evaluateNocturneCorpus(manifestPath, {mode = "reference-re
   works, authors, groups};
 }
 
+export async function evaluateNocturneCorpus(manifestPath, {mode = "reference-replay", provider} = {}) {
+  check(modes.includes(mode) && (mode === "live-provider" ? typeof provider === "function" : provider === undefined), "Choose a supported private evaluation mode.");
+  // Complete permission, pin and label preflight for the entire manifest before
+  // constructing any analysis request, including the first live window.
+  const corpus = await loadCorpus(manifestPath, mode);
+  return evaluateLoadedCorpus(corpus, {mode, analyzeWindow: (reference, window) => reviewNocturneWindow(reference, window, provider)});
+}
+
+export async function compareNocturneCorpus(manifestPath, {responsesProvider, decisionsProvider} = {}) {
+  check(typeof responsesProvider === "function" && typeof decisionsProvider === "function", "Supply both authorized comparison providers.");
+  const mode = "live-provider";
+  const corpus = await loadCorpus(manifestPath, mode);
+  const windows = corpus.passages.flatMap(({windows}) => windows);
+  const decisionsCalls = windows.reduce((total, units) => total + Math.ceil(
+    units.filter(({structuralBoundary}) => !structuralBoundary).length / DECISIONS_TARGETS_PER_CALL), 0);
+  const plannedProviderCalls = {responses: windows.length, decisions: decisionsCalls};
+  check(windows.length + decisionsCalls <= MAX_COMPARISON_CALLS, "Reduce the number of live requests to fit the comparison budget.");
+
+  const responses = await evaluateLoadedCorpus(corpus, {mode, engine: "responses", analyzeWindow: (_, units) => analyzeNocturneSceneMap({
+    units, approvedIds: units.map(({id}) => id), provider: responsesProvider, verify: false,
+  })});
+  const decisions = await evaluateLoadedCorpus(corpus, {mode, engine: "decisions", analyzeWindow: (_, units) => analyzeNocturneDecisions({
+    units, approvedIds: units.map(({id}) => id), provider: decisionsProvider,
+  })});
+  return {mode: "compare-decisions", interpretation: "Matched approved sources and whole-reference denominators. Responses uses one extraction per window.",
+    plannedProviderCalls, responses, decisions};
+}
+
+function hostedProvider(endpoint, key) {
+  return (request, {signal}) => fetch(endpoint, {method: "POST", redirect: "error", signal,
+    headers: {Authorization: `Bearer ${key}`, "Content-Type": "application/json"}, body: JSON.stringify(request)});
+}
+
 async function main() {
   const [manifestPath, option, ...extra] = process.argv.slice(2);
-  check(manifestPath && !manifestPath.startsWith("--") && !extra.length && [undefined, "--validate-only", "--live-provider"].includes(option),
-    "Use node scripts/evaluate-nocturne-corpus.mjs MANIFEST [--validate-only | --live-provider].");
+  check(manifestPath && !manifestPath.startsWith("--") && !extra.length &&
+    [undefined, "--validate-only", "--live-provider", "--compare-decisions"].includes(option),
+  "Use node scripts/evaluate-nocturne-corpus.mjs MANIFEST [--validate-only | --live-provider | --compare-decisions].");
   const mode = option?.slice(2) ?? "reference-replay";
   let provider;
-  if (mode === "live-provider") {
+  if (mode === "live-provider" || mode === "compare-decisions") {
     const key = process.env.OPENAI_API_KEY;
     check(typeof key === "string" && key.trim(), "Supply an authorized OpenAI project key privately in OPENAI_API_KEY.");
-    provider = (request, {signal}) => fetch("https://api.openai.com/v1/responses", {method: "POST", redirect: "error", signal,
-      headers: {Authorization: `Bearer ${key}`, "Content-Type": "application/json"}, body: JSON.stringify(request)});
+    provider = hostedProvider("https://api.openai.com/v1/responses", key);
+    if (mode === "compare-decisions") {
+      const decisionsProvider = hostedProvider("https://api.openai.com/v1/decisions", key);
+      console.log(JSON.stringify(await compareNocturneCorpus(manifestPath, {responsesProvider: provider, decisionsProvider}), null, 2));
+      return;
+    }
   }
   console.log(JSON.stringify(await evaluateNocturneCorpus(manifestPath, {mode, provider}), null, 2));
 }

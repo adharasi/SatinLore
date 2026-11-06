@@ -117,3 +117,18 @@ node scripts/evaluate-nocturne-timing.mjs /private/original-hosted.json --hosted
 ```
 
 The hosted-scope offline run applied the real benchmark preflight and planned 109/116 source units. Luna accuracy, latency and usage still require the configured provider. The latest release gate remains open for both models.
+
+## Luna Decisions comparison
+
+The evaluation candidate asks Decisions to classify frame, phase and category for each approved sentence. Each call labels up to 48 targets against a bounded window of approved context. The adapter validates the named answers and builds the shared scene map. Refusals, missing answers, contradictions and uncertainty cannot add a cue. Structural breaks are retained locally. Both requests disable implicit prompt caching. The Responses comparator uses the V4 single-pass extractor. Reader playback continues to use the existing analysis route.
+
+The fixed smoke test covers 13 sentences, six cue anchors and two boundary anchors across two original fixtures. In scripted checks, both adapters recovered all six cues and both boundaries. Refusing one cue per fixture reduced Decisions recall to 4/6 and mapped coverage to 11/13. These are scoring checks with supplied answers. Real measurements start with the following commands after a project key authorised for both endpoints is configured privately.
+
+```sh
+node scripts/evaluate-luna-decisions.mjs --live-provider
+node scripts/evaluate-nocturne-corpus.mjs /private/original-hosted.json --compare-decisions
+```
+
+The first command uses up to four calls. The second compares exact cue, boundary, phase, frame and category labels with the same approved context for each endpoint and scores against the full reference. Excluded, refused and unfilled anchors remain visible in the denominators. The original hosted corpus passed preflight for three works, 109 of 116 source units and six calls total. Compare valid coverage, raw usage and p50/p95 wall time, including the full window when Decisions needs multiple calls. Two timings per endpoint describe a smoke run. Before promoting a candidate, apply the [release gates](release-acceptance.md) to a broader eligible sample and replay measured window timings against the simulator.
+
+The local suite passed 22 Python and 660 JavaScript tests. Eight additional training-protocol tests, the Worker asset build and Wrangler dry run also passed. Live requests, quality, latency and usage remain pending. The deployed Worker currently uses Responses, and its secret is unavailable in the local test process.
