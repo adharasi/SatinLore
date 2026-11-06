@@ -6,7 +6,7 @@ import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseRe
 import { handleAccount } from "./accounts.mjs";
 import { handleBetaRecordings } from "./beta-recordings.mjs";
 import { alphaConfigured, handleAlphaApi, verifyAlphaSession } from "./alpha-study.mjs";
-import { handleSceneAnalysis } from "./scene-analysis.mjs";
+import { handleDecisionsBenchmark, handleSceneAnalysis } from "./scene-analysis.mjs";
 import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
@@ -334,6 +334,13 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       if (url.pathname === "/api/scene-analysis") {
         return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher, reverify }));
+      }
+      if (url.pathname === "/api/scene-analysis/decisions-benchmark") {
+        if (url.origin !== BETA_ORIGIN) return finish(json({ error: "Not found." }, 404));
+        const response = finish(await handleDecisionsBenchmark(request, env, { config, session, analysisFetcher, reverify }));
+        // Same-origin form navigation must send the actual Origin for the POST check.
+        if (read && response.ok) response.headers.set("Referrer-Policy", "same-origin");
+        return response;
       }
       if (url.pathname === "/api/story-import") {
         const expired = () => finish(json({ error: publicAuth ? "Sign in again to import a story." : "Founder access required." }, 403));

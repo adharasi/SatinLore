@@ -4,6 +4,7 @@ import {
   MAX_CONTEXT_OUTPUT_TOKENS, MAX_CONTEXT_PARAGRAPHS, MAX_PARAGRAPH_BYTES,
   MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEXT_VERSION, PREVIOUS_NOCTURNE_CONTEXT_VERSION, validContextAnnotation, validContextUsage,
 } from "../../app/static/reader/nocturne-context-contract.mjs";
+import { runDecisionsBenchmark } from "./decisions-benchmark.mjs";
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
@@ -109,16 +110,16 @@ function exactObject(value, keys) {
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 }
 
-async function readBoundedJson(message, maxBytes, signal) {
+async function readBoundedText(message, maxBytes, signal, mediaType) {
   const type = message.headers.get("Content-Type")?.split(";", 1)[0].trim().toLowerCase();
   const length = message.headers.get("Content-Length");
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > maxBytes)) {
     await message.body?.cancel();
     throw new RangeError("Size limit exceeded.");
   }
-  if (type !== "application/json" || !message.body) {
+  if (type !== mediaType || !message.body) {
     await message.body?.cancel();
-    throw new TypeError("Expected JSON.");
+    throw new TypeError("Unexpected request body.");
   }
   const reader = message.body.getReader();
   const cancel = () => { void reader.cancel().catch(() => {}); };
@@ -135,12 +136,16 @@ async function readBoundedJson(message, maxBytes, signal) {
       bytes.set(value, size);
       size += value.byteLength;
     }
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size));
   } finally {
     signal.removeEventListener("abort", cancel);
     cancel();
     reader.releaseLock();
   }
+}
+
+async function readBoundedJson(message, maxBytes, signal) {
+  return JSON.parse(await readBoundedText(message, maxBytes, signal, "application/json"));
 }
 
 function normalizeCues(value) {
@@ -334,6 +339,73 @@ async function reserveBudget(namespace, config, session) {
   }));
 }
 
+function analysisConfigured(key, budget) {
+  return typeof key === "string" && /^sk-[A-Za-z0-9_-]{12,512}$/.test(key) && !key.startsWith("sk-admin-") &&
+    typeof budget?.idFromName === "function" && typeof budget.get === "function";
+}
+
+function budgetLimited(permission) {
+  const retry = permission.headers.get("Retry-After");
+  return failure("rate_limited", 429, "Nocturne has reached the beta usage limit. The local analysis is still available.",
+    { "Retry-After": retry && /^\d{1,7}$/.test(retry) ? retry : "60" });
+}
+
+const BENCHMARK_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne benchmark</title>
+<main><h1>Nocturne benchmark</h1><p>Compare Luna Responses and Decisions on two original fixtures. The run uses up to four API calls and returns metrics.</p>
+<form method="post"><button name="benchmark" value="luna-decisions-v1">Run benchmark</button></form></main></html>`;
+
+export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
+  if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
+  const read = request.method === "GET" || request.method === "HEAD";
+  if (!read && request.method !== "POST") return failure("invalid_method", 405, "Open the benchmark page.", { Allow: "GET, HEAD, POST" });
+  if (new URL(request.url).search) return failure("invalid_request", 400, "Open the benchmark page.");
+  const origin = request.headers.get("Origin");
+  if (!read && (origin !== config.origin || ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site")))) {
+    return failure("invalid_origin", 403, "Open the benchmark on the beta host.");
+  }
+  if (read) return new Response(BENCHMARK_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(120_000)]);
+  try {
+    const body = await readBoundedText(request, 64, AbortSignal.any([signal, AbortSignal.timeout(4000)]), "application/x-www-form-urlencoded");
+    if (body !== "benchmark=luna-decisions-v1") return failure("invalid_request", 400, "Use the benchmark button.");
+  } catch (error) {
+    return failure("invalid_request", error instanceof RangeError ? 413 : 400, "Use the benchmark button.");
+  }
+  const key = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
+  if (!analysisConfigured(key, budget)) return providerUnavailable(session, "benchmark_unavailable");
+
+  const authorized = async () => {
+    if (request.signal.aborted || Date.now() >= session.expiresAt) return false;
+    try {
+      const renewed = await reverify();
+      return Boolean(renewed?.isFounder && renewed.subject === session.subject && Date.now() < renewed.expiresAt && !request.signal.aborted);
+    } catch { return false; }
+  };
+  const stop = new AbortController();
+  let blocked;
+  const deny = response => { blocked = response; stop.abort(); throw new Error("Benchmark blocked."); };
+  const expired = () => failure("invalid_session", 403, "Your app session has ended.");
+  try {
+    const result = await runDecisionsBenchmark({ key, signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
+      if (!await authorized()) deny(expired());
+      options.signal.throwIfAborted();
+      let permission;
+      try { permission = await reserveBudget(budget, config, session); }
+      catch { deny(providerUnavailable(session, "budget_unavailable")); }
+      if (permission.status === 429) deny(budgetLimited(permission));
+      if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
+      if (Date.now() >= session.expiresAt || request.signal.aborted) deny(expired());
+      options.signal.throwIfAborted();
+      return analysisFetcher(url, options);
+    } });
+    if (blocked) return blocked;
+    if (!await authorized()) return expired();
+    return Response.json({ measurement: "live-provider", ...result });
+  } catch {
+    return blocked ?? providerUnavailable(session, "benchmark_unavailable");
+  }
+}
+
 export async function handleSceneAnalysis(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   const url = new URL(request.url);
   const read = request.method === "GET" || request.method === "HEAD";
@@ -345,8 +417,7 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   }
   const key = env.OPENAI_API_KEY;
   const budget = env.SCENE_ANALYSIS_BUDGET;
-  const available = typeof key === "string" && /^sk-[A-Za-z0-9_-]{12,512}$/.test(key) && !key.startsWith("sk-admin-") &&
-    typeof budget?.idFromName === "function" && typeof budget.get === "function";
+  const available = analysisConfigured(key, budget);
   if (read) return Response.json({ available });
   if (!available) return failure("unavailable", 503, "Nocturne is not configured. The local analysis is still available.");
   let cues, context;
@@ -363,11 +434,7 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   let permission;
   try { permission = await reserveBudget(budget, config, session); }
   catch { return providerUnavailable(session, "budget_unavailable"); }
-  if (permission.status === 429) {
-    const retry = permission.headers.get("Retry-After");
-    return failure("rate_limited", 429, "Nocturne has reached the beta usage limit. The local analysis is still available.",
-      { "Retry-After": retry && /^\d{1,7}$/.test(retry) ? retry : "60" });
-  }
+  if (permission.status === 429) return budgetLimited(permission);
   if (permission.status !== 204) return providerUnavailable(session, "budget_unavailable");
   if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
   const contextualV3 = context?.version === NOCTURNE_CONTEXT_VERSION;
