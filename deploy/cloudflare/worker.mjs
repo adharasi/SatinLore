@@ -6,7 +6,7 @@ import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseRe
 import { handleAccount } from "./accounts.mjs";
 import { handleBetaRecordings } from "./beta-recordings.mjs";
 import { alphaConfigured, handleAlphaApi, verifyAlphaSession } from "./alpha-study.mjs";
-import { handleDecisionsBenchmark, handleSceneAnalysis } from "./scene-analysis.mjs";
+import { DECISIONS_STORY_STUDY_PATH, handleDecisionsBenchmark, handleSceneAnalysis } from "./scene-analysis.mjs";
 import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
@@ -289,7 +289,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       // A valid token must not make workers.dev, version URLs or another hostname an origin bypass.
       if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
-      const decisionsBenchmark = url.pathname === "/api/scene-analysis/decisions-benchmark";
+      const decisionsBenchmark = ["/api/scene-analysis/decisions-benchmark", DECISIONS_STORY_STUDY_PATH].includes(url.pathname);
       const publicAuth = !decisionsBenchmark && url.origin === APP_ORIGIN && env.PUBLIC_READER_ENABLED === "true";
       const config = publicAuth ? publicReaderConfiguration(env) : privateAppConfiguration(env, url.origin);
       if (!config) return finish(json({ error: publicAuth ? "Email sign-in is temporarily unavailable." : "The private preview is not available." }, 503));

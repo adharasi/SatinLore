@@ -149,6 +149,12 @@ For the approved corpus comparison, prepare the pinned upload locally with `node
 
 The same upload offers a **Run joint-label Decisions retest** action. It runs one combined label per sentence on the first and third passages in up to two calls. Use these same passages from the full benchmark for comparison. The standard run keeps the three-question Decisions baseline reproducible. The benchmark is separate from playback. [Release acceptance](../../docs/release-acceptance.md)
 
+### Run the founder story study
+
+Open `/api/scene-analysis/decisions-story-study` on the signed-in app origin. Submit the prepared calibration JSON from the 20-story evaluation bundle first. Freeze the candidate before submitting the holdout JSON. The same approved sentences go to both Decisions prompts in bounded batches with gaps between stories. Every uploaded story must match its approved digest. Results contain scores and provider usage without source sentences.
+
+This fixed suite has a founder-only allowance of 20 calls per UTC day. It uses the same deployment-wide daily and monthly counters. The reader and the earlier benchmark keep their ordinary per-reader limit. A study call still needs a signed founder session, exact origin and a validated upload. The study is separate from reader playback.
+
 ## Enable real Lovense pairing for the beta
 
 The simulator path is usable immediately. The real path deliberately reports unavailable until all three runtime settings below are valid. Never put these values into GitHub, build variables, browser code, feedback or chat.

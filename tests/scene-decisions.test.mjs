@@ -86,12 +86,74 @@ test("joint Decisions maps one allowed label per approved target and preserves l
   assert.equal(result.trace.uncertainUnits, 1);
   assert.equal(result.trace.inconsistentUnits, 0);
   assert.equal(result.trace.mappedUnits, 5);
+  assert.equal(Object.hasOwn(result, "boundaryIds"), false);
   assert.deepEqual(compileSceneMap(result.accepted, units).map(({frame, phase, category, boundary}) =>
     [frame, phase, category, boundary]), [
     ["current", "build", "flirting", null], ["reported", "quiet", "neutral", null], [null, "unmapped", "neutral", null],
     ["neutral", "boundary", "neutral", "structural"], ["current", "boundary", "neutral", "model"],
     [null, "unmapped", "neutral", null], [null, "unmapped", "neutral", null], ["current", "quiet", "neutral", null],
   ]);
+});
+
+test("separate boundary answers retain raw votes without erasing a grounded cue", async () => {
+  const units = buildSceneUnits(["He accepted the invitation.", "The host interrupted them.", "Private excluded text.", "***",
+    "They took each other's hand.", "She answered with the same warmth.", "A change overtook the exchange.",
+    "The crowd dispersed.", "She remembered the remark."]);
+  const result = await analyzeNocturneDecisions({units, approvedIds: [0, 1, 3, 4, 5, 6, 7, 8], joint: true, separateBoundary: true,
+    provider: async request => {
+      const ids = [0, 1, 4, 5, 6, 7, 8];
+      assert.deepEqual(request.questions.map(({name}) => name), ids.flatMap(id => [`u${id}-joint`, `u${id}-boundary`]));
+      for (const [index, {choices}] of request.questions.entries()) {
+        const values = choices.map(({value}) => value);
+        if (index % 2) assert.deepEqual(values, ["boundary", "no-boundary", "uncertain"]);
+        else {
+          assert.equal(values.length, 31);
+          assert.equal(values.includes("boundary"), false);
+        }
+      }
+      assert.match(request.input[0].content, /visibly reciprocate the immediate exchange/);
+      assert.match(request.input[0].content, /Decide independently/);
+      assert.match(request.input[0].content, /An atmospheric pause/);
+      assert.doesNotMatch(JSON.stringify(request), /Private excluded text/);
+      const choices = ["build-romance", "boundary", "quiet-current", "boundary", "sustain-intimacy", null,
+        "build-flirting", "uncertain", "uncertain", "boundary", null, "boundary", "quiet-reported", "no-boundary"];
+      return Response.json({model: "gpt-6-luna", usage,
+        answers: request.questions.map(({name}, index) => answer(name, choices[index]))});
+    }});
+  assert.equal(result.trace.status, "completed");
+  assert.deepEqual(result.boundaryIds, [0, 1, 6, 7]);
+  assert.equal(result.trace.boundaryConflicts, 1);
+  assert.equal(result.trace.boundaryAnsweredQuestions, 6);
+  assert.equal(result.trace.boundaryRefusedQuestions, 1);
+  assert.equal(result.trace.boundaryUncertainUnits, 1);
+  assert.equal(result.trace.appliedBoundaryUnits, 2);
+  assert.equal(result.trace.answeredQuestions, 12);
+  assert.equal(result.trace.refusedQuestions, 2);
+  assert.equal(result.trace.refusedUnits, 1);
+  assert.equal(result.trace.uncertainUnits, 1);
+  assert.deepEqual(compileSceneMap(result.accepted, units).map(({phase, boundary}) => [phase, boundary]), [
+    ["build", null], ["boundary", "model"], ["unmapped", null], ["boundary", "structural"], ["sustain", null],
+    ["build", null], ["boundary", "model"], ["unmapped", null], ["quiet", null],
+  ]);
+});
+
+test("separate boundary mode rejects reversed, missing and invalid cue answers", async () => {
+  const units = buildSceneUnits(["The group returned."]);
+  const noCall = async () => assert.fail("Unexpected provider call.");
+  await assert.rejects(analyzeNocturneDecisions({units, approvedIds: [0], separateBoundary: true, provider: noCall}),
+    /Decisions provider and options/);
+  for (const choices of [["quiet-current", "boundary"], ["quiet-current"], ["boundary", "boundary"]]) {
+    const result = await analyzeNocturneDecisions({units, approvedIds: [0], joint: true, separateBoundary: true,
+      provider: async request => {
+        const answers = choices.map((choice, index) => answer(request.questions[index].name, choice));
+        if (choices[0] === "quiet-current" && choices.length === 2) answers.reverse();
+        return Response.json({model: "gpt-6-luna", usage, answers});
+      }});
+    assert.equal(result.trace.status, "extraction_failed");
+    assert.equal(result.trace.calls[0].result, "invalid_response");
+    assert.equal(result.accepted, null);
+    assert.deepEqual(result.boundaryIds, []);
+  }
 });
 
 test("Decisions rejects missing, reordered, out-of-domain and invalid probability answers", async () => {

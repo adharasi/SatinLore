@@ -6,9 +6,12 @@ import {
 } from "../../app/static/reader/nocturne-context-contract.mjs";
 import { runDecisionsBenchmark } from "./decisions-benchmark.mjs";
 import { runDecisionsCorpusBenchmark, validateDecisionsCorpusPayload } from "./decisions-corpus-benchmark.mjs";
+import { runDecisionsStoryStudy, STORY_STUDY_MAX_TOTAL_REQUESTS, validateStoryStudyPayload } from "./decisions-story-study.mjs";
+import { DECISIONS_STORY_STUDY_PINS } from "./decisions-story-study-pins.mjs";
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
+export const DECISIONS_STORY_STUDY_PATH = "/api/scene-analysis/decisions-story-study";
 const MODEL = "gpt-6-luna";
 const MAX_CUES = 16;
 const DAY = 86_400_000;
@@ -257,12 +260,13 @@ function checkedContext(response, { version, paragraphs }, session) {
   } : null };
 }
 
-async function reserveBudget(namespace, config, session) {
+async function reserveBudget(namespace, config, session, storyStudy = false) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:scene-budget:v1:${config.issuer}:${session.subject}`));
   const reader = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   const stub = namespace.get(namespace.idFromName("scene-analysis:v1"));
   return stub.fetch(new Request(BUDGET_URL, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reader }),
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reader, ...(storyStudy ? { suite: DECISIONS_STORY_STUDY_PINS.version } : {}) }),
   }));
 }
 
@@ -287,16 +291,25 @@ const BENCHMARK_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><ti
 <button name="mode" value="joint">Run joint-label Decisions retest</button>
 <p>The joint-label retest runs Decisions on two approved passages in up to two API calls.</p></form></main></html>`;
 
+const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne story study</title>
+<main><h1>Nocturne story study</h1>
+<p>Compare the joint-label Decisions prompt with a version that evaluates boundaries separately. Choose the prepared calibration or holdout JSON. The run sends only the approved story sentences to OpenAI and returns aggregate metrics.</p>
+<form method="post" enctype="multipart/form-data"><label for="study-payload">Prepared story study JSON</label>
+<input id="study-payload" name="payload" type="file" accept=".json,application/json" required>
+<button>Run story comparison</button></form></main></html>`;
+
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
+  const url = new URL(request.url);
+  const storyStudy = url.pathname === DECISIONS_STORY_STUDY_PATH;
   const read = request.method === "GET" || request.method === "HEAD";
   if (!read && request.method !== "POST") return failure("invalid_method", 405, "Open the benchmark page.", { Allow: "GET, HEAD, POST" });
-  if (new URL(request.url).search) return failure("invalid_request", 400, "Open the benchmark page.");
+  if (url.search) return failure("invalid_request", 400, "Open the benchmark page.");
   const origin = request.headers.get("Origin");
   if (!read && (origin !== config.origin || ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site")))) {
     return failure("invalid_origin", 403, "Open the benchmark on SatinLore.");
   }
-  if (read) return new Response(BENCHMARK_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  if (read) return new Response(storyStudy ? STORY_STUDY_FORM : BENCHMARK_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   const contentType = request.headers.get("Content-Type");
   const corpus = contentType?.split(";", 1)[0].trim().toLowerCase() === "multipart/form-data";
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(corpus ? 180_000 : 120_000)]);
@@ -304,23 +317,25 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   let payload;
   let jointRetest = false;
   try {
+    if (storyStudy && !corpus) throw new TypeError("Invalid study form.");
     if (corpus) {
-      const bytes = await readBoundedBody(request, 32_768, readSignal, "multipart/form-data");
+      const bytes = await readBoundedBody(request, storyStudy ? 65_536 : 32_768, readSignal, "multipart/form-data");
       const form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
       const file = form.get("payload");
       const mode = form.get("mode");
-      if ((mode !== null && mode !== "joint") || [...form.keys()].length !== (mode === null ? 1 : 2) ||
+      if ((mode !== null && (mode !== "joint" || storyStudy)) || [...form.keys()].length !== (mode === null ? 1 : 2) ||
           !(file instanceof File)) throw new TypeError("Invalid corpus form.");
       jointRetest = mode === "joint";
       payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()));
-      await validateDecisionsCorpusPayload(payload);
+      if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS);
+      else await validateDecisionsCorpusPayload(payload);
     } else {
       const body = await readBoundedText(request, 64, readSignal, "application/x-www-form-urlencoded");
       if (body !== "benchmark=luna-decisions-v1") throw new TypeError("Invalid benchmark form.");
     }
   } catch (error) {
     return failure("invalid_request", error instanceof RangeError ? 413 : 400,
-      corpus ? "Choose the prepared approved corpus JSON." : "Use the benchmark button.");
+      storyStudy ? "Choose the prepared story study JSON." : corpus ? "Choose the prepared approved corpus JSON." : "Use the benchmark button.");
   }
   const key = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
   if (!analysisConfigured(key, budget)) return providerUnavailable(session, "benchmark_unavailable");
@@ -337,12 +352,13 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   const deny = response => { blocked = response; stop.abort(); throw new Error("Benchmark blocked."); };
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
   try {
-    const run = corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
-    const result = await run({ key, payload, jointRetest, signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
+    const run = storyStudy ? runDecisionsStoryStudy : corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
+    const result = await run({ key, payload, jointRetest, pins: DECISIONS_STORY_STUDY_PINS,
+      signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
       if (!await authorized()) deny(expired());
       options.signal.throwIfAborted();
       let permission;
-      try { permission = await reserveBudget(budget, config, session); }
+      try { permission = await reserveBudget(budget, config, session, storyStudy); }
       catch { deny(providerUnavailable(session, "budget_unavailable")); }
       if (permission.status === 429) deny(budgetLimited(permission));
       if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
@@ -440,13 +456,17 @@ export class SceneAnalysisBudget {
     if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
     try {
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
-      if (!exactObject(value, ["reader"]) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) return new Response(null, { status: 400 });
+      const storyStudy = exactObject(value, ["reader", "suite"]) && value.suite === DECISIONS_STORY_STUDY_PINS.version;
+      if ((!storyStudy && !exactObject(value, ["reader"])) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) {
+        return new Response(null, { status: 400 });
+      }
       const now = Date.now();
       const date = new Date(now);
       const dayEnds = (Math.floor(now / DAY) + 1) * DAY;
       const monthEnds = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
       const windows = [
-        { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 },
+        storyStudy ? { key: `study:${value.suite}`, expires: dayEnds, limit: STORY_STUDY_MAX_TOTAL_REQUESTS } :
+          { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 },
         { key: "global-day", expires: dayEnds, limit: 100 },
         { key: "global-month", expires: monthEnds, limit: 1000 },
       ];

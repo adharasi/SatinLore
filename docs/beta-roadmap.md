@@ -141,6 +141,8 @@ On 6 November, both endpoints returned valid maps on all three calibration passa
 
 The controlled-release milestone has a dedicated set of acceptance gates for story coverage, independent annotations, classification, output and reader use. [Release acceptance](release-acceptance.md)
 
+The Nocturne cue recall gate is now 90%. A new 20-story diagnostic separates 12 calibration stories from eight holdout stories, with all 307 sentences labelled before scoring. The founder story study compares the joint-label prompt with an experimental separate boundary question. These original, assistant-labelled microstories cover planned failure cases. Representative reading material, independent adjudication and playback acceptance remain part of release qualification. [Founder story study](../deploy/cloudflare/README.md#run-the-founder-story-study)
+
 Keep the local rules as the baseline and retain suggestions **0, 1, 2, 3 and 5 out of 20**. Visual labels never authorise stronger output. Prepare a versioned, rights-cleared evaluation set and rubric, split by story/source, with held-out material and independent labels on a subset. A proposed pilot is 200–500 paragraphs; that size is a starting hypothesis, not coverage evidence.
 
 Compare the existing rules, contextual improvements, a simple linear baseline and only then a licensed local classifier if useful. Measure neutral false activations, severe overestimates, ordinal error, correction burden, abstention, load size/memory and cold/warm latency. Choose promotion thresholds before inspecting held-out results. Neutral plumbing fixtures alone cannot establish usefulness on intended reading material.

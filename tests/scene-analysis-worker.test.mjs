@@ -13,6 +13,7 @@ const TESTER_EMAIL = "reader@example.test";
 const CONFIG = { PUBLIC_APP_ORIGIN: ORIGIN, PRIVATE_APP_ENABLED: "true", ACCESS_TEAM_DOMAIN: "fixture.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64), FOUNDER_EMAIL: "founder@example.test", BETA_TESTER_EMAILS: TESTER_EMAIL };
 const KEY = "sk-proj-synthetic_credential_for_tests";
 const BENCHMARK = "/api/scene-analysis/decisions-benchmark";
+const STUDY = "/api/scene-analysis/decisions-story-study";
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
   { id: 9, phase: "sustain", rhythm: "steady", previous: "build", next: "sustain", movementCount: 1, shape: "sustained" },
@@ -95,6 +96,22 @@ test("the Decisions benchmark rejects an unapproved corpus file before quota or 
     headers: { "Cf-Access-Jwt-Assertion": founder, Origin: ORIGIN }, body }), f.env);
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, "invalid_request");
+  assert.deepEqual(f.reservations, []);
+  assert.deepEqual(f.calls, []);
+});
+
+test("the story study accepts only a signed founder and a pinned same-origin upload", async () => {
+  const f = fixture(), founder = await token(), tester = await token(TESTER_EMAIL);
+  const page = await f.worker.fetch(benchmarkRequest(founder, { host: ORIGIN, path: STUDY, method: "GET" }), f.env);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Run story comparison/);
+  assert.equal((await f.worker.fetch(benchmarkRequest(tester, { path: STUDY, method: "GET" }), f.env)).status, 403);
+  const body = new FormData();
+  body.set("payload", new File(['{"version":"nocturne-story-study-20-2026-11-06-v1","split":"calibration","stories":[]}'], "study.json"));
+  const submitted = (origin) => new Request(ORIGIN + STUDY, { method: "POST",
+    headers: { "Cf-Access-Jwt-Assertion": founder, Origin: origin }, body });
+  assert.equal((await f.worker.fetch(submitted(BETA), f.env)).status, 403);
+  assert.equal((await f.worker.fetch(submitted(ORIGIN), f.env)).status, 400);
   assert.deepEqual(f.reservations, []);
   assert.deepEqual(f.calls, []);
 });
@@ -194,6 +211,7 @@ const CONTEXT_CONTRACT = "app/static/reader/nocturne-context-contract.mjs";
 const SCENE_ANALYSIS_MODULES = ["deploy/cloudflare/scene-analysis.mjs", CONTEXT_CONTRACT,
   "deploy/cloudflare/decisions-benchmark.mjs", "deploy/cloudflare/scene-decisions.mjs",
   "deploy/cloudflare/decisions-corpus-benchmark.mjs", "deploy/cloudflare/decisions-corpus-pins.mjs",
+  "deploy/cloudflare/decisions-story-study.mjs", "deploy/cloudflare/decisions-story-study-pins.mjs",
   "scripts/lib/nocturne-scene-analysis.mjs", "app/static/reader/scene-map.mjs", "app/static/reader/import.mjs"];
 const sceneModules = root => Promise.all(SCENE_ANALYSIS_MODULES.map(async source => ({
   type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8"),
@@ -543,14 +561,20 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
   durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } } });
   t.after(() => mf.dispose());
-  const reserve = id => mf.dispatchFetch("https://app.satinlore.com/fixture", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reader: id.toString(16).padStart(64, "0") }),
+  const reserve = (id, suite) => mf.dispatchFetch("https://app.satinlore.com/fixture", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reader: id.toString(16).padStart(64, "0"), ...(suite ? { suite } : {}) }),
   });
   const first = await Promise.all(Array.from({ length: 16 }, () => reserve(1)));
   assert.equal(first.filter(response => response.status === 204).length, 12);
   assert.equal(first.filter(response => response.status === 429).length, 4);
+  assert.equal((await reserve(1, "unknown-study")).status, 400);
+  const study = await Promise.all(Array.from({ length: 22 }, () => reserve(1, "nocturne-story-study-20-2026-11-06-v1")));
+  assert.equal(study.filter(response => response.status === 204).length, 20);
+  assert.equal(study.filter(response => response.status === 429).length, 2);
+  assert.equal((await reserve(1)).status, 429);
   const rest = await Promise.all(Array.from({ length: 92 }, (_, index) => reserve(index + 2)));
-  assert.equal(rest.filter(response => response.status === 204).length, 88);
-  assert.equal(rest.filter(response => response.status === 429).length, 4);
+  assert.equal(rest.filter(response => response.status === 204).length, 68);
+  assert.equal(rest.filter(response => response.status === 429).length, 24);
   assert.match((await reserve(100)).headers.get("Retry-After"), /^\d+$/);
 });

@@ -54,14 +54,24 @@ const jointLabels = new Map([
   ["boundary", {frame: "current", phase: "boundary", category: "neutral"}],
 ]);
 const jointChoices = [...jointLabels.keys(), "uncertain"].map(value => ({value}));
+const jointCueChoices = jointChoices.filter(({value}) => value !== "boundary");
+const boundaryChoices = ["boundary", "no-boundary", "uncertain"].map(value => ({value}));
 const definitions = entries => entries.map(([value, description]) => `${value}: ${description}`).join(" ");
+const jointDefinitions = [
+  `Active phases. ${definitions(Object.keys(emphasisForPhase).map(phase => [phase, rubrics.phase.values[phase]]))}`,
+  `Cue categories. ${definitions(cueCategories)}`,
+  `Quiet frames. ${definitions(quietFrames)}`,
+];
 const jointInstructions = [instructions,
   "Choose one label per target. A phase-category label describes a grounded cue in the current scene, never a reported, imagined or historical event. A cue can be directly expressed in the target or a response that clearly reciprocates the immediate current exchange. A nearby cue alone does not make an ordinary target active.",
   "Use boundary for a clear scene cut, interruption or withdrawal ending a beat, or an explicit return from reported, imagined or historical narration to the immediate scene. Label the transition sentence itself. Ordinary pauses and incidental actions are quiet.",
   "If there is no supported cue or boundary, use quiet plus the frame. Past-tense narration alone does not make an event historical. Use uncertain when framing, safety or intent is unclear.",
-  `Active phases. ${definitions(Object.keys(emphasisForPhase).map(phase => [phase, rubrics.phase.values[phase]]))}`,
-  `Cue categories. ${definitions(cueCategories)}`,
-  `Quiet frames. ${definitions(quietFrames)}`,
+  ...jointDefinitions,
+].join("\n");
+const separateBoundaryInstructions = [instructions,
+  "Cue question. Use a phase-category label for grounded romantic or intimate behavior in the current scene. The target can express a cue directly or visibly reciprocate the immediate exchange through dialogue or action, even without explicit wording. Generic warmth, politeness, atmosphere and mere proximity are quiet. Reported, imagined and historical events are quiet plus their frame. Past-tense narration alone does not make an event historical. Use uncertain if framing, safety or mutuality is unclear.",
+  "Boundary question. Decide independently whether this sentence marks a clear scene cut, an interruption or withdrawal that ends an established beat, a definite time jump, or an explicit shift out of or return from a reported, imagined or historical frame. Mark the transition sentence itself. An atmospheric pause, incidental action or minor pacing change within the same beat is no-boundary. Use uncertain when the transition cannot be established.",
+  ...jointDefinitions,
 ].join("\n");
 const validCount = value => Number.isSafeInteger(value) && value >= 0;
 const probability = value => Number.isFinite(value) && value >= 0 && value <= 1;
@@ -78,9 +88,15 @@ function selectApprovedUnits(units, approvedIds) {
   return selected.map(unit => ({...unit}));
 }
 
-function makeRequest(source, targets, joint) {
-  const questions = joint ? targets.map(({id}) => ({type: "choice", name: `u${id}-joint`,
-    instructions: `Classify source unit ${id} using the shared rubric.`, choices: jointChoices})) :
+function makeRequest(source, targets, joint, separateBoundary) {
+  const questions = joint ? targets.flatMap(({id}) => {
+    if (separateBoundary) return [
+      {type: "choice", name: `u${id}-joint`, instructions: `Classify the cue or quiet frame of source unit ${id}.`, choices: jointCueChoices},
+      {type: "choice", name: `u${id}-boundary`, instructions: `Does source unit ${id} itself mark a boundary?`, choices: boundaryChoices},
+    ];
+    return [{type: "choice", name: `u${id}-joint`,
+      instructions: `Classify source unit ${id} using the shared rubric.`, choices: jointChoices}];
+  }) :
     targets.flatMap(({id}) => fields.map(field => {
       const rubric = rubrics[field];
       return {type: "choice", name: `u${id}-${field}`, instructions: `Target source ID ${id}. ${rubric.instruction}`,
@@ -89,7 +105,7 @@ function makeRequest(source, targets, joint) {
   return {
     model: MODEL,
     input: [
-      {type: "message", role: "developer", content: joint ? jointInstructions : instructions},
+      {type: "message", role: "developer", content: separateBoundary ? separateBoundaryInstructions : joint ? jointInstructions : instructions},
       {type: "message", role: "user", content: [{type: "input_json", data: {units: source}}]},
     ],
     questions,
@@ -214,6 +230,24 @@ function recordJointAnswers(batch, answers, labels, trace) {
   }
 }
 
+function recordSeparateBoundaryAnswers(batch, answers, labels, trace, boundaryIds) {
+  recordJointAnswers(batch, answers.filter((_, index) => index % 2 === 0), labels, trace);
+  for (const [index, {id}] of batch.entries()) {
+    const answer = answers[index * 2 + 1];
+    if (answer === null) { trace.refusedQuestions++; trace.boundaryRefusedQuestions++; continue; }
+    trace.answeredQuestions++;
+    trace.boundaryAnsweredQuestions++;
+    if (answer === "uncertain") { trace.boundaryUncertainUnits++; continue; }
+    if (answer !== "boundary") continue;
+    boundaryIds.push(id);
+    const cue = labels.get(id);
+    if (cue && cue.phase !== "quiet") { trace.boundaryConflicts++; continue; }
+    if (answers[index * 2] === null) continue;
+    labels.set(id, {frame: cue?.frame ?? "current", phase: "boundary", category: "neutral"});
+    trace.appliedBoundaryUnits++;
+  }
+}
+
 function assembleMap(selected, labels) {
   const scenes = [];
   let open = null;
@@ -234,8 +268,9 @@ function assembleMap(selected, labels) {
 }
 
 /** Evaluate explicitly approved units. The caller owns authorization and transport. */
-export async function analyzeNocturneDecisions({units, approvedIds, provider, signal, joint = false} = {}) {
-  if (typeof provider !== "function" || typeof joint !== "boolean" || (signal !== undefined && !(signal instanceof AbortSignal))) {
+export async function analyzeNocturneDecisions({units, approvedIds, provider, signal, joint = false, separateBoundary = false} = {}) {
+  if (typeof provider !== "function" || typeof joint !== "boolean" || typeof separateBoundary !== "boolean" ||
+      separateBoundary && !joint || (signal !== undefined && !(signal instanceof AbortSignal))) {
     throw new TypeError("Provide the Decisions provider and options.");
   }
   const selected = selectApprovedUnits(units, approvedIds);
@@ -245,27 +280,31 @@ export async function analyzeNocturneDecisions({units, approvedIds, provider, si
     answeredUnits: 0, mappedUnits: 0, refusedUnits: 0, uncertainUnits: 0, inconsistentUnits: 0, failedUnits: 0,
     answeredQuestions: 0, refusedQuestions: 0, proposedBeats: 0, acceptedBeats: 0, targetedBeats: 0,
     keptBeats: 0, rejectedBeats: 0, uncertainBeats: 0, unverifiedBeats: 0, calls: []};
+  const empty = {proposed: null, accepted: null, trace, ...(separateBoundary ? {boundaryIds: []} : {})};
+  const boundaryIds = [];
+  if (separateBoundary) Object.assign(trace, {boundaryConflicts: 0, boundaryAnsweredQuestions: 0, boundaryRefusedQuestions: 0,
+    boundaryUncertainUnits: 0, appliedBoundaryUnits: 0});
   if (signal?.aborted || !selected.length) {
     if (signal?.aborted) trace.status = "aborted";
-    return {proposed: null, accepted: null, trace};
+    return empty;
   }
 
   const source = selected.map(({id, text, structuralBoundary}) => ({id, text, structuralBoundary}));
   const labels = new Map();
-  const record = joint ? recordJointAnswers : recordAnswers;
+  const record = separateBoundary ? recordSeparateBoundaryAnswers : joint ? recordJointAnswers : recordAnswers;
   for (let start = 0; start < targets.length; start += DECISIONS_TARGETS_PER_CALL) {
     const batch = targets.slice(start, start + DECISIONS_TARGETS_PER_CALL);
-    const request = makeRequest(source, batch, joint);
+    const request = makeRequest(source, batch, joint, separateBoundary);
     if (encoder.encode(JSON.stringify(request)).byteLength > MAX_WIRE_BYTES) {
       trace.status = "input_limit";
-      return {proposed: null, accepted: null, trace};
+      return empty;
     }
     const answers = await callProvider(request, provider, signal, trace.calls);
     if (signal?.aborted) {
       trace.status = "aborted";
-      return {proposed: null, accepted: null, trace};
+      return empty;
     }
-    if (answers) record(batch, answers, labels, trace);
+    if (answers) record(batch, answers, labels, trace, boundaryIds);
     else {
       // A failed request may indicate an upstream outage. Preserve preceding
       // validated batches and leave subsequent units without automatic labels.
@@ -276,9 +315,9 @@ export async function analyzeNocturneDecisions({units, approvedIds, provider, si
 
   trace.mappedUnits = labels.size + trace.structuralUnits;
   trace.status = trace.failedUnits ? (trace.mappedUnits ? "partial" : "extraction_failed") : "completed";
-  if (trace.status === "extraction_failed") return {proposed: null, accepted: null, trace};
+  if (trace.status === "extraction_failed") return empty;
   const accepted = assembleMap(selected, labels);
   const beats = accepted.scenes.reduce((sum, scene) => sum + scene.beats.length, 0);
   trace.proposedBeats = trace.acceptedBeats = trace.unverifiedBeats = beats;
-  return {proposed: accepted, accepted, trace};
+  return {proposed: accepted, accepted, trace, ...(separateBoundary ? {boundaryIds} : {})};
 }
