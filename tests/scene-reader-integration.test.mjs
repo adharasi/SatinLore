@@ -206,7 +206,7 @@ test("first-use simulator output distinguishes current contextual cues while pre
   assert.equal(controller.snapshot().output, 0);
 });
 
-test("label-only context preserves a locally vetted current cue and legacy labels keep their old mapping", () => {
+test("noncurrent context cancels a local cue while leaving Loom, the background and corrections available", () => {
   const model = new ReaderModel();
   model.load([
     "Mara was attracted to him, and held his gaze.",
@@ -217,17 +217,20 @@ test("label-only context preserves a locally vetted current cue and legacy label
   model.nocturneContext.set(0, {id: 0, category: "romance", phase: "build", shape: "unspecified", confidence: 95, eventKind: "reported"});
   model.nocturneContext.set(2, {id: 2, category: "romance", phase: "build", shape: "unspecified", confidence: 95});
   const preferences = {nocturne: true};
-  assert.deepEqual(model.effectiveProfile(0, preferences), model.effectiveProfile(0));
+  assert.equal(model.effectiveProfile(0, preferences).phase, "quiet");
+  assert.equal(model.effectiveProfile(0, preferences).sceneId, null);
+  assert.equal(model.effectiveProfile(0, preferences).currentCue, undefined);
+  assert.equal(model.effectiveLevels(preferences)[0], 0);
   assert.equal(model.effectiveLevels(preferences)[2], 1);
   assert.equal(model.effectiveProfile(2, preferences).currentCue, undefined);
   const feel = new ReadingFeel({rhythm: DEFAULT_EXPERIENCE.rhythm, maximum: DEFAULT_EXPERIENCE.maximum});
   feel.configure({mode: DEFAULT_EXPERIENCE.quiet});
-  for (const options of [{}, preferences]) {
-    const base = model.effectiveLevels(options)[0];
-    const scene = model.effectiveProfile(0, options);
-    assert.equal(feel.desired({base, scene, simulatorStagePatterns: true}), 2);
-    assert.equal(feel.desired({base, scene}), 1);
-  }
+  assert.equal(feel.desired({base: model.effectiveLevels()[0], scene: model.effectiveProfile(0), simulatorStagePatterns: true}), 2);
+  assert.equal(feel.desired({base: 0, scene: model.effectiveProfile(0, preferences), simulatorStagePatterns: true}), 1);
+  model.nocturneContext.get(0).confidence = 79;
+  assert.equal(model.effectiveLevels(preferences)[0], 1, "A low-confidence result keeps the local suggestion.");
+  model.nocturneContext.set(0, {id: 0, category: "aftermath", phase: "quiet", shape: "unspecified", confidence: 95, eventKind: "current"});
+  assert.equal(model.effectiveLevels(preferences)[0], 0, "Quiet aftermath uses the background setting.");
   model.setOverride(0, 0);
   assert.equal(model.contextualAnnotation(0), null);
   assert.equal(model.effectiveProfile(0, preferences).currentCue, undefined);

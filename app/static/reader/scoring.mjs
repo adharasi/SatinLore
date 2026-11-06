@@ -7,6 +7,10 @@ const CONTACT_CUES = [
   /\bembrac(?:e|es|ed|ing)\b/,
   /\bcaress(?:es|ed|ing)?\b/,
 ];
+const FIGURATIVE_CONTACT = /\b(?:blew|blows?|sent|sends?) (?:me|you|him|her|them) (?:(?:a|some) )?(?:[\p{L}]+ )?(?:words and )?kiss(?:es)?\b/gu;
+const CONTACT_BODY_SUBJECT = /^\s*(?:my|his|her|their|our|your) (?:lips|mouth|arms?|hands?)\b/u;
+const MODAL_CONTACT = /\b(?:would|could)\b/u;
+const WRAPPED_COMPLEMENT = /^\s*(?:in|with|against|on|upon)\b/u;
 // Narrated contact often has no adjective and never names a device. Keep this
 // distinct from the cues that identify a particular toy movement.
 const ENACTED_CONTACT = [
@@ -46,9 +50,9 @@ const REPORTED_SPEECH = /\b(?:(?:said|says|whisper(?:s|ed)|ask(?:s|ed)|told|tell
 const UNREALISED = /\b(?:expect(?:s|ed|ing)?|intend(?:s|ed|ing)?|consider(?:s|ed|ing)?|planned|planning|(?:was|were) going to|about to|almost|nearly|seem(?:s|ed)? to)\b/u;
 const LINKED_CLAUSE = new Set(["and", "and then", "then", "as", "while", "after", "before", "followed by"]);
 const CLAUSE_BREAK = /([.!?;\n]+|\b(?:and then|then|followed by|afterwards?|after|before|instead of|rather than|but|yet|whereas|although)\b|(?:,|\b(?:and|as|while)\b)(?=\s+(?:she|he|they|we|i|you|it|the|a|an|his|her|their|my|our|your)\b))/u;
-const EXPLICIT_STOP = /(?:^|[.!?;“"\n]\s*)(?:no|stop)(?:[,.!?;”"\n]|$)|(?:^|[.!?;\n]\s*)(?:he|she|they|we) (?:stopped|refused|(?:pulled|backed) away(?: from (?:her|him|them|each other))?)(?=[.!?;\n]|$)|\b(?:asked|told)\b[^.!?;]{0,36}\bto stop\b|\b(?:said|whispered|shouted)\s*,?\s*["“'](?:no|stop)\b/u;
+const EXPLICIT_STOP = /(?:^|[.!?;“"\n]\s*)(?:no|stop)(?:[,.!?;”"\n]|$)|(?:^|[.!?;\n]\s*)(?:he|she|they|we) (?:stopped|refused|(?:pulled|backed) away(?: from (?:her|him|them|each other))?)(?=[.!?;\n]|$)|\b(?:asked|told)\b[^.!?;]{0,36}\bto stop\b|\b(?:said|whispered|shouted)\s*,?\s*["“'](?:no|stop)\b|(?:^|[^\p{L}\p{N}])['‘](?:no|stop)[,.!?;]*'(?![\p{L}\p{N}])/u;
 const normalized = text => text.toLowerCase().replace(/’/g, "'").replace(/[^\S\n]+/gu, " ").trim();
-const QUOTED_TEXT = /“[^”]*”|"[^"]*"|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\n]*(?:'[\p{L}\p{N}][^'\n]*)*'(?![\p{L}\p{N}])/gu;
+const QUOTED_TEXT = /“[^”]*”|"[^"]*"|‘[^’\n]*(?:’[\p{L}\p{N}][^’\n]*)*’(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])'[^'\n]*(?:'[\p{L}\p{N}][^'\n]*)*'(?![\p{L}\p{N}])/gu;
 const QUOTE_GAP = "\u2063";
 const narration = text => normalized(text.replace(QUOTED_TEXT, ` ${QUOTE_GAP} `));
 const GENTLE_CONTACT = /\b(?:gentle|gently|soft|softly|slow|slowly)\s+$/u;
@@ -80,7 +84,7 @@ function clauseEvidence(value) {
   let uncertain = false, nonPresentMotion = false, cloudExcluded = false, directBand = 0;
   let speculative = false, reported = false, detached = false, ordinal = -2;
   for (let index = 0; index < parts.length; index += 2) {
-    const clause = parts[index];
+    const clause = parts[index].replace(FIGURATIVE_CONTACT, "");
     const before = parts[index - 1];
     if (clause.trim()) ordinal += 2;
     detached = DETACHED_PAST.test(clause) || detached && before === ",";
@@ -99,8 +103,14 @@ function clauseEvidence(value) {
     const unrealised = UNREALISED.exec(clause);
     const unrealisedAction = unrealised && [...contactMatches, MOTION_MATCH].map(cue => clause.search(cue))
       .filter(position => position >= 0).reduce((first, position) => Math.min(first, position), Infinity);
+    // A linked body description can elaborate the previous unrealised
+    // contact without introducing a new actor or a current action.
+    const prior = parts[index - 2] ?? "";
+    const priorClause = parts[index - 3] === "\n" && WRAPPED_COMPLEMENT.test(prior) ? `${parts[index - 4]} ${prior}` : prior;
+    const modalContinuation = (before === "and" || before === ",") && CONTACT_BODY_SUBJECT.test(clause) &&
+      MODAL_CONTACT.test(priorClause) && hasContactCue(priorClause);
     const speculativeOrReported = speculative || reported || META_CONTEXT.test(clause) || NON_ACTUAL.test(clause) ||
-      !!unrealised && Number.isFinite(unrealisedAction) && unrealised.index < unrealisedAction;
+      modalContinuation || !!unrealised && Number.isFinite(unrealisedAction) && unrealised.index < unrealisedAction;
     if (speculativeOrReported || UNCERTAIN_CONTEXT.test(clause) || direct && before === "before") {
       const motion = hasMotionCue(clause);
       nonPresentMotion ||= speculativeOrReported && motion;
@@ -186,6 +196,32 @@ const COMPLIMENT_ATTRIBUTION = /^\u2063\s*(?:(i|he|she|they) (?:said|murmured|re
 const RELATIONAL_FRAME = /\b(?:sister|brother|mother|father|grandmother|grandfather|aunt|uncle|son|daughter|baby|grandchild|siblings|parents?|puppy|kitten|rehears(?:e|ed|al|ing)|recit(?:e|ed|es|ing)|quot(?:e|ed|es|ing)|script|lyrics|overheard|pictured|envisioned|used to|back when|back then|years ago|last (?:summer|winter|spring|autumn|fall|year)|(?:in|from) (?:a|the) (?:film|movie|play|script))\b/u;
 const RELATIONAL_REPORT = /\b(?:(?:said|says|(?:whisper|murmur)(?:ed|s)) (?:i|you|he|she|they|we)|(?:told|tells) (?:me|you|him|her|them|us))\b/u;
 const RELATIONAL_SCOPE = new Set(["after", "before", "instead of", "rather than", "but", "yet", "whereas", "although"]);
+const PAST_PERFECT_CONTACT = /\bhad (?:(?:just|already|often|once|ever|never|[\p{L}]+ly) ){0,2}(?:kissed|embraced|returned)\b/u;
+const RELATIONAL_LOOKBACK = /\b(?:remember(?:ed|ing)|recall(?:ed|ing)|recollect(?:ed|ing)|memor(?:y|ies) of|in those days|(?:mind|thoughts?) (?:went back|returned) to)\b/u;
+const RELATIONAL_WITHDRAWAL = /\b(?:hands?|arms?) (?:slipped|withdrew) (?:out of|from) (?:mine|his|hers|ours|yours|theirs)\b/u;
+const RETROSPECTIVE_ENTRY = /\b(?:on looking back|in those days|back then|(?:mind|thoughts?) (?:went back|returned) to|could (?:still )?remember (?:[\p{L}]+ing|(?:that|the) (?:day|night|evening|morning|summer|winter|moment)))\b/u;
+const RETROSPECTIVE_RETURN = /\b(?:back in the present|back to the present|the memory faded)\b/u;
+const GROUNDED_CONTACT = /\b(?:(?:we|they) (?:kiss(?:ed)?|embrace(?:d)?)|(?:kiss(?:ed|es)|embrac(?:ed|es)|caress(?:ed|es)) (?:me|you|him|her|them|each other)|(?:is|are|was|were) (?:[\p{L}]+ly )?(?:kissing|embracing|caressing) (?:me|you|him|her|them|each other|(?:the|my|his|her|your|their) (?:[\p{L}]+ )?(?:lips|mouth|shoulder)))\b/u;
+const PERSON = "(?:[Ii]|[Hh]e|[Ss]he|[Tt]hey|[Ww]e|[Yy]ou|[\\p{Lu}][\\p{Ll}’'-]+(?: [\\p{Lu}][\\p{Ll}’'-]+){0,2})";
+const SPEECH_VERB = "(?:said|asked|answered|replied|whispered|murmured|admitted|confessed)";
+const LEADING_SPEAKER = new RegExp(`\\b(${PERSON})\\s+${SPEECH_VERB}\\s*[, :]?\\s*$`, "u");
+const TRAILING_SPEAKER = new RegExp(`^\\s*,?\\s*(?:(${PERSON})\\s+${SPEECH_VERB}\\b|${SPEECH_VERB}\\s+(${PERSON})(?=[\\s,.!?;]|$))`, "u");
+const SPEECH_ASIDE = /^(?:[,\s]*(?:and|[\p{L}]+ly)\b){0,4}[,.!?;\s]*$/u;
+const RELATIONAL_DISQUALIFIER = /\b(?:resist(?:ed|s|ing)?|reluctan(?:t|ce)|against (?:my|his|her|your|their) will|let (?:me|him|her|us|them) go|pulled (?:back|away)|pushed (?:me|him|her|us|them) away|refus(?:ed|es|ing))\b/u;
+const RELATIONAL_REPLAY = /\b(?:imagin(?:ed|es|ing)|dream(?:ed|t|s|ing)|pretend(?:ed|s|ing)|in the (?:script|letter)|read aloud|(?:\d+|[\p{L}]+) (?:years?|months?|weeks?) ago)\b/u;
+const RELATIONAL_NONENACTED = /\b(?:[\p{L}]+n't|unable to|failed to|may have|must have|(?:said|whispered|murmured|reported|insisted|mentioned|wrote|heard) that|had (?:(?:just|already|once|often|[\p{L}]+ly) ){0,2}(?:hugged|caressed|enfolded))\b/u;
+const DECLARATION = /(?:^|[,.;!?—]\s*)i(?: (?:(?:do|really|truly|still) )?(?:love|adore|am in love with|want to marry)|'m in love with) you\b/u;
+const COMMITMENT = /(?:^|[,.;!?—]\s*)(?:(?:will|would) you marry me|i (?:promise to be yours|want to marry you|want you to marry me))\b/u;
+const INDIRECT_PROPOSAL = /^(?:to ask if you(?:'d| would) marry me|i (?:came|wanted) to ask if you(?:'d| would) marry me)\b/u;
+const RELATIONAL_QUESTION = /^(?:do you (?:really |still )?(?:love|want|care for) me|(?:will|would) you (?:go out|come) with me.{0,65}just the two of us)\b/u;
+const RELATIONAL_ANSWER = /^(?:yes[,.!]?(?: i (?:do|will|would))?|i (?:do|will|would|feel the same|(?:love|adore) you too)|and i you|so do i)[.!…,]*$/u;
+const DIRECT_CONTACT_ACTION = /\b(?:kissed|kisses|embraced|embraces|hugged|hugs|caressed|caresses|enfolded|enfolds) (me|you|him|her|them|each other|one another|[\p{L}’'-]+)(?=$|[,.!?;—]| (?:again|and|as|back|before|for|gently|in|on|softly|then|while|with)\b)/u;
+const RECIPROCAL_CONTACT = /\b(?:kissed|embraced|hugged) (?:each other|one another)\b|\b(?:their|our) hands (?:clasped|interlaced)\b/u;
+const INTENTIONAL_CONTACT = /\b(?:kissed|kisses) (?:me|you|him|her|them) (?:on (?:the|my|his|her|your|their) (?:lips|mouth)|back|repeatedly)\b/u;
+const CONTACT_GESTURE = /\b(?:(?:drew|took|held|gathered|folded) (?:me|you|him|her|them) (?:close(?:r)?|in(?:to)? (?:my|his|her|your|their) arms|to (?:my|his|her|your|their) (?:chest|breast))|(?:clung|hung) (?:about|around) (?:my|his|her|your|their) neck|(?:placed|rested|sank|laid) (?:my|his|her|your|their) (?:head|face) (?:on|against) (?:my|his|her|your|their) (?:chest|shoulder|breast)|(?:my|his|her|your|their) arms? (?:slid|tightened|closed|curled|folded) (?:[\p{L}]+ly )?(?:about|around) (?:me|you|him|her|them|(?:my|his|her|your|their) (?:neck|shoulders?|waist)|[\p{L}’'-]+'s neck))\b/u;
+const DIRECTED_AFFECTION = /\b(?:loved|loves|adored|adores|cherished|cherishes|longed for|longs for|was in love with|am in love with|were in love with|was attracted to|were attracted to) (me|you|him|her|them|each other|one another|[\p{L}’'-]+)(?=$|[,.!?; ]|—)/u;
+const ATTRIBUTED_REACTION = /\b(?:(?:their|our) eyes met|(?:met|held|caught) (?:my|his|her|your|their) (?:look|gaze|eyes)|looked into (?:my|his|her|your|their) eyes|(?:my|his|her|your|their) (?:breath caught|heart (?:leaped|fluttered|quickened))|(?:i|he|she|they) (?:blushed|flushed)\b[^.!?;]{0,36}\b(?:look|smile|compliment|words))\b/u;
+const PRONOUN_RECIPIENT = /^(?:me|you|him|her|them|each other|one another)$/u;
 const RELEASE = /\b(?:slowed|softened|eased|relaxed|settled|(?:their|our) breathing (?:evened out|grew quieter))\b/u;
 const CONTACT_RELEASE = /\b(?:(?:they|we) (?:eased|drifted|drew|moved) apart|(?:the|their|our) (?:kiss|embrace) (?:softened|eased))\b/u;
 const PEAK = /\b(?:intensifi(?:ed|es)|crescendo|overwhelming|surge(?:d|s)?|reached (?:a|its|their) peak)\b/u;
@@ -369,6 +405,75 @@ function linkedRelationship(previous, next) {
     next.affectionTargets.some(target => previous.gestureTargets.has(target)));
 }
 
+function spokenRelationship(text) {
+  text = text.trim();
+  const acts = [];
+  let lastQuoteEnd = -1;
+  for (const match of text.matchAll(QUOTED_TEXT)) {
+    const previous = lastQuoteEnd;
+    lastQuoteEnd = match.index + match[0].length;
+    const quote = normalized(match[0].slice(1, -1).replace(/\s+/gu, " "));
+    const indirectProposal = INDIRECT_PROPOSAL.test(quote);
+    if (UNCERTAIN_CONTEXT.test(quote) || RELATIONAL_NONENACTED.test(quote) ||
+        !indirectProposal && SPECULATION.test(quote) || RELATIONAL_DISQUALIFIER.test(quote)) continue;
+    const tail = text.slice(lastQuoteEnd, lastQuoteEnd + 84);
+    const lead = text.slice(Math.max(0, match.index - 84), match.index);
+    const after = TRAILING_SPEAKER.exec(tail);
+    const between = previous >= 0 && match.index - previous <= 84 ? text.slice(previous, match.index) : "";
+    const continuation = TRAILING_SPEAKER.exec(between);
+    const priorSpeaker = continuation && SPEECH_ASIDE.test(between.slice(continuation[0].length)) ? continuation[1] ?? continuation[2] : null;
+    const speaker = after?.[1] ?? after?.[2] ?? LEADING_SPEAKER.exec(lead)?.[1] ?? priorSpeaker;
+    const bare = !speaker && match.index === 0 && lastQuoteEnd === text.length;
+    if (!speaker && !bare) continue;
+    let type = null;
+    if (indirectProposal || COMMITMENT.test(quote)) type = "commitment";
+    else if (RELATIONAL_QUESTION.test(quote)) type = "question";
+    else if (DECLARATION.test(quote)) type = "declaration";
+    else if (RELATIONAL_ANSWER.test(quote)) type = "answer";
+    if (type) acts.push({type, speaker: speaker ? normalized(speaker) : null, named: Boolean(speaker && !/^(?:i|he|she|they|we|you)$/iu.test(speaker))});
+  }
+  return acts;
+}
+
+function narrativeRelationship(text, narrated, actual) {
+  if (RELATIONAL_FRAME.test(narrated) || RELATIONAL_LOOKBACK.test(narrated) ||
+      RELATIONAL_REPLAY.test(narrated) || RELATIONAL_WITHDRAWAL.test(narrated) || RELATIONAL_DISQUALIFIER.test(narrated)) return null;
+  const names = new Set(Array.from(text.replace(QUOTED_TEXT, " ").matchAll(/\b\p{Lu}\p{Ll}{2,}\b/gu), match => normalized(match[0])));
+  const targetsPerson = recipient => recipient && (PRONOUN_RECIPIENT.test(recipient) || names.has(recipient));
+  const evidence = {contact: false, mutual: false, gesture: false, affection: false, reaction: false, speech: []};
+  for (const {clause, before} of actual) {
+    if (clause.includes(QUOTE_GAP) || RELATIONAL_SCOPE.has(before) || CONTACT_REPORT.test(clause) ||
+        RELATIONAL_REPORT.test(clause) || RELATIONAL_NONENACTED.test(clause) || UNREALISED.test(clause) ||
+        PAST_PERFECT_CONTACT.test(clause) || INNOCENT_KISS.test(clause)) continue;
+    evidence.contact ||= Boolean(targetsPerson(DIRECT_CONTACT_ACTION.exec(clause)?.[1]));
+    evidence.mutual ||= RECIPROCAL_CONTACT.test(clause) || INTENTIONAL_CONTACT.test(clause);
+    evidence.gesture ||= CONTACT_GESTURE.test(clause);
+    evidence.affection ||= Boolean(targetsPerson(DIRECTED_AFFECTION.exec(clause)?.[1]));
+    evidence.reaction ||= ATTRIBUTED_REACTION.test(clause);
+  }
+  evidence.speech = spokenRelationship(text);
+  return evidence;
+}
+
+function reciprocalSpeech(left, right) {
+  return left.some((a, i) => a.type !== "answer" && right.some((b, j) => (left !== right || i < j) &&
+    a.speaker !== b.speaker && (!a.speaker || !b.speaker || a.named === b.named) &&
+    (b.type === "declaration" || b.type === "answer" && a.type !== "declaration")));
+}
+
+function narrativeCue(current, previous, next) {
+  if (!current) return false;
+  if (current.mutual || current.contact && (current.gesture || current.affection || current.reaction) ||
+      current.affection && (current.gesture || current.reaction)) return true;
+  const statement = current.speech.some(act => act.type === "declaration");
+  if (current.speech.some(act => act.type === "commitment" && act.speaker) || statement && (current.contact || current.affection || current.gesture || current.reaction) ||
+      reciprocalSpeech(current.speech, current.speech)) return true;
+  if (previous && reciprocalSpeech(previous.speech, current.speech) || next && reciprocalSpeech(current.speech, next.speech)) return true;
+  return (current.contact || current.gesture || current.reaction) && [previous, next].some(evidence =>
+    evidence && (evidence.mutual || evidence.contact && evidence.affection || evidence.speech.some(act =>
+      act.speaker && (act.type === "declaration" || act.type === "commitment"))));
+}
+
 function sceneCandidate(paragraph, incomingDevice) {
   if (!paragraph || typeof paragraph.text !== "string" || !Number.isInteger(paragraph.band) ||
       paragraph.band < 0 || paragraph.band >= SUGGESTION_LEVELS.length || SUGGESTION_LEVELS[paragraph.band] !== paragraph.suggestedLevel || typeof paragraph.reason !== "string") {
@@ -377,7 +482,8 @@ function sceneCandidate(paragraph, incomingDevice) {
   const value = normalized(paragraph.text);
   const narrated = narration(paragraph.text);
   const evidence = clauseEvidence(narrated);
-  const rest = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim()) || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
+  const separator = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim());
+  const rest = separator || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
   const stopped = EXPLICIT_STOP.test(value);
   const sensitive = SENSITIVE_CUE.test(value) || SENSITIVE_AGE.test(value);
   const motion = sceneMovements(evidence.actual, incomingDevice && !/^["'“‘]/u.test(value));
@@ -404,12 +510,26 @@ function sceneCandidate(paragraph, incomingDevice) {
   const repositionsHold = !quiet && !cloudExcluded && paragraph.override == null && REPOSITIONED_CONTACT.test(actual);
   const relationship = band === 0 && !quiet && !cloudExcluded && paragraph.override == null ?
     relationshipEvidence(value, narrated, evidence.actual, quotes, short) : null;
+  const narrative = !quiet && !cloudExcluded && paragraph.override == null ?
+    narrativeRelationship(paragraph.text, narrated, evidence.actual) : null;
+  const startsRetrospective = RETROSPECTIVE_ENTRY.test(narrated);
+  const groundedContact = band > 0 && !cloudExcluded && paragraph.override == null && !startsRetrospective &&
+    !RELATIONAL_FRAME.test(narrated) && !RELATIONAL_LOOKBACK.test(narrated) && !RELATIONAL_WITHDRAWAL.test(narrated) &&
+    evidence.active.some(clause => !clause.includes(QUOTE_GAP) && !CONTACT_REPORT.test(clause) &&
+      !INNOCENT_KISS.test(clause) && !PAST_PERFECT_CONTACT.test(clause) &&
+      (enactedContact(clause) || GROUNDED_CONTACT.test(clause)));
   const advisory = sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
     uncertain ? "The wording is ambiguous or speculative. This suggestion stays at zero." : null;
   return {
     anchor: band > 0 && paragraph.override !== 0,
+    narrativeAnchor: false,
+    withdraws: stopped || RELATIONAL_WITHDRAWAL.test(narrated) || RELATIONAL_DISQUALIFIER.test(value),
     evidenceBand: band,
     relationship,
+    narrative,
+    startsRetrospective,
+    resetsRetrospective: separator || RETROSPECTIVE_RETURN.test(narrated),
+    groundedContact,
     connective: band === 0 && !quiet && short && paragraph.override == null && !hasContactCue(value),
     contextualContact: band === 0 && !quiet && short && paragraph.override == null &&
       DIRECT_CONTACT.test(narrated.replace(/[.!?]$/u, "")),
@@ -450,21 +570,37 @@ function applyBeat(result, {phase, band, rhythm, reason, movements}) {
 export function groupScenes(paragraphs) {
   if (!Array.isArray(paragraphs)) throw new TypeError("Use an array of analysed paragraphs.");
   const candidates = [];
-  for (const paragraph of paragraphs) {
+  let recalledThrough = -1;
+  for (const [index, paragraph] of paragraphs.entries()) {
     const previous = candidates.at(-1);
-    candidates.push(sceneCandidate(paragraph, previous?.anchor && previous.deviceReference));
+    const candidate = sceneCandidate(paragraph, previous?.anchor && previous.deviceReference);
+    if (candidate.resetsRetrospective) recalledThrough = -1;
+    else if (candidate.startsRetrospective) recalledThrough = index + 2;
+    // Only veto fresh local promotions and provenance. Existing explicit
+    // movement, quiet and manually chosen values keep their own rules.
+    if (index <= recalledThrough) {
+      candidate.relationship = null;
+      candidate.narrative = null;
+      candidate.groundedContact = false;
+    }
+    candidates.push(candidate);
   }
   for (const [index, candidate] of candidates.entries()) {
     const signal = candidate.relationship;
     const previous = candidates[index - 1]?.relationship;
     const next = candidates[index + 1]?.relationship;
-    if (!signal || !(signal.paired || hasComplimentResponse(signal, signal) ||
-        linkedRelationship(previous, signal) || linkedRelationship(signal, next))) continue;
+    const following = candidates[index + 1];
+    const recovered = !candidate.anchor && !following?.withdraws &&
+      narrativeCue(candidate.narrative, candidates[index - 1]?.narrative, following?.narrative);
+    if (!recovered && (!signal || !(signal.paired || hasComplimentResponse(signal, signal) ||
+        linkedRelationship(previous, signal) || linkedRelationship(signal, next)))) continue;
     candidate.anchor = true;
+    candidate.narrativeAnchor = recovered;
     candidate.evidenceBand = 1;
     candidate.movementHints = [];
     Object.assign(candidate.result, {band: 1, level: SUGGESTION_LEVELS[1], currentCue: true,
-      reason: "Matched a present affectionate gesture or a corroborated compliment."});
+      reason: recovered ? "Matched corroborated relationship evidence in the current scene." :
+        "Matched a present affectionate gesture or a corroborated compliment."});
   }
   let nextScene = 0, activeScene = null, lastAnchor = -1, heldContact = false;
   const endedMovements = new Set();
@@ -487,10 +623,12 @@ export function groupScenes(paragraphs) {
         recovery || band >= 2 && candidate.slow ? "gentle" : "steady";
       const movements = !result.currentCue && !result.movements.length && candidate.continuesContact && activeScene !== null ? previous?.movements : undefined;
       applyBeat(result, {phase, band, rhythm, reason: result.reason, movements});
+      if (candidate.groundedContact) result.currentCue = true;
       if (peak) result.advisory = "Review this stronger local suggestion if needed.";
       heldContact = !recovery && (candidate.holdsContact || heldContact && candidate.continuesContact);
       lastAnchor = index;
-    } else if (lastAnchor < 0 && candidate.approaching && (next?.anchor || next?.approaching && candidates[index + 2]?.anchor)) {
+    } else if (lastAnchor < 0 && candidate.approaching && (next?.anchor && !next.narrativeAnchor ||
+        next?.approaching && candidates[index + 2]?.anchor && !candidates[index + 2].narrativeAnchor)) {
       applyBeat(result, {phase: "build", band: 1, rhythm: "gentle", reason: "An approach immediately before matched contact."});
     } else if (lastAnchor >= 0 && (distance <= 2 && candidate.endingContact || distance === 1 && candidate.connective && candidate.releasing)) {
       applyBeat(result, {phase: "recover", band: 1, rhythm: "gentle", reason: "The preceding scene is easing off.",
@@ -509,8 +647,10 @@ export function groupScenes(paragraphs) {
     } else {
       const follows = next?.anchor || next?.continuesContact || next?.endingContact ||
         distance === 1 && next?.connective && candidates[index + 2]?.anchor;
+      const hasNarrativeEdge = candidates[lastAnchor]?.narrativeAnchor || next?.narrativeAnchor ||
+        next?.connective && candidates[index + 2]?.narrativeAnchor;
       if ((!candidate.connective && !candidate.contextualContact) || lastAnchor < 0 || distance > 2 || !follows ||
-          previous?.phase === "recover" && previous.band === 1) {
+          hasNarrativeEdge && !candidate.contextualContact || previous?.phase === "recover" && previous.band === 1) {
         activeScene = null;
         lastAnchor = -1;
         heldContact = false;

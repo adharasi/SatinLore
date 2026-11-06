@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import {workspace} from "./helpers/workspace.mjs";
 import {waitForWorkspace, waitForContext} from "./helpers/workspace-wait.mjs";
 
-const labelsFor = paragraphs => ({version: "context-v2", labels: paragraphs.map(({id}) =>
+const labelsFor = targets => ({version: "context-v3", labels: targets.map(id =>
   ({id, category: "romance", phase: "build", shape: "unspecified", confidence: 93, eventKind: "current"})), usage: null});
 
 async function contextualReader(t, provider, publicAuth = false) {
   const app = workspace({hosted: true, publicAuth, sceneRequest: async (_path, init = {}) => {
     if (init.method !== "POST") return Response.json({available: true});
-    const {paragraphs} = JSON.parse(init.body);
-    return provider ? provider(paragraphs) : Response.json(labelsFor(paragraphs));
+    const {targets} = JSON.parse(init.body);
+    return provider ? provider(targets) : Response.json(labelsFor(targets));
   }});
   t.after(() => app.destroy());
   await app.settle();
@@ -66,15 +66,15 @@ test("context annotations, consent and allowance are absent from the actual stor
   const record = JSON.parse(app.read("JSON.stringify(storyRecord(currentStory()))"));
   assert.deepEqual(Object.keys(record).sort(), ["analysisVersion", "corrections", "description", "favorite", "id", "position", "text", "title"]);
   assert.ok(record.corrections.every(value => value === null));
-  assert.doesNotMatch(JSON.stringify(record), /context-v[12]|confidence|nocturneContext|attempted|enabled|requests/i);
+  assert.doesNotMatch(JSON.stringify(record), /context-v[123]|confidence|nocturneContext|attempted|enabled|requests|targets/i);
   assert.deepEqual(app.errors, []);
 });
 
 test("Disable revokes a pending contextual request even if its provider ignores abort", async t => {
   let release;
-  const app = await contextualReader(t, async paragraphs => {
+  const app = await contextualReader(t, async targets => {
     await new Promise(resolve => { release = resolve; });
-    return Response.json(labelsFor(paragraphs));
+    return Response.json(labelsFor(targets));
   });
   const pending = app.click("nocturne-context-enable");
   await waitForWorkspace(app, () => typeof release === "function", "Delayed provider request did not start.");

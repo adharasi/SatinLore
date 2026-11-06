@@ -1,5 +1,6 @@
 export const LEGACY_NOCTURNE_CONTEXT_VERSION = "context-v1";
-export const NOCTURNE_CONTEXT_VERSION = "context-v2";
+export const PREVIOUS_NOCTURNE_CONTEXT_VERSION = "context-v2";
+export const NOCTURNE_CONTEXT_VERSION = "context-v3";
 export const MAX_CONTEXT_PARAGRAPHS = 64;
 export const MAX_CONTEXT_BYTES = 12_000;
 export const MAX_CONTEXT_BODY_BYTES = 16_384;
@@ -7,6 +8,7 @@ export const MAX_PARAGRAPH_BYTES = 3000;
 export const NOCTURNE_CONTEXT_TIMEOUT_MS = 30_000;
 export const MAX_CONTEXT_OUTPUT_TOKENS = 4096;
 export const MIN_CONTEXT_CONFIDENCE = 80;
+const contextVersions = [LEGACY_NOCTURNE_CONTEXT_VERSION, PREVIOUS_NOCTURNE_CONTEXT_VERSION, NOCTURNE_CONTEXT_VERSION];
 
 export const CATEGORY_PHASES = Object.freeze({
   neutral: ["quiet"], romance: ["build", "sustain"], flirting: ["build", "sustain"], tension: ["build", "sustain"],
@@ -24,9 +26,9 @@ function exactFields(value, fields) {
 }
 
 export function validContextAnnotation(entry, version) {
+  if (!contextVersions.includes(version)) return false;
   const fields = ["id", "category", "phase", "shape", "confidence"];
-  if (version === NOCTURNE_CONTEXT_VERSION) fields.push("eventKind");
-  else if (version !== LEGACY_NOCTURNE_CONTEXT_VERSION) return false;
+  if (version !== LEGACY_NOCTURNE_CONTEXT_VERSION) fields.push("eventKind");
   if (!exactFields(entry, fields) || !Number.isInteger(entry.id) || entry.id < 0 || entry.id > 1999 ||
       typeof entry.category !== "string" || !Object.hasOwn(CATEGORY_PHASES, entry.category) ||
       !CATEGORY_PHASES[entry.category].includes(entry.phase) || !CONTEXT_SHAPES.includes(entry.shape) ||
@@ -39,14 +41,15 @@ export function validContextAnnotation(entry, version) {
 }
 
 export function validContextUsage(inputTokens, outputTokens, totalTokens, version) {
-  const outputLimit = version === NOCTURNE_CONTEXT_VERSION ? MAX_CONTEXT_OUTPUT_TOKENS : 1000;
-  return [inputTokens, outputTokens, totalTokens].every(value => Number.isSafeInteger(value) && value >= 0) &&
+  const outputLimit = version === LEGACY_NOCTURNE_CONTEXT_VERSION ? 1000 : MAX_CONTEXT_OUTPUT_TOKENS;
+  return contextVersions.includes(version) &&
+    [inputTokens, outputTokens, totalTokens].every(value => Number.isSafeInteger(value) && value >= 0) &&
     inputTokens <= 20_000 && outputTokens <= outputLimit && totalTokens === inputTokens + outputTokens;
 }
 
 export function validateNocturneContext(paragraphs, response) {
   if (!exactFields(response, ["version", "labels", "usage"]) ||
-      ![NOCTURNE_CONTEXT_VERSION, LEGACY_NOCTURNE_CONTEXT_VERSION].includes(response.version) ||
+      !contextVersions.includes(response.version) ||
       !Array.isArray(response.labels) || response.labels.length !== paragraphs.length) {
     throw new Error("Unexpected Nocturne annotations.");
   }

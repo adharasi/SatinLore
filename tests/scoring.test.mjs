@@ -461,3 +461,86 @@ test("weak, uncertain and non-present signals cannot recover an affectionate cue
   const [sensitive] = groupScenes(sceneRows("A fifteen-year-old took his hand. She was falling for him."));
   assert.deepEqual([sensitive.level, sensitive.quiet, sensitive.cloudExcluded, sensitive.currentCue], [0, true, true, undefined]);
 });
+
+test("figurative and modal contact cannot start an automatic cue", () => {
+  const figurative = "She sent him tender words and kisses across the distance.";
+  const modal = "She would draw him closer in her trembling embrace, and her lips in soft kisses brushed his cheek.";
+  const enacted = "She would send a message. Then she kissed him gently.";
+  for (const text of [figurative, "He blew her a tender kiss from the platform.", modal, modal.replace("closer in", "closer\nin")]) {
+    assert.equal(scoreParagraph(text).level, 0);
+    assert.equal(groupScenes(sceneRows(text))[0].level, 0);
+  }
+  assert.equal(groupScenes(sceneRows(enacted))[0].level, 1);
+});
+
+test("a recalled scene blocks fresh relational cues until an explicit return or scene break", () => {
+  const entry = "She could still remember that evening.";
+  const detail = "The lanterns were glowing beside the gate.";
+  const contact = "Mara was attracted to him, and held his gaze.";
+  for (const reset of ["Back in the present, she unfolded the note.", "***"]) {
+    const result = groupScenes(sceneRows(entry, detail, contact, reset, contact));
+    assert.deepEqual(result.map(p => p.level), [0, 0, 0, 0, 1]);
+    assert.equal(result[2].currentCue, undefined);
+    assert.equal(result[4].currentCue, true);
+  }
+  const result = groupScenes(sceneRows("She remembered to lock the door.", detail, contact));
+  assert.equal(result[2].level, 1);
+});
+
+test("grounded existing contact is marked for contrast without changing its level or movements", () => {
+  const contact = "They kissed gently.";
+  const [described] = groupScenes(sceneRows(contact));
+  assert.deepEqual([described.level, described.currentCue, described.movements], [1, true, []]);
+  const [vague] = groupScenes(sceneRows("A tender kiss."));
+  assert.deepEqual([vague.level, vague.currentCue, vague.movements], [1, undefined, []]);
+  const [_, continuing] = groupScenes(sceneRows(`${contact} The device flexed.`, "He kissed her again tenderly."));
+  assert.deepEqual([continuing.level, continuing.currentCue, continuing.movements], [1, true, ["fingering"]]);
+});
+
+test("a typographic single-quoted refusal takes priority over contact", () => {
+  const text = "‘No.’ She kissed him gently.";
+  assert.equal(groupScenes(sceneRows(text))[0].level, 0);
+  const reply = "‘No, certainly not sad.’ They kissed gently.";
+  assert.equal(groupScenes(sceneRows(reply))[0].level, 1);
+});
+
+test("attributed reciprocal dialogue gets a low cue without selecting a movement", () => {
+  const phrases = ["“Do you still love me?” Rowan asked.", "“I do,” Alex replied."];
+  const exchange = groupScenes(sceneRows(...phrases));
+  assert.deepEqual(exchange.map(p => [p.level, p.phase, p.currentCue, p.sceneId, p.movements]), [
+    [1, "build", true, 1, []], [1, "sustain", true, 1, []],
+  ]);
+  const declaration = "‘I’m in love with you,’ Rae said. ‘I love you too,’ Max whispered.";
+  const [reply] = groupScenes(sceneRows(declaration));
+  assert.deepEqual([reply.level, reply.currentCue, reply.movements], [1, true, []]);
+});
+
+test("enacted contact and corroborating affection stay low and do not bridge unrelated details", () => {
+  const contact = "Mara hugged Tessa. She drew her closer.";
+  const affection = "“I love you,” Tessa said. Mara folded her into her arms.";
+  const result = groupScenes(sceneRows(contact, "The clock on the wall struck noon.", affection));
+  assert.deepEqual(result.map(p => [p.level, p.phase, p.currentCue, p.sceneId, p.movements]), [
+    [1, "build", true, 1, []], [0, "quiet", undefined, null, []], [1, "build", true, 2, []],
+  ]);
+});
+
+test("new relationship evidence respects withdrawal, replay, agency and scene boundaries", () => {
+  const question = "“Will you marry me?” Alex asked.";
+  const answer = "“Yes, I will,” Rowan replied.";
+  for (const paragraphs of [
+    [question, "Rowan pulled away."],
+    ["“Do you love me?” Alex asked.", "***", answer],
+    ["“Do you love me?”", "“Yes, I do.”"],
+    ["“Do you love me?” Alex asked.", "“Yes, I do,” Alex continued."],
+    ["“Do you love me?” Alex asked.", "“Yes, I will call the doctor,” Rowan replied."],
+    [`Alex imagined the conversation. ${question} ${answer}`],
+    [`Four months ago, ${question} ${answer}`],
+    [`${question} ${answer} They were reading aloud from the script.`],
+    ["A child watched. He kissed her repeatedly."],
+    ["He kissed her necklace. Her breath caught."],
+    ["Mara hadn't hugged Tessa. She drew her closer."],
+  ]) {
+    const result = groupScenes(sceneRows(...paragraphs));
+    assert.ok(result.every(p => p.level === 0 && p.currentCue === undefined && p.movements.length === 0), paragraphs.join(" / "));
+  }
+});

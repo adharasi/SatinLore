@@ -1063,7 +1063,8 @@ async function pastedRomanceChecks(context, origin) {
     await scrollTo(page, 3);
     await page.clock.runFor(1200);
     await current(page, 3);
-    await output(page, 1);
+    assert.equal(await page.locator("#suggested-level").textContent(), "1 / 20", "The local suggestion stays at one.");
+    await output(page, 2);
     await scrollTo(page, 4);
     await page.clock.runFor(1200);
     await current(page, 4);
