@@ -48,6 +48,7 @@ test("transition study scores one bounded Responses call with exact and one-to-o
   }});
   assert.equal(calls, 1);
   assert.equal(report.plannedProviderCalls, 1);
+  assert.equal(report.study, "story-transition-evidence-v2");
   assert.equal(report.totals.sourceUnits, 12);
   assert.equal(report.totals.parsedCalls, 1);
   assert.equal(report.provider.status, "partial");
@@ -80,4 +81,31 @@ test("transition study rejects an unpinned split before transport and counts fai
   assert.deepEqual(report.totals.paragraphToleranceBoundaries, report.totals.sentenceBoundaries);
   assert.equal(report.provider.calls[0].status, 429);
   assert.doesNotMatch(JSON.stringify(report), /Private provider rejection/);
+});
+
+test("the state-evidence transition study is opt-in and scores only validated anchors", async () => {
+  const options = await fixture();
+  let calls = 0;
+  const analysisFetcher = (_, init) => {
+    calls++;
+    const {text} = JSON.parse(init.body);
+    const {required} = text.format.schema.properties.transitions.items;
+    assert.ok(required.includes("beforeState"));
+    assert.ok(required.includes("afterState"));
+    const transitions = [
+      {storyId: "first", anchor: 2, before: 1, after: 2, kind: "interruption"},
+      {storyId: "second", anchor: 2, before: 1, after: 3, kind: "interruption",
+        beforeState: "foreground-interaction", afterState: "redirected"},
+    ];
+    return Response.json({model: "gpt-6-luna", status: "completed", output: [{type: "message", role: "assistant",
+      status: "completed", content: [{type: "output_text", text: JSON.stringify({transitions})}]}]});
+  };
+  await assert.rejects(runDecisionsTransitionStudy({key, ...options, analysisFetcher, requireStateEvidence: "true"}), TypeError);
+  assert.equal(calls, 0);
+  const report = await runDecisionsTransitionStudy({key, ...options, analysisFetcher, requireStateEvidence: true});
+  assert.equal(calls, 1);
+  assert.equal(report.study, "story-transition-evidence-v3-state-check");
+  assert.equal(report.provider.rejectedTransitions, 1);
+  assert.deepEqual(report.totals.sentenceBoundaries, {found: 1, missed: 1, false: 0, precision: 1, recall: .5});
+  assert.doesNotMatch(JSON.stringify(report), /beforeState|afterState|foreground-interaction|redirected/);
 });

@@ -1,6 +1,7 @@
 import {validateSceneMap} from "../../app/static/reader/scene-map.mjs";
 
 export const STORY_TRANSITION_PROMPT = "story-transition-evidence-v2";
+export const STORY_TRANSITION_STATE_PROMPT = "story-transition-evidence-v3-state-check";
 const MAX_STORIES = 14;
 const MAX_UNITS = 200;
 const MAX_SOURCE_BYTES = 32_000;
@@ -9,6 +10,17 @@ const MAX_RESPONSE_BYTES = 64_000;
 const MAX_BEFORE_DISTANCE = 8;
 const MAX_AFTER_DISTANCE = 2;
 const kinds = ["withdrawal", "interruption", "frame-return", "time-place-cut"];
+const foregroundStates = ["foreground-interaction", "active-episode"];
+const beforeStates = [...foregroundStates, "embedded-frame", "routine"];
+const afterStates = ["disengaged", "redirected", "outer-resumed", "new-episode", "routine-continuation"];
+const evidenceStates = {
+  withdrawal: {before: ["foreground-interaction"], after: ["disengaged"]},
+  interruption: {before: foregroundStates, after: ["disengaged", "redirected"]},
+  "frame-return": {before: ["embedded-frame"], after: ["outer-resumed"]},
+  "time-place-cut": {before: foregroundStates, after: ["new-episode"]},
+};
+const transitionFields = ["storyId", "anchor", "before", "after", "kind"];
+const stateTransitionFields = [...transitionFields, "beforeState", "afterState"];
 const encoder = new TextEncoder();
 const integer = {type: "integer"};
 const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
@@ -24,14 +36,27 @@ const instructions = [
   `Cite the nearest direct before evidence within ${MAX_BEFORE_DISTANCE} unit IDs before the anchor and confirming after evidence at the anchor or within ${MAX_AFTER_DISTANCE} unit IDs after it. The anchor may serve as after evidence only when it itself establishes the changed state. Do not cross story boundaries, gaps or structural markers. Leave out unsupported candidates. Return rows ordered by supplied story order and ascending anchor within each story.`,
 ].join(" ");
 
-function providerRequest(source, input) {
+const stateInstructions = [
+  instructions,
+  "Classify the state supported by each cited before and after unit. A foreground-interaction is an ongoing encounter or exchange. An active-episode is an unfolding objective or event with unresolved action or stakes, including non-romantic work and danger. An embedded-frame is an enacted past, imagined, reported or staged episode. Routine context, a completed chore, and a passing recollection do not establish these states.",
+  "For withdrawal, require a foreground-interaction before and actual disengagement after. For interruption, require a foreground-interaction or active-episode before and observable disengagement or redirection after. For frame-return, require an embedded-frame before and outer-resumed after. For time-place-cut, require a foreground-interaction or active-episode before and a distinct new-episode after. Omit proposals if the evidence shows only routine or routine-continuation.",
+  "A dated heading only anchors a cut if it closes a foreground interaction or still-active episode and the following text establishes a distinct new one. A normal readback, scheduled checkout, completed chore, background cue or change in attention alone does not establish a cut. Distinguish an escalation of the same task from an actual change of objective.",
+  "Treat a direct request such as quoted or unquoted wait or pause, followed immediately by an independent release or disengagement, as an actual interruption when it redirects what was happening. This can be temporary and prompted by an ordinary outside event. Anchor at the request or its causal event in that unit, not the later release. An unrelated wait, incidental sound, or planned pause without an observed change does not qualify.",
+].join(" ");
+
+function providerRequest(source, input, requireStateEvidence) {
   const fields = {storyId: {type: "string", enum: source.map(({id}) => id)}, anchor: integer, before: integer,
     after: integer, kind: {type: "string", enum: kinds}};
+  if (requireStateEvidence) {
+    fields.beforeState = {type: "string", enum: beforeStates};
+    fields.afterState = {type: "string", enum: afterStates};
+  }
   return {
     model: "gpt-6-luna",
-    instructions,
+    instructions: requireStateEvidence ? stateInstructions : instructions,
     input,
-    text: {format: {type: "json_schema", name: "nocturne_story_transitions", strict: true, schema: {
+    text: {format: {type: "json_schema", name: requireStateEvidence ? "nocturne_story_transitions_state_check" : "nocturne_story_transitions",
+      strict: true, schema: {
       type: "object", additionalProperties: false, required: ["transitions"], properties: {
         transitions: {type: "array", items: {
           type: "object", additionalProperties: false, required: Object.keys(fields), properties: fields,
@@ -78,17 +103,21 @@ function validEvidence(row, story, previousStory, previousAnchor) {
   return true;
 }
 
-function validateTransitions(value, {lookup, unitCount}) {
+function validateTransitions(value, {lookup, unitCount}, requireStateEvidence) {
   if (!exact(value, ["transitions"]) || !Array.isArray(value.transitions) || value.transitions.length > unitCount) return null;
   const transitions = [];
+  const fields = requireStateEvidence ? stateTransitionFields : transitionFields;
   let previousStory = -1, previousAnchor = -1;
   for (const row of value.transitions) {
-    if (!exact(row, ["storyId", "anchor", "before", "after", "kind"])) continue;
-    const story = lookup.get(row.storyId);
+    if (!exact(row, fields)) continue;
+    const {storyId, anchor, before, after, kind, beforeState, afterState} = row;
+    const story = lookup.get(storyId);
     if (!validEvidence(row, story, previousStory, previousAnchor)) continue;
-    transitions.push(row);
+    const states = evidenceStates[kind];
+    if (requireStateEvidence && (!states.before.includes(beforeState) || !states.after.includes(afterState))) continue;
+    transitions.push({storyId, anchor, before, after, kind});
     previousStory = story.index;
-    previousAnchor = row.anchor;
+    previousAnchor = anchor;
   }
   return {transitions, rejectedTransitions: value.transitions.length - transitions.length};
 }
@@ -130,7 +159,7 @@ function readUsage(usage) {
     cachedInputTokens: tokenCount(cached) && cached <= inputTokens ? cached : null};
 }
 
-function readTransitions(payload, call, prepared) {
+function readTransitions(payload, call, prepared, requireStateEvidence) {
   const parts = Array.isArray(payload?.output) ? payload.output.filter(item => item?.type === "message" && item.role === "assistant")
     .flatMap(item => Array.isArray(item.content) ? item.content : []) : [];
   const reason = payload?.incomplete_details?.reason;
@@ -138,7 +167,7 @@ function readTransitions(payload, call, prepared) {
   else if (reason === "max_output_tokens") call.result = "truncated";
   else if (payload?.status === "incomplete") call.result = "incomplete";
   else if (payload?.status === "completed" && parts.length === 1 && parts[0]?.type === "output_text" && typeof parts[0].text === "string") {
-    const parsed = validateTransitions(JSON.parse(parts[0].text), prepared);
+    const parsed = validateTransitions(JSON.parse(parts[0].text), prepared, requireStateEvidence);
     if (parsed) {
       call.result = "parsed";
       return parsed;
@@ -148,8 +177,8 @@ function readTransitions(payload, call, prepared) {
 }
 
 /** Run one transition-only comparison on an already approved story split. */
-export async function analyzeStoryTransitions({stories, provider, signal} = {}) {
-  if (typeof provider !== "function" || (signal !== undefined && !(signal instanceof AbortSignal))) {
+export async function analyzeStoryTransitions({stories, provider, signal, requireStateEvidence = false} = {}) {
+  if (typeof provider !== "function" || (signal !== undefined && !(signal instanceof AbortSignal)) || typeof requireStateEvidence !== "boolean") {
     throw new TypeError("Provide the transition analysis provider and options.");
   }
   if (signal?.aborted) return {transitions: [], trace: {status: "aborted", calls: [], rejectedTransitions: 0}};
@@ -163,7 +192,7 @@ export async function analyzeStoryTransitions({stories, provider, signal} = {}) 
   const started = performance.now();
   try {
     requestSignal.throwIfAborted();
-    const response = await provider(providerRequest(prepared.source, prepared.input), {signal: requestSignal});
+    const response = await provider(providerRequest(prepared.source, prepared.input, requireStateEvidence), {signal: requestSignal});
     requestSignal.throwIfAborted();
     call.result = "invalid_response";
     if (response instanceof Response) {
@@ -171,7 +200,7 @@ export async function analyzeStoryTransitions({stories, provider, signal} = {}) 
       if (response.ok) {
         const payload = await boundedResponseJson(response, requestSignal);
         call.usage = readUsage(payload?.usage);
-        parsed = readTransitions(payload, call, prepared);
+        parsed = readTransitions(payload, call, prepared, requireStateEvidence);
       } else {
         call.result = "http_error";
         void response.body?.cancel().catch(() => {});

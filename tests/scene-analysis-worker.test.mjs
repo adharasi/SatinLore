@@ -104,11 +104,11 @@ test("the story study accepts only a signed founder and a pinned same-origin upl
   const f = fixture(), founder = await token(), tester = await token(TESTER_EMAIL);
   const page = await f.worker.fetch(benchmarkRequest(founder, { host: ORIGIN, path: STUDY, method: "GET" }), f.env);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Run dedicated transition test/);
+  assert.match(await page.text(), /Run transition state-check candidate/);
   assert.equal((await f.worker.fetch(benchmarkRequest(tester, { path: STUDY, method: "GET" }), f.env)).status, 403);
   const body = new FormData();
   body.set("payload", new File(['{"version":"nocturne-story-study-20-2026-11-06-v1","split":"calibration","stories":[]}'], "study.json"));
-  body.set("mode", "transitions");
+  body.set("mode", "transitions-state");
   const submitted = (origin) => new Request(ORIGIN + STUDY, { method: "POST",
     headers: { "Cf-Access-Jwt-Assertion": founder, Origin: origin }, body });
   assert.equal((await f.worker.fetch(submitted(BETA), f.env)).status, 403);

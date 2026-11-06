@@ -1,5 +1,5 @@
 import {validateStoryStudyPayload} from "./decisions-story-study.mjs";
-import {analyzeStoryTransitions, STORY_TRANSITION_PROMPT} from "./story-transition-analysis.mjs";
+import {analyzeStoryTransitions, STORY_TRANSITION_PROMPT, STORY_TRANSITION_STATE_PROMPT} from "./story-transition-analysis.mjs";
 
 const RESPONSES_URL = "https://api.openai.com/v1/responses";
 const statuses = new Set(["completed", "partial", "aborted", "input_limit", "extraction_failed"]);
@@ -59,16 +59,18 @@ function safeCall(call) {
 }
 
 /** Score the pinned split without forwarding annotation labels or exposing provider bodies. */
-export async function runDecisionsTransitionStudy({key, analysisFetcher = fetch, signal, payload, pins} = {}) {
+export async function runDecisionsTransitionStudy({key, analysisFetcher = fetch, signal, payload, pins,
+  requireStateEvidence = false} = {}) {
   if (typeof key !== "string" || !/^sk-[A-Za-z0-9_-]{12,512}$/u.test(key) || key.startsWith("sk-admin-") ||
-      typeof analysisFetcher !== "function" || (signal !== undefined && !(signal instanceof AbortSignal))) {
+      typeof analysisFetcher !== "function" || (signal !== undefined && !(signal instanceof AbortSignal)) ||
+      typeof requireStateEvidence !== "boolean") {
     throw new TypeError("Invalid story transition benchmark configuration.");
   }
   const validated = await validateStoryStudyPayload(payload, pins);
   const source = validated.stories.map(({id, units}) => ({id, units}));
   const plannedProviderCalls = 1;
   let attempted = false;
-  const {transitions, trace} = await analyzeStoryTransitions({stories: source, signal, provider: (request, options) => {
+  const {transitions, trace} = await analyzeStoryTransitions({stories: source, signal, requireStateEvidence, provider: (request, options) => {
     options.signal.throwIfAborted();
     if (attempted) throw new RangeError("Story transition study request limit reached.");
     attempted = true;
@@ -86,7 +88,8 @@ export async function runDecisionsTransitionStudy({key, analysisFetcher = fetch,
     const total = calls[0]?.usage?.[field] ?? null;
     return [field, {reportedCalls: total === null ? 0 : 1, total}];
   }));
-  return {version: pins.version, split: validated.split, model: "gpt-6-luna", study: STORY_TRANSITION_PROMPT,
+  return {version: pins.version, split: validated.split, model: "gpt-6-luna",
+    study: requireStateEvidence ? STORY_TRANSITION_STATE_PROMPT : STORY_TRANSITION_PROMPT,
     storyCount: stories.length, aborted: signal?.aborted === true, plannedProviderCalls, stories,
     provider: {status: statuses.has(trace.status) ? trace.status : "unavailable", calls,
       rejectedTransitions: count(trace.rejectedTransitions)},

@@ -301,7 +301,8 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <button name="mode" value="grounded-calibration">Retest grounded candidate on calibration</button>
 <button name="mode" value="grounded">Run grounded candidate comparison</button>
 <button name="mode" value="transitions">Run dedicated transition test</button>
-<p>The dedicated test uses one API request for the selected split and scores transitions only.</p></form></main></html>`;
+<button name="mode" value="transitions-state">Run transition state-check candidate</button>
+<p>Each dedicated test uses one API request for the selected split and scores transitions only.</p></form></main></html>`;
 
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -324,6 +325,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   let groundedCandidate = false;
   let candidateOnly = false;
   let transitionOnly = false;
+  let requireStateEvidence = false;
   try {
     if (storyStudy && !corpus) throw new TypeError("Invalid study form.");
     if (corpus) {
@@ -331,13 +333,14 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
       const form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
       const file = form.get("payload");
       const mode = form.get("mode");
-      const modes = storyStudy ? [null, "grounded", "grounded-calibration", "transitions"] : [null, "joint"];
+      const modes = storyStudy ? [null, "grounded", "grounded-calibration", "transitions", "transitions-state"] : [null, "joint"];
       if (!modes.includes(mode) || [...form.keys()].length !== (mode === null ? 1 : 2) ||
           !(file instanceof File)) throw new TypeError("Invalid corpus form.");
       jointRetest = mode === "joint";
       candidateOnly = mode === "grounded-calibration";
       groundedCandidate = candidateOnly || mode === "grounded";
-      transitionOnly = mode === "transitions";
+      requireStateEvidence = mode === "transitions-state";
+      transitionOnly = mode === "transitions" || requireStateEvidence;
       payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()));
       if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS, { candidateOnly });
       else await validateDecisionsCorpusPayload(payload);
@@ -366,7 +369,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   try {
     const run = transitionOnly ? runDecisionsTransitionStudy : storyStudy ? runDecisionsStoryStudy :
       corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
-    const result = await run({ key, payload, jointRetest, groundedCandidate, candidateOnly, pins: DECISIONS_STORY_STUDY_PINS,
+    const result = await run({ key, payload, jointRetest, groundedCandidate, candidateOnly, requireStateEvidence, pins: DECISIONS_STORY_STUDY_PINS,
       signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
       if (!await authorized()) deny(expired());
       options.signal.throwIfAborted();

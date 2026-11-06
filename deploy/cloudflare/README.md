@@ -155,6 +155,8 @@ Open `/api/scene-analysis/decisions-story-study` on the signed-in app origin. Su
 
 **Run dedicated transition test** uses one Luna Responses call for the selected approved split. It reads each complete story as a separate sequence, nominates a transition with in-story before and after evidence, and reports exact sentence scores plus one-to-one scores within one paragraph. The second score measures narrative cuts and does not cover all playback phase changes. The transition pass is experimental and shares the study allowance.
 
+**Run transition state-check candidate** keeps the same source and scoring. It additionally asks for explicit before and after states and rejects state pairs that do not support the proposed kind of transition. Select it separately to compare it with the dedicated prompt. Each run uses one request from the same allowance.
+
 This fixed suite has a founder-only allowance of 20 calls per UTC day. It uses the same deployment-wide daily and monthly counters. The reader and the earlier benchmark keep their ordinary per-reader limit. A study call still needs a signed founder session, exact origin and a validated upload. The study is separate from reader playback.
 
 ## Enable real Lovense pairing for the beta
