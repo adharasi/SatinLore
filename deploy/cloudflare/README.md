@@ -153,6 +153,8 @@ The same upload offers a **Run joint-label Decisions retest** action. It runs on
 
 Open `/api/scene-analysis/decisions-story-study` on the signed-in app origin. Submit the prepared calibration JSON from the 20-story evaluation bundle first. The grounded candidate supports a candidate-only calibration retest and a matched comparison with v2. Freeze the candidate before submitting the holdout JSON. The same approved sentences go to both prompts in matched runs, with gaps between stories. Every uploaded story must match its approved digest. Results contain scores and provider usage without source sentences.
 
+**Run dedicated transition test** uses one Luna Responses call for the selected approved split. It reads each complete story as a separate sequence, nominates a transition with in-story before and after evidence, and reports exact sentence scores plus one-to-one scores within one paragraph. The second score measures narrative cuts and does not cover all playback phase changes. The transition pass is experimental and shares the study allowance.
+
 This fixed suite has a founder-only allowance of 20 calls per UTC day. It uses the same deployment-wide daily and monthly counters. The reader and the earlier benchmark keep their ordinary per-reader limit. A study call still needs a signed founder session, exact origin and a validated upload. The study is separate from reader playback.
 
 ## Enable real Lovense pairing for the beta

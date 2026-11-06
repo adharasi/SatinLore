@@ -104,10 +104,11 @@ test("the story study accepts only a signed founder and a pinned same-origin upl
   const f = fixture(), founder = await token(), tester = await token(TESTER_EMAIL);
   const page = await f.worker.fetch(benchmarkRequest(founder, { host: ORIGIN, path: STUDY, method: "GET" }), f.env);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Run story comparison/);
+  assert.match(await page.text(), /Run dedicated transition test/);
   assert.equal((await f.worker.fetch(benchmarkRequest(tester, { path: STUDY, method: "GET" }), f.env)).status, 403);
   const body = new FormData();
   body.set("payload", new File(['{"version":"nocturne-story-study-20-2026-11-06-v1","split":"calibration","stories":[]}'], "study.json"));
+  body.set("mode", "transitions");
   const submitted = (origin) => new Request(ORIGIN + STUDY, { method: "POST",
     headers: { "Cf-Access-Jwt-Assertion": founder, Origin: origin }, body });
   assert.equal((await f.worker.fetch(submitted(BETA), f.env)).status, 403);
@@ -212,6 +213,7 @@ const SCENE_ANALYSIS_MODULES = ["deploy/cloudflare/scene-analysis.mjs", CONTEXT_
   "deploy/cloudflare/decisions-benchmark.mjs", "deploy/cloudflare/scene-decisions.mjs",
   "deploy/cloudflare/decisions-corpus-benchmark.mjs", "deploy/cloudflare/decisions-corpus-pins.mjs",
   "deploy/cloudflare/decisions-story-study.mjs", "deploy/cloudflare/decisions-story-study-pins.mjs",
+  "deploy/cloudflare/decisions-transition-study.mjs", "deploy/cloudflare/story-transition-analysis.mjs",
   "scripts/lib/nocturne-scene-analysis.mjs", "app/static/reader/scene-map.mjs", "app/static/reader/import.mjs"];
 const sceneModules = root => Promise.all(SCENE_ANALYSIS_MODULES.map(async source => ({
   type: "ESModule", path: root + source, contents: await readFile(root + source, "utf8"),

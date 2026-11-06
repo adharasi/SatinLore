@@ -8,6 +8,7 @@ import { runDecisionsBenchmark } from "./decisions-benchmark.mjs";
 import { runDecisionsCorpusBenchmark, validateDecisionsCorpusPayload } from "./decisions-corpus-benchmark.mjs";
 import { runDecisionsStoryStudy, STORY_STUDY_MAX_TOTAL_REQUESTS, validateStoryStudyPayload } from "./decisions-story-study.mjs";
 import { DECISIONS_STORY_STUDY_PINS } from "./decisions-story-study-pins.mjs";
+import { runDecisionsTransitionStudy } from "./decisions-transition-study.mjs";
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
@@ -298,7 +299,9 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <input id="study-payload" name="payload" type="file" accept=".json,application/json" required>
 <button>Run story comparison</button>
 <button name="mode" value="grounded-calibration">Retest grounded candidate on calibration</button>
-<button name="mode" value="grounded">Run grounded candidate comparison</button></form></main></html>`;
+<button name="mode" value="grounded">Run grounded candidate comparison</button>
+<button name="mode" value="transitions">Run dedicated transition test</button>
+<p>The dedicated test uses one API request for the selected split and scores transitions only.</p></form></main></html>`;
 
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -320,6 +323,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   let jointRetest = false;
   let groundedCandidate = false;
   let candidateOnly = false;
+  let transitionOnly = false;
   try {
     if (storyStudy && !corpus) throw new TypeError("Invalid study form.");
     if (corpus) {
@@ -327,12 +331,13 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
       const form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
       const file = form.get("payload");
       const mode = form.get("mode");
-      const modes = storyStudy ? [null, "grounded", "grounded-calibration"] : [null, "joint"];
+      const modes = storyStudy ? [null, "grounded", "grounded-calibration", "transitions"] : [null, "joint"];
       if (!modes.includes(mode) || [...form.keys()].length !== (mode === null ? 1 : 2) ||
           !(file instanceof File)) throw new TypeError("Invalid corpus form.");
       jointRetest = mode === "joint";
       candidateOnly = mode === "grounded-calibration";
       groundedCandidate = candidateOnly || mode === "grounded";
+      transitionOnly = mode === "transitions";
       payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()));
       if (storyStudy) await validateStoryStudyPayload(payload, DECISIONS_STORY_STUDY_PINS, { candidateOnly });
       else await validateDecisionsCorpusPayload(payload);
@@ -359,7 +364,8 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   const deny = response => { blocked = response; stop.abort(); throw new Error("Benchmark blocked."); };
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
   try {
-    const run = storyStudy ? runDecisionsStoryStudy : corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
+    const run = transitionOnly ? runDecisionsTransitionStudy : storyStudy ? runDecisionsStoryStudy :
+      corpus ? runDecisionsCorpusBenchmark : runDecisionsBenchmark;
     const result = await run({ key, payload, jointRetest, groundedCandidate, candidateOnly, pins: DECISIONS_STORY_STUDY_PINS,
       signal: AbortSignal.any([signal, stop.signal]), analysisFetcher: async (url, options) => {
       if (!await authorized()) deny(expired());
