@@ -1,6 +1,7 @@
 import { CORPUS_COMPACT_PROMPTS, CORPUS_COMPACT_RESPONSE_FORMAT, REFERENCE_RUBRIC_VERSION,
   inspectCorpusCompactResponse } from "./corpus-study-contract.mjs";
-import { CORPUS_BUDGET_LIMITS, CORPUS_BUDGET_ORIGIN } from "./corpus-study-budget.mjs";
+import { CORPUS_ATTEMPT_STATES, CORPUS_BUDGET_LIMITS, CORPUS_BUDGET_ORIGIN,
+  CORPUS_RECONCILE_MAX_BATCHES } from "./corpus-study-budget.mjs";
 import { CORPUS_STUDY_CLIENT_ASSET } from "./assets.mjs";
 
 export const CORPUS_STUDY_PATH = "/api/scene-analysis/corpus-study";
@@ -217,7 +218,8 @@ const PAGE=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta nam
 <label>Optional conflict-target selection <input id="adjudication" type="file" accept=".json,application/json"></label>
 <fieldset><legend>Passes</legend><label><input id="referenceA" type="checkbox" checked>Reference A</label><label><input id="referenceB" type="checkbox" checked>Reference B</label><label><input id="detector" type="checkbox">Source-first detector v7</label><label><input id="transition" type="checkbox">Transition detector v7</label><label><input id="adjudicator" type="checkbox">Review A/B conflicts</label></fieldset>
 <label><input id="consent" type="checkbox">I authorize these exact source batches to be sent for neutral classification. This does not establish content or playback eligibility.</label>
-<p><button id="prepare">Prepare selected passes</button> <button id="start" disabled>Start</button> <button id="pause" disabled>Pause after in-flight calls</button> <button id="download" disabled>Download source-free results</button></p>
+<label>Concurrent requests <input id="concurrency" type="number" min="1" max="${CORPUS_BUDGET_LIMITS.concurrency}" value="6"></label>
+<p><button id="prepare">Prepare selected passes</button> <button id="start" disabled>Start</button> <button id="pause" disabled>Pause after in-flight calls</button> <button id="reconcile" disabled>Reconcile unknown requests</button> <button id="download" disabled>Download source-free results</button></p>
 <p id="progress" role="status">Choose a source file.</p><pre id="summary"></pre><p>Keep this page open. Source and outputs are held in memory. Download results before closing; the server retains only expiring digests and quota metadata, so lost outputs cannot be fetched or automatically re-billed.</p></main></body></html>`;
 
 export async function handleCorpusStudy(request,env,{config,session,reverify,analysisFetcher=fetch}){
@@ -232,16 +234,43 @@ export async function handleCorpusStudy(request,env,{config,session,reverify,ana
       return json({code:"study_unavailable"},503);
     }
     return json({code:"not_found"},404);}
-  if(request.method!=="POST"||![CORPUS_STUDY_PATH+"/register",CORPUS_STUDY_PATH+"/batch"].includes(url.pathname))return json({code:"invalid_method"},405);
+  const reconcile = url.pathname === CORPUS_STUDY_PATH + "/reconcile";
+  if(request.method!=="POST"||!reconcile&&![CORPUS_STUDY_PATH+"/register",CORPUS_STUDY_PATH+"/batch"].includes(url.pathname))return json({code:"invalid_method"},405);
   const expired=()=>request.signal.aborted||Date.now()>=session.expiresAt;
   const authorized=async()=>{const renewed=await reverify();return renewed?.isFounder===true&&renewed.subject===session.subject&&Date.now()<renewed.expiresAt&&!expired();};
   if(!await authorized())return json({code:"invalid_session"},403);
   const stop=AbortSignal.timeout(Math.max(0,Math.min(120000,session.expiresAt-Date.now()))),signal=AbortSignal.any([request.signal,stop]);
-  let input;try{input=await boundedJson(request,131072,AbortSignal.any([signal,AbortSignal.timeout(5000)]));}catch(error){return json({code:error instanceof RangeError?"input_limit":"invalid_request"},error instanceof RangeError?413:400);}
-  const namespace=env.SCENE_ANALYSIS_BUDGET,key=env.OPENAI_API_KEY;
-  if(typeof namespace?.idFromName!=="function"||typeof namespace.get!=="function"||typeof key!=="string"||!/^sk-[A-Za-z0-9_-]{12,512}$/.test(key)||key.startsWith("sk-admin-"))return json({code:"study_unavailable"},503);
+  let input;try{input=await boundedJson(request,reconcile?8192:131072,AbortSignal.any([signal,AbortSignal.timeout(5000)]));}catch(error){return json({code:error instanceof RangeError?"input_limit":"invalid_request"},error instanceof RangeError?413:400);}
+  const namespace=env.SCENE_ANALYSIS_BUDGET;
+  if(typeof namespace?.idFromName!=="function"||typeof namespace.get!=="function")return json({code:"study_unavailable"},503);
   const reader=await corpusDigest(`satinlore:corpus:v1:${config.issuer}:${session.subject}`),stub=namespace.get(namespace.idFromName("scene-analysis:v1"));
   const budget=async(operation,body)=>stub.fetch(new Request(CORPUS_BUDGET_ORIGIN+"/corpus/"+operation,{method:"POST",signal:AbortSignal.timeout(5000),headers:{"Content-Type":"application/json"},body:JSON.stringify({reader,...body})}));
+  if (reconcile) {
+    if (!exact(input, ["runId", "batchIds"]) || !id(input.runId) || !Array.isArray(input.batchIds) ||
+      input.batchIds.length === 0 || input.batchIds.length > CORPUS_RECONCILE_MAX_BATCHES ||
+      !input.batchIds.every(hash) || new Set(input.batchIds).size !== input.batchIds.length) return json({code:"invalid_request"}, 400);
+    if (!await authorized()) return json({code:"invalid_session"}, 403);
+    let response, status;
+    try {
+      response = await budget("status", {runId: input.runId, batchIds: input.batchIds});
+      status = await boundedJson(response, 8192, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
+    } catch {
+      return json({code:"budget_unavailable"}, 503);
+    }
+    if (!await authorized()) return json({code:"invalid_session"}, 403);
+    if (response.status === 403 && ["unknown_run", "batch_not_pinned"].includes(status?.code)) {
+      return json({code:status.code}, 403);
+    }
+    if (!response.ok || !exact(status, ["runId", "batches"]) || status.runId !== input.runId ||
+      !Array.isArray(status.batches) || status.batches.length !== input.batchIds.length ||
+      status.batches.some((batch, index) => !exact(batch, ["batchId", "state"]) ||
+        batch.batchId !== input.batchIds[index] || !CORPUS_ATTEMPT_STATES.includes(batch.state))) {
+      return json({code:"budget_unavailable"}, 503);
+    }
+    return json(status);
+  }
+  const key=env.OPENAI_API_KEY;
+  if(typeof key!=="string"||!/^sk-[A-Za-z0-9_-]{12,512}$/.test(key)||key.startsWith("sk-admin-"))return json({code:"study_unavailable"},503);
   if(url.pathname.endsWith("/register")){
     if(!exact(input,["runId","manifest","sourceConsent"])||input.sourceConsent!==true||!id(input.runId)||!Array.isArray(input.manifest)||!input.manifest.length||input.manifest.length>1500||!input.manifest.every(hash))return json({code:"invalid_manifest"},400);
     if(!await authorized())return json({code:"invalid_session"},403);

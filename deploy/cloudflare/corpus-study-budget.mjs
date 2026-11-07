@@ -2,6 +2,8 @@
 // It never receives source text, provider labels, authentication tokens or errors.
 export const CORPUS_BUDGET_ORIGIN = "https://scene-analysis.internal";
 export const CORPUS_BUDGET_LIMITS = Object.freeze({ attempts: 1500, micros: 15_000_000, lifetimeMs: 7 * 86_400_000, concurrency: 12 });
+export const CORPUS_RECONCILE_MAX_BATCHES = 64;
+export const CORPUS_ATTEMPT_STATES = Object.freeze(["complete", "refused", "inflight", "unknown", "absent"]);
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const id = value => typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,95}$/.test(value);
 const exact = (value, fields) => value && typeof value === "object" && !Array.isArray(value) &&
@@ -32,22 +34,45 @@ export async function handleCorpusBudget(request, state) {
   const url = new URL(request.url);
   if (url.origin !== CORPUS_BUDGET_ORIGIN || !url.pathname.startsWith("/corpus/") || request.method !== "POST") return null;
   const reply = (value, status = 200) => Response.json(value, { status });
+  const readStatus = url.pathname === "/corpus/status";
+  const bodyLimit = readStatus ? 8192 : 131072;
   let input;
   try {
     const length = request.headers.get("Content-Length");
-    if (length !== null && (!/^\d+$/.test(length) || Number(length) > 131072)) return reply({code:"input_limit"}, 413);
+    if (length !== null && (!/^\d+$/.test(length) || Number(length) > bodyLimit)) return reply({code:"input_limit"}, 413);
     const reader = request.body?.getReader();
     if (!reader) return reply({code:"invalid_request"}, 400);
     const chunks = []; let bytes = 0;
     try { while (true) { const {done,value} = await reader.read(); if (done) break; bytes += value.byteLength;
-      if (bytes > 131072) { await reader.cancel(); return reply({code:"input_limit"},413); } chunks.push(value); } }
+      if (bytes > bodyLimit) { await reader.cancel(); return reply({code:"input_limit"},413); } chunks.push(value); } }
     finally { reader.releaseLock(); }
     const combined = new Uint8Array(bytes); let offset = 0;
     for (const chunk of chunks) {combined.set(chunk, offset); offset += chunk.byteLength;}
     input = JSON.parse(new TextDecoder("utf-8", {fatal:true}).decode(combined));
   } catch { return reply({code:"invalid_request"},400); }
   if (!hash(input?.reader) || !id(input?.runId)) return reply({code:"invalid_request"},400);
-  const now = Date.now(), day = Math.floor(now / 86_400_000), expires = now + CORPUS_BUDGET_LIMITS.lifetimeMs;
+  const now = Date.now();
+  if (readStatus) {
+    if (url.search || !exact(input, ["reader", "runId", "batchIds"]) ||
+      !distinctHashes(input.batchIds, CORPUS_RECONCILE_MAX_BATCHES)) return reply({code:"invalid_request"}, 400);
+    return state.storage.transactionSync(() => {
+      const run = state.sql.exec("SELECT manifest FROM corpus_run WHERE id=? AND owner=? AND expires_at>?",
+        input.runId, input.reader, now).toArray()[0];
+      if (!run) return reply({code:"unknown_run"}, 403);
+      const manifest = new Set(JSON.parse(run.manifest));
+      if (input.batchIds.some(batchId => !manifest.has(batchId))) return reply({code:"batch_not_pinned"}, 403);
+      const batches = input.batchIds.map(batchId => {
+        const attempt = state.sql.exec("SELECT state,lease_until FROM corpus_attempt WHERE run_id=? AND digest=?",
+          input.runId, batchId).toArray()[0];
+        if (!attempt) return {batchId, state:"absent"};
+        const validState = CORPUS_ATTEMPT_STATES.includes(attempt.state) && attempt.state !== "absent";
+        const leaseExpired = attempt.state === "inflight" && attempt.lease_until <= now;
+        return {batchId, state:validState && !leaseExpired ? attempt.state : "unknown"};
+      });
+      return reply({runId:input.runId, batches});
+    });
+  }
+  const day = Math.floor(now / 86_400_000), expires = now + CORPUS_BUDGET_LIMITS.lifetimeMs;
   const result = state.storage.transactionSync(() => {
     pruneCorpusBudget(state.sql, now);
     const run = state.sql.exec("SELECT * FROM corpus_run WHERE id=?", input.runId).toArray()[0];
