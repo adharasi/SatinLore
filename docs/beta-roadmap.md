@@ -137,6 +137,8 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 ## F5 — measurable scoring evaluation
 
+The founder evidence recovery phase compares the same exact target with and without approved earlier anchors. It separates source coverage, interpretation, and transport before a source-selected candidate reaches reader qualification. [Paired diagnostic and release sequence](nocturne-evidence-recovery.md)
+
 A founder-only whole story research harness compares one complete cleared edition, concurrent paragraph windows and a causal sentence prefix on four pinned original neutral fixtures. It reports typed labels, coverage, exact transitions, timing and usage through a separately enabled Access-protected route. The next check is a billed Responses run on the deployed candidate. [Commands, schema and runtime flag](nocturne-luna-comparison.md)
 
 A founder-only hosted benchmark compares sentence-level Luna Decisions with Luna Responses using fixed fixtures and a digest-pinned approved calibration corpus. It uses the existing Worker key and quota. Compare live coverage, precision, recall, latency and token usage before considering playback integration. [Hosted benchmark](../deploy/cloudflare/README.md#run-the-founder-luna-decisions-benchmark)

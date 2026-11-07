@@ -9,6 +9,8 @@ export function corpusStudyClient({testOnly = false} = {}) {
   const BATCH_STREAM_TYPE = "application/x-ndjson";
   const MAX_BATCH_RESULT_BYTES = 2 * 1024 * 1024;
   const MAX_HEARTBEATS = 16;
+  const EVIDENCE_PAIR_PLAN_KIND = "satinlore-evidence-pair-plan";
+  const MAX_EVIDENCE_PAIRS = 150;
   const LEDGER_STATES = ["complete", "refused", "inflight", "unknown", "absent"];
   const encoder = new TextEncoder();
   const isHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
@@ -19,6 +21,8 @@ export function corpusStudyClient({testOnly = false} = {}) {
     encoder.encode(typeof value === "string" ? value : JSON.stringify(value)))), byte => byte.toString(16).padStart(2, "0")).join("");
   const unitKey = (work, unit) => digest([work.sourceSha256, work.indexSha256, unit.id, unit.unitSha256]);
   const fail = code => { throw new TypeError(code); };
+  const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
   const reasons = ["grounded-current", "context-supported-continuation", "neutral-context", "noncurrent-frame", "mention-only", "nonromantic-activity", "mixed-unit", "hard-stop", "scene-boundary", "frame-transition", "declined-restart", "adult-status-uncertain", "consent-withdrawn", "consent-uncertain", "capacity-uncertain", "protected-content", "scope-uncertain", "insufficient-context", "evidence-outside-window", "ambiguous-language", "unsupported-language", "reference-disagreement", "provider-refusal", "causal-projection", "evidence-after-target", "depicted-noncurrent-interaction"];
   const enums = {
     depiction: ["neutral", "romantic", "suggestive", "explicit", "graphic", "unknown"],
@@ -262,6 +266,14 @@ export function corpusStudyClient({testOnly = false} = {}) {
     }
     return out;
   }
+  function makeBatch(work, role, units, targetIds) {
+    return {schema: 1, workId: work.id, sourceSha256: work.sourceSha256, indexSha256: work.indexSha256, referenceVersion: VERSION, role,
+      units: units.map(u => ({id: u.id, paragraph: u.paragraph, unitSha256: u.unitSha256, text: u.text, target: targetIds.has(u.id), structuralBoundary: u.structuralBoundary}))};
+  }
+  function fitsBatch(batch) {
+    return encoder.encode(JSON.stringify(batch)).byteLength <= 112000 &&
+      batch.units.reduce((n, u) => n + encoder.encode(u.text).byteLength, 0) <= 110000;
+  }
   async function buildTasks(prepared, selectedRoles, adjudicationJobs = null) {
     if (!selectedRoles.length || selectedRoles.some(role => !ROLES.includes(role)) || new Set(selectedRoles).size !== selectedRoles.length) fail("invalid_roles");
     const tasks = [], jobTargets = new Map();
@@ -294,10 +306,9 @@ export function corpusStudyClient({testOnly = false} = {}) {
         const priority = u => wanted.has(u.id) ? -1 : (role === "referenceA" && u.id < (available[24]?.id ?? Infinity) ? 0 : 1) * 1e7 + Math.min(Math.abs(u.id - targets[0].id), Math.abs(u.id - targets.at(-1).id));
         candidates.sort((a, b) => priority(a) - priority(b) || a.id - b.id);
         candidates = candidates.slice(0, maxUnits);
-        const make = () => ({schema: 1, workId: work.id, sourceSha256: work.sourceSha256, indexSha256: work.indexSha256, referenceVersion: VERSION, role,
-          units: [...candidates].sort((a, b) => a.id - b.id).map(u => ({id: u.id, paragraph: u.paragraph, unitSha256: u.unitSha256, text: u.text, target: wanted.has(u.id), structuralBoundary: u.structuralBoundary}))});
+        const make = () => makeBatch(work, role, [...candidates].sort((a, b) => a.id - b.id), wanted);
         let batch = make();
-        while (encoder.encode(JSON.stringify(batch)).byteLength > 112000 || batch.units.reduce((n, u) => n + encoder.encode(u.text).byteLength, 0) > 110000) {
+        while (!fitsBatch(batch)) {
           const index = candidates.findLastIndex(u => !wanted.has(u.id)); if (index < 0) fail("target_limit"); candidates.splice(index, 1); batch = make();
         }
         if (batch.units.filter(u => u.target).length !== targets.length) fail("target_limit");
@@ -306,6 +317,42 @@ export function corpusStudyClient({testOnly = false} = {}) {
     }
     if (!tasks.length || tasks.length > 1500 || new Set(tasks.map(t => t.batchHash)).size !== tasks.length) fail("plan_limit");
     return tasks;
+  }
+
+  // Both arms use the ordinary detector contract. Only earlier context differs.
+  async function buildEvidencePairTasks(prepared, plan) {
+    if (!exactKeys(plan, ["schema", "kind", "sourceBundleSha256", "pairs"]) || plan.schema !== 1 ||
+        plan.kind !== EVIDENCE_PAIR_PLAN_KIND || !isHash(plan.sourceBundleSha256) ||
+        plan.sourceBundleSha256 !== prepared.sourceBundleSha256 || !Array.isArray(plan.pairs) ||
+        !plan.pairs.length || plan.pairs.length > MAX_EVIDENCE_PAIRS) fail("invalid_evidence_pair_plan");
+    const tasks = [], pairs = [], seenTargets = new Set();
+    const workById = new Map(prepared.works.map(work => [work.id, work]));
+    const unitsByWork = new Map();
+    for (const pair of plan.pairs) {
+      if (!exactKeys(pair, ["workId", "sourceSha256", "indexSha256", "targetId", "baselineContextIds", "addedContextIds"])) fail("invalid_evidence_pair");
+      const {workId, sourceSha256, indexSha256, targetId, baselineContextIds, addedContextIds} = pair;
+      const work = workById.get(workId), targetKey = `${workId}:${targetId}`;
+      if (!work || work.sourceSha256 !== sourceSha256 || work.indexSha256 !== indexSha256 ||
+          !integer(targetId) || seenTargets.has(targetKey) || !ids(baselineContextIds) || !ids(addedContextIds) ||
+          !addedContextIds.length || baselineContextIds.length + addedContextIds.length > 8) fail("invalid_evidence_pair");
+      seenTargets.add(targetKey);
+      if (!unitsByWork.has(workId)) unitsByWork.set(workId, new Map(work.units.map(unit => [unit.id, unit])));
+      const units = unitsByWork.get(workId), contextIds = [...baselineContextIds, ...addedContextIds];
+      if (new Set(contextIds).size !== contextIds.length || contextIds.some(id => id >= targetId) ||
+          [...contextIds, targetId].some(id => units.get(id)?.admission !== "approved" || units.get(id).structuralBoundary)) fail("invalid_evidence_pair");
+      const targetIds = new Set([targetId]);
+      async function buildArm(context) {
+        const selected = [...context].sort((a, b) => a - b).concat(targetId).map(id => units.get(id));
+        const batch = makeBatch(work, "detector", selected, targetIds);
+        if (!fitsBatch(batch)) fail("evidence_pair_limit");
+        return {batch, batchHash: await digest(batch), unitKeys: selected.map(unit => unit.unitKey)};
+      }
+      const [baseline, enriched] = await Promise.all([buildArm(baselineContextIds), buildArm(contextIds)]);
+      tasks.push(baseline, enriched);
+      pairs.push({workId, sourceSha256, indexSha256, targetId, baselineContextIds: [...baselineContextIds],
+        addedContextIds: [...addedContextIds], baselineBatchId: baseline.batchHash, enrichedBatchId: enriched.batchHash});
+    }
+    return {tasks, pairs};
   }
 
   function resumeDisposition(checkpoint, prepared) {
@@ -322,6 +369,30 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const b = task.batch;
     return {batchId: task.batchHash, workId: b.workId, role: b.role, targetIds: b.units.filter(u => u.target).map(u => u.id), contextIds: b.units.filter(u => !u.target).map(u => u.id)};
   }
+  async function validateEvidencePairResume(resumed, evidencePairPlan, tasks, manifest, manifestHash) {
+    const pairedCheckpoint = resumed.some(r => r.checkpoint && Object.hasOwn(r.checkpoint, "evidencePairPlan"));
+    if (!evidencePairPlan && !pairedCheckpoint) return;
+    if (!evidencePairPlan || resumed.some(r => r.jobs)) fail("evidence_pair_checkpoint_mismatch");
+    const knownBatches = new Set(manifest), runIds = new Set();
+    for (const r of resumed) {
+      const checkpoint = r.checkpoint;
+      if (!checkpoint) continue;
+      const metadata = checkpoint.evidencePairPlan;
+      if (!exactKeys(metadata, ["schema", "kind", "sourceBundleSha256", "pairs", "planSha256"])) fail("evidence_pair_checkpoint_mismatch");
+      const {schema, kind, sourceBundleSha256, pairs, planSha256} = metadata;
+      if (planSha256 !== evidencePairPlan.planSha256 ||
+          await digest({schema, kind, sourceBundleSha256, pairs}) !== planSha256 ||
+          checkpoint.manifestHash !== manifestHash || JSON.stringify(checkpoint.manifest) !== JSON.stringify(manifest) ||
+          JSON.stringify(checkpoint.selectedRoles) !== '["detector"]' ||
+          r.plannedBatches.length !== tasks.length ||
+          r.plannedBatches.some((record, i) => JSON.stringify(record) !== JSON.stringify(planRecord(tasks[i])))) fail("evidence_pair_checkpoint_mismatch");
+      const sameRun = record => record?.runId === checkpoint.runId && knownBatches.has(record.batchId);
+      if ([r.batches, r.attempts].some(rows => !rows.every(sameRun) || new Set(rows.map(row => row.batchId)).size !== rows.length) ||
+          !r.reconciliationEvents.every(sameRun)) fail("evidence_pair_checkpoint_mismatch");
+      runIds.add(checkpoint.runId);
+    }
+    if (runIds.size > 1) fail("evidence_pair_checkpoint_mismatch");
+  }
   async function recoverTask(prepared, record) {
     if (!record || !isHash(record.batchId) || !isId(record.workId) || !ROLES.includes(record.role) ||
         !Array.isArray(record.targetIds) || !record.targetIds.length || record.targetIds.length > 64 || !Array.isArray(record.contextIds) || record.targetIds.length + record.contextIds.length > (record.role === "detector" ? 80 : 512)) fail("invalid_checkpoint");
@@ -330,17 +401,16 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const work = prepared.works.find(w => w.id === record.workId), mapped = new Map(work?.units.map(u => [u.id, u]));
     const selected = all.sort((a, b) => a - b).map(id => mapped.get(id));
     if (!work || selected.some(u => !u || u.structuralBoundary || u.admission !== "approved")) fail("checkpoint_plan_mismatch");
-    const batch = {schema: 1, workId: work.id, sourceSha256: work.sourceSha256, indexSha256: work.indexSha256, referenceVersion: VERSION, role: record.role,
-      units: selected.map(u => ({id: u.id, paragraph: u.paragraph, unitSha256: u.unitSha256, text: u.text, target: target.has(u.id), structuralBoundary: u.structuralBoundary}))};
+    const batch = makeBatch(work, record.role, selected, target);
     const batchHash = await digest(batch);
     if (batchHash !== record.batchId) fail("checkpoint_plan_mismatch");
     return {batch, batchHash, unitKeys: selected.map(u => u.unitKey)};
   }
-  const helpers = {prepareSource, buildTasks, digest, unitKey, cleanResult, cleanRow, localResult, adjudicationTargets, resumeDisposition, planRecord, recoverTask, readBatchResponse, VERSION};
+  const helpers = {prepareSource, buildTasks, buildEvidencePairTasks, validateEvidencePairResume, digest, unitKey, cleanResult, cleanRow, localResult, adjudicationTargets, resumeDisposition, planRecord, recoverTask, readBatchResponse, VERSION};
   if (testOnly) return helpers;
 
   const el = id => document.getElementById(id);
-  const state = {prepared: null, tasks: [], tasksByHash: new Map(), runId: null, manifest: [], selectedRoles: [], batches: new Map(), attempts: new Map(), history: new Map(), blocked: new Set(), held: new Set(), legacyHolds: new Set(), refusedWindows: new Set(), reconciliationEvents: [], running: false, preparing: false, reconciling: false, paused: true, active: 0, registered: false, pauseCode: null, concurrency: DEFAULT_CONCURRENCY};
+  const state = {prepared: null, tasks: [], tasksByHash: new Map(), runId: null, manifest: [], selectedRoles: [], evidencePairPlan: null, batches: new Map(), attempts: new Map(), history: new Map(), blocked: new Set(), held: new Set(), legacyHolds: new Set(), refusedWindows: new Set(), reconciliationEvents: [], running: false, preparing: false, reconciling: false, paused: true, active: 0, registered: false, pauseCode: null, concurrency: DEFAULT_CONCURRENCY};
   const message = text => { el("progress").textContent = text; };
   const selected = () => ROLES.filter(role => el(role).checked);
   const unknownAttempts = () => [...state.attempts.values()].filter(attempt => attempt.state === "unknown");
@@ -378,10 +448,11 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const busy = state.running || state.preparing || state.reconciling;
     el("prepare").disabled = busy; el("start").disabled = busy || !state.tasks.length; el("pause").disabled = !state.running; el("download").disabled = !state.prepared;
     if (el("reconcile")) el("reconcile").disabled = busy || !unknownAttempts().length;
-    for (const name of ["source", "checkpoint", "adjudication", "concurrency", ...ROLES]) if (el(name)) el(name).disabled = busy;
+    for (const name of ["source", "checkpoint", "adjudication", "evidence-pairs", "concurrency", ...ROLES]) if (el(name)) el(name).disabled = busy;
   };
   const snapshot = () => ({schema: 1, kind: "satinlore-corpus-study-checkpoint", referenceVersion: VERSION, sourceBundleSha256: state.prepared.sourceBundleSha256,
     runId: state.runId, manifest: [...state.manifest], manifestHash: state.manifestHash, selectedRoles: [...state.selectedRoles],
+    ...(state.evidencePairPlan ? {evidencePairPlan: state.evidencePairPlan} : {}),
     contextPolicy: {referenceA: "opening-24-plus-centered-local-with-gaps", referenceB: "centered-local", adjudicator: "blind-centered-local", referenceBFirstPartition: 32, detectorPrecedingUnits: 8, maxConcurrency: MAX_CONCURRENCY, concurrency: state.concurrency, overlappingWindowsConcurrent: false},
     workRoster: state.prepared.works.map(w => ({workId: w.id, family: w.family, sourceSha256: w.sourceSha256, indexSha256: w.indexSha256, sourceUnitSha256: w.sourceUnitSha256, units: w.units.length, targets: w.units.filter(u => !u.structuralBoundary && u.admission === "approved").length})),
     plannedBatches: [...state.history.values()], attempts: [...state.attempts.values()], batches: [...state.batches.values()], blockedUnitKeys: [...state.blocked].sort(), heldUnitKeys: [...state.held].sort(), reconciliationEvents: [...state.reconciliationEvents], updatedAt: new Date().toISOString()});
@@ -396,8 +467,12 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const prepared = await prepareSource(await readInput(el("source"), 8 * 1024 * 1024));
     const readJson = async (name, limit) => { try { return JSON.parse(await readInput(el(name), limit)); } catch { fail("invalid_checkpoint"); } };
     const imported = el("checkpoint").files?.length ? await readJson("checkpoint", 64 * 1024 * 1024) : null;
-    const retained = state.prepared?.sourceBundleSha256 === prepared.sourceBundleSha256 ? snapshot() : null;
+    const pairFile = Boolean(el("evidence-pairs")?.files?.length);
+    const hasRetainedStudy = state.registered || state.attempts.size || state.batches.size;
+    const retained = state.prepared?.sourceBundleSha256 === prepared.sourceBundleSha256 &&
+      (hasRetainedStudy || !pairFile && !state.evidencePairPlan) ? snapshot() : null;
     const resumed = [resumeDisposition(imported, prepared), resumeDisposition(retained, prepared)], roles = selected();
+    if (pairFile && (el("adjudication")?.files?.length || roles.length !== 1 || roles[0] !== "detector")) fail("invalid_evidence_pair_passes");
     const sidecar = el("adjudication")?.files?.length ? resumeDisposition(await readJson("adjudication", 8 * 1024 * 1024), prepared) : null;
     if (sidecar && !sidecar.jobs) fail("invalid_adjudication_jobs");
     const mergedRows = new Map(), attemptRecords = new Map();
@@ -410,9 +485,17 @@ export function corpusStudyClient({testOnly = false} = {}) {
     }
     const allRows = [...mergedRows.values()];
     const jobs = sidecar?.jobs ?? resumed[0].jobs ?? (roles.includes("adjudicator") ? adjudicationTargets(prepared, allRows) : null);
-    const tasks = await buildTasks(prepared, roles, jobs), byHash = new Map(tasks.map(t => [t.batchHash, t]));
+    let tasks, evidencePairPlan = null;
+    if (pairFile) {
+      const pairPlan = await buildEvidencePairTasks(prepared, await readJson("evidence-pairs", 128 * 1024));
+      tasks = pairPlan.tasks;
+      const metadata = {schema: 1, kind: EVIDENCE_PAIR_PLAN_KIND, sourceBundleSha256: prepared.sourceBundleSha256, pairs: pairPlan.pairs};
+      evidencePairPlan = {...metadata, planSha256: await digest(metadata)};
+    } else tasks = await buildTasks(prepared, roles, jobs);
+    const byHash = new Map(tasks.map(t => [t.batchHash, t]));
     const manifest = tasks.map(t => t.batchHash), manifestHash = await digest(manifest);
     for (const r of resumed) if (r.checkpoint && await digest(r.checkpoint.manifest) !== r.checkpoint.manifestHash) fail("invalid_checkpoint");
+    await validateEvidencePairResume(resumed, evidencePairPlan, tasks, manifest, manifestHash);
     const sameManifest = resumed.findLast(r => r.checkpoint?.manifestHash === manifestHash)?.checkpoint;
     const runId = sameManifest ? sameManifest.runId : `corpus-${crypto.randomUUID()}`;
     const batches = new Map(), attempts = new Map(), history = new Map(tasks.map(task => [task.batchHash, planRecord(task)]));
@@ -463,11 +546,13 @@ export function corpusStudyClient({testOnly = false} = {}) {
       for (const record of [...uncertain, ...unsettled, ...r.reconciliationEvents]) byHash.get(record?.batchId)?.unitKeys.forEach(key => explainedHolds.add(key));
     }
     const legacyHolds = new Set(resumed.flatMap(r => r.heldUnitKeys).filter(key => verifiedKeys(key) && !explainedHolds.has(key)));
-    Object.assign(state, {prepared, tasks, tasksByHash: new Map(tasks.map(task => [task.batchHash, task])), runId, manifest, manifestHash, selectedRoles: roles, batches, attempts, history, reconciliationEvents,
+    Object.assign(state, {prepared, tasks, tasksByHash: new Map(tasks.map(task => [task.batchHash, task])), runId, manifest, manifestHash, selectedRoles: roles, evidencePairPlan, batches, attempts, history, reconciliationEvents,
       blocked: new Set(resumed.flatMap(r => r.blockedUnitKeys).filter(verifiedKeys)), legacyHolds, paused: true, registered: false});
     for (const b of batches.values()) for (const key of b.blockedUnitKeys ?? []) state.blocked.add(key);
     await refreshHolds();
-    update(); message(`Prepared ${tasks.length} batches. Start sends these exact batches for neutral classification. Existing attempted batches will not be re-billed.`);
+    const pairCount = evidencePairPlan?.pairs.length;
+    const preparedCount = pairCount ? `${pairCount} evidence ${pairCount === 1 ? "pair" : "pairs"} (${tasks.length} batches)` : `${tasks.length} batches`;
+    update(); message(`Prepared ${preparedCount}. Start sends these exact batches for neutral classification. Existing attempted batches will not be re-billed.`);
   }
   const post = (operation, body, signal) => fetch(`${PATH}/${operation}`, {method: "POST", credentials: "same-origin",
     headers: {"Content-Type": "application/json", ...(operation === "batch" ? {Accept: BATCH_STREAM_TYPE} : {})},
@@ -611,7 +696,7 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const blob = new Blob([content], {type: "application/json"}), url = URL.createObjectURL(blob), link = document.createElement("a");
     link.href = url; link.download = `satinlore-corpus-${state.runId}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  for (const name of ["source", "checkpoint", "adjudication", ...ROLES]) el(name)?.addEventListener("change", () => { if (!state.running && !state.preparing) { state.tasks = []; update(); message("Prepare the newly selected source, checkpoint and passes before starting."); } });
+  for (const name of ["source", "checkpoint", "adjudication", "evidence-pairs", ...ROLES]) el(name)?.addEventListener("change", () => { if (!state.running && !state.preparing) { state.tasks = []; update(); message("Prepare the newly selected source, checkpoint and passes before starting."); } });
   window.addEventListener("pagehide", () => { state.paused = true; });
   update();
 }
