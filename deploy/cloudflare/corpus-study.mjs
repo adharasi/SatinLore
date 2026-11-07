@@ -254,6 +254,7 @@ const PAGE=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta nam
 <label>Prepared source JSON <input id="source" type="file" accept=".json,application/json"></label><br>
 <label>Source-free checkpoint JSON <input id="checkpoint" type="file" accept=".json,application/json"></label>
 <label>Optional conflict-target selection <input id="adjudication" type="file" accept=".json,application/json"></label>
+<label>Optional paired evidence plan (Detector only) <input id="evidence-pairs" type="file" accept=".json,application/json"></label>
 <fieldset><legend>Passes</legend><label><input id="referenceA" type="checkbox" checked>Reference A</label><label><input id="referenceB" type="checkbox" checked>Reference B</label><label><input id="detector" type="checkbox">Source-first detector v7</label><label><input id="transition" type="checkbox">Transition detector v7</label><label><input id="adjudicator" type="checkbox">Review A/B conflicts</label></fieldset>
 <label><input id="consent" type="checkbox">I authorize these exact source batches to be sent for neutral classification. This does not establish content or playback eligibility.</label>
 <label>Concurrent requests <input id="concurrency" type="number" min="1" max="${CORPUS_BUDGET_LIMITS.concurrency}" value="6"></label>
