@@ -125,47 +125,150 @@ const compactInstructions = [
 export const CORPUS_COMPACT_PROMPTS = Object.freeze(Object.fromEntries(
   Object.entries(CORPUS_PROMPTS).map(([role, value]) => [role, value + " " + compactInstructions])));
 
-const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
-  Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-const validIds = values => Array.isArray(values) && values.length <= 8 &&
-  values.every((id, i) => Number.isSafeInteger(id) && id >= 0 && (i === 0 || id > values[i - 1]));
+const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const exactKeys = (value, keys) => record(value) && Object.keys(value).length === keys.length &&
+  keys.every(key => Object.hasOwn(value, key));
+const validId = id => Number.isSafeInteger(id) && id >= 0 && id <= 50000;
 const decodeCode = (name, code) => typeof code === "string" && Object.hasOwn(CORPUS_COMPACT_CODES[name], code)
   ? CORPUS_COMPACT_CODES[name][code] : undefined;
-function decodeLabel(value) {
-  if (!exactKeys(value, ["d", "f", "b", "a", "p", "t", "v", "k"]) || !validIds(value.v) ||
-      !(value.k === null || Number.isSafeInteger(value.k) && value.k >= 0)) return null;
-  const out = {depiction: decodeCode("depiction", value.d), frame: decodeCode("frame", value.f),
-    interaction: decodeCode("interaction", value.b),
-    activation: decodeCode("activation", value.a), phase: decodeCode("phase", value.p),
-    transition: decodeCode("transition", value.t), evidenceIds: [...value.v], knowledgeAtId: value.k};
-  return Object.values(out).some(item => item === undefined) ? null : out;
-}
+const unknownLabel = () => ({depiction: "unknown", frame: "uncertain", interaction: "uncertain", activation: "review",
+  phase: "unknown", transition: "unknown", evidenceIds: [], knowledgeAtId: null});
 const plainNeutral = () => ({depiction: "neutral", frame: "neutral", interaction: "none", activation: "context",
   phase: "quiet", transition: "none", evidenceIds: [], knowledgeAtId: null});
-const isPlainNeutral = value => value && Object.entries(plainNeutral()).every(([key, expected]) =>
+const isPlainNeutral = value => Object.entries(plainNeutral()).every(([key, expected]) =>
   key === "evidenceIds" ? value.evidenceIds.length === 0 : value[key] === expected);
-export function decodeCorpusCompactResponse(value) {
-  if (!exactKeys(value, ["rows"]) || !Array.isArray(value.rows) || !value.rows.length ||
-      value.rows.length > CORPUS_MAX_TARGETS) return null;
-  const seen = new Set(), rows = [];
-  for (const row of value.rows) {
-    if (!exactKeys(row, ["i", "s", "c", "r", "e", "q", "z"]) || !Number.isSafeInteger(row.i) || row.i < 0 || seen.has(row.i) ||
-        row.e !== null && (!exactKeys(row.e, ["s", "a", "c", "k", "v"]) || !validIds(row.e.v)) ||
-        !Number.isInteger(row.q) || row.q < 0 || row.q > 100 || !Array.isArray(row.z) ||
-        row.z.length < 1 || row.z.length > 4 || new Set(row.z).size !== row.z.length ||
-        row.z.some(code => !Number.isInteger(code) || code < 0 || code >= CORPUS_REASON_CODES.length)) return null;
-    seen.add(row.i);
-    if (row.c === "n" && row.s !== "c") return null;
-    const causal = row.c === "n" ? plainNeutral() : decodeLabel(row.c);
-    const retrospective = row.r === null && causal ? structuredClone(causal) : decodeLabel(row.r);
-    const status = decodeCode("status", row.s);
-    if (row.e === null && (status !== "classified" || !isPlainNeutral(causal) || !isPlainNeutral(retrospective))) return null;
-    const eligibility = row.e === null ? {status: "eligible", adult: "not_applicable", consent: "not_applicable",
-      capacity: "not_applicable", evidenceIds: []} : {status: decodeCode("eligibility", row.e.s), adult: decodeCode("adult", row.e.a),
-      consent: decodeCode("consent", row.e.c), capacity: decodeCode("capacity", row.e.k), evidenceIds: [...row.e.v]};
-    if (!status || !causal || !retrospective || Object.values(eligibility).some(item => item === undefined)) return null;
-    rows.push({id: row.i, status, causal, retrospective, eligibility, confidence: row.q,
-      reasonCodes: row.z.map(code => CORPUS_REASON_CODES[code])});
+const unknownEligibility = () => ({status: "uncertain", adult: "uncertain", consent: "uncertain", capacity: "uncertain", evidenceIds: []});
+
+function decodeEvidence(value, field, issue) {
+  if (!Array.isArray(value) || value.length > CORPUS_MAX_TARGETS) {
+    issue(field, "invalid_evidence_ids");
+    return [];
   }
-  return {rows};
+  if (!value.every(validId)) {
+    issue(field, "invalid_evidence_id");
+    return [];
+  }
+  const distinct = [...new Set(value)];
+  if (distinct.length > 8) {
+    issue(field, "excess_evidence_ids");
+    return [];
+  }
+  if (distinct.length !== value.length) issue(field, "duplicate_evidence_ids", "normalized");
+  if (distinct.some((id, index) => index > 0 && distinct[index - 1] > id)) issue(field, "unsorted_evidence_ids", "normalized");
+  return distinct.sort((a, b) => a - b);
+}
+
+function decodeLabel(value, scope, issue) {
+  const result = unknownLabel();
+  if (!exactKeys(value, ["d", "f", "b", "a", "p", "t", "v", "k"])) issue(scope, "invalid_label_keys");
+  if (!record(value)) return result;
+  const wireFields = {depiction: "d", frame: "f", interaction: "b", activation: "a", phase: "p", transition: "t"};
+  for (const [field, key] of Object.entries(wireFields)) {
+    const decoded = decodeCode(field, value[key]);
+    if (decoded === undefined) issue(`${scope}.${field}`, "invalid_label_code");
+    else result[field] = decoded;
+  }
+  result.evidenceIds = decodeEvidence(value.v, `${scope}.evidenceIds`, issue);
+  if (value.k === null || validId(value.k)) result.knowledgeAtId = value.k;
+  else issue(`${scope}.knowledgeAtId`, "invalid_knowledge_at_id");
+  return result;
+}
+
+function decodeEligibility(value, plain, issue) {
+  if (value === null) {
+    if (plain) return {status: "eligible", adult: "not_applicable", consent: "not_applicable", capacity: "not_applicable", evidenceIds: []};
+    issue("eligibility", "missing_eligibility", "normalized");
+    return unknownEligibility();
+  }
+  const result = unknownEligibility();
+  if (!exactKeys(value, ["s", "a", "c", "k", "v"])) issue("eligibility", "invalid_eligibility_keys");
+  if (!record(value)) return result;
+  const wireFields = {status: "s", adult: "a", consent: "c", capacity: "k"};
+  for (const [field, key] of Object.entries(wireFields)) {
+    const decoded = decodeCode(field === "status" ? "eligibility" : field, value[key]);
+    if (decoded === undefined) issue(`eligibility.${field}`, "invalid_eligibility_code");
+    else result[field] = decoded;
+  }
+  result.evidenceIds = decodeEvidence(value.v, "eligibility.evidenceIds", issue);
+  return result;
+}
+
+function decodeMetadata(row, issue) {
+  const validConfidence = Number.isInteger(row.q) && row.q >= 0 && row.q <= 100;
+  if (!validConfidence) issue("confidence", Object.hasOwn(row, "q") ? "invalid_confidence" : "missing_confidence", "normalized");
+  const confidence = validConfidence ? row.q : 0;
+  const reasonCodes = [];
+  if (!Array.isArray(row.z)) {
+    issue("reasonCodes", Object.hasOwn(row, "z") ? "invalid_reason_codes" : "missing_reason_codes", "normalized");
+    return {confidence, reasonCodes};
+  }
+  const validCodes = row.z.filter(code => Number.isInteger(code) && code >= 0 && code < CORPUS_REASON_CODES.length);
+  const distinct = [...new Set(validCodes)];
+  if (validCodes.length !== row.z.length) issue("reasonCodes", "invalid_reason_code", "normalized");
+  if (distinct.length !== validCodes.length) issue("reasonCodes", "duplicate_reason_codes", "normalized");
+  if (distinct.length > 4) issue("reasonCodes", "excess_reason_codes", "normalized");
+  return {confidence, reasonCodes: distinct.slice(0, 4).map(code => CORPUS_REASON_CODES[code])};
+}
+
+// The inspector preserves valid typed fields for independently validated scopes.
+// Consumers must quarantine any scope carrying an error before using its labels.
+export function inspectCorpusCompactResponse(value) {
+  const rows = [], issues = [];
+  let fatalCode = null;
+  if (!exactKeys(value, ["rows"]) || !Array.isArray(value.rows) || !value.rows.length || value.rows.length > CORPUS_MAX_TARGETS) {
+    return {rows, issues: [{rowIndex: null, id: null, field: "rows", code: "invalid_envelope", severity: "error"}], fatalCode: "invalid_envelope"};
+  }
+  const seen = new Set(), duplicates = new Set();
+  for (const row of value.rows) {
+    if (!validId(row?.i)) continue;
+    if (seen.has(row.i)) duplicates.add(row.i);
+    seen.add(row.i);
+  }
+  const allowedKeys = ["i", "s", "c", "r", "e", "q", "z"];
+  for (const [rowIndex, row] of value.rows.entries()) {
+    const id = validId(row?.i) ? row.i : null;
+    const issue = (field, code, severity = "error") => issues.push({rowIndex, id, field, code, severity});
+    const fatal = (field, code) => {fatalCode ??= code; issue(field, code);};
+    if (!record(row) || Object.keys(row).some(key => !allowedKeys.includes(key))) {
+      fatal("row", "invalid_row_keys");
+      continue;
+    }
+    if (id === null) {
+      fatal("id", "invalid_target_id");
+      continue;
+    }
+    if (duplicates.has(id)) {
+      fatal("id", "duplicate_target_id");
+      continue;
+    }
+    const status = decodeCode("status", row.s);
+    if (!status) {
+      fatal("status", "invalid_status_code");
+      continue;
+    }
+    const firstScopeIssue = issues.length;
+    let causal;
+    if (row.c !== "n") causal = decodeLabel(row.c, "causal", issue);
+    else if (status === "classified") causal = plainNeutral();
+    else {
+      issue("causal", "invalid_neutral_shortcut");
+      causal = unknownLabel();
+    }
+    let retrospective;
+    if (row.r === null) {
+      retrospective = structuredClone(causal);
+      for (const item of issues.slice(firstScopeIssue).filter(item => item.severity === "error")) {
+        issue(item.field.replace(/^causal/u, "retrospective"), item.code);
+      }
+    } else retrospective = decodeLabel(row.r, "retrospective", issue);
+    const plain = status === "classified" && isPlainNeutral(causal) && isPlainNeutral(retrospective);
+    const eligibility = decodeEligibility(row.e, plain, issue);
+    rows.push({id, status, causal, retrospective, eligibility, ...decodeMetadata(row, issue)});
+  }
+  return {rows, issues, fatalCode};
+}
+
+export function decodeCorpusCompactResponse(value) {
+  const inspected = inspectCorpusCompactResponse(value);
+  return inspected.fatalCode || inspected.issues.some(item => item.severity === "error") ? null : {rows: inspected.rows};
 }

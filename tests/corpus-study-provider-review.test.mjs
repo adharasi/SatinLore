@@ -69,7 +69,11 @@ test('review: invalid evidence timing and absent eligibility evidence cannot val
   const timing = row(0); timing.c.k = 1;
   assert.equal(parseCorpusProvider(payload([timing,row(2)]),batch).rows[0].failureCode,'invalid_evidence_timing');
   const unsupported = row(0); unsupported.e.v = [];
-  assert.equal(parseCorpusProvider(payload([unsupported,row(2)]),batch).rows[0].status,'failed');
+  const result = parseCorpusProvider(payload([unsupported,row(2)]),batch).rows[0];
+  assert.equal(result.status,'partial');
+  assert.deepEqual(result.scopeStatus,{causal:'invalid',retrospective:'invalid',eligibility:'valid'});
+  assert.equal(result.causal.activation,'review');
+  assert.equal(result.retrospective.depiction,'romantic');
 });
 
 test('review: refusal blocks submitted material and truncation never becomes a negative classification', () => {
@@ -83,4 +87,59 @@ test('review: refusal blocks submitted material and truncation never becomes a n
   const truncated = parseCorpusProvider({status:'incomplete',incomplete_details:{reason:'max_output_tokens'}},batch);
   assert.equal(truncated.status,'truncated');
   assert.ok(truncated.rows.every(item=>item.status==='failed'&&item.retrospective.activation==='review'));
+});
+
+test('noncue phase projection keeps the classification and records the provider proposal', () => {
+  const context = row(0);
+  context.c.a = 'c'; context.c.t = 's';
+  context.r.a = 'r';
+  const protectedRow = row(2);
+  protectedRow.e = {s:'p',a:'m',c:'u',k:'u',v:[2]};
+  protectedRow.c.a = 'p'; protectedRow.r.a = 'p';
+  const parsed = parseCorpusProvider(payload([context,protectedRow]),batch);
+  assert.equal(parsed.status,'parsed');
+  const [a,b] = parsed.rows;
+  assert.equal(a.causal.phase,'quiet');
+  assert.equal(a.causal.transition,'stop');
+  assert.equal(a.retrospective.phase,'unknown');
+  assert.equal(b.causal.activation,'protected');
+  assert.equal(b.causal.phase,'quiet');
+  assert.equal(a.proposed.causal.phase,'build');
+  assert.equal(a.failureCode,null);
+  assert.ok(a.decodeIssues.some(issue => issue.code === 'noncue_phase_normalized' && issue.severity === 'normalized'));
+});
+
+test('transition and activation evidence failures are isolated by field', () => {
+  const validCue = row(0); validCue.c.t = 'unsupported-transition-code';
+  const invalidCue = row(2); invalidCue.c.p = 'q'; invalidCue.c.t = 's';
+  const [a,b] = parseCorpusProvider(payload([validCue,invalidCue]),batch).rows;
+  assert.equal(a.scopeStatus.causal,'classified');
+  assert.equal(a.causal.activation,'cue');
+  assert.equal(a.causal.transition,'unknown');
+  assert.equal(a.fieldStatus.causal.transition,'unresolved');
+  assert.equal(b.scopeStatus.causal,'invalid');
+  assert.equal(b.causal.activation,'review');
+  assert.equal(b.causal.transition,'stop');
+  assert.equal(b.fieldStatus.causal.transition,'applied');
+  assert.equal(b.proposed.causal.activation,'cue');
+});
+
+test('bounded surplus provider rows never erase requested rows or qualify context', () => {
+  const unrelated = Array.from({length:70},(_,i)=>row(i+10));
+  const parsed = parseCorpusProvider(payload([row(0),...unrelated,row(2)]),batch);
+  assert.equal(parsed.status,'partial');
+  assert.equal(parsed.rejected,70);
+  assert.deepEqual(parsed.rows.map(row=>[row.id,row.status]),[[0,'classified'],[2,'classified']]);
+  assert.ok(parsed.decodeIssues.every(issue=>issue.code==='unexpected_target_id'));
+});
+
+test('a refused target stays refused when other returned fields conflict with the refusal', () => {
+  const refused = row(0); refused.s = 'r';
+  const parsed = parseCorpusProvider(payload([refused,row(2)]),batch);
+  assert.deepEqual(parsed.refusedIds,[0]);
+  assert.equal(parsed.rows[0].status,'refused');
+  assert.equal(parsed.rows[0].causal.activation,'review');
+  assert.equal(parsed.rows[0].retrospective.transition,'unknown');
+  assert.equal(parsed.rows[0].eligibility.status,'uncertain');
+  assert.equal(parsed.rows[1].status,'classified');
 });

@@ -1,7 +1,7 @@
 // This ledger retains opaque research identifiers, source digests and usage only.
 // It never receives source text, provider labels, authentication tokens or errors.
 export const CORPUS_BUDGET_ORIGIN = "https://scene-analysis.internal";
-export const CORPUS_BUDGET_LIMITS = Object.freeze({ attempts: 1500, micros: 15_000_000, lifetimeMs: 7 * 86_400_000 });
+export const CORPUS_BUDGET_LIMITS = Object.freeze({ attempts: 1500, micros: 15_000_000, lifetimeMs: 7 * 86_400_000, concurrency: 12 });
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const id = value => typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,95}$/.test(value);
 const exact = (value, fields) => value && typeof value === "object" && !Array.isArray(value) &&
@@ -71,7 +71,7 @@ export async function handleCorpusBudget(request, state) {
       if (blockedUnitKeys.length) return reply({code:"refusal_blocked",blockedUnitKeys},422);
       const daily = state.sql.exec("SELECT * FROM corpus_day WHERE owner=? AND day=?",input.reader,day).toArray()[0] ?? {attempts:0,micros:0};
       const inflight = state.sql.exec("SELECT COUNT(*) AS total FROM corpus_attempt a JOIN corpus_run r ON a.run_id=r.id WHERE r.owner=? AND a.state='inflight'",input.reader).one().total;
-      if (inflight >= 8) return reply({code:"concurrency_limited"},429);
+      if (inflight >= CORPUS_BUDGET_LIMITS.concurrency) return reply({code:"concurrency_limited"},429);
       if (run.attempts >= CORPUS_BUDGET_LIMITS.attempts || daily.attempts >= CORPUS_BUDGET_LIMITS.attempts ||
         run.micros + input.reserveMicros > CORPUS_BUDGET_LIMITS.micros || daily.micros + input.reserveMicros > CORPUS_BUDGET_LIMITS.micros) return reply({code:"budget_exhausted"},429);
       state.sql.exec("INSERT INTO corpus_attempt(run_id,digest,state,reserve,charged,reserved_day,lease_until,expires_at) VALUES(?,?,?,?,?,?,?,?)",input.runId,input.batchHash,"inflight",input.reserveMicros,input.reserveMicros,day,now+LEASE_MS,run.expires_at);
