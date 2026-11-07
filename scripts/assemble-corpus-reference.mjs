@@ -6,6 +6,7 @@ import {assembleFullCorpusReference, auditPriorReference} from "./lib/reference-
 
 const usage = "node scripts/assemble-corpus-reference.mjs --source PRIVATE_SOURCE.json --checkpoint CHECKPOINT.json " +
   "[--checkpoint MORE.json] --output PRIVATE_REFERENCE.json --adjudication-output PRIVATE_SELECTION.json " +
+  "[--admission-overlay PRIVATE_OVERLAY_SOURCE.json] " +
   "[--prior PRIOR.json --prior-output PRIVATE_AUDIT.json]";
 const maxInputBytes = 256 * 1024 * 1024;
 const sha = value => createHash("sha256").update(value).digest("hex");
@@ -37,12 +38,12 @@ function optionsFrom(args) {
     if (!value || value.startsWith("--")) throw new TypeError(usage);
     if (name === "--checkpoint") options.checkpoints.push(resolve(value));
     else if (name === "--prior") options.priors.push(resolve(value));
-    else if (["--source", "--output", "--adjudication-output", "--prior-output"].includes(name) && !options[name]) options[name] = resolve(value);
+    else if (["--source", "--output", "--adjudication-output", "--prior-output", "--admission-overlay"].includes(name) && !options[name]) options[name] = resolve(value);
     else throw new TypeError(usage);
   }
   if (!options["--source"] || !options["--output"] || !options["--adjudication-output"] || !options.checkpoints.length ||
       Boolean(options.priors.length) !== Boolean(options["--prior-output"])) throw new TypeError(usage);
-  const inputs = [options["--source"], ...options.checkpoints, ...options.priors].map(path => {
+  const inputs = [options["--source"], options["--admission-overlay"], ...options.checkpoints, ...options.priors].filter(Boolean).map(path => {
     try { return realpathSync(path); } catch { return path; }
   });
   const outputKeys = ["--output", "--adjudication-output", "--prior-output"].filter(key => options[key]);
@@ -73,8 +74,10 @@ function save(path, value) {
 try {
   const options = optionsFrom(process.argv.slice(2));
   const source = load(options["--source"]), checkpoints = options.checkpoints.map(load);
+  const overlay = options["--admission-overlay"] ? load(options["--admission-overlay"]) : null;
   const {reference, adjudicationSelection} = assembleFullCorpusReference({corpus: source.value,
-    checkpoints: checkpoints.map(item => item.value), sourceBundleSha256: source.sha256});
+    checkpoints: checkpoints.map(item => item.value), sourceBundleSha256: source.sha256,
+    admissionOverlay: overlay ? {corpus: overlay.value, sourceBundleSha256: overlay.sha256} : null});
   const audit = options.priors.length ? {schema: 1, referenceSha256: reference.referenceSha256,
     priorAudits: options.priors.map(path => {
       const prior = load(path);

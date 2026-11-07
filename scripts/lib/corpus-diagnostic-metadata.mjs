@@ -23,6 +23,8 @@ const failureCategories = new Map([
   ["concurrency_limited", "concurrency-limited"],
   ["not_submitted", "not-submitted"],
   ["client_transport_unknown", "client-transport-unknown"],
+  ["provider_response_lost", "provider-response-lost"],
+  ["reconciled_refusal", "provider-refused"],
   ["client_invalid_response", "retained-output-missing"],
 ]);
 const schemaCodes = new Set([
@@ -62,6 +64,10 @@ export function observedCorpusCode(code) {
 export function corpusParserMetadata(value) {
   const result = {};
   if (value?.parserRevision === "v7-field-validation-2") result.parserRevision = value.parserRevision;
+  if (["no_response", "response_invalid", "response_rejected", "response_mismatch"].includes(value?.transport?.stage)) {
+    const httpStatus = value.transport.httpStatus;
+    result.transport = {stage: value.transport.stage, httpStatus: Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? httpStatus : null};
+  }
   if (Array.isArray(value?.decodeIssues)) {
     const coordinate = id => id === null || Number.isSafeInteger(id) && id >= 0;
     result.decodeIssues = value.decodeIssues.slice(0, 4096).filter(issue => issue &&

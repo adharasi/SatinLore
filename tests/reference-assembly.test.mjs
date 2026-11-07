@@ -118,3 +118,88 @@ test("prior audit is read-only and checks old target digests where present", () 
   assert.equal(reference.referenceSha256, seal);
   assert.equal(reference.works[0].labels[1].retrospective.activation, "cue");
 });
+
+function overlayFixture() {
+  const source = structuredClone(corpus);
+  for (const unit of source.works[0].units) unit.admission = unit.structuralBoundary ? "blocked" : "approved";
+  const masked = structuredClone(source);
+  masked.works[0].units[0].admission = "blocked";
+  const sourceBundleSha256 = sha(JSON.stringify(source));
+  const overlaySha256 = sha(JSON.stringify(masked));
+  const holdKey = sha(JSON.stringify([sourceSha256, indexSha256, 0, sha(work.units[0].text)]));
+  const firstViews = {sourceBundleSha256, heldUnitKeys: [holdKey], batches: [
+    batch("referenceA", label(0)), batch("referenceB", label(0)),
+    batch("referenceA", label()), batch("referenceB", label(1, quiet(1), quiet(1))),
+  ]};
+  const makeThirdView = (row, contextIds) => {
+    const result = {...batch("adjudicator", row), contextIds};
+    const units = [row.id, ...contextIds].sort((a, b) => a - b).map(id => {
+      const unit = work.units[id];
+      return {id, paragraph: unit.paragraph, unitSha256: sha(unit.text), text: unit.text, target: id === row.id, structuralBoundary: unit.structuralBoundary};
+    });
+    result.batchId = sha(JSON.stringify({schema: 1, workId: work.id, sourceSha256, indexSha256,
+      referenceVersion: REFERENCE_RUBRIC_VERSION, role: "adjudicator", units}));
+    return result;
+  };
+  const run = (extra = [], overlayCorpus = masked) => assembleFullCorpusReference({corpus: source, sourceBundleSha256,
+    checkpoints: [firstViews, ...extra], admissionOverlay: {corpus: overlayCorpus, sourceBundleSha256: sha(JSON.stringify(overlayCorpus))}});
+  return {source, masked, sourceBundleSha256, overlaySha256, firstViews, makeThirdView, run};
+}
+
+test("an admission overlay preserves original coordinates, denominators, and prior resolved labels", () => {
+  const fixture = overlayFixture();
+  const before = fixture.run();
+  assert.equal(before.reference.counts.targets, 2);
+  assert.equal(before.reference.admissionOverlay.verifiedWithheldUnits, 1);
+  assert.equal(before.adjudicationSelection.sourceBundleSha256, fixture.overlaySha256);
+  assert.deepEqual(before.adjudicationSelection.jobs[0].targetIds, [1]);
+  const oldCue = before.reference.works[0].labels[0];
+  assert.equal(oldCue.sourceAdmission, "approved");
+  assert.equal(oldCue.admissionOverlayStatus, "blocked");
+  assert.equal(oldCue.scopeStatus.retrospective, "resolved");
+  assert.equal(oldCue.retrospective.activation, "cue");
+  assert.equal(oldCue.unitSha256, sha(work.units[0].text));
+
+  const third = fixture.makeThirdView({...label(), eligibility: eligibility([1])}, []);
+  const after = fixture.run([{sourceBundleSha256: fixture.overlaySha256, batches: [third]}]);
+  const selected = after.reference.works[0].labels[1];
+  assert.equal(selected.reviewStatus, "model-assisted-adjudicated");
+  assert.equal(selected.retrospective.activation, "cue");
+  assert.equal(after.reference.requests[selected.provenance.adjudicator.requestIndex].admissionOverlaySourceBundleSha256, fixture.overlaySha256);
+  assert.equal(after.reference.counts.targets, before.reference.counts.targets);
+  assert.equal(after.adjudicationSelection.targetCount, 0);
+  assert.doesNotMatch(JSON.stringify(after), /Two adult friends entered a room/u);
+});
+
+test("withheld disagreements stay pending and are omitted from third-view selection", () => {
+  const fixture = overlayFixture();
+  fixture.firstViews.batches[1] = batch("referenceB", label(0, quiet(0), quiet(0)));
+  const {reference, adjudicationSelection} = fixture.run();
+  assert.equal(reference.works[0].labels[0].scopeStatus.retrospective, "pending");
+  assert.equal(reference.counts.adjudicationWithheldTargets, 1);
+  assert.deepEqual(adjudicationSelection.jobs[0].targetIds, [1]);
+});
+
+test("an admission overlay rejects withheld targets, withheld context, and mismatched window digests", () => {
+  const fixture = overlayFixture();
+  const forOverlay = batches => [{sourceBundleSha256: fixture.overlaySha256, batches}];
+  const heldTarget = fixture.makeThirdView(label(0), [1]);
+  const heldContext = fixture.makeThirdView(label(), [0]);
+  assert.throws(() => fixture.run(forOverlay([heldTarget])), /outside the admission overlay/u);
+  assert.throws(() => fixture.run(forOverlay([heldContext])), /outside the admission overlay/u);
+  assert.throws(() => fixture.run(forOverlay([{...heldContext, contextIds: []}])), /window digest/u);
+  assert.throws(() => fixture.run([{sourceBundleSha256: fixture.sourceBundleSha256, batches: [heldContext]}]), /must use the admission overlay/u);
+});
+
+test("an admission overlay rejects source edits, expanded admission, and incomplete holds", () => {
+  const fixture = overlayFixture();
+  const changedText = structuredClone(fixture.masked);
+  changedText.works[0].units[1].text = "Edited source.";
+  assert.throws(() => fixture.run([], changedText), /changed source units or text/u);
+  const expanded = structuredClone(fixture.masked);
+  expanded.works[0].units[2].admission = "approved";
+  assert.throws(() => fixture.run([], expanded), /only block previously approved units/u);
+  const incomplete = structuredClone(fixture.source);
+  incomplete.works[0].units[1].admission = "blocked";
+  assert.throws(() => fixture.run([], incomplete), /leaves a held or refused source unit available/u);
+});

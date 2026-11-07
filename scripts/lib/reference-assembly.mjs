@@ -1,4 +1,5 @@
 import {createHash} from "node:crypto";
+import {isDeepStrictEqual} from "node:util";
 import {CORPUS_ENUMS, CORPUS_REASON_CODES, REFERENCE_RUBRIC_VERSION} from "../../deploy/cloudflare/corpus-study-contract.mjs";
 
 export const REFERENCE_ASSEMBLY_VERSION = "full-corpus-reference-assembly-v1";
@@ -42,6 +43,105 @@ function indexCorpus(corpus) {
     works.set(work.id, {work, units});
   }
   return works;
+}
+
+function verifyAdmissionOverlay(corpus, sourceIndex, sourceBundleSha256, overlay, checkpoints) {
+  if (!overlay) return null;
+  const {corpus: overlayCorpus, sourceBundleSha256: overlaySha256} = overlay;
+  if (!digest(sourceBundleSha256) || !digest(overlaySha256) || overlaySha256 === sourceBundleSha256 ||
+      !Array.isArray(overlayCorpus?.works) || overlayCorpus.works.length !== corpus.works.length) {
+    throw new TypeError("Invalid admission overlay source identity.");
+  }
+  const {works: originalWorks, ...originalMetadata} = corpus;
+  const {works: overlayWorks, ...overlayMetadata} = overlayCorpus;
+  if (!isDeepStrictEqual(originalMetadata, overlayMetadata)) throw new TypeError("Admission overlay changed source metadata.");
+
+  const admissions = new Map(), keyAdmissions = new Map();
+  let newlyBlockedUnits = 0, newlyBlockedTargets = 0;
+  for (const [workIndex, originalWork] of originalWorks.entries()) {
+    const {units: originalUnits, ...originalIdentity} = originalWork;
+    const {units: overlayUnits, ...overlayIdentity} = overlayWorks[workIndex] ?? {};
+    if (!isDeepStrictEqual(originalIdentity, overlayIdentity) || !Array.isArray(overlayUnits) || overlayUnits.length !== originalUnits.length) {
+      throw new TypeError("Admission overlay changed work identity or unit count.");
+    }
+    const admissionById = new Map();
+    for (const [unitIndex, originalUnit] of originalUnits.entries()) {
+      const {admission: originalAdmission, ...originalUnitIdentity} = originalUnit;
+      const {admission, ...overlayUnitIdentity} = overlayUnits[unitIndex] ?? {};
+      if (!isDeepStrictEqual(originalUnitIdentity, overlayUnitIdentity)) throw new TypeError("Admission overlay changed source units or text.");
+      if (!["approved", "blocked", "review"].includes(originalAdmission) ||
+          admission !== originalAdmission && (originalAdmission !== "approved" || admission !== "blocked")) {
+        throw new TypeError("Admission overlay must only block previously approved units.");
+      }
+      admissionById.set(originalUnit.id, admission);
+      const unit = sourceIndex.get(originalWork.id).units.get(originalUnit.id);
+      const unitKey = hash(JSON.stringify([originalWork.sourceSha256, originalWork.indexSha256, unit.id, unit.unitSha256]));
+      keyAdmissions.set(unitKey, admission);
+      if (admission !== originalAdmission) {
+        newlyBlockedUnits++;
+        if (!unit.structuralBoundary) newlyBlockedTargets++;
+      }
+    }
+    admissions.set(originalWork.id, admissionById);
+  }
+
+  const requiredWithheldKeys = new Set();
+  function withholdUnits(workId, ids) {
+    const source = sourceIndex.get(workId);
+    if (!source || !Array.isArray(ids) || ids.some(id => !source.units.has(id))) {
+      throw new TypeError("Cannot verify withheld source unit identity.");
+    }
+    for (const id of ids) {
+      const unit = source.units.get(id);
+      requiredWithheldKeys.add(hash(JSON.stringify([source.work.sourceSha256, source.work.indexSha256, id, unit.unitSha256])));
+    }
+  }
+  for (const checkpoint of checkpoints) {
+    if (checkpoint.sourceBundleSha256 !== sourceBundleSha256) continue;
+    const batches = checkpoint.batches ?? checkpoint.results ?? [];
+    for (const keys of [checkpoint.heldUnitKeys, checkpoint.blockedUnitKeys, checkpoint.refusedWindowKeys,
+      ...batches.map(batch => batch.blockedUnitKeys)]) {
+      if (keys === undefined) continue;
+      if (!Array.isArray(keys) || keys.some(key => !digest(key))) throw new TypeError("Invalid withheld source unit keys.");
+      for (const key of keys) requiredWithheldKeys.add(key);
+    }
+    const plans = new Map((checkpoint.plannedBatches ?? []).map(plan => [plan.batchId, plan]));
+    const outcomes = new Map(batches.map(batch => [batch.batchId, batch]));
+    const attempts = new Map((checkpoint.attempts ?? []).map(attempt => [attempt.batchId, attempt]));
+    function withholdPlan(batchId) {
+      const plan = plans.get(batchId);
+      if (!plan || !Array.isArray(plan.targetIds) || !Array.isArray(plan.contextIds)) {
+        throw new TypeError("Cannot verify the source window of a withheld request.");
+      }
+      withholdUnits(plan.workId, [...plan.targetIds, ...plan.contextIds]);
+    }
+    for (const attempt of attempts.values()) {
+      const ambiguous = ["sending", "unknown"].includes(attempt.state) && attempt.ledgerState !== "absent" &&
+        outcomes.get(attempt.batchId)?.status !== "settlement_unknown";
+      if (ambiguous || attempt.ledgerState === "refused") withholdPlan(attempt.batchId);
+    }
+    for (const event of checkpoint.reconciliationEvents ?? []) {
+      if (event.state !== "refused") continue;
+      if (attempts.get(event.batchId)?.runId !== event.runId) throw new TypeError("Cannot verify reconciled refusal identity.");
+      withholdPlan(event.batchId);
+    }
+    for (const batch of batches) {
+      if (batch.status === "refused") {
+        if (!Array.isArray(batch.targetIds) || !Array.isArray(batch.contextIds)) throw new TypeError("Cannot verify a refused source window.");
+        withholdUnits(batch.workId, [...batch.targetIds, ...batch.contextIds]);
+      } else {
+        const refused = (batch.rows ?? []).filter(row => row.status === "refused").map(row => row.id);
+        if (refused.length) withholdUnits(batch.workId, refused);
+      }
+    }
+  }
+  for (const key of requiredWithheldKeys) {
+    if (!keyAdmissions.has(key) || keyAdmissions.get(key) === "approved") {
+      throw new TypeError("Admission overlay leaves a held or refused source unit available.");
+    }
+  }
+  return {admissions, provenance: {sourceBundleSha256: overlaySha256, originalSourceBundleSha256: sourceBundleSha256,
+    verification: "admission-only-v1", newlyBlockedUnits, newlyBlockedTargets, verifiedWithheldUnits: requiredWithheldKeys.size}};
 }
 
 function labelSyntax(label) {
@@ -97,25 +197,57 @@ function safeRow(row, unit, batch) {
   return {row: sanitized, errors, scopedStatus, eligibilityValid};
 }
 
-function safeRequest(batch) {
+function safeRequest(batch, overlaySourceBundleSha256 = null) {
   return {batchId: batch.batchId, workId: batch.workId, role: batch.role,
     sourceSha256: batch.sourceSha256, indexSha256: batch.indexSha256,
     promptSha256: digest(batch.promptSha256) ? batch.promptSha256 : null,
     model: typeof batch.model === "string" && /^[a-zA-Z0-9_.-]{1,80}$/u.test(batch.model) ? batch.model : null,
     status: typeof batch.status === "string" && /^[a-zA-Z0-9_-]{1,80}$/u.test(batch.status) ? batch.status : "unknown",
     targetIds: [...batch.targetIds], contextIds: [...batch.contextIds],
-    returned: batch.returned !== false, causalStatus: "evidence-timing-projection"};
+    returned: batch.returned !== false, causalStatus: "evidence-timing-projection",
+    ...(overlaySourceBundleSha256 ? {admissionOverlaySourceBundleSha256: overlaySourceBundleSha256} : {})};
 }
 
-function collectViews(corpus, checkpoints, expectedSourceBundleSha256) {
+function collectViews(corpus, checkpoints, expectedSourceBundleSha256, overlay) {
   const byRole = Object.fromEntries(roles.map(role => [role, new Map()])), requests = [], ignoredRoles = {};
+  const overlaySha256 = overlay?.provenance.sourceBundleSha256;
+  const usesOverlay = checkpoint => Boolean(overlaySha256 && checkpoint.sourceBundleSha256 === overlaySha256);
+  function checkOverlayWindow(window, overlayCheckpoint) {
+    if (!overlay) return;
+    if (!overlayCheckpoint) {
+      if (window.role === "adjudicator") throw new TypeError("Blind third-view checkpoints must use the admission overlay.");
+      return;
+    }
+    const admissions = overlay.admissions.get(window.workId);
+    if (window.role !== "adjudicator" || !admissions || !Array.isArray(window.targetIds) || !Array.isArray(window.contextIds) ||
+        [...window.targetIds, ...window.contextIds].some(id => admissions.get(id) !== "approved" || corpus.get(window.workId).units.get(id).structuralBoundary)) {
+      throw new TypeError("Blind third-view target or context is outside the admission overlay.");
+    }
+    const source = corpus.get(window.workId), targets = new Set(window.targetIds);
+    const unitIds = uniqueSorted([...window.targetIds, ...window.contextIds]);
+    if (!targets.size || unitIds.length !== window.targetIds.length + window.contextIds.length) {
+      throw new TypeError("Invalid blind third-view target or context identity.");
+    }
+    const canonicalBatch = {schema: 1, workId: window.workId, sourceSha256: source.work.sourceSha256,
+      indexSha256: source.work.indexSha256, referenceVersion: REFERENCE_RUBRIC_VERSION, role: "adjudicator",
+      units: unitIds.map(id => {
+        const unit = source.units.get(id);
+        return {id, paragraph: unit.paragraph, unitSha256: unit.unitSha256, text: unit.text,
+          target: targets.has(id), structuralBoundary: unit.structuralBoundary};
+      })};
+    if (hash(JSON.stringify(canonicalBatch)) !== window.batchId) {
+      throw new TypeError("Blind third-view window digest does not match its source units.");
+    }
+  }
   for (const checkpoint of checkpoints) {
-    if (expectedSourceBundleSha256 && checkpoint.sourceBundleSha256 !== expectedSourceBundleSha256) {
+    const overlayCheckpoint = usesOverlay(checkpoint);
+    if (expectedSourceBundleSha256 && checkpoint.sourceBundleSha256 !== expectedSourceBundleSha256 && !overlayCheckpoint) {
       throw new TypeError("Checkpoint source bundle does not match.");
     }
     const batches = checkpoint.batches ?? checkpoint.results;
     if (!Array.isArray(batches) || batches.length > 100000) throw new TypeError("Invalid checkpoint batches.");
     for (const batch of batches) {
+      checkOverlayWindow(batch, overlayCheckpoint);
       if (!roles.includes(batch.role)) {
         const role = ["detector", "transition"].includes(batch.role) ? batch.role : "other";
         ignoredRoles[role] = (ignoredRoles[role] ?? 0) + 1; continue;
@@ -129,7 +261,7 @@ function collectViews(corpus, checkpoints, expectedSourceBundleSha256) {
       const allIds = [...batch.targetIds, ...batch.contextIds];
       if (new Set(allIds).size !== allIds.length || allIds.some(id => !source.units.has(id)) ||
           batch.targetIds.some(id => source.units.get(id).structuralBoundary)) throw new TypeError("Checkpoint unit identity does not match.");
-      const requestIndex = requests.length; requests.push(safeRequest(batch));
+      const requestIndex = requests.length; requests.push(safeRequest(batch, overlayCheckpoint ? overlaySha256 : null));
       const rows = new Map();
       for (const row of batch.rows) {
         if (!batch.targetIds.includes(row?.id) || rows.has(row.id)) throw new TypeError("Invalid checkpoint target mapping.");
@@ -154,8 +286,10 @@ function collectViews(corpus, checkpoints, expectedSourceBundleSha256) {
   // Plans with no saved provider result are still observable coverage states.
   // They do not become model negatives or masquerade as completed requests.
   for (const checkpoint of checkpoints) {
+    const overlayCheckpoint = usesOverlay(checkpoint);
     const attempts = new Map((checkpoint.attempts ?? []).map(attempt => [attempt.batchId, attempt.state]));
     for (const plan of checkpoint.plannedBatches ?? []) {
+      checkOverlayWindow(plan, overlayCheckpoint);
       if (!roles.includes(plan.role)) continue;
       const source = corpus.get(plan.workId);
       if (!source || !opaqueId(plan.batchId) || !Array.isArray(plan.targetIds) || !Array.isArray(plan.contextIds) ||
@@ -169,7 +303,7 @@ function collectViews(corpus, checkpoints, expectedSourceBundleSha256) {
       const missingStatus = ["attempt-result-unknown", "checkpoint-result-missing"].includes(missingReason) ? "failed" : "not_submitted";
       const requestIndex = requests.length;
       requests.push(safeRequest({...plan, sourceSha256: source.work.sourceSha256, indexSha256: source.work.indexSha256,
-        status: missingReason, returned: false}));
+        status: missingReason, returned: false}, overlayCheckpoint ? overlaySha256 : null));
       for (const key of missing) byRole[plan.role].set(key, {row: null, missingReason, missingStatus,
         errors: Object.fromEntries(scopes.map(scope => [scope, [missingReason]])), requestIndex, duplicateConflict: false});
     }
@@ -240,10 +374,11 @@ function assembleScope(a, b, c, scope) {
   return {label, fieldStatus, groups, resolution, status: groups.semantic.status};
 }
 
-export function assembleFullCorpusReference({corpus, checkpoints, sourceBundleSha256 = null}) {
+export function assembleFullCorpusReference({corpus, checkpoints, sourceBundleSha256 = null, admissionOverlay = null}) {
   if (!Array.isArray(checkpoints) || !checkpoints.length) throw new TypeError("Reference checkpoints are required.");
   const sourceIndex = indexCorpus(corpus);
-  const {byRole, requests, ignoredRoles} = collectViews(sourceIndex, checkpoints, sourceBundleSha256);
+  const overlay = verifyAdmissionOverlay(corpus, sourceIndex, sourceBundleSha256, admissionOverlay, checkpoints);
+  const {byRole, requests, ignoredRoles} = collectViews(sourceIndex, checkpoints, sourceBundleSha256, overlay);
   const reference = {schema: 1, datasetId: "full-corpus-v7", rubricVersion: REFERENCE_RUBRIC_VERSION,
     assemblyVersion: REFERENCE_ASSEMBLY_VERSION, reviewerStatus: "model-assisted-development-reference",
     humanReviewed: false, frozenSnapshot: true, sourceProseIncluded: false, sourceBundleSha256,
@@ -252,13 +387,17 @@ export function assembleFullCorpusReference({corpus, checkpoints, sourceBundleSh
       independentGroups: ["semantic", "depiction", "phase", "transition"],
       evidenceDifferencesCreateDisagreement: false, confidenceSelectsReference: false,
       detectorOutputUsed: false, thirdViewMustMatchAtLeastOneValidFirstViewPerGroup: true},
-    requests, ignoredRoles, works: []};
-  const selection = {schema: 1, referenceVersion: REFERENCE_RUBRIC_VERSION, sourceBundleSha256,
+    requests, ignoredRoles, works: [],
+    ...(overlay ? {admissionOverlay: {...overlay.provenance, checkpointCount: checkpoints.filter(checkpoint =>
+      checkpoint.sourceBundleSha256 === overlay.provenance.sourceBundleSha256).length}} : {})};
+  const selection = {schema: 1, referenceVersion: REFERENCE_RUBRIC_VERSION,
+    sourceBundleSha256: overlay?.provenance.sourceBundleSha256 ?? sourceBundleSha256,
     purpose: "blind-third-source-view-selection", containsReferenceLabelValues: false, jobs: []};
   const counts = {works: sourceIndex.size, sourceUnits: 0, targets: 0, structural: 0,
     scopes: Object.fromEntries(scopes.map(scope => [scope, {}])), depiction: Object.fromEntries(scopes.map(scope => [scope, {}])),
     activation: Object.fromEntries(scopes.map(scope => [scope, {}])), allFieldsResolvedTargets: 0,
-    targetRowsWithAnyPendingScope: 0, adjudicationTargets: 0};
+    targetRowsWithAnyPendingScope: 0, adjudicationTargets: 0,
+    ...(overlay ? {adjudicationWithheldTargets: 0} : {})};
   for (const {work, units} of sourceIndex.values()) {
     const output = {id: work.id, family: work.family, sourceSha256: work.sourceSha256, indexSha256: work.indexSha256,
       sourceUnitSha256: work.sourceUnitSha256, sourceUnitCount: units.size,
@@ -275,6 +414,7 @@ export function assembleFullCorpusReference({corpus, checkpoints, sourceBundleSh
       counts.targets++;
       const key = JSON.stringify([work.id, unit.id]);
       const [a, b, c] = roles.map(role => byRole[role].get(key));
+      const overlayAdmission = overlay?.admissions.get(work.id).get(unit.id);
       const assembled = Object.fromEntries(scopes.map(scope => [scope, assembleScope(a, b, c, scope)]));
       const scopesResolved = scopes.filter(scope => assembled[scope].status === "resolved");
       const hasAdjudication = scopes.some(scope => Object.values(assembled[scope].groups).some(group => group.method === "blind-third-view-confirmation"));
@@ -282,6 +422,7 @@ export function assembleFullCorpusReference({corpus, checkpoints, sourceBundleSh
       const unresolved = unresolvedStatus([a, b, c]);
       const row = {...coords, status: scopesResolved.length ? "classified" : unresolved === "pending" ? "uncertain" : unresolved,
         sourceAdmission: ["approved", "blocked", "review"].includes(unit.admission) ? unit.admission : "unknown",
+        ...(overlay ? {admissionOverlayStatus: overlayAdmission} : {}),
         reviewStatus: scopesResolved.length === scopes.length ? hasAdjudication ? "model-assisted-adjudicated" : "model-assisted-agreed" : "pending",
         scopeStatus: Object.fromEntries(scopes.map(scope => [scope, assembled[scope].status])),
         fieldStatus: Object.fromEntries(scopes.map(scope => [scope, assembled[scope].fieldStatus])),
@@ -309,7 +450,10 @@ export function assembleFullCorpusReference({corpus, checkpoints, sourceBundleSh
       if (scopes.every(scope => fields.every(field => row.fieldStatus[scope][field] === "resolved"))) counts.allFieldsResolvedTargets++;
       if (scopesResolved.length < scopes.length) counts.targetRowsWithAnyPendingScope++;
       const conflicts = scopes.filter(scope => Object.values(assembled[scope].groups).some(group => group.needsAdjudication));
-      if (conflicts.length) workSelection.push({id: unit.id, scopes: conflicts});
+      if (conflicts.length) {
+        if (overlay && overlayAdmission !== "approved") counts.adjudicationWithheldTargets++;
+        else workSelection.push({id: unit.id, scopes: conflicts});
+      }
     }
     for (let start = 0; start < workSelection.length; start += 64) {
       const slice = workSelection.slice(start, start + 64);

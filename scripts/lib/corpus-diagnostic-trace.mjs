@@ -44,9 +44,9 @@ export function buildCorpusDiagnosticTrace({reference, checkpoint, batches = che
       throw new TypeError("Invalid corpus checkpoint source or targets.");
     }
     if (token(batch.predictionVersion)) versions.add(batch.predictionVersion);
-    const dispatched = batch.measurement === "live-provider" && (batch.dispatched ?? true) === true;
+    const dispatched = batch.measurement === "live-provider" && (batch.dispatched ?? true) === true || batch.status === "response_lost";
     const blocked = ["refusal_blocked", "settlement_unknown"].includes(batch.status);
-    const {parserRevision, decodeIssues} = corpusParserMetadata(batch);
+    const {parserRevision, decodeIssues, transport} = corpusParserMetadata(batch);
     attemptedProvider ||= dispatched;
     const targetIds = new Set(batch.targetIds);
     if (targetIds.size !== batch.targetIds.length || [...targetIds].some(id => !integer(id) || !found.unitsById.has(id))) {
@@ -60,6 +60,8 @@ export function buildCorpusDiagnosticTrace({reference, checkpoint, batches = che
       targetIds: [...batch.targetIds], contextIds: [...batch.contextIds]};
     if (parserRevision) request.parserRevision = parserRevision;
     if (decodeIssues) request.decodeIssues = decodeIssues;
+    if (transport) request.transport = transport;
+    if (batch.status === "response_lost") request.failureCode = "provider-response-lost";
     if (batch.status !== "unknown") request.dispatched = dispatched;
     if (batch.status === "timed_out") request.failureCode = "timeout";
     for (const key of ["httpStatus", "elapsedMs"]) if (integer(batch[key])) request[key] = batch[key];

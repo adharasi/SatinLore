@@ -15,7 +15,7 @@ const labels = {
 const statuses = new Set(["classified", "uncertain", "abstain", "refused", "failed", "invalid", "truncated",
   "missing", "not-submitted", "not-admitted", "not-planned", "budget-deferred", "cancelled", "partial"]);
 const requestStatuses = new Set([...statuses, "completed", "parsed", "annotated", "reserved", "running", "invalid-map"]);
-const stages = new Set(["admission", "planning", "budget", "submission", "provider", "decoding", "validation",
+const stages = new Set(["admission", "planning", "budget", "submission", "transport", "provider", "decoding", "validation",
   "evidence", "application", "classification", "unknown"]);
 const reasons = new Map([
   ["not-admitted", "admission"], ["not-planned", "planning"], ["budget-deferred", "budget"],
@@ -29,7 +29,8 @@ const reasons = new Map([
   ["provider-rate-limit", "provider"], ["provider-key-rejected", "provider"], ["provider-model-access", "provider"],
   ["provider-model-mismatch", "provider"], ["provider-billing-limit", "provider"], ["provider-request-rejected", "provider"],
   ["settlement-unknown-dependent", "admission"], ["admission-unavailable", "admission"], ["budget-unavailable", "budget"],
-  ["concurrency-limited", "submission"], ["client-transport-unknown", "submission"], ["unknown", "unknown"],
+  ["concurrency-limited", "submission"], ["client-transport-unknown", "transport"],
+  ["provider-response-lost", "transport"], ["unknown", "unknown"],
 ]);
 const eligibilityValues = {
   status: new Set(["eligible", "protected", "uncertain"]),
@@ -154,9 +155,10 @@ function cleanRequest(value) {
   if (["completed", "max-output-tokens", "content-filter", "unknown"].includes(status(value.finishReason))) result.finishReason = status(value.finishReason);
   if (["sending", "complete", "unknown", "blocked", "deferred", "not-started"].includes(value.attemptState)) result.attemptState = value.attemptState;
   if (["provider-attempt", "planned-only", "unknown"].includes(value.windowDisposition)) result.windowDisposition = value.windowDisposition;
-  const {parserRevision, decodeIssues} = corpusParserMetadata(value);
+  const {parserRevision, decodeIssues, transport} = corpusParserMetadata(value);
   if (parserRevision) result.parserRevision = parserRevision;
   if (decodeIssues) result.decodeIssues = decodeIssues;
+  if (transport) result.transport = transport;
   return result;
 }
 
