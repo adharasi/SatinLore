@@ -6,8 +6,13 @@ import { CORPUS_STUDY_CLIENT_ASSET } from "./assets.mjs";
 
 export const CORPUS_STUDY_PATH = "/api/scene-analysis/corpus-study";
 export const CORPUS_PARSER_REVISION = "v7-field-validation-2";
+export const CORPUS_BATCH_STREAM_TYPE = "application/x-ndjson";
 const API = "https://api.openai.com/v1/responses";
 const encoder = new TextEncoder();
+const HEARTBEAT_MS = 10_000;
+const MAX_HEARTBEATS = 16;
+const MAX_RESULT_FRAME_BYTES = 2 * 1024 * 1024;
+const heartbeat = encoder.encode('{"type":"heartbeat"}\n');
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const id = value => typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,95}$/.test(value);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -28,6 +33,38 @@ async function boundedJson(message, maxBytes, signal) {
     if(done)break;if(size+value.byteLength>maxBytes)throw new RangeError();bytes.set(value,size);size+=value.byteLength;}
     return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes.subarray(0,size)));
   } finally {signal.removeEventListener("abort",cancel);cancel();reader.releaseLock();}
+}
+
+function streamCorpusBatch(run) {
+  const disconnected = new AbortController();
+  let timer;
+  const body = new ReadableStream({
+    start(controller) {
+      let heartbeats = 1;
+      controller.enqueue(heartbeat);
+      timer = setInterval(() => {
+        if (controller.desiredSize > 0 && heartbeats < MAX_HEARTBEATS) {
+          controller.enqueue(heartbeat);
+          if (++heartbeats === MAX_HEARTBEATS) clearInterval(timer);
+        }
+      }, HEARTBEAT_MS);
+      void Promise.resolve().then(() => run(disconnected.signal)).then(value => {
+        if (disconnected.signal.aborted) return;
+        const frame = value === null ? {type:"error", code:"session_ended_after_reservation"} : {type:"result", value};
+        const bytes = encoder.encode(JSON.stringify(frame) + "\n");
+        if (bytes.byteLength > MAX_RESULT_FRAME_BYTES) throw new RangeError();
+        controller.enqueue(bytes);
+        controller.close();
+      }).catch(() => {
+        if (!disconnected.signal.aborted) controller.error(new Error("Corpus batch stream interrupted."));
+      }).finally(() => clearInterval(timer));
+    },
+    cancel() {
+      clearInterval(timer);
+      disconnected.abort();
+    },
+  });
+  return new Response(body, {headers:{"Content-Type":`${CORPUS_BATCH_STREAM_TYPE}; charset=utf-8`, "Cache-Control":"no-store, no-transform"}});
 }
 
 function canonicalBatch(value) {
@@ -212,6 +249,7 @@ function providerErrorCode(status,payload){
 
 const PAGE=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Private corpus study</title><script type="module" src="${CORPUS_STUDY_PATH}/client.mjs"></script></head><body><main>
 <h1>Private corpus study</h1><p>Upload the prepared corpus for neutral classification. Source stays in this page until Start sends bounded batches to OpenAI. Labels do not control a reader or device. Reference labels are model-assisted research material.</p>
+<p id="transport-version">NDJSON heartbeat transport v1</p>
 <p>Each run permits at most ${CORPUS_BUDGET_LIMITS.attempts} calls and $15 estimated usage, shared with a $15 founder daily research ceiling. Up to ${CORPUS_BUDGET_LIMITS.concurrency} independent requests can run together.</p>
 <label>Prepared source JSON <input id="source" type="file" accept=".json,application/json"></label><br>
 <label>Source-free checkpoint JSON <input id="checkpoint" type="file" accept=".json,application/json"></label>
@@ -288,28 +326,45 @@ export async function handleCorpusStudy(request,env,{config,session,reverify,ana
   if(!await authorized())return json({code:"invalid_session"},403);
   let reservation;try{reservation=await budget("reserve",{runId:input.runId,batchHash:input.batchHash,reserveMicros,unitHashes:[...new Set(unitKeys)]});}catch{return json({code:"budget_unavailable"},503);}
   if(!reservation.ok)return reservation;
-  const started=performance.now();let usage=null,httpStatus=null,returnedModel=null,dispatched=false,result={status:"network_error",rows:failedCorpusRows(batch,"failed","provider_connection")};
-  try{
-    signal.throwIfAborted();if(!await authorized())throw new Error();
-    dispatched=true;
-    const response=await analysisFetcher(API,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json","Cache-Control":"no-store"},body:providerBody,redirect:"manual",signal});
-    httpStatus=response.status;
-    if(!response.ok){let payload;try{payload=await boundedJson(response,8192,signal);}catch{await response.body?.cancel().catch(()=>{});}
-      if(["content_filter","content_policy_violation","safety_violation"].includes(payload?.error?.code))result={status:"refused",rows:failedCorpusRows(batch,"refused","provider_refusal"),blockAll:true};
-      else{const code=providerErrorCode(response.status,payload);result={status:"http_error",haltRecommended:[400,401,403,404,422,429].includes(response.status),rows:failedCorpusRows(batch,"failed",code)};}}
-    else{const payload=await boundedJson(response,2_097_152,signal);usage=providerUsage(payload,encoder.encode(providerBody).byteLength+2048,maxOutputTokens);
-      returnedModel=typeof payload?.model==="string"&&/^gpt-6-luna(?:-[a-z0-9-]{1,48})?$/.test(payload.model)?payload.model:null;
-      result=parseCorpusProvider(payload,batch);
-      if(!returnedModel&&["parsed","partial"].includes(result.status))result={status:"model_mismatch",haltRecommended:true,refusedIds:result.refusedIds,
-        rows:failedCorpusRows(batch,"failed","provider_model_mismatch")};}
-  }catch{result={status:stop.aborted?"timed_out":"network_error",haltRecommended:true,rows:failedCorpusRows(batch,"failed",stop.aborted?"provider_timeout":"provider_connection")};}
-  const refusedIds=new Set(result.refusedIds??result.rows.filter(row=>row.status==="refused").map(row=>row.id));
-  const refusedHashes=result.blockAll?unitKeys:batch.units.flatMap((unit,index)=>refusedIds.has(unit.id)?[unitKeys[index]]:[]);
-  let settlement;try{settlement=await budget("settle",{runId:input.runId,batchHash:input.batchHash,usage,refusedHashes});}catch{}
-  if(!await authorized())return json({code:"session_ended_after_reservation"},403);
-  return json({schema:1,measurement:"live-provider",runId:input.runId,batchId:input.batchHash,workId:batch.workId,sourceSha256:batch.sourceSha256,indexSha256:batch.indexSha256,
-    referenceVersion:REFERENCE_RUBRIC_VERSION,predictionVersion:batch.role==="detector"?"source-first-detector-v7":`${batch.role}-v7`,role:batch.role,model:"gpt-6-luna",promptSha256:await corpusDigest(CORPUS_COMPACT_PROMPTS[batch.role]),causalStatus:"evidence-timing-projection",
-    parserRevision:CORPUS_PARSER_REVISION,decodeIssues:result.decodeIssues??[],
-    status:result.status,haltRecommended:result.haltRecommended===true||settlement?.ok!==true,httpStatus,returnedModel,dispatched,rejectedRows:result.rejected??0,elapsedMs:Math.round(performance.now()-started),usage,maxOutputTokens,targetIds,contextIds,
-    inputUnitKeys:unitKeys,blockedUnitKeys:refusedHashes,budget:{reservedMicros:reserveMicros,settlementConfirmed:settlement?.ok===true,usageMeasured:usage!==null},rows:result.rows});
+  async function runBatch(disconnected) {
+    const providerSignal = disconnected ? AbortSignal.any([signal,disconnected]) : signal;
+    const started=performance.now();let usage=null,httpStatus=null,returnedModel=null,dispatched=false,result={status:"network_error",rows:failedCorpusRows(batch,"failed","provider_connection")};
+    try{
+      providerSignal.throwIfAborted();if(!await authorized())throw new Error();
+      providerSignal.throwIfAborted();
+      dispatched=true;
+      const response=await analysisFetcher(API,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json","Cache-Control":"no-store"},body:providerBody,redirect:"manual",signal:providerSignal});
+      httpStatus=response.status;
+      if(!response.ok){let payload;try{payload=await boundedJson(response,8192,providerSignal);}catch{await response.body?.cancel().catch(()=>{});}
+        if(["content_filter","content_policy_violation","safety_violation"].includes(payload?.error?.code))result={status:"refused",rows:failedCorpusRows(batch,"refused","provider_refusal"),blockAll:true};
+        else{const code=providerErrorCode(response.status,payload);result={status:"http_error",haltRecommended:[400,401,403,404,422,429].includes(response.status),rows:failedCorpusRows(batch,"failed",code)};}}
+      else{const payload=await boundedJson(response,2_097_152,providerSignal);usage=providerUsage(payload,encoder.encode(providerBody).byteLength+2048,maxOutputTokens);
+        returnedModel=typeof payload?.model==="string"&&/^gpt-6-luna(?:-[a-z0-9-]{1,48})?$/.test(payload.model)?payload.model:null;
+        result=parseCorpusProvider(payload,batch);
+        if(!returnedModel&&["parsed","partial"].includes(result.status))result={status:"model_mismatch",haltRecommended:true,refusedIds:result.refusedIds,
+          rows:failedCorpusRows(batch,"failed","provider_model_mismatch")};}
+    }catch{result={status:stop.aborted?"timed_out":"network_error",haltRecommended:true,rows:failedCorpusRows(batch,"failed",stop.aborted?"provider_timeout":"provider_connection")};}
+    const refusedIds=new Set(result.refusedIds??result.rows.filter(row=>row.status==="refused").map(row=>row.id));
+    const refusedHashes=result.blockAll?unitKeys:batch.units.flatMap((unit,index)=>refusedIds.has(unit.id)?[unitKeys[index]]:[]);
+    let settlementConfirmed = false;
+    try {
+      const settlement = await budget("settle", {runId:input.runId,batchHash:input.batchHash,usage,refusedHashes});
+      if (settlement.ok) {
+        const receipt = await boundedJson(settlement, 1024, AbortSignal.timeout(5000));
+        // The ledger can acknowledge a write while preserving an unknown outcome.
+        settlementConfirmed = receipt?.settled === true && integer(receipt.chargedMicros) &&
+          (receipt.measured === true || refusedHashes.length > 0);
+      }
+    } catch {}
+    const promptSha256 = await corpusDigest(CORPUS_COMPACT_PROMPTS[batch.role]);
+    if(!await authorized()||disconnected?.aborted)return null;
+    return {schema:1,measurement:"live-provider",runId:input.runId,batchId:input.batchHash,workId:batch.workId,sourceSha256:batch.sourceSha256,indexSha256:batch.indexSha256,
+      referenceVersion:REFERENCE_RUBRIC_VERSION,predictionVersion:batch.role==="detector"?"source-first-detector-v7":`${batch.role}-v7`,role:batch.role,model:"gpt-6-luna",promptSha256,causalStatus:"evidence-timing-projection",
+      parserRevision:CORPUS_PARSER_REVISION,decodeIssues:result.decodeIssues??[],
+      status:result.status,haltRecommended:result.haltRecommended===true||!settlementConfirmed,httpStatus,returnedModel,dispatched,rejectedRows:result.rejected??0,elapsedMs:Math.round(performance.now()-started),usage,maxOutputTokens,targetIds,contextIds,
+      inputUnitKeys:unitKeys,blockedUnitKeys:refusedHashes,budget:{reservedMicros:reserveMicros,settlementConfirmed,usageMeasured:usage!==null},rows:result.rows};
+  }
+  if (request.headers.get("Accept") === CORPUS_BATCH_STREAM_TYPE) return streamCorpusBatch(runBatch);
+  const result = await runBatch();
+  return result === null ? json({code:"session_ended_after_reservation"},403) : json(result);
 }
