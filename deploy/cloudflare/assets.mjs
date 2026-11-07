@@ -85,3 +85,5 @@ export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
   "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
   "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html",
 });
+// Served only by the authenticated research route. Do not add to reader assets.
+export const CORPUS_STUDY_CLIENT_ASSET = "/_research/corpus-study.mjs";

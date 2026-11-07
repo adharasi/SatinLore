@@ -328,6 +328,7 @@ const CONTEXT_V2_LABELS = [
 ];
 const CONTEXT_CONTRACT = "app/static/reader/nocturne-context-contract.mjs";
 const SCENE_ANALYSIS_MODULES = ["deploy/cloudflare/scene-analysis.mjs", CONTEXT_CONTRACT,
+  "deploy/cloudflare/corpus-study-budget.mjs",
   "deploy/cloudflare/decisions-benchmark.mjs", "deploy/cloudflare/scene-decisions.mjs",
   "deploy/cloudflare/decisions-corpus-benchmark.mjs", "deploy/cloudflare/decisions-corpus-pins.mjs",
   "deploy/cloudflare/decisions-story-study.mjs", "deploy/cloudflare/decisions-story-study-pins.mjs",

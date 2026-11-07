@@ -3,12 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { build } from "esbuild";
-import { READER_ASSETS, ALPHA_ASSETS } from "../deploy/cloudflare/assets.mjs";
+import { READER_ASSETS, ALPHA_ASSETS, CORPUS_STUDY_CLIENT_ASSET } from "../deploy/cloudflare/assets.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE = resolve(ROOT, "app/static");
 const OUTPUT = resolve(ROOT, "dist/private-app");
-const entries = [...READER_ASSETS, ...ALPHA_ASSETS];
+const entries = [...READER_ASSETS, ...ALPHA_ASSETS,
+  [resolve(ROOT,"deploy/cloudflare/corpus-study-client.mjs"),CORPUS_STUDY_CLIENT_ASSET]];
 const paths = new Set(entries.map(([, path]) => path));
 const assets = [];
 let revision = process.env.WORKERS_CI_COMMIT_SHA ?? "";

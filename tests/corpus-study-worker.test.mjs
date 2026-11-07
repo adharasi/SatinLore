@@ -1,0 +1,133 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {readFile} from "node:fs/promises";
+import {createLocalJWKSet, exportJWK, generateKeyPair, SignJWT} from "jose";
+import {createPrivateAppWorker} from "../deploy/cloudflare/worker.mjs";
+import {CORPUS_STUDY_PATH, corpusDigest, handleCorpusStudy} from "../deploy/cloudflare/corpus-study.mjs";
+import {REFERENCE_RUBRIC_VERSION} from "../deploy/cloudflare/corpus-study-contract.mjs";
+
+const origin="https://app.satinlore.com", issuer="https://fixture.cloudflareaccess.com";
+const key="sk-proj-synthetic_credential_for_tests";
+const config={origin,issuer};
+const session={isFounder:true,subject:"neutral-founder-fixture",expiresAt:Date.now()+3600000};
+const unit=async(id,text,target)=>({id,paragraph:0,unitSha256:await corpusDigest(text),text,target,structuralBoundary:false});
+const source=async(role="referenceA")=>({schema:1,workId:"neutral-test",sourceSha256:"a".repeat(64),indexSha256:"b".repeat(64),
+  referenceVersion:REFERENCE_RUBRIC_VERSION,role,units:[await unit(0,"The lamps were lit.",false),await unit(1,"A caretaker closed the reading room.",true)]});
+const request=(suffix="",input,headers={})=>new Request(origin+CORPUS_STUDY_PATH+suffix,{method:input?"POST":"GET",headers:{Origin:origin,"Content-Type":"application/json",...headers},...(input?{body:JSON.stringify(input)}:{})});
+const compactRow=id=>{const label={d:"n",f:"n",b:"n",a:"c",p:"q",t:"n",v:[],k:null};return{i:id,s:"c",c:label,r:label,e:{s:"u",a:"n",c:"n",k:"n",v:[]},q:94,z:[2]};};
+const providerReply=(rows=[compactRow(1)],usage={input_tokens:120,output_tokens:100,total_tokens:220})=>Response.json({status:"completed",model:"gpt-6-luna",usage,
+  output:[{type:"message",role:"assistant",content:[{type:"output_text",text:JSON.stringify({rows})}]}]});
+
+function harness(provider=()=>providerReply(),{reserveStatus=200,settleStatus=200}={}){
+  const actions=[];const env={OPENAI_API_KEY:key,SCENE_ANALYSIS_BUDGET:{idFromName:name=>name,get:()=>({async fetch(req){
+    const op=new URL(req.url).pathname.split("/").at(-1),payload=await req.json();actions.push({op,payload});
+    return Response.json({code:op}, {status:op==="reserve"?reserveStatus:op==="settle"?settleStatus:200});}})}};
+  const call=(req,options={})=>handleCorpusStudy(req,env,{config,session,reverify:async()=>session,
+    analysisFetcher:async(url,init)=>{actions.push({op:"provider",url,body:JSON.parse(init.body),redirect:init.redirect});return provider();},...options});
+  return{actions,call};
+}
+const submission=async batch=>({runId:"neutral-run",batchHash:await corpusDigest(batch),batch,sourceConsent:true});
+
+test("corpus page, client and registration require founder access on the exact app origin",async()=>{
+  const {privateKey,publicKey}=await generateKeyPair("RS256");
+  const keys=createLocalJWKSet({keys:[{...await exportJWK(publicKey),kid:"test",alg:"RS256"}]});
+  const env={PUBLIC_APP_ORIGIN:origin,PRIVATE_APP_ENABLED:"true",PUBLIC_READER_ENABLED:"true",WHOLE_STORY_LUNA_STUDY_ENABLED:"true",
+    ACCESS_TEAM_DOMAIN:"fixture.cloudflareaccess.com",ACCESS_AUD:"a".repeat(64),FOUNDER_EMAIL:"founder@example.test",BETA_TESTER_EMAILS:"reader@example.test",
+    ASSETS:{async fetch(req){assert.equal(req.url,origin+"/_research/corpus-study.mjs");assert.equal(req.headers.get("Cf-Access-Jwt-Assertion"),null);
+      return new Response(await readFile(new URL("../deploy/cloudflare/corpus-study-client.mjs",import.meta.url),"utf8"));}}};
+  const token=async email=>new SignJWT({iss:issuer,aud:env.ACCESS_AUD,sub:"neutral-subject",email,type:"app"})
+    .setIssuedAt().setExpirationTime("1h").setProtectedHeader({alg:"RS256",kid:"test"}).sign(privateKey);
+  const founder=await token(env.FOUNDER_EMAIL),tester=await token(env.BETA_TESTER_EMAILS);
+  const worker=createPrivateAppWorker({keyResolver:keys,analysisFetcher:()=>assert.fail("Page reads never dispatch.")});
+  const read=(host=origin,suffix="",jwt=founder,headers={})=>new Request(host+CORPUS_STUDY_PATH+suffix,{headers:{...(jwt?{"Cf-Access-Jwt-Assertion":jwt}:{}),...headers}});
+  assert.equal((await worker.fetch(read(origin,"",null),env)).status,403);
+  assert.equal((await worker.fetch(read(origin,"/client.mjs",tester),env)).status,403);
+  assert.equal((await worker.fetch(read("https://beta.satinlore.com"),env)).status,404);
+  assert.equal((await worker.fetch(read(),{...env,WHOLE_STORY_LUNA_STUDY_ENABLED:"false"})).status,404);
+  assert.equal((await worker.fetch(read(origin,"",founder,{Origin:"https://other.test"}),env)).status,403);
+  const page=await worker.fetch(read(),env);assert.equal(page.status,200);
+  assert.match(page.headers.get("Content-Security-Policy"),/script-src 'self'/);
+  assert.equal(page.headers.get("Cache-Control"),"no-store");
+  assert.match(await page.text(),/corpus-study\/client\.mjs/);
+  const client=await worker.fetch(read(origin,"/client.mjs"),env);assert.equal(client.status,200);
+  assert.match(client.headers.get("Content-Type"),/javascript/);
+  assert.match(await client.text(),/corpusStudyClient/);
+  assert.notEqual((await worker.fetch(new Request(origin+"/_research/corpus-study.mjs",{headers:{"Cf-Access-Jwt-Assertion":founder}}),env)).status,200);
+  const denied=await worker.fetch(request("/register",{runId:"neutral-run",manifest:["a".repeat(64)],sourceConsent:true},
+    {"Cf-Access-Jwt-Assertion":founder,Origin:"https://other.test"}),env);
+  assert.equal(denied.status,403);
+});
+
+test("hashed batch reserves before dispatch and returns only source-free typed outcomes",async()=>{
+  const h=harness(),batch=await source(),post=await submission(batch);
+  const reply=await h.call(request("/batch",post));assert.equal(reply.status,200);
+  const report=await reply.json();assert.deepEqual(h.actions.map(action=>action.op),["reserve","provider","settle"]);
+  assert.equal(report.status,"parsed");assert.equal(report.dispatched,true);
+  assert.deepEqual(report.targetIds,[1]);assert.deepEqual(report.contextIds,[0]);
+  assert.equal(report.rows[0].retrospective.activation,"context");
+  assert.deepEqual(report.usage,{inputTokens:120,outputTokens:100});
+  assert.match(report.promptSha256,/^[a-f0-9]{64}$/);
+  assert.equal(report.causalStatus,"evidence-timing-projection");
+  assert.equal(report.budget.settlementConfirmed,true);
+  assert.equal(h.actions[1].url,"https://api.openai.com/v1/responses");
+  assert.equal(h.actions[1].body.store,false);assert.equal(h.actions[1].redirect,"manual");
+  assert.deepEqual(h.actions[1].body.prompt_cache_options,{mode:"explicit"});
+  assert.deepEqual(Object.keys(JSON.parse(h.actions[1].body.input)),["workId","targetIds","units"]);
+  assert.doesNotMatch(JSON.stringify([report,h.actions[0],h.actions[2]]),/caretaker|lamps|synthetic_credential/);
+  const unitKeys=await Promise.all(batch.units.map(row=>corpusDigest(JSON.stringify([batch.sourceSha256,batch.indexSha256,row.id,row.unitSha256]))));
+  assert.deepEqual(report.inputUnitKeys,unitKeys);
+});
+
+test("mutated digests, misplaced context and reference vote injection fail before quota or provider",async()=>{
+  const h=harness(),batch=await source(),post=await submission(batch);
+  post.batch.units[0].text="Changed source.";
+  assert.equal((await h.call(request("/batch",post))).status,400);
+  const injected=await source("adjudicator");injected.reviews={referenceA:{rows:[]},referenceB:{rows:[]}};
+  assert.equal((await h.call(request("/batch",await submission(injected)))).status,400);
+  const detector=await source("detector");detector.units[0].target=true;detector.units[1].target=false;
+  assert.equal((await h.call(request("/batch",await submission(detector)))).status,400);
+  assert.deepEqual(h.actions,[]);
+});
+
+test("provider safety HTTP errors block all submitted coordinates without echoing prose",async()=>{
+  const h=harness(()=>Response.json({error:{code:"content_policy_violation",message:"private vendor details"}},{status:400}));
+  const report=await(await h.call(request("/batch",await submission(await source())))).json();
+  assert.equal(report.status,"refused");assert.equal(report.haltRecommended,false);
+  assert.deepEqual(report.blockedUnitKeys,report.inputUnitKeys);
+  assert.deepEqual(h.actions.at(-1).payload.refusedHashes,report.inputUnitKeys);
+  assert.equal(report.rows[0].failureCode,"provider_refusal");
+  assert.doesNotMatch(JSON.stringify(report),/private vendor details/);
+});
+
+test("quota denial does not dispatch and impossible usage cannot lower the reservation",async()=>{
+  const input=await submission(await source());
+  const denied=harness(()=>assert.fail("Denied quota must not dispatch."),{reserveStatus:429});
+  assert.equal((await denied.call(request("/batch",input))).status,429);
+  assert.deepEqual(denied.actions.map(action=>action.op),["reserve"]);
+  const h=harness(()=>providerReply(undefined,{input_tokens:999999,output_tokens:10,total_tokens:1000009}));
+  const report=await(await h.call(request("/batch",input))).json();
+  assert.equal(report.usage,null);assert.equal(h.actions.at(-1).payload.usage,null);
+  const unconfirmed=harness(()=>providerReply(),{settleStatus:503});
+  const blocked=await(await unconfirmed.call(request("/batch",input))).json();
+  assert.equal(blocked.haltRecommended,true);assert.equal(blocked.budget.settlementConfirmed,false);
+});
+
+test("billing failures halt the queue and revalidation prevents returning labels after expiry",async()=>{
+  const input=await submission(await source());
+  const h=harness(()=>Response.json({error:{code:"insufficient_quota",message:"untrusted quota prose"}},{status:429}));
+  const report=await(await h.call(request("/batch",input))).json();
+  assert.equal(report.haltRecommended,true);assert.equal(report.rows[0].failureCode,"provider_billing_limit");
+  assert.doesNotMatch(JSON.stringify(report),/untrusted quota prose/);
+  let calls=0;const expired=harness();
+  const result=await expired.call(request("/batch",input),{reverify:async()=>++calls>=4?null:session});
+  assert.equal(result.status,403);assert.equal((await result.json()).code,"session_ended_after_reservation");
+  assert.deepEqual(expired.actions.map(action=>action.op),["reserve","provider","settle"]);
+});
+
+test("unidentified returned model cannot qualify a parsed batch",async()=>{
+  const h=harness(async()=>{const payload=await providerReply().json();payload.model="unrelated-model";return Response.json(payload);});
+  const report=await(await h.call(request("/batch",await submission(await source())))).json();
+  assert.equal(report.status,"model_mismatch");assert.equal(report.haltRecommended,true);
+  assert.equal(report.returnedModel,null);assert.equal(report.rows[0].failureCode,"provider_model_mismatch");
+  assert.doesNotMatch(JSON.stringify(report),/unrelated-model/);
+});
