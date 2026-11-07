@@ -94,3 +94,33 @@ test('review: settlement charges the attempt day when a run resumes on a later U
   assert.equal(f.db.prepare('SELECT micros FROM corpus_day WHERE owner=? AND day=?').get(OWNER,101).micros, 20);
   f.db.close();
 });
+
+test('review: abandoned leases free slots without rebilling and still accept a late refusal', async () => {
+  const f = fixture();
+  const started = 100 * DAY + 1000;
+  const resumed = started + 151_000;
+  const batches = Array.from({length: 14}, (_, index) => (index + 1).toString(16).padStart(64, '0'));
+  const units = batches.map((_, index) => (index + 100).toString(16).padStart(64, '0'));
+  const request = (index, unit = units[index]) => ({...reservation('lease-run', batches[index]), unitHashes: [unit]});
+
+  assert.equal((await invoke(f, 'register', {reader: OWNER, runId: 'lease-run', manifest: batches}, started)).status, 200);
+  for (let index = 0; index < 12; index++) {
+    assert.equal((await invoke(f, 'reserve', request(index), started)).status, 200);
+  }
+  const full = await invoke(f, 'reserve', request(12), started);
+  assert.equal(full.status, 429);
+  assert.equal(full.body.code, 'concurrency_limited');
+
+  assert.equal((await invoke(f, 'reserve', request(12), resumed)).status, 200);
+  const replay = await invoke(f, 'reserve', request(0), resumed);
+  assert.equal(replay.status, 409);
+  assert.equal(replay.body.state, 'unknown');
+  assert.equal(f.db.prepare('SELECT micros FROM corpus_run WHERE id=?').get('lease-run').micros, 13_000);
+
+  const late = await invoke(f, 'settle', settlement({inputTokens: 100, outputTokens: 20}, 'lease-run', batches[0], [units[0]]), resumed);
+  assert.equal(late.body.chargedMicros, 1000);
+  const blocked = await invoke(f, 'reserve', request(13, units[0]), resumed);
+  assert.equal(blocked.status, 422);
+  assert.deepEqual(blocked.body.blockedUnitKeys, [units[0]]);
+  f.db.close();
+});

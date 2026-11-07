@@ -1,9 +1,10 @@
 import { CORPUS_COMPACT_PROMPTS, CORPUS_COMPACT_RESPONSE_FORMAT, REFERENCE_RUBRIC_VERSION,
-  decodeCorpusCompactResponse } from "./corpus-study-contract.mjs";
+  inspectCorpusCompactResponse } from "./corpus-study-contract.mjs";
 import { CORPUS_BUDGET_LIMITS, CORPUS_BUDGET_ORIGIN } from "./corpus-study-budget.mjs";
 import { CORPUS_STUDY_CLIENT_ASSET } from "./assets.mjs";
 
 export const CORPUS_STUDY_PATH = "/api/scene-analysis/corpus-study";
+export const CORPUS_PARSER_REVISION = "v7-field-validation-2";
 const API = "https://api.openai.com/v1/responses";
 const encoder = new TextEncoder();
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
@@ -60,23 +61,104 @@ export function failedCorpusRows(batch,status,code){return batch.units.filter(un
   causal:unknownLabel(),retrospective:unknownLabel(),eligibility:{status:"uncertain",adult:"uncertain",consent:"uncertain",capacity:"uncertain",evidenceIds:[]},
   confidence:0,reasonCodes:[],failureCode:code}));}
 
-function checkedRow(row,batch){
-  const ids=new Set(batch.units.map(unit=>unit.id));
-  const evidence=values=>values.every(value=>ids.has(value));
-  const eligibility=evidence(row.eligibility.evidenceIds)?null:"evidence_outside_window";
-  const check=(name,label)=>{
-    if(eligibility&&label.activation==="cue")return eligibility;
-    if(!evidence(label.evidenceIds)||name==="causal"&&label.evidenceIds.some(value=>value>row.id))return "invalid_evidence";
-    if(label.knowledgeAtId!==(label.evidenceIds.length?label.evidenceIds.at(-1):null))return "invalid_evidence_timing";
-    if(label.activation==="cue"&&(!label.evidenceIds.includes(row.id)||label.interaction!=="depicted"||["quiet","unknown"].includes(label.phase)||
-      row.eligibility.status!=="eligible"||row.eligibility.adult!=="adult"||row.eligibility.consent!=="present"||row.eligibility.capacity!=="present"||!row.eligibility.evidenceIds.length))return "cue_invariant";
-    if(name==="causal"&&label.activation==="cue"&&row.eligibility.evidenceIds.some(value=>value>row.id))return "future_eligibility_evidence";
-    if(["context","protected"].includes(label.activation)&&label.phase!=="quiet"||label.activation==="review"&&label.phase!=="unknown")return "phase_invariant";
-    if(!["none","unknown"].includes(label.transition)&&!label.evidenceIds.includes(row.id))return "transition_evidence_missing";
-    if(row.status==="refused"&&(label.activation!=="review"||label.phase!=="unknown"||label.transition!=="unknown"||label.evidenceIds.length||label.knowledgeAtId!==null))return "refusal_invariant";
-    return null;
-  };
-  return{causal:check("causal",row.causal),retrospective:check("retrospective",row.retrospective),eligibility};
+const labelFields = ["depiction", "frame", "interaction", "activation", "phase", "transition"];
+
+function validateCorpusRow(row, fallback, availableIds, originalIssues, rowIndex) {
+  const decodeIssues = [...originalIssues];
+  const addIssue = (field, code, severity = "error") =>
+    decodeIssues.push({rowIndex, id: row.id, field, code, severity});
+  const hasError = field => originalIssues.some(issue => issue.severity === "error" &&
+    (issue.field === field || issue.field.startsWith(field + ".")));
+  const proposed = {causal: row.causal, retrospective: row.retrospective, eligibility: row.eligibility};
+  const fieldStatus = {};
+  const validationErrors = {causal: null, retrospective: null, eligibility: null};
+  const scopeStatus = {causal: row.status, retrospective: row.status, eligibility: "valid"};
+  const eligibilityEvidenceOutsideWindow = row.eligibility.evidenceIds.some(id => !availableIds.has(id));
+  if (eligibilityEvidenceOutsideWindow) addIssue("eligibility.evidenceIds", "evidence_outside_window");
+  if (hasError("eligibility") || eligibilityEvidenceOutsideWindow) {
+    validationErrors.eligibility = eligibilityEvidenceOutsideWindow ? "evidence_outside_window" : "invalid_schema";
+    scopeStatus.eligibility = "invalid";
+  }
+  const eligibility = validationErrors.eligibility || row.status === "refused" ? fallback.eligibility : row.eligibility;
+  const applied = {};
+  for (const scope of ["causal", "retrospective"]) {
+    const label = proposed[scope];
+    const checked = {...label};
+    const fields = Object.fromEntries(labelFields.map(field => [field,
+      hasError(scope + "." + field) ? "unresolved" : "applied"]));
+    fieldStatus[scope] = fields;
+    const issue = (field, code, severity) => addIssue(scope + "." + field, code, severity);
+    const malformedScope = originalIssues.some(item => item.field === scope && item.severity === "error");
+    if (malformedScope) for (const field of labelFields) fields[field] = "unresolved";
+
+    if (row.status === "refused") {
+      const invalidRefusal = label.activation !== "review" || label.phase !== "unknown" ||
+        label.transition !== "unknown" || label.evidenceIds.length || label.knowledgeAtId !== null;
+      if (invalidRefusal) {
+        issue("activation", "refusal_invariant");
+        validationErrors[scope] = "refusal_invariant";
+      }
+      applied[scope] = unknownLabel();
+      for (const field of labelFields) fields[field] = "unresolved";
+      continue;
+    }
+
+    let evidenceError = null;
+    if (hasError(scope + ".evidenceIds") || label.evidenceIds.some(id => !availableIds.has(id) ||
+      scope === "causal" && id > row.id)) {
+      evidenceError = "invalid_evidence";
+      issue("evidenceIds", evidenceError);
+    } else if (hasError(scope + ".knowledgeAtId") || label.knowledgeAtId !== (label.evidenceIds.at(-1) ?? null)) {
+      evidenceError = "invalid_evidence_timing";
+      issue("knowledgeAtId", evidenceError);
+    }
+    if (evidenceError) {
+      checked.evidenceIds = [];
+      checked.knowledgeAtId = null;
+    }
+
+    const transitionNeedsEvidence = !["none", "unknown"].includes(label.transition);
+    if (transitionNeedsEvidence && (evidenceError || !label.evidenceIds.includes(row.id))) {
+      issue("transition", "transition_evidence_missing");
+      checked.transition = "unknown";
+    }
+    if (checked.transition === "unknown") fields.transition = "unresolved";
+
+    if (malformedScope || hasError(scope + ".activation")) {
+      validationErrors[scope] = "invalid_schema";
+    } else if (label.activation === "cue") {
+      const cueError = validationErrors.eligibility ?? evidenceError;
+      if (cueError) validationErrors[scope] = cueError;
+      else if (!label.evidenceIds.includes(row.id) || label.interaction !== "depicted" ||
+        label.frame === "uncertain" || ["quiet", "unknown"].includes(label.phase) ||
+        eligibility.status !== "eligible" || eligibility.adult !== "adult" ||
+        eligibility.consent !== "present" || eligibility.capacity !== "present" || !eligibility.evidenceIds.length) {
+        validationErrors[scope] = "cue_invariant";
+      } else if (scope === "causal" && eligibility.evidenceIds.some(id => id > row.id)) {
+        validationErrors[scope] = "future_eligibility_evidence";
+      }
+    } else {
+      const phase = label.activation === "review" ? "unknown" : "quiet";
+      if (label.phase !== phase || hasError(scope + ".phase")) issue("phase", "noncue_phase_normalized", "normalized");
+      checked.phase = phase;
+      fields.phase = phase === "unknown" ? "unresolved" : "applied";
+    }
+
+    if (validationErrors[scope]) {
+      issue("activation", validationErrors[scope]);
+      checked.activation = "review";
+      checked.phase = "unknown";
+      fields.activation = "unresolved";
+      fields.phase = "unresolved";
+      scopeStatus[scope] = "invalid";
+    }
+    applied[scope] = checked;
+  }
+  const failureCode = Object.values(validationErrors).find(Boolean) ??
+    decodeIssues.find(issue => issue.severity === "error")?.code ?? null;
+  return {...row, ...applied, eligibility, unitSha256: fallback.unitSha256, failureCode, scopeStatus,
+    status: failureCode && row.status !== "refused" ? "partial" : row.status,
+    ...(decodeIssues.length ? {proposed, validationErrors, fieldStatus, decodeIssues} : {})};
 }
 
 export function parseCorpusProvider(payload,batch){
@@ -86,31 +168,32 @@ export function parseCorpusProvider(payload,batch){
   if(payload?.status!=="completed")return{status:payload?.status==="incomplete"?"truncated":"invalid_response",rows:failedCorpusRows(batch,"failed",payload?.status==="incomplete"?"provider_truncated":"invalid_response")};
   let wire;
   try{if(parts.length!==1||parts[0].type!=="output_text"||typeof parts[0].text!=="string")throw new TypeError();wire=JSON.parse(parts[0].text);}catch{return{status:"invalid_response",rows:failedCorpusRows(batch,"failed","invalid_json")};}
-  if(!exact(wire,["rows"])||!Array.isArray(wire.rows)||wire.rows.length>64)return{status:"invalid_response",rows:failedCorpusRows(batch,"failed","invalid_schema")};
-  const mapped=new Map(),duplicates=new Set(),seen=new Set(),badSchema=new Set(),refusedIds=new Set();
+  if(!exact(wire,["rows"])||!Array.isArray(wire.rows)||wire.rows.length>512)return{status:"invalid_response",rows:failedCorpusRows(batch,"failed","invalid_schema")};
+  const mapped=new Map(),duplicates=new Set(),seen=new Set(),badSchema=new Map(),refusedIds=new Set(),decodeIssues=[];
+  const availableIds=new Set(batch.units.map(unit=>unit.id));
   const targets=new Set(batch.units.filter(unit=>unit.target).map(unit=>unit.id));let rejected=0;
-  for(const raw of wire.rows){
-    if(!targets.has(raw?.i)){rejected++;continue;}
+  for(const [rowIndex,raw] of wire.rows.entries()){
+    if(!targets.has(raw?.i)){
+      rejected++;
+      decodeIssues.push({rowIndex,id:integer(raw?.i)?raw.i:null,field:"id",code:"unexpected_target_id",severity:"error"});
+      continue;
+    }
     if(raw.s==="r")refusedIds.add(raw.i);
-    if(seen.has(raw.i)){duplicates.add(raw.i);continue;}seen.add(raw.i);
-    const decoded=decodeCorpusCompactResponse({rows:[raw]})?.rows[0];
-    if(!decoded){badSchema.add(raw.i);rejected++;continue;}mapped.set(raw.i,decoded);
+    if(seen.has(raw.i)){duplicates.add(raw.i);rejected++;continue;}seen.add(raw.i);
+    const inspected=inspectCorpusCompactResponse({rows:[raw]});
+    const issues=inspected.issues.map(issue=>({...issue,rowIndex}));
+    const decoded=inspected.rows[0];
+    if(!decoded){badSchema.set(raw.i,issues);rejected++;continue;}
+    mapped.set(raw.i,{decoded,issues,rowIndex});
   }
-  const unresolved=label=>({...unknownLabel(),depiction:label.depiction,frame:label.frame,interaction:label.interaction});
   const rows=failedCorpusRows(batch,"failed","missing_output").map(fallback=>{
     if(duplicates.has(fallback.id))return{...fallback,failureCode:"duplicate_output"};
-    if(badSchema.has(fallback.id))return{...fallback,failureCode:"invalid_schema"};
-    const row=mapped.get(fallback.id);if(!row)return fallback;
-    const validationErrors=checkedRow(row,batch),failureCode=Object.values(validationErrors).find(Boolean)??null;
-    const scopeStatus={causal:validationErrors.causal?"invalid":row.status,retrospective:validationErrors.retrospective?"invalid":row.status,eligibility:validationErrors.eligibility?"invalid":"valid"};
-    if(!failureCode)return{...row,unitSha256:fallback.unitSha256,failureCode,scopeStatus};
-    return{...row,status:validationErrors.causal&&validationErrors.retrospective?"failed":"partial",unitSha256:fallback.unitSha256,failureCode,
-      scopeStatus,validationErrors,proposed:{causal:row.causal,retrospective:row.retrospective,eligibility:row.eligibility},
-      causal:validationErrors.causal?unresolved(row.causal):row.causal,
-      retrospective:validationErrors.retrospective?unresolved(row.retrospective):row.retrospective,
-      eligibility:validationErrors.eligibility?fallback.eligibility:row.eligibility};
+    if(badSchema.has(fallback.id))return{...fallback,failureCode:"invalid_schema",decodeIssues:badSchema.get(fallback.id)};
+    const mappedRow=mapped.get(fallback.id);
+    if(!mappedRow)return fallback;
+    return validateCorpusRow(mappedRow.decoded,fallback,availableIds,mappedRow.issues,mappedRow.rowIndex);
   });
-  return{status:rows.every(row=>row.failureCode===null)&&!rejected?"parsed":"partial",rows,rejected,refusedIds:[...refusedIds]};
+  return{status:rows.every(row=>row.failureCode===null)&&!rejected?"parsed":"partial",rows,rejected,decodeIssues,refusedIds:[...refusedIds]};
 }
 
 function providerUsage(payload,inputLimit,outputLimit){const value=payload?.usage;
@@ -128,7 +211,7 @@ function providerErrorCode(status,payload){
 
 const PAGE=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Private corpus study</title><script type="module" src="${CORPUS_STUDY_PATH}/client.mjs"></script></head><body><main>
 <h1>Private corpus study</h1><p>Upload the prepared corpus for neutral classification. Source stays in this page until Start sends bounded batches to OpenAI. Labels do not control a reader or device. Reference labels are model-assisted research material.</p>
-<p>Each run permits at most ${CORPUS_BUDGET_LIMITS.attempts} calls and $15 estimated usage, shared with a $15 founder daily research ceiling. Existing reader limits are unchanged.</p>
+<p>Each run permits at most ${CORPUS_BUDGET_LIMITS.attempts} calls and $15 estimated usage, shared with a $15 founder daily research ceiling. Up to ${CORPUS_BUDGET_LIMITS.concurrency} independent requests can run together.</p>
 <label>Prepared source JSON <input id="source" type="file" accept=".json,application/json"></label><br>
 <label>Source-free checkpoint JSON <input id="checkpoint" type="file" accept=".json,application/json"></label>
 <label>Optional conflict-target selection <input id="adjudication" type="file" accept=".json,application/json"></label>
@@ -197,6 +280,7 @@ export async function handleCorpusStudy(request,env,{config,session,reverify,ana
   if(!await authorized())return json({code:"session_ended_after_reservation"},403);
   return json({schema:1,measurement:"live-provider",runId:input.runId,batchId:input.batchHash,workId:batch.workId,sourceSha256:batch.sourceSha256,indexSha256:batch.indexSha256,
     referenceVersion:REFERENCE_RUBRIC_VERSION,predictionVersion:batch.role==="detector"?"source-first-detector-v7":`${batch.role}-v7`,role:batch.role,model:"gpt-6-luna",promptSha256:await corpusDigest(CORPUS_COMPACT_PROMPTS[batch.role]),causalStatus:"evidence-timing-projection",
+    parserRevision:CORPUS_PARSER_REVISION,decodeIssues:result.decodeIssues??[],
     status:result.status,haltRecommended:result.haltRecommended===true||settlement?.ok!==true,httpStatus,returnedModel,dispatched,rejectedRows:result.rejected??0,elapsedMs:Math.round(performance.now()-started),usage,maxOutputTokens,targetIds,contextIds,
     inputUnitKeys:unitKeys,blockedUnitKeys:refusedHashes,budget:{reservedMicros:reserveMicros,settlementConfirmed:settlement?.ok===true,usageMeasured:usage!==null},rows:result.rows});
 }

@@ -4,6 +4,7 @@ export function corpusStudyClient({testOnly = false} = {}) {
   const PATH = "/api/scene-analysis/corpus-study";
   const VERSION = "2026-11-07-full-corpus-v7";
   const ROLES = ["referenceA", "referenceB", "detector", "transition", "adjudicator"];
+  const MAX_CONCURRENCY = 12;
   const encoder = new TextEncoder();
   const isHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
   const isId = value => typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,95}$/.test(value);
@@ -25,7 +26,23 @@ export function corpusStudyClient({testOnly = false} = {}) {
     consent: ["present", "withdrawn", "absent", "uncertain", "not_applicable"], capacity: ["present", "absent", "uncertain", "not_applicable"]
   };
   const errorCodes = ["invalid_session", "invalid_origin", "invalid_request", "invalid_manifest", "invalid_batch", "input_limit", "provider_input_limit", "study_unavailable", "budget_unavailable", "run_conflict", "run_limit", "unknown_run", "invalid_reservation", "batch_not_pinned", "already_attempted", "refusal_blocked", "concurrency_limited", "budget_exhausted", "unknown_attempt", "invalid_settlement", "invalid_operation"];
-  const failureCodes = ["provider_refusal", "provider_truncated", "invalid_response", "invalid_json", "invalid_schema", "missing_output", "duplicate_output", "evidence_outside_window", "invalid_evidence", "invalid_evidence_timing", "future_eligibility_evidence", "cue_invariant", "phase_invariant", "transition_evidence_missing", "refusal_invariant", "provider_rate_limit", "provider_http_error", "provider_key_rejected", "provider_model_access", "provider_model_mismatch", "provider_billing_limit", "provider_request_rejected", "provider_timeout", "provider_connection", "client_transport_unknown", "client_invalid_response", "client_invalid_row", "refusal_dependency", "settlement_unknown_dependency", "admission_unavailable"];
+  const decodeIssueCodes = [
+    "duplicate_evidence_ids", "unsorted_evidence_ids", "missing_confidence", "invalid_confidence",
+    "missing_reason_codes", "invalid_reason_codes", "invalid_reason_code", "duplicate_reason_codes",
+    "excess_reason_codes", "missing_eligibility", "noncue_phase_normalized", "invalid_envelope",
+    "invalid_row_keys", "invalid_target_id", "duplicate_target_id", "unexpected_target_id",
+    "invalid_status_code", "invalid_label_keys", "invalid_label_code", "invalid_evidence_ids",
+    "invalid_evidence_id", "excess_evidence_ids", "invalid_knowledge_at_id", "invalid_eligibility_keys",
+    "invalid_eligibility_code", "invalid_neutral_shortcut"
+  ];
+  const failureCodes = ["provider_refusal", "provider_truncated", "invalid_response", "invalid_json", "invalid_schema", "missing_output", "duplicate_output", "evidence_outside_window", "invalid_evidence", "invalid_evidence_timing", "future_eligibility_evidence", "cue_invariant", "phase_invariant", "transition_evidence_missing", "refusal_invariant", "provider_rate_limit", "provider_http_error", "provider_key_rejected", "provider_model_access", "provider_model_mismatch", "provider_billing_limit", "provider_request_rejected", "provider_timeout", "provider_connection", "client_transport_unknown", "client_invalid_response", "client_invalid_row", "refusal_dependency", "settlement_unknown_dependency", "admission_unavailable", ...decodeIssueCodes];
+  const labelFields = ["depiction", "frame", "interaction", "activation", "phase", "transition"];
+  const decodeIssueFields = new Set([
+    "$", "envelope", "rows", "row", "id", "status", "confidence", "reasonCodes", "neutralShortcut",
+    "causal", "retrospective", "eligibility",
+    ...["causal", "retrospective"].flatMap(scope => [...labelFields, "evidenceIds", "knowledgeAtId"].map(field => `${scope}.${field}`)),
+    ...["status", "adult", "consent", "capacity", "evidenceIds"].map(field => `eligibility.${field}`)
+  ]);
   const unknown = () => ({depiction: "unknown", frame: "uncertain", interaction: "uncertain", activation: "review", phase: "unknown", transition: "unknown", evidenceIds: [], knowledgeAtId: null});
   const fallback = (unit, code, status = "failed") => ({id: unit.id, unitSha256: unit.unitSha256, status,
     causal: unknown(), retrospective: unknown(), eligibility: {status: "uncertain", adult: "uncertain", consent: "uncertain", capacity: "uncertain", evidenceIds: []}, confidence: 0, reasonCodes: [], failureCode: code});
@@ -66,13 +83,34 @@ export function corpusStudyClient({testOnly = false} = {}) {
     if (!label || !ids(label.evidenceIds) || !proposed && label.evidenceIds.some(id => !supplied.has(id) || causal && id > targetId) ||
         !(label.knowledgeAtId === null || integer(label.knowledgeAtId)) || !proposed && label.knowledgeAtId !== (label.evidenceIds.at(-1) ?? null)) return null;
     const out = {};
-    for (const field of ["depiction", "frame", "interaction", "activation", "phase", "transition"]) { if (!enums[field].includes(label[field])) return null; out[field] = label[field]; }
+    for (const field of labelFields) { if (!enums[field].includes(label[field])) return null; out[field] = label[field]; }
     return {...out, evidenceIds: [...label.evidenceIds], knowledgeAtId: label.knowledgeAtId};
   }
   function cleanEligibility(e, supplied, proposed = false) {
     if (!e || !enums.eligibility.includes(e.status) || !enums.adult.includes(e.adult) || !enums.consent.includes(e.consent) || !enums.capacity.includes(e.capacity) ||
         !ids(e.evidenceIds) || !proposed && e.evidenceIds.some(id => !supplied.has(id))) return null;
     return {status: e.status, adult: e.adult, consent: e.consent, capacity: e.capacity, evidenceIds: [...e.evidenceIds]};
+  }
+  function cleanDecodeIssues(value) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 4096).filter(issue => issue &&
+      (issue.rowIndex === null || integer(issue.rowIndex)) && (issue.id === null || integer(issue.id)) &&
+      decodeIssueFields.has(issue.field) && failureCodes.includes(issue.code) &&
+      ["normalized", "error"].includes(issue.severity)).map(issue => ({
+        rowIndex: issue.rowIndex, id: issue.id, field: issue.field, code: issue.code, severity: issue.severity
+      }));
+  }
+  function cleanFieldStatus(value) {
+    const result = {};
+    for (const scope of ["causal", "retrospective"]) {
+      const fields = {};
+      for (const field of labelFields) {
+        const status = value?.[scope]?.[field];
+        if (["applied", "unresolved"].includes(status)) fields[field] = status;
+      }
+      if (Object.keys(fields).length) result[scope] = fields;
+    }
+    return result;
   }
   function cleanRow(row, unit, supplied) {
     if (!row || row.id !== unit.id || row.unitSha256 !== unit.unitSha256 || !["classified", "uncertain", "refused", "failed", "partial"].includes(row.status)) return fallback(unit, "client_invalid_row");
@@ -96,6 +134,9 @@ export function corpusStudyClient({testOnly = false} = {}) {
       if (!c || !r || !e) return fallback(unit, "client_invalid_row");
       out.proposed = {causal: c, retrospective: r, eligibility: e};
     }
+    if (Array.isArray(row.decodeIssues)) out.decodeIssues = cleanDecodeIssues(row.decodeIssues);
+    const fieldStatus = cleanFieldStatus(row.fieldStatus);
+    if (Object.keys(fieldStatus).length) out.fieldStatus = fieldStatus;
     return out;
   }
   function cleanResult(value, task, runId) {
@@ -117,7 +158,10 @@ export function corpusStudyClient({testOnly = false} = {}) {
       elapsedMs: integer(value.elapsedMs) ? value.elapsedMs : null, usage, maxOutputTokens: integer(value.maxOutputTokens) ? value.maxOutputTokens : null,
       targetIds: targets.map(u => u.id), contextIds: b.units.filter(u => !u.target).map(u => u.id),
       blockedUnitKeys: Array.isArray(value.blockedUnitKeys) ? value.blockedUnitKeys.filter(key => isHash(key) && task.unitKeys.includes(key)) : [],
-      budget: {reservedMicros: integer(value.budget?.reservedMicros) ? value.budget.reservedMicros : null, settlementConfirmed: value.budget?.settlementConfirmed === true, usageMeasured: value.budget?.usageMeasured === true}, rows};
+      budget: {reservedMicros: integer(value.budget?.reservedMicros) ? value.budget.reservedMicros : null, settlementConfirmed: value.budget?.settlementConfirmed === true, usageMeasured: value.budget?.usageMeasured === true},
+      ...(value.parserRevision === "v7-field-validation-2" ? {parserRevision: value.parserRevision} : {}),
+      ...(Array.isArray(value.decodeIssues) ? {decodeIssues: cleanDecodeIssues(value.decodeIssues)} : {}),
+      rows};
   }
   function localResult(task, runId, code, status = "not_submitted") {
     const b = task.batch;
@@ -243,7 +287,7 @@ export function corpusStudyClient({testOnly = false} = {}) {
   };
   const snapshot = () => ({schema: 1, kind: "satinlore-corpus-study-checkpoint", referenceVersion: VERSION, sourceBundleSha256: state.prepared.sourceBundleSha256,
     runId: state.runId, manifest: [...state.manifest], manifestHash: state.manifestHash, selectedRoles: [...state.selectedRoles],
-    contextPolicy: {referenceA: "opening-24-plus-centered-local-with-gaps", referenceB: "centered-local", adjudicator: "blind-centered-local", referenceBFirstPartition: 32, detectorPrecedingUnits: 8, maxConcurrency: 8, overlappingWindowsConcurrent: false},
+    contextPolicy: {referenceA: "opening-24-plus-centered-local-with-gaps", referenceB: "centered-local", adjudicator: "blind-centered-local", referenceBFirstPartition: 32, detectorPrecedingUnits: 8, maxConcurrency: MAX_CONCURRENCY, overlappingWindowsConcurrent: false},
     workRoster: state.prepared.works.map(w => ({workId: w.id, family: w.family, sourceSha256: w.sourceSha256, indexSha256: w.indexSha256, sourceUnitSha256: w.sourceUnitSha256, units: w.units.length, targets: w.units.filter(u => !u.structuralBoundary && u.admission === "approved").length})),
     plannedBatches: [...state.history.values()], attempts: [...state.attempts.values()], batches: [...state.batches.values()], blockedUnitKeys: [...state.blocked].sort(), heldUnitKeys: [...state.held].sort(), updatedAt: new Date().toISOString()});
 
@@ -356,10 +400,10 @@ export function corpusStudyClient({testOnly = false} = {}) {
         if (!response.ok || value?.registered !== true) { message("The immutable run manifest could not be registered. No source batches were sent."); return; }
         state.registered = true;
       }
-      message("Running up to eight nonoverlapping windows concurrently. Pause lets in-flight requests finish.");
+      message(`Running up to ${MAX_CONCURRENCY} nonoverlapping windows concurrently. Pause lets in-flight requests finish.`);
       const pending = state.tasks.filter(task => !state.attempts.has(task.batchHash) || state.attempts.get(task.batchHash).state === "deferred"), inFlight = new Map(), locked = new Set();
       while ((!state.paused && pending.length) || inFlight.size) {
-        while (!state.paused && inFlight.size < 8 && pending.length) {
+        while (!state.paused && inFlight.size < MAX_CONCURRENCY && pending.length) {
           const index = pending.findIndex(task => task.unitKeys.every(key => !locked.has(key)));
           if (index < 0) break;
           const [task] = pending.splice(index, 1); task.unitKeys.forEach(key => locked.add(key));
