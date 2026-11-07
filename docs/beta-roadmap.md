@@ -137,6 +137,8 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 ## F5 — measurable scoring evaluation
 
+A founder-only whole story research harness compares one complete cleared edition, concurrent paragraph windows and a causal sentence prefix on four pinned original neutral fixtures. It reports typed labels, coverage, exact transitions, timing and usage through a separately enabled Access-protected route. The next check is a billed Responses run on the deployed candidate. [Commands, schema and runtime flag](nocturne-luna-comparison.md)
+
 A founder-only hosted benchmark compares sentence-level Luna Decisions with Luna Responses using fixed fixtures and a digest-pinned approved calibration corpus. It uses the existing Worker key and quota. Compare live coverage, precision, recall, latency and token usage before considering playback integration. [Hosted benchmark](../deploy/cloudflare/README.md#run-the-founder-luna-decisions-benchmark)
 
 On 6 November, both endpoints returned valid maps on all three calibration passages. Responses recovered 36 of 36 cues with 12 false cues and recovered three of three boundaries with two false boundaries. Decisions recovered 27 of 36 cues with one false cue and recovered one of three boundaries with one false boundary. Median request time was 12.006 seconds for Responses and 0.706 seconds for Decisions. Decisions used 74,389 input tokens with zero output tokens. Responses used 4,199 input and 3,769 output tokens. The joint-label experiment targets the 12 contradictory labels recorded by Decisions and the overhead of its repeated rubric.

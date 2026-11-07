@@ -6,7 +6,7 @@ export const BEAT_CATEGORIES = Object.freeze(["neutral", "romance", "flirting", 
 export const MAX_SCENE_UNITS = 20_000;
 const MAX_SOURCE_PARAGRAPHS = 2_000;
 const encoder = new TextEncoder();
-const separator = /^(?:[\s*#~_—–-]{3,}|(?:chapter|part|book|scene)\s+(?:\d+|[ivxlcdm]{1,8}|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[:.\-–—].*)?)$/iu;
+const separator = /^(?:[\s*#~_—–-]{3,}|<{3,}>{3,}|(?:chapter|part|book|scene)\s+(?:\d+|[ivxlcdm]{1,8}|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[:.\-–—].*)?)$/iu;
 const between = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
 const exactFields = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
   Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
