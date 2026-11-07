@@ -309,7 +309,8 @@ test("new provider and client failure codes preserve their observed cause and st
     ["provider_request_rejected", "provider-request-rejected", "provider"],
     ["provider_rate_limit", "provider-rate-limit", "provider"],
     ["client_invalid_row", "schema-invalid", "validation"],
-    ["client_transport_unknown", "client-transport-unknown", "submission"],
+    ["client_transport_unknown", "client-transport-unknown", "transport"],
+    ["provider_response_lost", "provider-response-lost", "transport"],
     ["admission_unavailable", "admission-unavailable", "admission"],
     ["settlement_unknown_dependency", "settlement-unknown-dependent", "admission"],
   ];
