@@ -42,6 +42,33 @@ test("a provider refusal and an application suppression are distinct from a sema
   assert.deepEqual(result.rows[0].evidenceCoverage.missingRequiredIds, []);
 });
 
+test("eligibility coverage checks one provider window and preserves the observed cue diagnosis", () => {
+  const input = fixture([quiet(), quiet(), quiet(), cue({evidenceIds: [3], knowledgeAtId: 3})], [
+    {status: "classified", causal: quiet()},
+    {status: "classified", causal: quiet()},
+    {status: "classified", causal: quiet()},
+    {status: "classified", causal: quiet(), requestIds: ["attempt1", "attempt2", "plan", "context-only"]},
+  ]);
+  input.reference.works[0].units[3].scopeEligibility = {causal: {
+    status: "eligible", adult: "adult", consent: "present", capacity: "present", evidenceIds: [0, 1, 2],
+  }};
+  input.trace.requests = [
+    {id: "attempt1", workId: "w1", targetIds: [3], contextIds: [0], windowDisposition: "provider-attempt"},
+    {id: "attempt2", workId: "w1", targetIds: [3], contextIds: [1, 2], windowDisposition: "provider-attempt"},
+    {id: "plan", workId: "w1", targetIds: [3], contextIds: [0, 1, 2], windowDisposition: "planned-only"},
+    {id: "context-only", workId: "w1", targetIds: [2], contextIds: [0, 1, 3], windowDisposition: "provider-attempt"},
+  ];
+  const result = evaluateCueDiagnostics(input);
+  const row = result.rows[3];
+  assert.deepEqual(row.evidenceCoverage, {known: true, requiredIds: [3], missingRequiredIds: [], basis: "provider-attempt-window"});
+  assert.deepEqual(row.eligibilityEvidenceCoverage, {
+    known: true, requiredIds: [0, 1, 2], missingRequiredIds: [0], basis: "provider-attempt-window",
+  });
+  assert.deepEqual(row.diagnosis, {reason: "model-negative", stage: "classification", certainty: "observed-label-disagreement",
+    hypotheses: ["reference-eligibility-evidence-absent-from-retained-window"]});
+  assert.equal(result.summary.activation.missed, 1);
+});
+
 test("unknown references and protected references do not become ordinary negatives", () => {
   const input = fixture([cue(), quiet({activation: "protected"}), cue({activation: "review"})], [
     {status: "classified", causal: cue()}, {status: "classified", causal: cue()}, {status: "classified", causal: cue()},

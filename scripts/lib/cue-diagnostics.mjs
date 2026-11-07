@@ -295,6 +295,27 @@ function reportDetails(counts, measured) {
     knownPredictionCoverage: ratio(counts.predictionKnown, counts.referenceKnown)};
 }
 
+function eligibilityEvidenceCoverage(requiredIds, requests, workId, unitId) {
+  const windows = requests.filter(request => request.workId === workId && Array.isArray(request.targetIds) &&
+    Array.isArray(request.contextIds) && request.targetIds.includes(unitId));
+  const groups = [
+    ["provider-attempt-window", windows.filter(request => request.windowDisposition === "provider-attempt")],
+    ["retained-window", windows.filter(request => !["provider-attempt", "planned-only"].includes(request.windowDisposition))],
+    ["planned-window", windows.filter(request => request.windowDisposition === "planned-only")],
+  ];
+  for (const [basis, candidates] of groups) {
+    if (!candidates.length) continue;
+    let missingRequiredIds = null;
+    for (const request of candidates) {
+      const submitted = new Set([...request.targetIds, ...request.contextIds]);
+      const missing = requiredIds.filter(id => !submitted.has(id));
+      if (missingRequiredIds === null || missing.length < missingRequiredIds.length) missingRequiredIds = missing;
+    }
+    return {known: true, requiredIds, missingRequiredIds, basis};
+  }
+  return {known: false, requiredIds, missingRequiredIds: null, basis: "unknown"};
+}
+
 /**
  * Evaluate frozen exact-unit references against retained prediction traces.
  * A missing prediction stays in the positive reference denominator. Unknown
@@ -396,6 +417,10 @@ export function evaluateCueDiagnostics({reference, trace, scope = "causal"} = {}
         .flatMap(row => [...(row.targetIds ?? []), ...(row.contextIds ?? [])]));
       const hasEvidenceCoverage = prediction.requests.some(row => Array.isArray(row.targetIds) && Array.isArray(row.contextIds) && row.workId === work.id);
       const missingRequiredIds = hasEvidenceCoverage ? (expected?.evidenceIds ?? []).filter(id => !submitted.has(id)) : null;
+      const eligibilityCoverage = eligibilityEvidenceCoverage(expectedEligibility?.evidenceIds ?? [], prediction.requests, work.id, unit.id);
+      const hypotheses = [];
+      if (missingRequiredIds?.length) hypotheses.push("reference-evidence-absent-from-retained-window");
+      if (eligibilityCoverage.missingRequiredIds?.length) hypotheses.push("reference-eligibility-evidence-absent-from-retained-window");
       const row = {key, workId: work.id, sourceSha256: work.sourceSha256, unitId: unit.id, unitSha256: unit.unitSha256, paragraph: unit.paragraph,
         referenceResolved: resolved, transitionReferenceResolved: Boolean(transitionResolved), expected, expectedEligibility, referenceReasonCodes: cleanReasons(unit.reasonCodes),
         prediction, cueResult, transitionResult, mismatches: mismatch, proposedMismatches: proposedMismatch,
@@ -408,7 +433,8 @@ export function evaluateCueDiagnostics({reference, trace, scope = "causal"} = {}
           ...(prediction.observedFailureCode ? {observedCode: prediction.observedFailureCode} : {}),
           ...(prediction.local ? {observedRule: prediction.local.reasonCode} : {}),
           ...(prediction.planning?.exclusion ? {observedPlanningExclusion: prediction.planning.exclusion} : {}),
-          ...(missingRequiredIds?.length ? {hypotheses: ["reference-evidence-absent-from-retained-window"]} : {})} : null,
+          ...(hypotheses.length ? {hypotheses} : {})} : null,
+        eligibilityEvidenceCoverage: eligibilityCoverage,
         evidenceCoverage: {known: hasEvidenceCoverage, requiredIds: expected?.evidenceIds ?? [], missingRequiredIds,
           basis: !hasEvidenceCoverage ? "unknown" : prediction.requests.some(row => row.windowDisposition === "provider-attempt") ?
             "provider-attempt-window" : prediction.requests.every(row => row.windowDisposition === "planned-only") ? "planned-window" : "retained-window"}};
