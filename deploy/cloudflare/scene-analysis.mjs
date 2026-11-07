@@ -10,6 +10,7 @@ import { CUE_CONTINUITY_STUDY_REQUESTS, CUE_CONTINUITY_STUDY_SUITE, runDecisions
   STORY_STUDY_MAX_TOTAL_REQUESTS, validateStoryStudyPayload } from "./decisions-story-study.mjs";
 import { DECISIONS_STORY_STUDY_PINS } from "./decisions-story-study-pins.mjs";
 import { runDecisionsTransitionStudy } from "./decisions-transition-study.mjs";
+import { initializeCorpusBudget, handleCorpusBudget, corpusBudgetExpiry, pruneCorpusBudget } from "./corpus-study-budget.mjs";
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
@@ -575,14 +576,19 @@ export class SceneAnalysisBudget {
     this.storage = ctx.storage;
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS quota (key TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, count INTEGER NOT NULL)");
+    initializeCorpusBudget(this.sql);
   }
 
   async scheduleExpiry() {
-    const next = this.sql.exec("SELECT MIN(expires_at) AS next FROM quota").one().next;
+    const quotaNext = this.sql.exec("SELECT MIN(expires_at) AS next FROM quota").one().next;
+    const corpusNext = corpusBudgetExpiry(this.sql);
+    const next = [quotaNext, corpusNext].filter(Number.isSafeInteger).sort((a,b)=>a-b)[0];
     if (Number.isSafeInteger(next)) await this.storage.setAlarm(next);
   }
 
   async fetch(request) {
+    const corpusResponse = await handleCorpusBudget(request, this);
+    if (corpusResponse) return corpusResponse;
     if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
     try {
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
@@ -619,6 +625,7 @@ export class SceneAnalysisBudget {
 
   async alarm() {
     this.sql.exec("DELETE FROM quota WHERE expires_at<=?", Date.now());
+    pruneCorpusBudget(this.sql, Date.now());
     await this.scheduleExpiry();
   }
 }

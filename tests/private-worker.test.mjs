@@ -7,7 +7,7 @@ import { Script } from "node:vm";
 import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
-import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_ASSETS } from "../deploy/cloudflare/assets.mjs";
+import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_ASSETS, CORPUS_STUDY_CLIENT_ASSET } from "../deploy/cloudflare/assets.mjs";
 import { FEEDBACK_INBOX_NAME } from "../deploy/cloudflare/feedback.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -190,7 +190,10 @@ test("deployment invokes authentication ahead of all assets and packages only th
     }
     return files;
   }
-  assert.deepEqual((await list(output)).sort(), [...PRIVATE_ASSET_PATHS, ...ALPHA_ASSETS.map(([, path]) => path)].sort());
+  assert.deepEqual((await list(output)).sort(), [...PRIVATE_ASSET_PATHS, ...ALPHA_ASSETS.map(([, path]) => path), CORPUS_STUDY_CLIENT_ASSET].sort());
+  assert.equal(PRIVATE_ASSET_PATHS.includes(CORPUS_STUDY_CLIENT_ASSET),false,"Research module must not enter reader asset routing.");
+  assert.equal(await readFile(resolve(output,CORPUS_STUDY_CLIENT_ASSET.slice(1)),"utf8"),
+    await readFile(resolve(ROOT,"deploy/cloudflare/corpus-study-client.mjs"),"utf8"));
   const hosted = await readFile(resolve(output, "index.html"), "utf8");
   assert.match(hosted, /<meta name="satinlore-hosted-access" content="true">/);
   for (const path of Object.values(PRIVATE_DOCUMENT_ROUTES)) {
