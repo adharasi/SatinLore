@@ -124,3 +124,41 @@ test('review: abandoned leases free slots without rebilling and still accept a l
   assert.deepEqual(blocked.body.blockedUnitKeys, [units[0]]);
   f.db.close();
 });
+
+test('reconciliation reports owned pinned attempt states without writing quota or clearing refusals', async () => {
+  const f = fixture();
+  const started = 100 * DAY + 1000;
+  const manifest = Array.from({length: 5}, (_, index) => (index + 1).toString(16).padStart(64, '0'));
+  const runId = 'status-run';
+  const registration = {reader: OWNER, runId, manifest};
+  await invoke(f, 'register', registration, started);
+  for (const batchHash of manifest.slice(0,4)) {
+    const reply = await invoke(f, 'reserve', {...reservation(runId, batchHash),unitHashes:[batchHash]}, started);
+    assert.equal(reply.status, 200);
+  }
+  await invoke(f, 'settle', settlement({inputTokens:100,outputTokens:20},runId,manifest[0]), started);
+  await invoke(f, 'settle', settlement(null,runId,manifest[1],[manifest[1]]), started);
+  await invoke(f, 'settle', settlement(null,runId,manifest[2]), started);
+  const snapshot = () => ['corpus_run','corpus_day','corpus_attempt','corpus_block'].map(table =>
+    f.db.prepare(`SELECT * FROM ${table}`).all());
+  const before = snapshot();
+  const input = {reader: OWNER, runId, batchIds: [...manifest].reverse()};
+  const observed = await invoke(f, 'status', input, started);
+  assert.deepEqual(observed, {status:200,body:{runId,batches:input.batchIds.map((batchId,index)=>({
+    batchId,state:['absent','inflight','unknown','refused','complete'][index]
+  }))}});
+  const afterLease = await invoke(f, 'status', input, started + 151_000);
+  assert.equal(afterLease.body.batches[1].state, 'unknown');
+  assert.deepEqual(snapshot(), before);
+
+  assert.deepEqual(await invoke(f,'status',{...input,reader:OTHER},started),
+    {status:403,body:{code:'unknown_run'}});
+  assert.deepEqual(await invoke(f,'status',{...input,batchIds:[manifest[0],'f'.repeat(64)]},started),
+    {status:403,body:{code:'batch_not_pinned'}});
+  assert.deepEqual(await invoke(f,'status',{...input,batchIds:[manifest[0],manifest[0]]},started),
+    {status:400,body:{code:'invalid_request'}});
+  assert.deepEqual(await invoke(f,'status',input,started+7*DAY),
+    {status:403,body:{code:'unknown_run'}});
+  assert.deepEqual(snapshot(), before);
+  f.db.close();
+});

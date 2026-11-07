@@ -5,6 +5,8 @@ export function corpusStudyClient({testOnly = false} = {}) {
   const VERSION = "2026-11-07-full-corpus-v7";
   const ROLES = ["referenceA", "referenceB", "detector", "transition", "adjudicator"];
   const MAX_CONCURRENCY = 12;
+  const DEFAULT_CONCURRENCY = 6;
+  const LEDGER_STATES = ["complete", "refused", "inflight", "unknown", "absent"];
   const encoder = new TextEncoder();
   const isHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
   const isId = value => typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,95}$/.test(value);
@@ -35,7 +37,7 @@ export function corpusStudyClient({testOnly = false} = {}) {
     "invalid_evidence_id", "excess_evidence_ids", "invalid_knowledge_at_id", "invalid_eligibility_keys",
     "invalid_eligibility_code", "invalid_neutral_shortcut"
   ];
-  const failureCodes = ["provider_refusal", "provider_truncated", "invalid_response", "invalid_json", "invalid_schema", "missing_output", "duplicate_output", "evidence_outside_window", "invalid_evidence", "invalid_evidence_timing", "future_eligibility_evidence", "cue_invariant", "phase_invariant", "transition_evidence_missing", "refusal_invariant", "provider_rate_limit", "provider_http_error", "provider_key_rejected", "provider_model_access", "provider_model_mismatch", "provider_billing_limit", "provider_request_rejected", "provider_timeout", "provider_connection", "client_transport_unknown", "client_invalid_response", "client_invalid_row", "refusal_dependency", "settlement_unknown_dependency", "admission_unavailable", ...decodeIssueCodes];
+  const failureCodes = ["provider_refusal", "provider_truncated", "invalid_response", "invalid_json", "invalid_schema", "missing_output", "duplicate_output", "evidence_outside_window", "invalid_evidence", "invalid_evidence_timing", "future_eligibility_evidence", "cue_invariant", "phase_invariant", "transition_evidence_missing", "refusal_invariant", "provider_rate_limit", "provider_http_error", "provider_key_rejected", "provider_model_access", "provider_model_mismatch", "provider_billing_limit", "provider_request_rejected", "provider_timeout", "provider_connection", "client_transport_unknown", "client_invalid_response", "client_invalid_row", "refusal_dependency", "settlement_unknown_dependency", "admission_unavailable", "provider_response_lost", "reconciled_refusal", ...decodeIssueCodes];
   const labelFields = ["depiction", "frame", "interaction", "activation", "phase", "transition"];
   const decodeIssueFields = new Set([
     "$", "envelope", "rows", "row", "id", "status", "confidence", "reasonCodes", "neutralShortcut",
@@ -163,10 +165,16 @@ export function corpusStudyClient({testOnly = false} = {}) {
       ...(Array.isArray(value.decodeIssues) ? {decodeIssues: cleanDecodeIssues(value.decodeIssues)} : {}),
       rows};
   }
-  function localResult(task, runId, code, status = "not_submitted") {
-    const b = task.batch;
+  function cleanTransport(value) {
+    if (!["no_response", "response_invalid", "response_rejected", "response_mismatch"].includes(value?.stage)) return null;
+    const httpStatus = Number.isInteger(value.httpStatus) && value.httpStatus >= 100 && value.httpStatus <= 599 ? value.httpStatus : null;
+    return {stage: value.stage, httpStatus};
+  }
+  function localResult(task, runId, code, status = "not_submitted", transport = null) {
+    const b = task.batch, trace = cleanTransport(transport);
     return {schema: 1, measurement: "client-disposition", runId, batchId: task.batchHash, workId: b.workId, sourceSha256: b.sourceSha256, indexSha256: b.indexSha256,
       referenceVersion: VERSION, role: b.role, status, targetIds: b.units.filter(u => u.target).map(u => u.id), contextIds: b.units.filter(u => !u.target).map(u => u.id),
+      ...(trace ? {transport: trace} : {}),
       usage: null, rows: b.units.filter(u => u.target).map(u => fallback(u, code))};
   }
   function meaningful(row) { return JSON.stringify([row.status, row.causal, row.retrospective, row.eligibility]); }
@@ -243,13 +251,14 @@ export function corpusStudyClient({testOnly = false} = {}) {
   }
 
   function resumeDisposition(checkpoint, prepared) {
-    if (!checkpoint) return {batches: [], attempts: [], plannedBatches: [], blockedUnitKeys: [], heldUnitKeys: [], checkpoint: null, jobs: null};
+    if (!checkpoint) return {batches: [], attempts: [], plannedBatches: [], blockedUnitKeys: [], heldUnitKeys: [], reconciliationEvents: [], checkpoint: null, jobs: null};
     if (checkpoint.schema !== 1 || checkpoint.sourceBundleSha256 !== prepared.sourceBundleSha256) fail("checkpoint_source_mismatch");
-    if (Array.isArray(checkpoint.jobs) && !checkpoint.batches && [VERSION, "v7"].includes(checkpoint.referenceVersion)) return {batches: [], attempts: [], plannedBatches: [], blockedUnitKeys: [], heldUnitKeys: [], checkpoint: null, jobs: checkpoint.jobs};
+    if (Array.isArray(checkpoint.jobs) && !checkpoint.batches && [VERSION, "v7"].includes(checkpoint.referenceVersion)) return {batches: [], attempts: [], plannedBatches: [], blockedUnitKeys: [], heldUnitKeys: [], reconciliationEvents: [], checkpoint: null, jobs: checkpoint.jobs};
     if (checkpoint.kind !== "satinlore-corpus-study-checkpoint" || checkpoint.referenceVersion !== VERSION || !isId(checkpoint.runId) || !Array.isArray(checkpoint.manifest) || !checkpoint.manifest.length || checkpoint.manifest.length > 1500 || checkpoint.manifest.some(h => !isHash(h)) || new Set(checkpoint.manifest).size !== checkpoint.manifest.length || !isHash(checkpoint.manifestHash) ||
         !Array.isArray(checkpoint.batches) || !Array.isArray(checkpoint.attempts) || !Array.isArray(checkpoint.plannedBatches) || checkpoint.plannedBatches.length > 10000 ||
-        !Array.isArray(checkpoint.blockedUnitKeys) || checkpoint.blockedUnitKeys.some(h => !isHash(h)) || !Array.isArray(checkpoint.heldUnitKeys ?? []) || (checkpoint.heldUnitKeys ?? []).some(h => !isHash(h))) fail("invalid_checkpoint");
-    return {batches: checkpoint.batches, attempts: checkpoint.attempts, plannedBatches: checkpoint.plannedBatches, blockedUnitKeys: checkpoint.blockedUnitKeys, heldUnitKeys: checkpoint.heldUnitKeys ?? [], checkpoint, jobs: null};
+        !Array.isArray(checkpoint.blockedUnitKeys) || checkpoint.blockedUnitKeys.some(h => !isHash(h)) || !Array.isArray(checkpoint.heldUnitKeys ?? []) || (checkpoint.heldUnitKeys ?? []).some(h => !isHash(h)) ||
+        !Array.isArray(checkpoint.reconciliationEvents ?? []) || (checkpoint.reconciliationEvents ?? []).length > 10000) fail("invalid_checkpoint");
+    return {batches: checkpoint.batches, attempts: checkpoint.attempts, plannedBatches: checkpoint.plannedBatches, blockedUnitKeys: checkpoint.blockedUnitKeys, heldUnitKeys: checkpoint.heldUnitKeys ?? [], reconciliationEvents: checkpoint.reconciliationEvents ?? [], checkpoint, jobs: null};
   }
   function planRecord(task) {
     const b = task.batch;
@@ -273,23 +282,51 @@ export function corpusStudyClient({testOnly = false} = {}) {
   if (testOnly) return helpers;
 
   const el = id => document.getElementById(id);
-  const state = {prepared: null, tasks: [], runId: null, manifest: [], selectedRoles: [], batches: new Map(), attempts: new Map(), history: new Map(), blocked: new Set(), held: new Set(), running: false, preparing: false, paused: true, active: 0, registered: false, pauseCode: null};
+  const state = {prepared: null, tasks: [], tasksByHash: new Map(), runId: null, manifest: [], selectedRoles: [], batches: new Map(), attempts: new Map(), history: new Map(), blocked: new Set(), held: new Set(), legacyHolds: new Set(), refusedWindows: new Set(), reconciliationEvents: [], running: false, preparing: false, reconciling: false, paused: true, active: 0, registered: false, pauseCode: null, concurrency: DEFAULT_CONCURRENCY};
   const message = text => { el("progress").textContent = text; };
   const selected = () => ROLES.filter(role => el(role).checked);
+  const unknownAttempts = () => [...state.attempts.values()].filter(attempt => attempt.state === "unknown");
+  const taskFor = batchId => state.tasksByHash.get(batchId) ?? recoverTask(state.prepared, state.history.get(batchId));
+  const overlapsRefusal = task => task.unitKeys.some(key => state.blocked.has(key) || state.refusedWindows.has(key));
+  async function refreshHolds() {
+    state.held = new Set(state.legacyHolds);
+    state.refusedWindows.clear();
+    for (const attempt of state.attempts.values()) {
+      if (attempt.state === "unknown" || attempt.ledgerState === "refused") {
+        const task = await taskFor(attempt.batchId);
+        const holds = attempt.ledgerState === "refused" ? state.refusedWindows : state.held;
+        task.unitKeys.forEach(key => holds.add(key));
+      }
+    }
+    for (const attempt of state.attempts.values()) {
+      if (attempt.state !== "held") continue;
+      const task = await taskFor(attempt.batchId);
+      if (overlapsRefusal(task)) {
+        attempt.state = "blocked";
+        state.batches.set(attempt.batchId, localResult(task, attempt.runId, "refusal_dependency", "refusal_blocked"));
+      } else if (task.unitKeys.every(key => !state.held.has(key))) {
+        attempt.state = "deferred";
+        state.batches.delete(attempt.batchId);
+      }
+    }
+  }
   const update = () => {
     const rows = [...state.batches.values()].flatMap(b => b.rows ?? []), attempted = [...state.attempts.values()];
     el("summary").textContent = JSON.stringify({sourceItems: state.prepared?.works.length ?? 0, admittedTargets: state.prepared?.targets ?? 0, plannedBatches: state.tasks.length,
       attemptsRecorded: attempted.length, inFlight: state.active, completedBatches: state.batches.size, classifiedRows: rows.filter(r => r.status === "classified").length,
       unresolvedRows: rows.filter(r => r.status !== "classified").length, blockedUnits: state.blocked.size, heldUnits: state.held.size,
+      interruptedRequests: unknownAttempts().length, heldBatches: attempted.filter(a => a.state === "held").length, refusedWindowUnits: state.refusedWindows.size,
       reportedInputTokens: [...state.batches.values()].reduce((n, b) => n + (b.usage?.inputTokens ?? 0), 0), reportedOutputTokens: [...state.batches.values()].reduce((n, b) => n + (b.usage?.outputTokens ?? 0), 0)}, null, 2);
-    el("prepare").disabled = state.running || state.preparing; el("start").disabled = state.running || state.preparing || !state.tasks.length; el("pause").disabled = !state.running; el("download").disabled = !state.prepared;
-    for (const name of ["source", "checkpoint", "adjudication", ...ROLES]) if (el(name)) el(name).disabled = state.running || state.preparing;
+    const busy = state.running || state.preparing || state.reconciling;
+    el("prepare").disabled = busy; el("start").disabled = busy || !state.tasks.length; el("pause").disabled = !state.running; el("download").disabled = !state.prepared;
+    if (el("reconcile")) el("reconcile").disabled = busy || !unknownAttempts().length;
+    for (const name of ["source", "checkpoint", "adjudication", "concurrency", ...ROLES]) if (el(name)) el(name).disabled = busy;
   };
   const snapshot = () => ({schema: 1, kind: "satinlore-corpus-study-checkpoint", referenceVersion: VERSION, sourceBundleSha256: state.prepared.sourceBundleSha256,
     runId: state.runId, manifest: [...state.manifest], manifestHash: state.manifestHash, selectedRoles: [...state.selectedRoles],
-    contextPolicy: {referenceA: "opening-24-plus-centered-local-with-gaps", referenceB: "centered-local", adjudicator: "blind-centered-local", referenceBFirstPartition: 32, detectorPrecedingUnits: 8, maxConcurrency: MAX_CONCURRENCY, overlappingWindowsConcurrent: false},
+    contextPolicy: {referenceA: "opening-24-plus-centered-local-with-gaps", referenceB: "centered-local", adjudicator: "blind-centered-local", referenceBFirstPartition: 32, detectorPrecedingUnits: 8, maxConcurrency: MAX_CONCURRENCY, concurrency: state.concurrency, overlappingWindowsConcurrent: false},
     workRoster: state.prepared.works.map(w => ({workId: w.id, family: w.family, sourceSha256: w.sourceSha256, indexSha256: w.indexSha256, sourceUnitSha256: w.sourceUnitSha256, units: w.units.length, targets: w.units.filter(u => !u.structuralBoundary && u.admission === "approved").length})),
-    plannedBatches: [...state.history.values()], attempts: [...state.attempts.values()], batches: [...state.batches.values()], blockedUnitKeys: [...state.blocked].sort(), heldUnitKeys: [...state.held].sort(), updatedAt: new Date().toISOString()});
+    plannedBatches: [...state.history.values()], attempts: [...state.attempts.values()], batches: [...state.batches.values()], blockedUnitKeys: [...state.blocked].sort(), heldUnitKeys: [...state.held].sort(), reconciliationEvents: [...state.reconciliationEvents], updatedAt: new Date().toISOString()});
 
   async function readInput(input, maxBytes) {
     const file = input.files?.[0]; if (!file || file.size > maxBytes) fail("file_limit");
@@ -305,7 +342,15 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const resumed = [resumeDisposition(imported, prepared), resumeDisposition(retained, prepared)], roles = selected();
     const sidecar = el("adjudication")?.files?.length ? resumeDisposition(await readJson("adjudication", 8 * 1024 * 1024), prepared) : null;
     if (sidecar && !sidecar.jobs) fail("invalid_adjudication_jobs");
-    const allRows = [...new Map(resumed.flatMap(r => r.batches).map(b => [b.batchId, b])).values()];
+    const mergedRows = new Map(), attemptRecords = new Map();
+    for (const r of resumed) {
+      for (const a of r.attempts) {
+        attemptRecords.set(a.batchId, a);
+        if (a.state === "deferred") mergedRows.delete(a.batchId);
+      }
+      for (const b of r.batches) mergedRows.set(b.batchId, b);
+    }
+    const allRows = [...mergedRows.values()];
     const jobs = sidecar?.jobs ?? resumed[0].jobs ?? (roles.includes("adjudicator") ? adjudicationTargets(prepared, allRows) : null);
     const tasks = await buildTasks(prepared, roles, jobs), byHash = new Map(tasks.map(t => [t.batchHash, t]));
     const manifest = tasks.map(t => t.batchHash), manifestHash = await digest(manifest);
@@ -319,28 +364,51 @@ export function corpusStudyClient({testOnly = false} = {}) {
       if (!task) { task = await recoverTask(prepared, priorRecords.get(record.batchId) ?? record); byHash.set(task.batchHash, task); }
       history.set(task.batchHash, planRecord(task)); return task;
     };
+    const ledgerStates = new Map();
+    const reconciliationEvents = [...new Map(resumed.flatMap(r => r.reconciliationEvents).filter(e => e && isId(e.runId) && isHash(e.batchId) && integer(e.checkedAtMs) && [...LEDGER_STATES, "unreachable"].includes(e.state)).map(e => [JSON.stringify([e.runId, e.batchId, e.state, e.checkedAtMs]), {runId: e.runId, batchId: e.batchId, state: e.state, checkedAtMs: e.checkedAtMs}])).values()].slice(-10000);
+    for (const e of reconciliationEvents) if (LEDGER_STATES.includes(e.state)) ledgerStates.set(`${e.runId}:${e.batchId}`, e.state);
     for (const b of allRows) {
       const task = await resolvePrior(b); if (!isId(b.runId)) fail("checkpoint_plan_mismatch");
       if (b.measurement === "live-provider") { const clean = cleanResult(b, task, b.runId); if (!clean) fail("invalid_checkpoint"); batches.set(b.batchId, clean); }
-      else if (b.measurement === "client-disposition" && ["refusal_blocked", "unknown", "settlement_unknown"].includes(b.status)) batches.set(b.batchId, localResult(task, b.runId, b.status === "refusal_blocked" ? "refusal_dependency" : b.status === "settlement_unknown" ? "settlement_unknown_dependency" : "client_transport_unknown", b.status));
+      else if (b.measurement === "client-disposition" && ["refusal_blocked", "unknown", "settlement_unknown", "response_lost"].includes(b.status)) {
+        const code = {refusal_blocked: "refusal_dependency", unknown: "client_transport_unknown", settlement_unknown: "settlement_unknown_dependency", response_lost: "provider_response_lost"}[b.status];
+        const failure = b.rows?.[0]?.failureCode;
+        batches.set(b.batchId, localResult(task, b.runId, failureCodes.includes(failure) ? failure : code, b.status, b.transport));
+      }
       else fail("invalid_checkpoint");
-      attempts.set(b.batchId, {batchId: b.batchId, runId: b.runId, role: task.batch.role, workId: task.batch.workId, state: b.measurement === "live-provider" ? "complete" : b.status === "refusal_blocked" ? "blocked" : "unknown"});
+      const recorded = attemptRecords.get(b.batchId);
+      const savedLedgerState = recorded?.runId === b.runId && ["absent", "complete", "refused"].includes(recorded.ledgerState) ? recorded.ledgerState : undefined;
+      const ledgerState = ledgerStates.get(`${b.runId}:${b.batchId}`) ?? savedLedgerState;
+      let disposition = {refusal_blocked: "blocked", settlement_unknown: "held", response_lost: "complete"}[b.status] ?? "unknown";
+      if (b.measurement === "live-provider" && (b.budget?.settlementConfirmed || ledgerState === "complete")) disposition = "complete";
+      if (ledgerState === "refused") disposition = "blocked";
+      const keepLedgerState = ledgerState === "refused" || ledgerState === "complete" && disposition === "complete" || ledgerState === "absent" && disposition === "held";
+      attempts.set(b.batchId, {batchId: b.batchId, runId: b.runId, role: task.batch.role, workId: task.batch.workId, state: disposition, ...(keepLedgerState ? {ledgerState} : {})});
     }
-    for (const a of [...new Map(resumed.flatMap(r => r.attempts).map(a => [a.batchId, a])).values()]) {
-      if (!isHash(a.batchId) || !isId(a.runId) || !ROLES.includes(a.role) || !isId(a.workId) || !["sending", "complete", "unknown", "blocked", "deferred"].includes(a.state)) fail("invalid_checkpoint");
+    for (const a of attemptRecords.values()) {
+      if (!isHash(a.batchId) || !isId(a.runId) || !ROLES.includes(a.role) || !isId(a.workId) || !["sending", "complete", "unknown", "blocked", "deferred", "held"].includes(a.state)) fail("invalid_checkpoint");
       const task = await resolvePrior(a); if (task.batch.workId !== a.workId || task.batch.role !== a.role) fail("checkpoint_plan_mismatch");
       if (!attempts.has(a.batchId)) {
         const status = a.state === "deferred" ? "deferred" : "unknown";
-        attempts.set(a.batchId, {batchId: a.batchId, runId: a.runId, role: a.role, workId: a.workId, state: status});
+        const absent = status === "deferred" && (ledgerStates.get(`${a.runId}:${a.batchId}`) ?? a.ledgerState) === "absent";
+        attempts.set(a.batchId, {batchId: a.batchId, runId: a.runId, role: a.role, workId: a.workId, state: status, ...(absent ? {ledgerState: "absent"} : {})});
         if (status === "unknown") batches.set(a.batchId, localResult(task, a.runId, "client_transport_unknown", "unknown"));
       }
     }
     const knownKeys = new Set(prepared.works.flatMap(w => w.units.map(u => u.unitKey)));
     const verifiedKeys = key => knownKeys.has(key);
-    Object.assign(state, {prepared, tasks, runId, manifest, manifestHash, selectedRoles: roles, batches, attempts, history,
-      blocked: new Set(resumed.flatMap(r => r.blockedUnitKeys).filter(verifiedKeys)), held: new Set(resumed.flatMap(r => r.heldUnitKeys).filter(verifiedKeys)), paused: true, registered: false});
-    for (const a of attempts.values()) if (a.state === "unknown") byHash.get(a.batchId)?.unitKeys.forEach(key => state.held.add(key));
+    const explainedHolds = new Set();
+    for (const r of resumed) {
+      const heldOnly = new Set(r.batches.filter(b => b.status === "settlement_unknown").map(b => b.batchId));
+      const uncertain = r.attempts.filter(a => ["unknown", "sending"].includes(a.state) && !heldOnly.has(a.batchId));
+      const unsettled = r.batches.filter(b => b.measurement === "live-provider" && b.budget?.settlementConfirmed === false);
+      for (const record of [...uncertain, ...unsettled, ...r.reconciliationEvents]) byHash.get(record?.batchId)?.unitKeys.forEach(key => explainedHolds.add(key));
+    }
+    const legacyHolds = new Set(resumed.flatMap(r => r.heldUnitKeys).filter(key => verifiedKeys(key) && !explainedHolds.has(key)));
+    Object.assign(state, {prepared, tasks, tasksByHash: new Map(tasks.map(task => [task.batchHash, task])), runId, manifest, manifestHash, selectedRoles: roles, batches, attempts, history, reconciliationEvents,
+      blocked: new Set(resumed.flatMap(r => r.blockedUnitKeys).filter(verifiedKeys)), legacyHolds, paused: true, registered: false});
     for (const b of batches.values()) for (const key of b.blockedUnitKeys ?? []) state.blocked.add(key);
+    await refreshHolds();
     update(); message(`Prepared ${tasks.length} batches. Start sends these exact batches for neutral classification. Existing attempted batches will not be re-billed.`);
   }
   const responseJson = async response => {
@@ -348,62 +416,117 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const text = await response.text(); if (encoder.encode(text).byteLength > 2 * 1024 * 1024) fail("invalid_response");
     try { return JSON.parse(text); } catch { fail("invalid_response"); }
   };
-  const post = body => fetch(body.batch ? `${PATH}/batch` : `${PATH}/register`, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), redirect: "error", cache: "no-store"});
+  const post = (operation, body, signal) => fetch(`${PATH}/${operation}`, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), redirect: "error", cache: "no-store", signal});
+  const canDispatch = task => {
+    const attempt = state.attempts.get(task.batchHash);
+    return !attempt || attempt.state === "deferred" && (attempt.ledgerState !== "absent" || attempt.runId === state.runId);
+  };
+  async function reconcile() {
+    const candidates = unknownAttempts();
+    if (state.running || state.preparing || state.reconciling || !candidates.length) return;
+    state.reconciling = true; update(); message("Checking interrupted requests against the run ledger…");
+    const byRun = new Map();
+    for (const attempt of candidates) {
+      const group = byRun.get(attempt.runId) ?? [];
+      group.push(attempt); byRun.set(attempt.runId, group);
+    }
+    const totals = {complete: 0, refused: 0, absent: 0, unresolved: 0};
+    try {
+      for (const [runId, group] of byRun) {
+        for (let offset = 0; offset < group.length; offset += 64) {
+          const chunk = group.slice(offset, offset + 64), batchIds = chunk.map(a => a.batchId);
+          let entries;
+          try {
+            const response = await post("reconcile", {runId, batchIds}, AbortSignal.timeout(20000));
+            const value = await responseJson(response);
+            if (!response.ok || value?.runId !== runId || !Array.isArray(value.batches) || value.batches.length !== chunk.length ||
+                value.batches.some((b, index) => b?.batchId !== batchIds[index] || !LEDGER_STATES.includes(b.state))) fail("invalid_response");
+            entries = value.batches;
+          } catch { entries = batchIds.map(batchId => ({batchId, state: "unreachable"})); }
+          for (const [index, entry] of entries.entries()) {
+            const attempt = chunk[index], batch = state.batches.get(attempt.batchId);
+            state.reconciliationEvents.push({runId, batchId: attempt.batchId, state: entry.state, checkedAtMs: Date.now()});
+            if (entry.state === "complete") {
+              attempt.state = "complete"; attempt.ledgerState = "complete"; totals.complete++;
+              if (batch?.measurement !== "live-provider") state.batches.set(attempt.batchId, localResult(await taskFor(attempt.batchId), runId, "provider_response_lost", "response_lost", batch?.transport));
+            } else if (entry.state === "refused") {
+              attempt.state = "blocked"; attempt.ledgerState = "refused"; totals.refused++;
+              if (batch?.measurement !== "live-provider") state.batches.set(attempt.batchId, localResult(await taskFor(attempt.batchId), runId, "reconciled_refusal", "refusal_blocked", batch?.transport));
+            } else if (entry.state === "absent" && batch?.measurement !== "live-provider") {
+              // The original run's atomic reservation prevents a duplicate if
+              // the interrupted request arrives after this status check.
+              attempt.state = "deferred"; attempt.ledgerState = "absent"; totals.absent++;
+              state.batches.delete(attempt.batchId);
+            } else totals.unresolved++;
+          }
+        }
+      }
+      state.reconciliationEvents = state.reconciliationEvents.slice(-10000);
+      await refreshHolds();
+      message(`Checked ${candidates.length} interrupted requests. ${totals.complete} completed, ${totals.refused} refused, ${totals.absent} eligible to retry in their original run, ${totals.unresolved} still unresolved.`);
+    } finally { state.reconciling = false; update(); }
+  }
   async function execute(task) {
-    const existing = state.attempts.get(task.batchHash); if (existing && existing.state !== "deferred") return;
-    if (task.unitKeys.some(key => state.blocked.has(key))) {
+    if (!canDispatch(task)) return;
+    if (overlapsRefusal(task)) {
       state.attempts.set(task.batchHash, {batchId: task.batchHash, runId: state.runId, role: task.batch.role, workId: task.batch.workId, state: "blocked"});
       state.batches.set(task.batchHash, localResult(task, state.runId, "refusal_dependency", "refusal_blocked")); update(); return;
     }
     if (task.unitKeys.some(key => state.held.has(key))) {
-      state.attempts.set(task.batchHash, {batchId: task.batchHash, runId: state.runId, role: task.batch.role, workId: task.batch.workId, state: "unknown"});
+      const previous = state.attempts.get(task.batchHash);
+      state.attempts.set(task.batchHash, previous ? {...previous, state: "held"} : {batchId: task.batchHash, runId: state.runId, role: task.batch.role, workId: task.batch.workId, state: "held"});
       state.batches.set(task.batchHash, localResult(task, state.runId, "settlement_unknown_dependency", "settlement_unknown")); update(); return;
     }
     state.active++; state.attempts.set(task.batchHash, {batchId: task.batchHash, runId: state.runId, role: task.batch.role, workId: task.batch.workId, state: "sending"}); update();
     const pause = code => { state.paused = true; state.pauseCode = code; };
-    const markUnknown = code => {
+    let response;
+    const markUnknown = (code, stage) => {
       state.attempts.get(task.batchHash).state = "unknown";
-      state.batches.set(task.batchHash, localResult(task, state.runId, code, "unknown"));
+      state.batches.set(task.batchHash, localResult(task, state.runId, code, "unknown", {stage, httpStatus: response?.status ?? null}));
       task.unitKeys.forEach(key => state.held.add(key)); pause(code);
     };
     try {
-      const response = await post({runId: state.runId, batchHash: task.batchHash, batch: task.batch, sourceConsent: true}), value = await responseJson(response);
+      response = await post("batch", {runId: state.runId, batchHash: task.batchHash, batch: task.batch, sourceConsent: true});
+      const value = await responseJson(response);
       if (!response.ok) {
         const code = errorCodes.includes(value?.code) ? value.code : "invalid_request";
         if (code === "refusal_blocked") {
           for (const key of Array.isArray(value.blockedUnitKeys) ? value.blockedUnitKeys : []) if (task.unitKeys.includes(key)) state.blocked.add(key);
           state.attempts.get(task.batchHash).state = "blocked"; state.batches.set(task.batchHash, localResult(task, state.runId, "refusal_dependency", "refusal_blocked"));
         } else if (["budget_exhausted", "concurrency_limited", "budget_unavailable", "study_unavailable"].includes(code)) { state.attempts.get(task.batchHash).state = "deferred"; pause(code); }
-        else markUnknown("client_transport_unknown");
+        else markUnknown("client_transport_unknown", "response_rejected");
         return;
       }
       const result = cleanResult(value, task, state.runId);
-      if (!result) { markUnknown("client_invalid_response"); return; }
+      if (!result) { markUnknown("client_invalid_response", "response_mismatch"); return; }
       const refused = new Set(result.rows.filter(r => r.status === "refused").map(r => r.id));
       if (result.status === "refused") task.unitKeys.forEach(key => state.blocked.add(key));
       task.batch.units.forEach((unit, index) => { if (refused.has(unit.id)) state.blocked.add(task.unitKeys[index]); });
       result.blockedUnitKeys.forEach(key => state.blocked.add(key));
       state.batches.set(task.batchHash, result); state.attempts.get(task.batchHash).state = "complete";
-      if (!result.budget.settlementConfirmed) { task.unitKeys.forEach(key => state.held.add(key)); pause("settlement_unconfirmed"); }
+      if (!result.budget.settlementConfirmed) { state.attempts.get(task.batchHash).state = "unknown"; task.unitKeys.forEach(key => state.held.add(key)); pause("settlement_unconfirmed"); }
       else if (result.haltRecommended) pause(result.rows.find(row => row.failureCode)?.failureCode ?? "provider_halt");
     } catch {
-      markUnknown("client_transport_unknown");
+      markUnknown("client_transport_unknown", response ? "response_invalid" : "no_response");
     } finally { state.active--; update(); }
   }
   async function start() {
-    if (state.running || !state.tasks.length) return;
+    if (state.running || state.preparing || state.reconciling || !state.tasks.length) return;
     if (!el("consent").checked || JSON.stringify(selected()) !== JSON.stringify(state.selectedRoles)) { message("Confirm the selected source-processing choice and prepare again after changing passes."); return; }
+    const concurrency = Number(el("concurrency")?.value ?? DEFAULT_CONCURRENCY);
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_CONCURRENCY) { message(`Choose a concurrency between 1 and ${MAX_CONCURRENCY}.`); return; }
+    state.concurrency = concurrency;
     state.running = true; state.paused = false; state.pauseCode = null; update();
     try {
       if (!state.registered) {
-        const response = await post({runId: state.runId, manifest: state.manifest, sourceConsent: true}), value = await responseJson(response);
+        const response = await post("register", {runId: state.runId, manifest: state.manifest, sourceConsent: true}), value = await responseJson(response);
         if (!response.ok || value?.registered !== true) { message("The immutable run manifest could not be registered. No source batches were sent."); return; }
         state.registered = true;
       }
-      message(`Running up to ${MAX_CONCURRENCY} nonoverlapping windows concurrently. Pause lets in-flight requests finish.`);
-      const pending = state.tasks.filter(task => !state.attempts.has(task.batchHash) || state.attempts.get(task.batchHash).state === "deferred"), inFlight = new Map(), locked = new Set();
+      message(`Running up to ${concurrency} nonoverlapping windows concurrently. Pause lets in-flight requests finish.`);
+      const pending = state.tasks.filter(canDispatch), inFlight = new Map(), locked = new Set();
       while ((!state.paused && pending.length) || inFlight.size) {
-        while (!state.paused && inFlight.size < MAX_CONCURRENCY && pending.length) {
+        while (!state.paused && inFlight.size < concurrency && pending.length) {
           const index = pending.findIndex(task => task.unitKeys.every(key => !locked.has(key)));
           if (index < 0) break;
           const [task] = pending.splice(index, 1); task.unitKeys.forEach(key => locked.add(key));
@@ -418,11 +541,12 @@ export function corpusStudyClient({testOnly = false} = {}) {
     finally { state.running = false; state.paused = true; update(); }
   }
   el("prepare").addEventListener("click", () => {
-    if (state.running || state.preparing) return;
+    if (state.running || state.preparing || state.reconciling) return;
     state.preparing = true; update();
     void prepare().catch(() => { state.tasks = []; message("Preparation failed. Check the source/checkpoint version, hashes, file bounds and selected passes. No source was sent."); }).finally(() => { state.preparing = false; update(); });
   });
   el("start").addEventListener("click", () => { void start(); });
+  el("reconcile")?.addEventListener("click", () => { void reconcile().catch(() => { message("The interrupted requests could not be checked. Their source holds remain in place."); }); });
   el("pause").addEventListener("click", () => { state.paused = true; message("Pausing after in-flight calls finish…"); });
   el("consent").addEventListener("change", () => { if (!el("consent").checked && state.running) { state.paused = true; message("Source permission removed. No new batches will start."); } });
   el("download").addEventListener("click", () => {

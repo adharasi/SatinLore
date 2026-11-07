@@ -131,3 +131,59 @@ test("unidentified returned model cannot qualify a parsed batch",async()=>{
   assert.equal(report.returnedModel,null);assert.equal(report.rows[0].failureCode,"provider_model_mismatch");
   assert.doesNotMatch(JSON.stringify(report),/unrelated-model/);
 });
+
+test("founder reconciliation only reads its scoped ledger and never accesses the model key", async () => {
+  const runId = "neutral-run";
+  const batchIds = ["1".repeat(64), "2".repeat(64)];
+  const batches = [{batchId:batchIds[0],state:"complete"}, {batchId:batchIds[1],state:"absent"}];
+  const calls = [];
+  const env = {
+    get OPENAI_API_KEY() { assert.fail("Reconciliation needs no provider key."); },
+    SCENE_ANALYSIS_BUDGET: {
+      idFromName: name => name,
+      get: name => ({async fetch(req) {
+        assert.equal(name, "scene-analysis:v1");
+        assert.equal(req.url, "https://scene-analysis.internal/corpus/status");
+        assert.equal(req.method, "POST");
+        calls.push(await req.json());
+        return Response.json({runId,batches});
+      }})
+    }
+  };
+  const context = {config, session, reverify: async () => session,
+    analysisFetcher: () => assert.fail("Reconciliation cannot dispatch to the model.")};
+  const body = {runId,batchIds};
+  const deniedOrigin = await handleCorpusStudy(request("/reconcile",body,{Origin:"https://other.test"}),env,context);
+  assert.equal(deniedOrigin.status,403);
+  const deniedFounder = await handleCorpusStudy(request("/reconcile",body),env,{...context,session:{...session,isFounder:false}});
+  assert.equal(deniedFounder.status,403);
+  const duplicates = await handleCorpusStudy(request("/reconcile",{runId,batchIds:[batchIds[0],batchIds[0]]}),env,context);
+  assert.equal(duplicates.status,400);
+  const extra = await handleCorpusStudy(request("/reconcile",{...body,source:"Unneeded source."}),env,context);
+  assert.equal(extra.status,400);
+  assert.deepEqual(calls,[]);
+  const result = await handleCorpusStudy(request("/reconcile",body),env,context);
+  assert.equal(result.status,200);
+  assert.deepEqual(await result.json(),{runId,batches});
+  assert.deepEqual(calls,[{reader:await corpusDigest(`satinlore:corpus:v1:${issuer}:${session.subject}`),runId,batchIds}]);
+});
+
+test("reconciliation sanitizes internal errors and rechecks the founder before returning status", async () => {
+  const runId = "neutral-run", batchIds = ["1".repeat(64)];
+  let reply = () => Response.json({code:"batch_not_pinned",detail:"internal diagnostic text"},{status:403});
+  const env = {SCENE_ANALYSIS_BUDGET:{idFromName:name=>name,get:()=>({fetch:async()=>reply()})}};
+  const context = {config,session,reverify:async()=>session};
+  const call = options => handleCorpusStudy(request("/reconcile",{runId,batchIds}),env,{...context,...options});
+  const unpinned = await call();
+  assert.equal(unpinned.status,403);
+  assert.deepEqual(await unpinned.json(),{code:"batch_not_pinned"});
+  reply = () => Response.json({runId,batches:[{batchId:batchIds[0],state:"absent",label:"internal diagnostic text"}]});
+  const malformed = await call();
+  assert.equal(malformed.status,503);
+  assert.deepEqual(await malformed.json(),{code:"budget_unavailable"});
+  reply = () => Response.json({runId,batches:[{batchId:batchIds[0],state:"complete"}]});
+  let checks = 0;
+  const expired = await call({reverify:async()=>++checks === 3 ? null : session});
+  assert.equal(expired.status,403);
+  assert.deepEqual(await expired.json(),{code:"invalid_session"});
+});
