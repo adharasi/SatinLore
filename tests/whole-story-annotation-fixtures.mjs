@@ -1,0 +1,55 @@
+export const wholeStoryAnnotationFixtures = Object.freeze([
+  {
+    id: "first-dance",
+    paragraphs: [
+      "Nora and Eli, both adults, waited outside the dance hall.",
+      "Nora said she was looking forward to their first date. Eli grinned and said he had been looking forward to it all week.",
+      "Eli offered his hand and asked if she wanted to dance. Nora said yes and took his hand.",
+      "They moved together at a steady pace. The hall had blue curtains.",
+      "Nora asked for a break and Eli let go. They sat apart and drank water.",
+      "Later Nora asked for another dance and Eli said yes. They took each other's hands again.",
+    ],
+    phases: ["quiet", "quiet", "build", "build", "onset", "sustain", "quiet", "quiet", "quiet", "build", "restart"],
+    evidence: {2: [1, 2], 3: [1, 2, 3], 4: [3, 4], 5: [4, 5], 9: [7, 9], 10: [9, 10]},
+    events: {7: "stop"},
+  },
+  {
+    id: "old-letter",
+    paragraphs: [
+      "Amira and Jo, both adults, sat at the kitchen table.",
+      "Amira opened an old letter and read the account of their first date aloud.",
+      "I wanted to hold your hand, and you offered yours. We held hands until the train arrived.",
+      "Amira put the letter down. Jo pointed out the date at the top.",
+      "Here at the table, Jo asked if she could hold Amira's hand again. Amira said yes and reached for her.",
+    ],
+    phases: ["quiet", "quiet", "quiet", "quiet", "quiet", "quiet", "quiet", "onset"],
+    evidence: {7: [4, 6, 7]},
+    events: {1: "reported-entry", 4: "present-return"},
+  },
+  {
+    id: "reading-room",
+    paragraphs: [
+      "Kai and Jules, both adults, met for a date at a bookshop.",
+      "They both said they wanted to hold hands, and they did.",
+      "They stayed by the shelves for a while. A cart rattled across the floor.",
+      "A private phone call interrupted them.",
+      "After the call, Jules opened a book. Kai asked to hold hands again, but Jules said they would rather read.",
+      "At closing time Jules offered a hand and Kai accepted. They held hands as they left.",
+    ],
+    phases: ["quiet", "onset", "quiet", "quiet", "quiet", "quiet", "quiet", "build", "restart"],
+    evidence: {1: [0, 1], 7: [7], 8: [7, 8]},
+    events: {2: "uncertain-continuity", 4: "interruption", 6: "declined-restart"},
+  },
+  {
+    id: "practice-drill",
+    paragraphs: [
+      "Rae and Morgan stood on the gym floor for a training drill.",
+      "Rae offered a hand to demonstrate the grip, and Morgan took it.",
+      "They increased the speed for the last ten seconds. The coach called time and they stepped apart.",
+      "Morgan stayed behind to put away the equipment.",
+    ],
+    phases: ["quiet", "quiet", "quiet", "quiet", "quiet"],
+    evidence: {},
+    events: {3: "non-romantic-activity-stop"},
+  },
+]);

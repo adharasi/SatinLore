@@ -14,6 +14,16 @@ import { runDecisionsTransitionStudy } from "./decisions-transition-study.mjs";
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
 export const DECISIONS_STORY_STUDY_PATH = "/api/scene-analysis/decisions-story-study";
+export const WHOLE_STORY_LUNA_STUDY_PATH = "/api/scene-analysis/whole-story-luna-study";
+const WHOLE_STORY_LUNA_STUDY_SUITE = "nocturne-whole-story-luna-v1";
+const WHOLE_STORY_LUNA_ATTEMPTS = 64;
+const WHOLE_STORY_LUNA_MAX_USD = 1;
+const WHOLE_STORY_LUNA_TIMEOUT_MS = 180_000;
+const RESEARCH_SUITE_DAY_LIMITS = {
+  [CUE_CONTINUITY_STUDY_SUITE]: CUE_CONTINUITY_STUDY_REQUESTS,
+  [DECISIONS_STORY_STUDY_PINS.version]: STORY_STUDY_MAX_TOTAL_REQUESTS,
+  [WHOLE_STORY_LUNA_STUDY_SUITE]: WHOLE_STORY_LUNA_ATTEMPTS,
+};
 const MODEL = "gpt-6-luna";
 const MAX_CUES = 16;
 const DAY = 86_400_000;
@@ -262,12 +272,12 @@ function checkedContext(response, { version, paragraphs }, session) {
   } : null };
 }
 
-async function reserveBudget(namespace, config, session, suite) {
+async function reserveBudget(namespace, config, session, suite, signal) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:scene-budget:v1:${config.issuer}:${session.subject}`));
   const reader = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   const stub = namespace.get(namespace.idFromName("scene-analysis:v1"));
   return stub.fetch(new Request(BUDGET_URL, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", signal, headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader, ...(suite ? { suite } : {}) }),
   }));
 }
@@ -305,6 +315,100 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <button name="mode" value="transitions-state">Run transition state-check candidate</button>
 <button name="mode" value="cue-continuity">Compare cue continuity on calibration</button>
 <p>Each dedicated transition test uses one API request for the selected split. The cue continuity comparison uses two requests on the first approved calibration batch, with one comparison allowed per UTC day.</p></form></main></html>`;
+
+const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne whole-story Luna study</title>
+<main><h1>Nocturne whole-story Luna study</h1>
+<p>Compare whole-story, paragraph and sentence context on four original research fixtures. Running the study sends those fixtures to OpenAI and returns aggregate scores. It has a limit of ${WHOLE_STORY_LUNA_ATTEMPTS} API attempts, a $${WHOLE_STORY_LUNA_MAX_USD} estimated usage budget and a three-minute deadline.</p>
+<form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form></main></html>`;
+
+export async function handleWholeStoryLunaStudy(request, env, { config, session, reverify, runComparison, analysisFetcher = fetch }) {
+  if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
+  const read = request.method === "GET" || request.method === "HEAD";
+  if (!read && request.method !== "POST") return failure("invalid_method", 405, "Open the study page.", { Allow: "GET, HEAD, POST" });
+  const url = new URL(request.url);
+  if (url.search) return failure("invalid_request", 400, "Open the study page.");
+  const origin = request.headers.get("Origin");
+  if (url.origin !== config.origin || ((!read || origin !== null) && origin !== config.origin) ||
+      ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
+    return failure("invalid_origin", 403, "Open the study on SatinLore.");
+  }
+  const expired = () => failure("invalid_session", 403, "Your app session has ended.");
+  const sessionEnded = () => request.signal.aborted || Date.now() >= session.expiresAt;
+  if (sessionEnded()) return expired();
+  if (read) return new Response(WHOLE_STORY_LUNA_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+
+  const stop = new AbortController();
+  const timeout = AbortSignal.timeout(Math.max(0, Math.min(WHOLE_STORY_LUNA_TIMEOUT_MS, session.expiresAt - Date.now())));
+  const signal = AbortSignal.any([request.signal, timeout, stop.signal]);
+  try {
+    const body = await readBoundedText(request, 64, AbortSignal.any([signal, AbortSignal.timeout(4000)]),
+      "application/x-www-form-urlencoded");
+    if (body !== "benchmark=whole-story-luna-v1") throw new TypeError("Invalid study form.");
+  } catch (error) {
+    if (sessionEnded()) return expired();
+    return failure("invalid_request", error instanceof RangeError ? 413 : 400, "Use the study button.");
+  }
+  const apiKey = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
+  if (!analysisConfigured(apiKey, budget)) return providerUnavailable(session, "benchmark_unavailable");
+
+  let attempts = 0, blocked, abort;
+  const deny = response => {
+    blocked ??= response;
+    stop.abort();
+    throw new Error("Study blocked.");
+  };
+  const authorized = async () => {
+    signal.throwIfAborted();
+    const renewed = await reverify();
+    signal.throwIfAborted();
+    return renewed?.isFounder === true && renewed.subject === session.subject &&
+      Date.now() < renewed.expiresAt && !sessionEnded();
+  };
+  const fetchImpl = async (target, options) => {
+    const attemptSignal = options?.signal ? AbortSignal.any([signal, options.signal]) : signal;
+    attemptSignal.throwIfAborted();
+    if (target !== API_URL || options?.method !== "POST" || typeof options.body !== "string" ||
+        new TextEncoder().encode(options.body).byteLength > 131_072) {
+      deny(providerUnavailable(session, "benchmark_unavailable"));
+    }
+    if (!await authorized()) deny(expired());
+    attemptSignal.throwIfAborted();
+    if (attempts >= WHOLE_STORY_LUNA_ATTEMPTS) deny(failure("rate_limited", 429, "This study reached its attempt limit."));
+    attempts++;
+    let permission;
+    try { permission = await reserveBudget(budget, config, session, WHOLE_STORY_LUNA_STUDY_SUITE, attemptSignal); }
+    catch {
+      attemptSignal.throwIfAborted();
+      deny(providerUnavailable(session, "budget_unavailable"));
+    }
+    if (permission.status === 429) deny(budgetLimited(permission));
+    if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
+    if (sessionEnded()) deny(expired());
+    attemptSignal.throwIfAborted();
+    return analysisFetcher(API_URL, {
+      method: "POST", signal: attemptSignal, redirect: "manual",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
+      body: options.body,
+    });
+  };
+  try {
+    signal.throwIfAborted();
+    const interrupted = new Promise((_, reject) => {
+      abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+    });
+    const run = async () => {
+      const result = await runComparison({ apiKey, fetchImpl, signal, maxUsd: WHOLE_STORY_LUNA_MAX_USD, maxAttempts: WHOLE_STORY_LUNA_ATTEMPTS });
+      if (!await authorized()) return expired();
+      return Response.json(result);
+    };
+    return await Promise.race([run(), interrupted]);
+  } catch {
+    return blocked ?? (sessionEnded() ? expired() : providerUnavailable(session, timeout.aborted ? "provider_timeout" : "benchmark_unavailable"));
+  } finally {
+    if (abort) signal.removeEventListener("abort", abort);
+  }
+}
 
 export async function handleDecisionsBenchmark(request, env, { config, session, reverify, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -483,9 +587,8 @@ export class SceneAnalysisBudget {
     try {
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
       const suite = exactObject(value, ["reader", "suite"]) ? value.suite : null;
-      const storyStudy = suite === DECISIONS_STORY_STUDY_PINS.version;
-      const paired = suite === CUE_CONTINUITY_STUDY_SUITE;
-      if ((!storyStudy && !paired && !exactObject(value, ["reader"])) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) {
+      const suiteLimit = typeof suite === "string" && Object.hasOwn(RESEARCH_SUITE_DAY_LIMITS, suite) ? RESEARCH_SUITE_DAY_LIMITS[suite] : null;
+      if ((suiteLimit === null && !exactObject(value, ["reader"])) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) {
         return new Response(null, { status: 400 });
       }
       const now = Date.now();
@@ -493,13 +596,12 @@ export class SceneAnalysisBudget {
       const dayEnds = (Math.floor(now / DAY) + 1) * DAY;
       const monthEnds = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
       const windows = [
-        paired ? { key: `study:${suite}`, expires: dayEnds, limit: CUE_CONTINUITY_STUDY_REQUESTS } :
-          storyStudy ? { key: `study:${suite}`, expires: dayEnds, limit: STORY_STUDY_MAX_TOTAL_REQUESTS } :
-          { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 },
+        suiteLimit === null ? { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 } :
+          { key: `study:${suite}`, expires: dayEnds, limit: suiteLimit },
         { key: "global-day", expires: dayEnds, limit: 100 },
         { key: "global-month", expires: monthEnds, limit: 1000 },
       ];
-      const attempts = paired ? CUE_CONTINUITY_STUDY_REQUESTS : 1;
+      const attempts = suite === CUE_CONTINUITY_STUDY_SUITE ? CUE_CONTINUITY_STUDY_REQUESTS : 1;
       const retryAt = this.storage.transactionSync(() => {
         this.sql.exec("DELETE FROM quota WHERE expires_at<=?", now);
         const limited = windows.filter(({ key, limit }) =>

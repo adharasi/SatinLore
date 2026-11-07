@@ -38,6 +38,7 @@
   ],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",
+    "WHOLE_STORY_LUNA_STUDY_ENABLED": "true",
     "FOUNDER_EMAIL": "team@satinlore.com"
   }
 }

@@ -14,6 +14,8 @@ const CONFIG = { PUBLIC_APP_ORIGIN: ORIGIN, PRIVATE_APP_ENABLED: "true", ACCESS_
 const KEY = "sk-proj-synthetic_credential_for_tests";
 const BENCHMARK = "/api/scene-analysis/decisions-benchmark";
 const STUDY = "/api/scene-analysis/decisions-story-study";
+const WHOLE_STORY_STUDY = "/api/scene-analysis/whole-story-luna-study";
+const WHOLE_STORY_SUITE = "nocturne-whole-story-luna-v1";
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
   { id: 9, phase: "sustain", rhythm: "steady", previous: "build", next: "sustain", movementCount: 1, shape: "sustained" },
@@ -26,17 +28,17 @@ async function token(email = CONFIG.FOUNDER_EMAIL) {
   return new SignJWT({ iss: `https://${CONFIG.ACCESS_TEAM_DOMAIN}`, aud: CONFIG.ACCESS_AUD, sub: "synthetic-subject", email,
     type: "app", iat: now, exp: now + 3600 }).setProtectedHeader({ alg: "RS256", kid: "fixture" }).sign(privateKey);
 }
-function request(jwt, { host = ORIGIN, origin = host, path = "/api/scene-analysis", body = { cues: CUES }, headers = {}, method = "POST" } = {}) {
-  return new Request(host + path, { method, headers: { ...(jwt ? { "Cf-Access-Jwt-Assertion": jwt } : {}),
+function request(jwt, { host = ORIGIN, origin = host, path = "/api/scene-analysis", body = { cues: CUES }, headers = {}, method = "POST", signal } = {}) {
+  return new Request(host + path, { method, signal, headers: { ...(jwt ? { "Cf-Access-Jwt-Assertion": jwt } : {}),
     ...(origin === null ? {} : { Origin: origin }), "Content-Type": "application/json", ...headers },
     ...(method === "POST" ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}) });
 }
 function upstream(labels = LABELS) {
   return Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
 }
-function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204 } = {}) {
+function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204, wholeStoryLunaComparison } = {}) {
   const calls = [], reservations = [];
-  const worker = createPrivateAppWorker({ keyResolver, analysisFetcher: async (url, options) => {
+  const worker = createPrivateAppWorker({ keyResolver, wholeStoryLunaComparison, analysisFetcher: async (url, options) => {
     calls.push({ url, options });
     return provider(url, options);
   } });
@@ -54,6 +56,118 @@ function benchmarkRequest(jwt, options = {}) {
   return request(jwt, { host: BETA, path: BENCHMARK, body: "benchmark=luna-decisions-v1", ...options,
     headers: { "Content-Type": "application/x-www-form-urlencoded", ...options.headers } });
 }
+
+function wholeStoryRequest(jwt, options = {}) {
+  return request(jwt, { path: WHOLE_STORY_STUDY, body: "benchmark=whole-story-luna-v1", ...options,
+    headers: { "Content-Type": "application/x-www-form-urlencoded", ...options.headers } });
+}
+
+const enableWholeStory = env => ({ ...env, WHOLE_STORY_LUNA_STUDY_ENABLED: "true", PUBLIC_READER_ENABLED: "true" });
+
+test("whole-story study requires opt-in, exact app origin, founder Access and the fixed form", async () => {
+  const f = fixture({ wholeStoryLunaComparison: () => assert.fail("Invalid requests must never run the study.") });
+  const founder = await token(), tester = await token(TESTER_EMAIL), env = enableWholeStory(f.env);
+  const get = { method: "GET", origin: null, headers: { "Sec-Fetch-Site": "none" } };
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, get), f.env)).status, 404);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { ...get, host: BETA }), env)).status, 404);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { ...get, host: "https://worker.example.test" }), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(null, get), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(tester, get), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(tester), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { ...get, origin: BETA }), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { origin: null }), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { origin: BETA }), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { headers: { "Sec-Fetch-Site": "same-site" } }), env)).status, 403);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { path: `${WHOLE_STORY_STUDY}?input=unapproved` }), env)).status, 400);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "benchmark=whole-story-luna-v1&text=x" }), env)).status, 400);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "x".repeat(65) }), env)).status, 413);
+  const upload = new FormData();
+  upload.set("payload", new File(["unapproved"], "upload.txt"));
+  assert.equal((await f.worker.fetch(new Request(ORIGIN + WHOLE_STORY_STUDY, { method: "POST",
+    headers: { "Cf-Access-Jwt-Assertion": founder, Origin: ORIGIN }, body: upload }), env)).status, 400);
+  const page = await f.worker.fetch(wholeStoryRequest(founder, get), env);
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get("Referrer-Policy"), "same-origin");
+  assert.equal(page.headers.get("Cache-Control"), "no-store");
+  const html = await page.text();
+  assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
+  assert.doesNotMatch(html, /multipart|<input|<textarea/);
+  assert.equal(await (await f.worker.fetch(wholeStoryRequest(founder, { ...get, method: "HEAD" }), env)).text(), "");
+  assert.deepEqual(f.reservations, []);
+  assert.deepEqual(f.calls, []);
+});
+
+const studyProvider = "https://api.openai.com/v1/responses";
+const studyAttempt = (fetchImpl, options = {}) => fetchImpl(studyProvider, { method: "POST", body: '{"model":"gpt-6-luna"}', ...options });
+
+test("whole-story study rechecks founder and reserves every exact provider attempt before returning aggregates", async () => {
+  let checks = 0;
+  const aggregate = { measurement: "live-provider", fixtureVersion: "neutral-stories-v1", providerCalls: 2 };
+  const f = fixture({ keyResolver: (...args) => { checks++; return localKeys(...args); }, provider: () => new Response("untrusted provider body"),
+    async wholeStoryLunaComparison({ apiKey, fetchImpl, signal, maxAttempts, maxUsd }) {
+      assert.equal(apiKey, KEY);
+      assert.equal(maxAttempts, 64);
+      assert.equal(maxUsd, 1);
+      await studyAttempt(fetchImpl, { signal, redirect: "follow", headers: { "X-Incoming": "untrusted header" } });
+      await studyAttempt(fetchImpl, { signal });
+      return aggregate;
+    } });
+  const response = await f.worker.fetch(wholeStoryRequest(await token()), enableWholeStory(f.env));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), aggregate);
+  assert.equal(checks, 4, "Initial founder check, one per outbound attempt, and one before returning results.");
+  assert.equal(f.reservations.length, 2);
+  assert.ok(f.reservations.every(entry => entry.name === "scene-analysis:v1" && entry.body.suite === WHOLE_STORY_SUITE &&
+    /^[a-f0-9]{64}$/.test(entry.body.reader)));
+  assert.deepEqual(f.calls.map(({ url }) => url), [studyProvider, studyProvider]);
+  assert.ok(f.calls.every(({ options }) => options.redirect === "manual" && options.headers.Authorization === `Bearer ${KEY}` &&
+    !Object.hasOwn(options.headers, "X-Incoming") && options.signal instanceof AbortSignal));
+});
+
+test("whole-story study stops for quota, rejected provider endpoints and an ended founder session", async () => {
+  const founder = await token();
+  const attemptTwo = async ({ fetchImpl }) => { await studyAttempt(fetchImpl); await studyAttempt(fetchImpl); };
+  const quota = fixture({ wholeStoryLunaComparison: attemptTwo, quotaStatus: count => count === 1 ? 204 : 429 });
+  const denied = await quota.worker.fetch(wholeStoryRequest(founder), enableWholeStory(quota.env));
+  assert.equal(denied.status, 429);
+  assert.equal(denied.headers.get("Retry-After"), "66");
+  assert.equal(quota.reservations.length, 2);
+  assert.equal(quota.calls.length, 1);
+
+  const wrongEndpoint = fixture({ wholeStoryLunaComparison: ({ fetchImpl }) => fetchImpl("https://other.example.test/", { method: "POST", body: "{}" }) });
+  assert.equal((await wrongEndpoint.worker.fetch(wholeStoryRequest(founder), enableWholeStory(wrongEndpoint.env))).status, 503);
+  assert.deepEqual(wrongEndpoint.reservations, []);
+  assert.deepEqual(wrongEndpoint.calls, []);
+
+  let checks = 0;
+  const expired = fixture({ wholeStoryLunaComparison: attemptTwo, keyResolver: (...args) => {
+    if (++checks === 3) throw new Error("Synthetic expired session.");
+    return localKeys(...args);
+  } });
+  assert.equal((await expired.worker.fetch(wholeStoryRequest(founder), enableWholeStory(expired.env))).status, 403);
+  assert.equal(expired.reservations.length, 1);
+  assert.equal(expired.calls.length, 1);
+});
+
+test("whole-story study aborts pending work on disconnect and cannot resume provider dispatch", async () => {
+  const disconnect = new AbortController();
+  let started, lateCall;
+  const waiting = new Promise(resolve => { started = resolve; });
+  const f = fixture({ provider: () => { started(); return new Promise(() => {}); },
+    async wholeStoryLunaComparison({ fetchImpl, signal }) {
+      signal.addEventListener("abort", () => { lateCall = studyAttempt(fetchImpl).catch(error => error); }, { once: true });
+      await studyAttempt(fetchImpl);
+    } });
+  const pending = f.worker.fetch(wholeStoryRequest(await token(), { signal: disconnect.signal }), enableWholeStory(f.env));
+  await waiting;
+  disconnect.abort();
+  assert.equal((await pending).status, 403);
+  assert.equal((await lateCall).name, "AbortError");
+  assert.equal(f.reservations.length, 1);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].options.signal.aborted, true);
+});
 
 test("the fixed Decisions benchmark requires signed founder Access and an exact same-origin form", async () => {
   const f = fixture(), founder = await token(), tester = await token(TESTER_EMAIL);
@@ -582,8 +696,11 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
   assert.equal(pairs.filter(response => response.status === 204).length, 1);
   assert.equal(pairs.filter(response => response.status === 429).length, 3);
   assert.equal((await reserve(1)).status, 429);
+  const wholeStory = await Promise.all(Array.from({ length: 66 }, (_, index) => reserve(index + 3, WHOLE_STORY_SUITE)));
+  assert.equal(wholeStory.filter(response => response.status === 204).length, 64);
+  assert.equal(wholeStory.filter(response => response.status === 429).length, 2);
   const rest = await Promise.all(Array.from({ length: 92 }, (_, index) => reserve(index + 2)));
-  assert.equal(rest.filter(response => response.status === 204).length, 66);
-  assert.equal(rest.filter(response => response.status === 429).length, 26);
+  assert.equal(rest.filter(response => response.status === 204).length, 2);
+  assert.equal(rest.filter(response => response.status === 429).length, 90);
   assert.match((await reserve(100)).headers.get("Retry-After"), /^\d+$/);
 });
