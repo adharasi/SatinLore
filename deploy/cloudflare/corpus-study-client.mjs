@@ -6,6 +6,9 @@ export function corpusStudyClient({testOnly = false} = {}) {
   const ROLES = ["referenceA", "referenceB", "detector", "transition", "adjudicator"];
   const MAX_CONCURRENCY = 12;
   const DEFAULT_CONCURRENCY = 6;
+  const BATCH_STREAM_TYPE = "application/x-ndjson";
+  const MAX_BATCH_RESULT_BYTES = 2 * 1024 * 1024;
+  const MAX_HEARTBEATS = 16;
   const LEDGER_STATES = ["complete", "refused", "inflight", "unknown", "absent"];
   const encoder = new TextEncoder();
   const isHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
@@ -170,6 +173,61 @@ export function corpusStudyClient({testOnly = false} = {}) {
     const httpStatus = Number.isInteger(value.httpStatus) && value.httpStatus >= 100 && value.httpStatus <= 599 ? value.httpStatus : null;
     return {stage: value.stage, httpStatus};
   }
+  async function* responseChunks(response, maxBytes) {
+    if (!response.body) fail("invalid_response");
+    const length = response.headers.get("Content-Length");
+    if (length !== null && (!/^\d+$/.test(length) || Number(length) > maxBytes)) fail("invalid_response");
+    const reader = response.body.getReader();
+    let bytes = 0;
+    try {
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > maxBytes) fail("invalid_response");
+        yield value;
+      }
+    } finally {
+      void reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+  function responseType(response) {
+    return response.headers.get("Content-Type")?.split(";", 1)[0].trim().toLowerCase();
+  }
+  async function responseJson(response) {
+    if (responseType(response) !== "application/json") fail("invalid_response");
+    const decoder = new TextDecoder("utf-8", {fatal: true});
+    let text = "";
+    for await (const chunk of responseChunks(response, MAX_BATCH_RESULT_BYTES)) text += decoder.decode(chunk, {stream: true});
+    return JSON.parse(text + decoder.decode());
+  }
+  async function readBatchResponse(response) {
+    if (!response.ok || responseType(response) !== BATCH_STREAM_TYPE) return responseJson(response);
+    const decoder = new TextDecoder("utf-8", {fatal: true});
+    let heartbeats = 0, pending = "", result;
+    for await (const chunk of responseChunks(response, MAX_BATCH_RESULT_BYTES + 512)) {
+      pending += decoder.decode(chunk, {stream: true});
+      let newline;
+      while ((newline = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        if (result !== undefined) fail("invalid_response");
+        if (line === '{"type":"heartbeat"}') {
+          if (++heartbeats > MAX_HEARTBEATS) fail("invalid_response");
+          continue;
+        }
+        if (!heartbeats || encoder.encode(line).byteLength >= MAX_BATCH_RESULT_BYTES) fail("invalid_response");
+        const frame = JSON.parse(line);
+        if (!frame || typeof frame !== "object" || Object.keys(frame).length !== 2 ||
+            frame.type !== "result" || !Object.hasOwn(frame, "value") || !frame.value ||
+            typeof frame.value !== "object" || Array.isArray(frame.value)) fail("invalid_response");
+        result = frame.value;
+      }
+    }
+    if (pending + decoder.decode() || result === undefined) fail("invalid_response");
+    return result;
+  }
   function localResult(task, runId, code, status = "not_submitted", transport = null) {
     const b = task.batch, trace = cleanTransport(transport);
     return {schema: 1, measurement: "client-disposition", runId, batchId: task.batchHash, workId: b.workId, sourceSha256: b.sourceSha256, indexSha256: b.indexSha256,
@@ -278,7 +336,7 @@ export function corpusStudyClient({testOnly = false} = {}) {
     if (batchHash !== record.batchId) fail("checkpoint_plan_mismatch");
     return {batch, batchHash, unitKeys: selected.map(u => u.unitKey)};
   }
-  const helpers = {prepareSource, buildTasks, digest, unitKey, cleanResult, cleanRow, localResult, adjudicationTargets, resumeDisposition, planRecord, recoverTask, VERSION};
+  const helpers = {prepareSource, buildTasks, digest, unitKey, cleanResult, cleanRow, localResult, adjudicationTargets, resumeDisposition, planRecord, recoverTask, readBatchResponse, VERSION};
   if (testOnly) return helpers;
 
   const el = id => document.getElementById(id);
@@ -411,12 +469,9 @@ export function corpusStudyClient({testOnly = false} = {}) {
     await refreshHolds();
     update(); message(`Prepared ${tasks.length} batches. Start sends these exact batches for neutral classification. Existing attempted batches will not be re-billed.`);
   }
-  const responseJson = async response => {
-    const length = response.headers.get("Content-Length"); if (length !== null && Number(length) > 2 * 1024 * 1024) fail("invalid_response");
-    const text = await response.text(); if (encoder.encode(text).byteLength > 2 * 1024 * 1024) fail("invalid_response");
-    try { return JSON.parse(text); } catch { fail("invalid_response"); }
-  };
-  const post = (operation, body, signal) => fetch(`${PATH}/${operation}`, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), redirect: "error", cache: "no-store", signal});
+  const post = (operation, body, signal) => fetch(`${PATH}/${operation}`, {method: "POST", credentials: "same-origin",
+    headers: {"Content-Type": "application/json", ...(operation === "batch" ? {Accept: BATCH_STREAM_TYPE} : {})},
+    body: JSON.stringify(body), redirect: "error", cache: "no-store", signal});
   const canDispatch = task => {
     const attempt = state.attempts.get(task.batchHash);
     return !attempt || attempt.state === "deferred" && (attempt.ledgerState !== "absent" || attempt.runId === state.runId);
@@ -486,14 +541,14 @@ export function corpusStudyClient({testOnly = false} = {}) {
       task.unitKeys.forEach(key => state.held.add(key)); pause(code);
     };
     try {
-      response = await post("batch", {runId: state.runId, batchHash: task.batchHash, batch: task.batch, sourceConsent: true});
-      const value = await responseJson(response);
+      response = await post("batch", {runId: state.runId, batchHash: task.batchHash, batch: task.batch, sourceConsent: true}, AbortSignal.timeout(135_000));
+      const value = await readBatchResponse(response);
       if (!response.ok) {
         const code = errorCodes.includes(value?.code) ? value.code : "invalid_request";
         if (code === "refusal_blocked") {
           for (const key of Array.isArray(value.blockedUnitKeys) ? value.blockedUnitKeys : []) if (task.unitKeys.includes(key)) state.blocked.add(key);
           state.attempts.get(task.batchHash).state = "blocked"; state.batches.set(task.batchHash, localResult(task, state.runId, "refusal_dependency", "refusal_blocked"));
-        } else if (["budget_exhausted", "concurrency_limited", "budget_unavailable", "study_unavailable"].includes(code)) { state.attempts.get(task.batchHash).state = "deferred"; pause(code); }
+        } else if (["budget_exhausted", "concurrency_limited", "study_unavailable"].includes(code)) { state.attempts.get(task.batchHash).state = "deferred"; pause(code); }
         else markUnknown("client_transport_unknown", "response_rejected");
         return;
       }

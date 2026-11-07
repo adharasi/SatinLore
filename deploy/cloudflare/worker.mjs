@@ -9,7 +9,7 @@ import { alphaConfigured, handleAlphaApi, verifyAlphaSession } from "./alpha-stu
 import { DECISIONS_STORY_STUDY_PATH, WHOLE_STORY_LUNA_STUDY_PATH, handleDecisionsBenchmark, handleSceneAnalysis,
   handleWholeStoryLunaStudy } from "./scene-analysis.mjs";
 import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
-import { CORPUS_STUDY_PATH, handleCorpusStudy } from "./corpus-study.mjs";
+import { CORPUS_BATCH_STREAM_TYPE, CORPUS_STUDY_PATH, handleCorpusStudy } from "./corpus-study.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
@@ -329,6 +329,9 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         const result = corpusStudy ? await handleCorpusStudy(request, env, context) : wholeStoryStudy ? await handleWholeStoryLunaStudy(request, env, { ...context, runComparison: wholeStoryLunaComparison }) :
           await handleDecisionsBenchmark(request, env, context);
         const response = finish(result);
+        if (corpusStudy && response.headers.get("Content-Type")?.split(";", 1)[0] === CORPUS_BATCH_STREAM_TYPE) {
+          response.headers.set("Cache-Control", "no-store, no-transform");
+        }
         // Same-origin form navigation must send the actual Origin for the POST check.
         if (read && response.ok) response.headers.set("Referrer-Policy", "same-origin");
         return response;
