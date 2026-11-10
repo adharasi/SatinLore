@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v11/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v12/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -108,6 +108,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   assert.match(sent.instructions, /A later reciprocal response never supplies buildup to the earlier opening/u);
   assert.match(sent.instructions, /A specific private perception or bodily reaction grounded in attraction can be buildup without a reply/u);
   assert.match(sent.instructions, /Mark that unit onset or restart even if the next unit describes the action more fully/u);
+  assert.match(sent.instructions, /Group connected steps that carry out the same immediate invitation or goal/u);
   assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);

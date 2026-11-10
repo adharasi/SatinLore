@@ -111,7 +111,7 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   const html = await page.text();
   assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
-  assert.match(html, /Luna rubric v11 is active/);
+  assert.match(html, /Luna rubric v12 is active/);
   assert.match(html, /\$3 estimated spend cap for 24 hours/);
   assert.match(html, /Shared run ID \(optional\)/);
   for (const arm of ["complete", "windowed"]) for (const shard of ["a", "b"]) {
