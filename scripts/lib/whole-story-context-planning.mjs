@@ -149,7 +149,11 @@ function runWindows(run, identity, limits, fits) {
 // Offline only. The caller supplies a trusted review grant. Matching hashes
 // validates what it covers, while the caller remains responsible for its origin.
 export function planWholeStoryContext(text, {grant, now = Date.now(), startId = 0, limits: overrides = {}} = {}) {
-  const {units, ...identity} = buildWholeStoryIndex(text);
+  return planIndexedWholeStoryContext(buildWholeStoryIndex(text), {grant, now, startId, limits: overrides});
+}
+
+// Use only an index produced by buildWholeStoryIndex for the current edition.
+export function planIndexedWholeStoryContext({units, ...identity}, {grant, now = Date.now(), startId = 0, limits: overrides = {}} = {}) {
   if (!whole(now) || !whole(startId) || startId >= Math.max(1, units.length)) throw new RangeError("Use a valid time and starting sentence.");
   const approved = checkedGrant({units, ...identity}, grant, now), limits = checkedLimits(overrides);
   const fits = window => window.sourceBytes <= limits.maxWindowSourceBytes && window.bodyBytes <= limits.maxWindowBodyBytes;

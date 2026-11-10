@@ -137,6 +137,12 @@ In the earlier nine-profile extension, live Osci 3 testing used documented gener
 
 ## F5 — measurable scoring evaluation
 
+The founder study has a separate transition verifier and per-sentence source-free diagnostics. The protected complete-context and windowed variants test the same original fixtures and retain separate discovery, cue, transition and compiler records. [Runner and qualification](nocturne-beat-protocol-shadow.md)
+
+The shadow verifier now supports a frozen native target roster and independently verified earlier anchors. Local tests cover a distant continuation, withheld or cut context, an incomplete discovery response, and the shared spend reservation. The four pinned neutral fixtures exercise different complete and windowed inputs with mock labels. Live model coverage and paired accuracy remain separate checks.
+
+The approved beat protocol now has a JavaScript continuity compiler and a founder command-line Luna shadow runner. The compiler reproduced all 17,895 approved profile and trace rows across 41 stories, and the fixed ten-story comparison separates current Loom, archived Luna, and offline fallback. The new live arm needs current exact-range clearance and an authorized provider route before it can be scored. [Runner and qualification](nocturne-beat-protocol-shadow.md)
+
 The founder evidence recovery phase compares the same exact target with and without approved earlier anchors. It separates source coverage, interpretation, and transport before a source-selected candidate reaches reader qualification. [Paired diagnostic and release sequence](nocturne-evidence-recovery.md)
 
 A founder-only whole story research harness compares one complete cleared edition, concurrent paragraph windows and a causal sentence prefix on four pinned original neutral fixtures. It reports typed labels, coverage, exact transitions, timing and usage through a separately enabled Access-protected route. The next check is a billed Responses run on the deployed candidate. [Commands, schema and runtime flag](nocturne-luna-comparison.md)

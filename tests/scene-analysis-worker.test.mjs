@@ -6,6 +6,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { Miniflare } from "miniflare";
 import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
 import { validateNocturneContext } from "../app/static/reader/nocturne-context-contract.mjs";
+import { wholeStoryAnnotationFixtures } from "./whole-story-annotation-fixtures.mjs";
 
 const ORIGIN = "https://app.satinlore.com";
 const BETA = "https://beta.satinlore.com";
@@ -16,6 +17,8 @@ const BENCHMARK = "/api/scene-analysis/decisions-benchmark";
 const STUDY = "/api/scene-analysis/decisions-story-study";
 const WHOLE_STORY_STUDY = "/api/scene-analysis/whole-story-luna-study";
 const WHOLE_STORY_SUITE = "nocturne-whole-story-luna-v1";
+const NEUTRAL_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
+const NEUTRAL_PROTOCOL_FORM = "benchmark=luna-protocol-neutral-v2-complete";
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
   { id: 9, phase: "sustain", rhythm: "steady", previous: "build", next: "sustain", movementCount: 1, shape: "sustained" },
@@ -80,6 +83,8 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { headers: { "Sec-Fetch-Site": "same-site" } }), env)).status, 403);
   assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { path: `${WHOLE_STORY_STUDY}?input=unapproved` }), env)).status, 400);
   assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "benchmark=whole-story-luna-v1&text=x" }), env)).status, 400);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM + "&text=x" }), env)).status, 400);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(tester, { body: NEUTRAL_PROTOCOL_FORM }), env)).status, 403);
   assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "x".repeat(65) }), env)).status, 413);
   const upload = new FormData();
   upload.set("payload", new File(["unapproved"], "upload.txt"));
@@ -91,6 +96,8 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   const html = await page.text();
   assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
+  assert.match(html, /value="luna-protocol-neutral-v2-complete"/);
+  assert.match(html, /value="luna-protocol-neutral-v2-windowed"/);
   assert.doesNotMatch(html, /multipart|<input|<textarea/);
   assert.equal(await (await f.worker.fetch(wholeStoryRequest(founder, { ...get, method: "HEAD" }), env)).text(), "");
   assert.deepEqual(f.reservations, []);
@@ -99,6 +106,108 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
 
 const studyProvider = "https://api.openai.com/v1/responses";
 const studyAttempt = (fetchImpl, options = {}) => fetchImpl(studyProvider, { method: "POST", body: '{"model":"gpt-6-luna"}', ...options });
+
+function neutralProtocolUpstream(_url, options) {
+  const body = JSON.parse(options.body);
+  const { targetIds } = JSON.parse(body.input);
+  const transitionOnly = body.text.format.name === "nocturne_luna_transition_v1";
+  const facts = targetIds.map(unitId => ({ unitId, status: "neutral", frame: "current", transition: "none",
+    fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
+    ...(transitionOnly ? {} : { depiction: "neutral", narrativePhase: "quiet", action: "none" }),
+  }));
+  return Response.json({ status: "completed", model: "gpt-6-luna", usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
+    output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ facts }) }] }] });
+}
+
+test("the two fixed neutral protocol forms run the upgraded benchmark and return source-free sentence diagnostics", async () => {
+  const founder = await token();
+  for (const [arm, discovery, transitions] of [["complete", 4, 15], ["windowed", 10, 9]]) {
+    const f = fixture({ provider: neutralProtocolUpstream,
+      wholeStoryLunaComparison: () => assert.fail("The v2 form must select the new study.") });
+    const response = await f.worker.fetch(wholeStoryRequest(founder, { body: `benchmark=luna-protocol-neutral-v2-${arm}` }),
+      enableWholeStory(f.env));
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("Content-Type"), /^application\/json/u);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    const serialized = await response.text();
+    const result = JSON.parse(serialized);
+    assert.equal(result.measurement, "live-neutral-provider");
+    assert.equal(result.hostedStudyVersion, NEUTRAL_PROTOCOL_SUITE);
+    assert.equal(result.quotaLimited, false);
+    assert.equal(result.hostedTermination, "completed");
+    assert.equal(result.arm, arm);
+    assert.equal(result.sourceProseIncluded, false);
+    assert.equal(result.planning.plannedTargets, 33);
+    assert.equal(result.planning.discoveryAttempts, discovery);
+    assert.equal(result.planning.prefixAttempts, 33);
+    assert.equal(result.planning.transitionAttempts, transitions);
+    assert.equal(result.transition.targets, 33);
+    assert.equal(result.transition.returnedTargets, transitions);
+    assert.equal(result.externalCalls, discovery + 33 + transitions);
+    assert.equal(result.externalCalls, f.calls.length);
+    assert.equal(result.externalCalls, f.reservations.length);
+    assert.ok(f.reservations.every(({ body }) => body.suite === NEUTRAL_PROTOCOL_SUITE));
+    assert.ok(f.calls.every(({ url, options }) => url === studyProvider && options.redirect === "manual" &&
+      options.headers.Authorization === `Bearer ${KEY}`));
+    assert.equal(result.diagnostics.length, 4);
+    assert.equal(result.diagnostics.flatMap(work => work.units).length, 33);
+    const stop = result.diagnostics.find(work => work.id === "first-dance").units.find(unit => unit.id === 7);
+    assert.equal(stop.expected.transition, "hard-stop");
+    assert.equal(stop.discovery.transition, "none");
+    assert.ok(stop.discovery.reasons.includes("transition-missed"));
+    assert.equal(serialized.includes(KEY), false);
+    for (const fixture of wholeStoryAnnotationFixtures) for (const paragraph of fixture.paragraphs) {
+      assert.equal(serialized.includes(paragraph), false);
+    }
+  }
+});
+
+test("the fixed neutral protocol uses its own shared-quota suite and rejects spending when denied", async () => {
+  const f = fixture({ quotaStatus: 429,
+    wholeStoryLunaComparison: () => assert.fail("The v2 form must select the new study.") });
+  const response = await f.worker.fetch(wholeStoryRequest(await token(), { body: NEUTRAL_PROTOCOL_FORM }),
+    enableWholeStory(f.env));
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("Retry-After"), "66");
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.reservations.length, 1);
+  assert.equal(f.reservations[0].body.suite, NEUTRAL_PROTOCOL_SUITE);
+});
+
+test("neutral protocol quota cutoff keeps completed rows and accounts only for forwarded requests", async () => {
+  const founder = await token();
+  let oneCallCharge;
+  for (const accepted of [1, 2]) {
+    const f = fixture({ provider: neutralProtocolUpstream, quotaStatus: count => count <= accepted ? 204 : 429 });
+    const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }),
+      enableWholeStory(f.env));
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.quotaLimited, true);
+    assert.equal(result.hostedTermination, "durable-quota");
+    assert.equal(result.externalCalls, accepted);
+    assert.equal(f.calls.length, accepted);
+    assert.equal(f.reservations.length, accepted + 1);
+    assert.equal(result.diagnostics.flatMap(work => work.units).length, 33);
+    assert.equal(result.discovery.returnedTargets, 11);
+    assert.equal(result.prefix.returnedTargets, accepted - 1);
+    assert.equal(result.prefix.dispositions["budget-deferred"], 34 - accepted);
+    const stages = [result.discovery, result.prefix, result.transition];
+    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.attempts, 0), accepted);
+    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.measuredUsage, 0), accepted);
+    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.inputTokens, 0), 20 * accepted);
+    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.outputTokens, 0), 5 * accepted);
+    assert.equal(result.budget.reservedMicros, 0);
+    assert.equal(result.budget.unsettled, 0);
+    assert.ok(result.budget.chargedMicros > 0);
+    oneCallCharge ??= result.budget.chargedMicros;
+    assert.equal(result.budget.chargedMicros, oneCallCharge * accepted);
+    const stopped = result.diagnostics[0].units[accepted - 1].prefix;
+    assert.equal(stopped.dispatched, false);
+    assert.equal(stopped.status, "budget-deferred");
+    assert.equal(stopped.submittedIds, null);
+  }
+});
 
 test("whole-story study rechecks founder and reserves every exact provider attempt before returning aggregates", async () => {
   let checks = 0;
@@ -669,7 +778,7 @@ test("Nocturne fails closed on quota errors and rechecks the Access session afte
   assert.equal(contextual.calls.length, 1);
 });
 
-test("the SQLite budget admits concurrent work up to per-reader and deployment limits", { timeout: 30000 }, async t => {
+async function studyBudget(t) {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const source = "deploy/cloudflare/scene-analysis.mjs";
   const mf = new Miniflare({ modulesRoot: root, modules: [
@@ -686,6 +795,11 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader: id.toString(16).padStart(64, "0"), ...(suite ? { suite } : {}) }),
   });
+  return reserve;
+}
+
+test("the SQLite budget admits concurrent work up to per-reader and deployment limits", { timeout: 30000 }, async t => {
+  const reserve = await studyBudget(t);
   const first = await Promise.all(Array.from({ length: 16 }, () => reserve(1)));
   assert.equal(first.filter(response => response.status === 204).length, 12);
   assert.equal(first.filter(response => response.status === 429).length, 4);
@@ -704,4 +818,15 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
   assert.equal(rest.filter(response => response.status === 204).length, 2);
   assert.equal(rest.filter(response => response.status === 429).length, 90);
   assert.match((await reserve(100)).headers.get("Retry-After"), /^\d+$/);
+});
+
+test("the neutral protocol has 52 daily attempts and cannot bypass the global limit", { timeout: 30000 }, async t => {
+  const reserve = await studyBudget(t);
+  const neutral = await Promise.all(Array.from({ length: 54 }, (_, index) => reserve(index + 1, NEUTRAL_PROTOCOL_SUITE)));
+  assert.equal(neutral.filter(response => response.status === 204).length, 52);
+  assert.equal(neutral.filter(response => response.status === 429).length, 2);
+  const legacy = await Promise.all(Array.from({ length: 50 }, (_, index) => reserve(index + 1, WHOLE_STORY_SUITE)));
+  assert.equal(legacy.filter(response => response.status === 204).length, 48);
+  assert.equal(legacy.filter(response => response.status === 429).length, 2);
+  assert.equal((await reserve(100)).status, 429);
 });

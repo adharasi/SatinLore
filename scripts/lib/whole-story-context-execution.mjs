@@ -54,8 +54,9 @@ function decode(response, targetIds) {
 // retry unclassified errors, change request bodies, or construct new requests.
 export async function executeWholeStoryContextPlan(plan, {request, signal = new AbortController().signal,
   concurrency = maxConcurrentRequests, maxAttempts = Math.min(plan?.windows?.length, WHOLE_STORY_PLAN_LIMITS.maxRequests),
-  maxRetries = 1, onProgress = () => {}} = {}) {
+  maxRetries = 1, serialWithinRun = false, onProgress = () => {}} = {}) {
   if (!Array.isArray(plan?.windows) || typeof request !== "function" || typeof onProgress !== "function" ||
+      typeof serialWithinRun !== "boolean" ||
       !limit(concurrency, 1) || concurrency > maxConcurrentRequests || !limit(maxAttempts, 0) ||
       maxAttempts > MAX_WHOLE_STORY_REQUESTS || !limit(maxRetries, 0) || maxRetries > 1) {
     throw new TypeError("Invalid approved context execution options.");
@@ -145,7 +146,8 @@ export async function executeWholeStoryContextPlan(plan, {request, signal = new 
         // Preserve planner priority for overlapping input, while letting other
         // cleared windows run during an outstanding request.
         const blocked = records.slice(0, index).some(other =>
-          (other.status === "pending" || other.status === "running") && overlaps(record, other));
+          (other.status === "pending" || other.status === "running") &&
+          (overlaps(record, other) || serialWithinRun && record.window.runId === other.window.runId));
         if (blocked) continue;
         record.status = "running";
         active++;

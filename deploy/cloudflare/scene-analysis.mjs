@@ -20,10 +20,18 @@ const WHOLE_STORY_LUNA_STUDY_SUITE = "nocturne-whole-story-luna-v1";
 const WHOLE_STORY_LUNA_ATTEMPTS = 64;
 const WHOLE_STORY_LUNA_MAX_USD = 1;
 const WHOLE_STORY_LUNA_TIMEOUT_MS = 180_000;
+const NEUTRAL_LUNA_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
+const NEUTRAL_LUNA_PROTOCOL_ATTEMPTS = 52;
+const NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS = 300_000;
+const NEUTRAL_LUNA_PROTOCOL_FORMS = new Map([
+  ["benchmark=luna-protocol-neutral-v2-complete", { arm: "complete", transitionLimit: 15 }],
+  ["benchmark=luna-protocol-neutral-v2-windowed", { arm: "windowed", transitionLimit: 9 }],
+]);
 const RESEARCH_SUITE_DAY_LIMITS = {
   [CUE_CONTINUITY_STUDY_SUITE]: CUE_CONTINUITY_STUDY_REQUESTS,
   [DECISIONS_STORY_STUDY_PINS.version]: STORY_STUDY_MAX_TOTAL_REQUESTS,
   [WHOLE_STORY_LUNA_STUDY_SUITE]: WHOLE_STORY_LUNA_ATTEMPTS,
+  [NEUTRAL_LUNA_PROTOCOL_SUITE]: NEUTRAL_LUNA_PROTOCOL_ATTEMPTS,
 };
 const MODEL = "gpt-6-luna";
 const MAX_CUES = 16;
@@ -320,7 +328,11 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne whole-story Luna study</title>
 <main><h1>Nocturne whole-story Luna study</h1>
 <p>Compare whole-story, paragraph and sentence context on four original research fixtures. Running the study sends those fixtures to OpenAI and returns aggregate scores. It has a limit of ${WHOLE_STORY_LUNA_ATTEMPTS} API attempts, a $${WHOLE_STORY_LUNA_MAX_USD} estimated usage budget and a three-minute deadline.</p>
-<form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form></main></html>`;
+<form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form>
+<h2>Luna protocol v2 neutral diagnostic</h2>
+<p>Send the same four original fixtures to OpenAI and compare discovery, causal cue checks and a bounded sample of transition checks. The result includes sentence IDs and structured labels. Each run has a five-minute deadline and can use up to ${NEUTRAL_LUNA_PROTOCOL_ATTEMPTS} of the study's daily attempt allowance, subject to the shared usage limits.</p>
+<form method="post"><button name="benchmark" value="luna-protocol-neutral-v2-complete">Run v2 complete-context diagnostic</button>
+<button name="benchmark" value="luna-protocol-neutral-v2-windowed">Run v2 windowed diagnostic</button></form></main></html>`;
 
 export async function handleWholeStoryLunaStudy(request, env, { config, session, reverify, runComparison, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -338,13 +350,14 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   if (sessionEnded()) return expired();
   if (read) return new Response(WHOLE_STORY_LUNA_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 
-  const stop = new AbortController();
-  const timeout = AbortSignal.timeout(Math.max(0, Math.min(WHOLE_STORY_LUNA_TIMEOUT_MS, session.expiresAt - Date.now())));
-  const signal = AbortSignal.any([request.signal, timeout, stop.signal]);
+  const startedAt = Date.now();
+  let neutralStudy;
   try {
-    const body = await readBoundedText(request, 64, AbortSignal.any([signal, AbortSignal.timeout(4000)]),
+    const bodyDeadline = AbortSignal.timeout(Math.max(0, Math.min(4000, session.expiresAt - startedAt)));
+    const body = await readBoundedText(request, 64, AbortSignal.any([request.signal, bodyDeadline]),
       "application/x-www-form-urlencoded");
-    if (body !== "benchmark=whole-story-luna-v1") throw new TypeError("Invalid study form.");
+    neutralStudy = NEUTRAL_LUNA_PROTOCOL_FORMS.get(body);
+    if (!neutralStudy && body !== "benchmark=whole-story-luna-v1") throw new TypeError("Invalid study form.");
   } catch (error) {
     if (sessionEnded()) return expired();
     return failure("invalid_request", error instanceof RangeError ? 413 : 400, "Use the study button.");
@@ -352,11 +365,21 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   const apiKey = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
   if (!analysisConfigured(apiKey, budget)) return providerUnavailable(session, "benchmark_unavailable");
 
-  let attempts = 0, blocked, abort;
+  const maxAttempts = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_ATTEMPTS : WHOLE_STORY_LUNA_ATTEMPTS;
+  const suite = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_SUITE : WHOLE_STORY_LUNA_STUDY_SUITE;
+  const duration = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS : WHOLE_STORY_LUNA_TIMEOUT_MS;
+  const stop = new AbortController();
+  const timeout = AbortSignal.timeout(Math.max(0, Math.min(startedAt + duration, session.expiresAt) - Date.now()));
+  const signal = AbortSignal.any([request.signal, timeout, stop.signal]);
+  let attempts = 0, dispatched = 0, blocked, abort, hostedTermination;
   const deny = response => {
     blocked ??= response;
     stop.abort();
     throw new Error("Study blocked.");
+  };
+  const limitQuota = (reason, response) => {
+    if (!neutralStudy || dispatched === 0) deny(response);
+    hostedTermination ??= reason;
   };
   const authorized = async () => {
     signal.throwIfAborted();
@@ -365,7 +388,12 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
     return renewed?.isFounder === true && renewed.subject === session.subject &&
       Date.now() < renewed.expiresAt && !sessionEnded();
   };
-  const fetchImpl = async (target, options) => {
+  const fetchImpl = async (target, options, onQuota = () => {}) => {
+    const checkQuota = () => {
+      if (!hostedTermination) return;
+      onQuota();
+      throw new Error("Study quota reached.");
+    };
     const attemptSignal = options?.signal ? AbortSignal.any([signal, options.signal]) : signal;
     attemptSignal.throwIfAborted();
     if (target !== API_URL || options?.method !== "POST" || typeof options.body !== "string" ||
@@ -374,18 +402,27 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
     }
     if (!await authorized()) deny(expired());
     attemptSignal.throwIfAborted();
-    if (attempts >= WHOLE_STORY_LUNA_ATTEMPTS) deny(failure("rate_limited", 429, "This study reached its attempt limit."));
+    checkQuota();
+    if (attempts >= maxAttempts) {
+      limitQuota("attempt-cap", failure("rate_limited", 429, "This study reached its attempt limit."));
+      checkQuota();
+    }
     attempts++;
     let permission;
-    try { permission = await reserveBudget(budget, config, session, WHOLE_STORY_LUNA_STUDY_SUITE, attemptSignal); }
+    try { permission = await reserveBudget(budget, config, session, suite, attemptSignal); }
     catch {
       attemptSignal.throwIfAborted();
       deny(providerUnavailable(session, "budget_unavailable"));
     }
-    if (permission.status === 429) deny(budgetLimited(permission));
+    if (permission.status === 429) {
+      limitQuota("durable-quota", budgetLimited(permission));
+      checkQuota();
+    }
     if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
     if (sessionEnded()) deny(expired());
     attemptSignal.throwIfAborted();
+    checkQuota();
+    dispatched++;
     return analysisFetcher(API_URL, {
       method: "POST", signal: attemptSignal, redirect: "manual",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
@@ -399,7 +436,25 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
       signal.addEventListener("abort", abort, { once: true });
     });
     const run = async () => {
-      const result = await runComparison({ apiKey, fetchImpl, signal, maxUsd: WHOLE_STORY_LUNA_MAX_USD, maxAttempts: WHOLE_STORY_LUNA_ATTEMPTS });
+      if (neutralStudy) {
+        const [{ runLunaProtocolNeutral }, { createLunaProtocolProvider }] = await Promise.all([
+          import("../../scripts/lib/luna-protocol-neutral.mjs"), import("../../scripts/lib/luna-protocol-provider.mjs"),
+        ]);
+        const provider = async (payload, options) => {
+          if (hostedTermination) return { status: "not-dispatched" };
+          let quotaDenied = false;
+          const request = createLunaProtocolProvider({ apiKey, fetchImpl: (target, requestOptions) =>
+            fetchImpl(target, requestOptions, () => { quotaDenied = true; }) });
+          const result = await request(payload, options);
+          return quotaDenied ? { status: "not-dispatched" } : result;
+        };
+        const result = await runLunaProtocolNeutral({ mode: "live", ...neutralStudy, provider, signal, maxAttempts });
+        if (!await authorized()) return expired();
+        return Response.json({ ...result, hostedStudyVersion: suite, externalCalls: dispatched,
+          quotaLimited: hostedTermination !== undefined, hostedTermination: hostedTermination ??
+            (result.providerStops.all ? "provider-terminal" : Object.keys(result.providerStops).length ? "provider-mode-terminal" : "completed") });
+      }
+      const result = await runComparison({ apiKey, fetchImpl, signal, maxUsd: WHOLE_STORY_LUNA_MAX_USD, maxAttempts });
       if (!await authorized()) return expired();
       return Response.json(result);
     };
