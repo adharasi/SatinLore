@@ -40,6 +40,15 @@ The transition pass receives the same causal prefix as the cue pass and answers 
 
 The founder-only study page offers fixed complete-context and windowed diagnostics on the four original neutral fixtures. Each arm has two complementary parts. Part A has 19 units and part B has 14. Both check every cue and transition in their part, and combining the reports restores the original 33-unit denominator. Complete context plans 40 and 30 calls before cue rechecks. Windowed plans 43 and 33. Each part can add up to four rechecks. The score-only reference stays outside the prompt.
 
+Save the four source-free responses and compare them locally. The comparator validates fixture and unit hashes, rubric, model and arm. It reports the fixed denominator and the intersection of rows with usable results in both arms. An unsent row stays visible in the fixed denominator. Unit-level differences keep separate reasons for changes in discovery, primary cue recognition and applied playback.
+
+```sh
+node scripts/compare-luna-protocol-neutral.mjs \
+  --complete /private/complete-a.json --complete /private/complete-b.json \
+  --windowed /private/windowed-a.json --windowed /private/windowed-b.json \
+  > /private/paired-neutral.json
+```
+
 Each diagnostic row contains its sentence ID, provisional discovery result, causal cue result, independent transition result and the compiled decision. Attempts report submitted and cited IDs, typed failure codes, timing and measured usage. The hosted response omits source text, provider response bodies and credentials. If quota closes the route after provider dispatch has begun, the report preserves completed results and marks unsent work as deferred. Use exact typed accuracy and protective-stop results alongside overall coverage when comparing runs.
 
 ### Improve coverage and precision in order
@@ -89,9 +98,11 @@ The follow-up compiler change keeps the restart profile when an exact enacted re
 
 The old research routes and normal reader share a deployment-wide 100-attempt UTC day and 1,000-attempt UTC month. The reader also has a per-reader allowance. Research routes have their own suite allowances. Each reservation checks both the applicable suite or reader allowance and the shared deployment allowance. One benchmark can exhaust those counters even when it costs very little. The counters reserve requests before sending them, and a reserved request can later fail.
 
-The fixed founder neutral diagnostic uses its own atomic allowance of 256 attempts per UTC day and 2,000 per UTC month, with a shared 256-attempt suite ceiling across its parts. Reader and older study limits are separate. Each protected submission is capped at 48 provider attempts and a conservative $0.15 reservation. This leaves room below the 50 external subrequests per invocation on Cloudflare Workers Free. A combined complete-context test has a maximum $0.30 reservation across its two parts. A partial report identifies the limiting day or month and includes the time until the window resets. Estimated charges and outstanding reservations are reported separately. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+The fixed founder neutral diagnostic uses its own atomic allowance of 512 attempts per UTC day and 4,096 per UTC month. Reader and older study limits are separate. The founder form shows remaining headroom. Each shard checks its capacity before the first dispatch, and individual requests still reserve their quota atomically. Concurrent submissions can change capacity after preflight. The four-part matched comparison needs up to 162 requests for the fixed fixtures. Each protected submission is capped at 48 provider attempts and a conservative $0.15 reservation. This leaves room below the 50 external subrequests per invocation on Cloudflare Workers Free. A partial report identifies the limiting day or month and includes the time until the window resets. Estimated charges and outstanding reservations are reported separately. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 
 The exact compiler regression uses `scripts/replay-approved-beat-protocol.py`. Supply the frozen prior v9 labels and review inputs separately from the approved v6 output. Run the CLI with `--help` for the input and output flags. It hydrates the approved input shape with the historical replay adapter, then compares complete JavaScript profile and trace objects against the expected outputs.
+
+The approved 41-story local replay reproduced all 17,895 profiles and traces exactly, including all ten D2 stories. It supplied reviewed facts to the compiler. Live labeling on those editions requires a separate current exact-range grant and an authorized credential in the execution environment. Three of the ten D2 editions fit the current whole-story discovery bounds before checking clearance. The other seven need windowed discovery or a separately qualified whole-story strategy.
 
 ## Qualification
 

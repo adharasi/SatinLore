@@ -14,6 +14,7 @@ import { initializeCorpusBudget, handleCorpusBudget, corpusBudgetExpiry, pruneCo
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
+const NEUTRAL_QUOTA_URL = "https://scene-analysis.internal/founder-neutral-quota";
 export const DECISIONS_STORY_STUDY_PATH = "/api/scene-analysis/decisions-story-study";
 export const WHOLE_STORY_LUNA_STUDY_PATH = "/api/scene-analysis/whole-story-luna-study";
 const WHOLE_STORY_LUNA_STUDY_SUITE = "nocturne-whole-story-luna-v1";
@@ -22,7 +23,7 @@ const WHOLE_STORY_LUNA_MAX_USD = 1;
 const WHOLE_STORY_LUNA_TIMEOUT_MS = 180_000;
 const NEUTRAL_LUNA_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
 const NEUTRAL_LUNA_PROTOCOL_QUOTA = Object.freeze({
-  lane: "founder-neutral", perRun: 48, perUtcDay: 256, perUtcMonth: 2_000,
+  lane: "founder-neutral", perRun: 48, perUtcDay: 512, perUtcMonth: 4_096,
 });
 const NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS = 300_000;
 const NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS = 2;
@@ -31,10 +32,10 @@ const NEUTRAL_LUNA_PROTOCOL_SHARDS = {
   b: { fixtureIds: ["reading-room", "practice-drill"], transitionLimit: 14 },
 };
 const NEUTRAL_LUNA_PROTOCOL_FORMS = new Map([
-  ["benchmark=luna-protocol-neutral-v2-complete-a", { arm: "complete", shard: "a" }],
-  ["benchmark=luna-protocol-neutral-v2-complete-b", { arm: "complete", shard: "b" }],
-  ["benchmark=luna-protocol-neutral-v2-windowed-a", { arm: "windowed", shard: "a" }],
-  ["benchmark=luna-protocol-neutral-v2-windowed-b", { arm: "windowed", shard: "b" }],
+  ["benchmark=luna-protocol-neutral-v2-complete-a", { arm: "complete", shard: "a", discoveryWindows: 2 }],
+  ["benchmark=luna-protocol-neutral-v2-complete-b", { arm: "complete", shard: "b", discoveryWindows: 2 }],
+  ["benchmark=luna-protocol-neutral-v2-windowed-a", { arm: "windowed", shard: "a", discoveryWindows: 5 }],
+  ["benchmark=luna-protocol-neutral-v2-windowed-b", { arm: "windowed", shard: "b", discoveryWindows: 5 }],
 ]);
 const RESEARCH_SUITE_DAY_LIMITS = {
   [CUE_CONTINUITY_STUDY_SUITE]: CUE_CONTINUITY_STUDY_REQUESTS,
@@ -290,14 +291,30 @@ function checkedContext(response, { version, paragraphs }, session) {
   } : null };
 }
 
+function budgetStub(namespace) {
+  return namespace.get(namespace.idFromName("scene-analysis:v1"));
+}
+
 async function reserveBudget(namespace, config, session, suite, signal) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:scene-budget:v1:${config.issuer}:${session.subject}`));
   const reader = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  const stub = namespace.get(namespace.idFromName("scene-analysis:v1"));
-  return stub.fetch(new Request(BUDGET_URL, {
+  return budgetStub(namespace).fetch(new Request(BUDGET_URL, {
     method: "POST", signal, headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader, ...(suite ? { suite } : {}) }),
   }));
+}
+
+async function readNeutralQuota(namespace, signal) {
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(3000)]);
+  const response = await budgetStub(namespace).fetch(new Request(NEUTRAL_QUOTA_URL, { signal: deadline }));
+  if (response.status !== 200) return null;
+  const quota = await readBoundedJson(response, 512, deadline);
+  const { perUtcDay, perUtcMonth } = NEUTRAL_LUNA_PROTOCOL_QUOTA;
+  const bounds = { remainingToday: perUtcDay, remainingThisMonth: perUtcMonth,
+    dayRetryAfterSeconds: DAY / 1000, monthRetryAfterSeconds: 31 * DAY / 1000 };
+  if (!exactObject(quota, Object.keys(bounds)) || Object.entries(bounds).some(([key, max]) =>
+    !Number.isSafeInteger(quota[key]) || quota[key] < (key.endsWith("Seconds") ? 1 : 0) || quota[key] > max)) return null;
+  return quota;
 }
 
 function analysisConfigured(key, budget) {
@@ -334,14 +351,15 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <button name="mode" value="cue-continuity">Compare cue continuity on calibration</button>
 <p>Each dedicated transition test uses one API request for the selected split. The cue continuity comparison uses two requests on the first approved calibration batch, with one comparison allowed per UTC day.</p></form></main></html>`;
 
-const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne whole-story Luna study</title>
+const wholeStoryLunaForm = quota => `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne whole-story Luna study</title>
 <main><h1>Nocturne whole-story Luna study</h1>
 <p>Compare whole-story, paragraph and sentence context on four original research fixtures. Running the study sends those fixtures to OpenAI and returns aggregate scores. It has a limit of ${WHOLE_STORY_LUNA_ATTEMPTS} API attempts, a $${WHOLE_STORY_LUNA_MAX_USD} estimated usage budget and a three-minute deadline.</p>
 <form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form>
 <h2>Luna protocol v2 neutral diagnostic</h2>
 <p>Send the selected original fixtures to OpenAI for discovery, causal cue checks and independent transition checks. The result includes sentence IDs and structured labels. Run both parts of the same diagnostic to cover all 33 sentences.</p>
-<p>Verified restart and temporal continuity checks are active. Up to ${NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS} blinded cue rechecks per fixture investigate discovery disagreements or invalid cue contracts.</p>
+<p>Luna rubric v8 is active. Up to ${NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS} blinded cue rechecks per fixture investigate discovery disagreements or invalid cue contracts.</p>
 <p>Each run has a five-minute deadline and up to ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun} attempts. The founder study permits ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay} attempts per UTC day and ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcMonth} per UTC month, separately from reader analysis.</p>
+<p>${quota ? `Founder neutral headroom is ${quota.remainingToday} attempts today and ${quota.remainingThisMonth} this UTC month.` : "Founder neutral headroom is unavailable."} The study checks room for the full shard before dispatch.</p>
 <form method="post"><button name="benchmark" value="luna-protocol-neutral-v2-complete-a">Run v2 complete context A (19 sentences)</button>
 <button name="benchmark" value="luna-protocol-neutral-v2-complete-b">Run v2 complete context B (14 sentences)</button>
 <button name="benchmark" value="luna-protocol-neutral-v2-windowed-a">Run v2 windowed A (19 sentences)</button>
@@ -361,7 +379,10 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
   const sessionEnded = () => request.signal.aborted || Date.now() >= session.expiresAt;
   if (sessionEnded()) return expired();
-  if (read) return new Response(WHOLE_STORY_LUNA_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  if (read) {
+    const quota = request.method === "GET" ? await readNeutralQuota(env.SCENE_ANALYSIS_BUDGET, request.signal).catch(() => null) : null;
+    return sessionEnded() ? expired() : new Response(wholeStoryLunaForm(quota), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
 
   const startedAt = Date.now();
   let neutralStudy;
@@ -378,7 +399,10 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   const apiKey = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
   if (!analysisConfigured(apiKey, budget)) return providerUnavailable(session, "benchmark_unavailable");
 
-  const maxAttempts = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun : WHOLE_STORY_LUNA_ATTEMPTS;
+  const neutralShard = neutralStudy && NEUTRAL_LUNA_PROTOCOL_SHARDS[neutralStudy.shard];
+  const maxAttempts = neutralStudy ? Math.min(NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun,
+    neutralStudy.discoveryWindows + 2 * neutralShard.transitionLimit + NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS * neutralShard.fixtureIds.length) :
+    WHOLE_STORY_LUNA_ATTEMPTS;
   const suite = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_SUITE : WHOLE_STORY_LUNA_STUDY_SUITE;
   const duration = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS : WHOLE_STORY_LUNA_TIMEOUT_MS;
   const stop = new AbortController();
@@ -456,6 +480,17 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
     });
     const run = async () => {
       if (neutralStudy) {
+        const quota = await readNeutralQuota(budget, signal).catch(() => null);
+        signal.throwIfAborted();
+        if (!quota) return providerUnavailable(session, "budget_unavailable");
+        const { remainingToday, remainingThisMonth, dayRetryAfterSeconds, monthRetryAfterSeconds } = quota;
+        if (remainingToday < maxAttempts || remainingThisMonth < maxAttempts) {
+          const monthLimited = remainingThisMonth < maxAttempts;
+          const retryAfterSeconds = monthLimited ? monthRetryAfterSeconds : dayRetryAfterSeconds;
+          return Response.json({ code: "rate_limited", error: "The founder quota has insufficient room for the full shard.",
+            requiredAttempts: maxAttempts, remainingToday, remainingThisMonth, window: monthLimited ? "month" : "day", retryAfterSeconds },
+          { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } });
+        }
         const [{ runLunaProtocolNeutral }, { createLunaProtocolProvider }] = await Promise.all([
           import("../../scripts/lib/luna-protocol-neutral.mjs"), import("../../scripts/lib/luna-protocol-provider.mjs"),
         ]);
@@ -468,11 +503,12 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
           return quotaDenied ? { status: "not-dispatched" } : result;
         };
         const { arm, shard } = neutralStudy;
-        const result = await runLunaProtocolNeutral({ mode: "live", arm, ...NEUTRAL_LUNA_PROTOCOL_SHARDS[shard],
+        const result = await runLunaProtocolNeutral({ mode: "live", arm, ...neutralShard,
           provider, signal, maxAttempts, maxCueChecks: NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS });
         if (!await authorized()) return expired();
         return Response.json({ ...result, hostedStudyVersion: suite, hostedShard: shard,
           hostedQuota: NEUTRAL_LUNA_PROTOCOL_QUOTA,
+          hostedQuotaPreflight: { requiredAttempts: maxAttempts, remainingToday, remainingThisMonth },
           ...(hostedQuotaCutoff ? { hostedQuotaCutoff } : {}),
           externalCalls: dispatched,
           quotaLimited: hostedTermination !== undefined, hostedTermination: hostedTermination ??
@@ -649,6 +685,20 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   }
 }
 
+function utcQuotaEnds(now) {
+  const date = new Date(now);
+  return { dayEnds: (Math.floor(now / DAY) + 1) * DAY, monthEnds: Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) };
+}
+
+function neutralQuotaWindows({ dayEnds, monthEnds }) {
+  const { perUtcDay, perUtcMonth } = NEUTRAL_LUNA_PROTOCOL_QUOTA;
+  return [
+    { key: `study:${NEUTRAL_LUNA_PROTOCOL_SUITE}`, expires: dayEnds, limit: perUtcDay },
+    { key: "founder-neutral-day", expires: dayEnds, limit: perUtcDay },
+    { key: "founder-neutral-month", expires: monthEnds, limit: perUtcMonth },
+  ];
+}
+
 /** Deployment-wide spending gate. Stores only expiring counts for UTC windows. */
 export class SceneAnalysisBudget {
   constructor(ctx) {
@@ -668,8 +718,18 @@ export class SceneAnalysisBudget {
   async fetch(request) {
     const corpusResponse = await handleCorpusBudget(request, this);
     if (corpusResponse) return corpusResponse;
-    if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
     try {
+      if (request.url === NEUTRAL_QUOTA_URL && request.method === "GET") {
+        const now = Date.now();
+        const ends = utcQuotaEnds(now);
+        const [suite, day, month] = neutralQuotaWindows(ends).map(({ key, limit }) => {
+          const count = this.sql.exec("SELECT count FROM quota WHERE key=? AND expires_at>?", key, now).toArray()[0]?.count ?? 0;
+          return Math.max(0, limit - count);
+        });
+        return Response.json({ remainingToday: Math.min(suite, day), remainingThisMonth: month,
+          dayRetryAfterSeconds: Math.ceil((ends.dayEnds - now) / 1000), monthRetryAfterSeconds: Math.ceil((ends.monthEnds - now) / 1000) });
+      }
+      if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
       const suite = exactObject(value, ["reader", "suite"]) ? value.suite : null;
       const suiteLimit = typeof suite === "string" && Object.hasOwn(RESEARCH_SUITE_DAY_LIMITS, suite) ? RESEARCH_SUITE_DAY_LIMITS[suite] : null;
@@ -677,20 +737,12 @@ export class SceneAnalysisBudget {
         return new Response(null, { status: 400 });
       }
       const now = Date.now();
-      const date = new Date(now);
-      const dayEnds = (Math.floor(now / DAY) + 1) * DAY;
-      const monthEnds = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
-      const deploymentWindows = suite === NEUTRAL_LUNA_PROTOCOL_SUITE ? [
-        { key: "founder-neutral-day", expires: dayEnds, limit: NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay },
-        { key: "founder-neutral-month", expires: monthEnds, limit: NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcMonth },
-      ] : [
-        { key: "global-day", expires: dayEnds, limit: 100 },
-        { key: "global-month", expires: monthEnds, limit: 1000 },
-      ];
-      const windows = [
+      const { dayEnds, monthEnds } = utcQuotaEnds(now);
+      const windows = suite === NEUTRAL_LUNA_PROTOCOL_SUITE ? neutralQuotaWindows({ dayEnds, monthEnds }) : [
         suiteLimit === null ? { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 } :
           { key: `study:${suite}`, expires: dayEnds, limit: suiteLimit },
-        ...deploymentWindows,
+        { key: "global-day", expires: dayEnds, limit: 100 },
+        { key: "global-month", expires: monthEnds, limit: 1000 },
       ];
       const attempts = suite === CUE_CONTINUITY_STUDY_SUITE ? CUE_CONTINUITY_STUDY_REQUESTS : 1;
       const limited = this.storage.transactionSync(() => {

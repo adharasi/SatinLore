@@ -50,6 +50,7 @@ test("submits only typed discovery inputs and accepts complete rows in target or
   assert.deepEqual(row.properties.depiction.enum, LUNA_PROTOCOL_ENUMS.depiction);
   assert.ok(row.properties.narrativePhase.enum.includes("rebuild"));
   assert.match(sent.instructions, /untrusted data/u);
+  assert.match(sent.instructions, /Contact serving an ordinary purpose supplies no romantic cue, onset, accent or restart/u);
   assert.equal(JSON.stringify(result).includes(units[0].text), false);
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
@@ -93,7 +94,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v7/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v8/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -208,9 +209,13 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /Ordinary movement stopping/iu);
   assert.match(sent.instructions, /Set frame to reported if the target enters the account/u);
   assert.match(sent.instructions, /Events within a recollection, imagined scene or report do not establish a transition/u);
-  assert.match(sent.instructions, /An explicit elapsed-time bridge can qualify/u);
+  assert.match(sent.instructions, /An elapsed interval can make continuity unresolved even with the same people and place/u);
+  assert.match(sent.instructions, /Ordinary dialogue or background detail within a continuous moment supplies no such boundary/u);
   assert.match(sent.instructions, /An earlier closing event is context only/u);
-  assert.match(sent.instructions, /status uncertain and transition unknown/u);
+  assert.match(sent.instructions, /Contact serving an ordinary purpose supplies no romantic cue, onset, accent or restart/u);
+  assert.match(sent.instructions, /final repetition or change in speed while the activity continues supplies no stop/u);
+  assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
+  assert.match(sent.instructions, /Use uncertain or abstain with transition unknown/u);
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
   assert.equal(rows.items.additionalProperties, false);
@@ -237,6 +242,7 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
     [transitionRow("hard-stop", "protective", {evidenceIds: [10]}), "target-evidence"],
     [transitionRow("non-romantic-activity-stop", "protective"), "transition-fact"],
     [transitionRow("non-romantic-activity-stop", "neutralize"), "transition-fact"],
+    [transitionRow("non-romantic-activity-stop", "none", {evidenceIds: [10]}), "target-evidence"],
     [transitionRow("declined-restart", "none"), "transition-fact"],
     [transitionRow("restart", "low"), "transition-fact"],
     [transitionRow("restart", "none", {evidenceIds: [10]}), "target-evidence"],
@@ -327,8 +333,9 @@ test("keeps local cue, continuity, frame and neutral decisions independently gro
   const build = fact(11, {status: "verified", narrativePhase: "build", action: "anticipation", evidenceIds: [10, 11]});
   const neutral = fact(11, {depiction: "romantic"});
   const ordinaryStop = fact(11, {status: "verified", transition: "non-romantic-activity-stop", evidenceIds: [11]});
+  const continuityGap = fact(11, {status: "verified", transition: "uncertain-continuity", fact: "neutralize", evidenceIds: [11]});
   const reportEntry = fact(11, {status: "verified", frame: "reported", transition: "reported-entry", fact: "cut", evidenceIds: [11]});
-  for (const row of [build, neutral, {...neutral, frame: "reported"}, ordinaryStop, reportEntry]) {
+  for (const row of [build, neutral, {...neutral, frame: "reported"}, ordinaryStop, continuityGap, reportEntry]) {
     const run = provider(async (_url, {body}) => {
       const {instructions} = JSON.parse(body);
       assert.match(instructions, /routine line in a live beat can be neutral/u);
@@ -344,6 +351,7 @@ test("keeps local cue, continuity, frame and neutral decisions independently gro
     [{...build, priorAnchor: 10}, "prior-anchor"], [{...build, transition: "restart"}, "transition-action"],
     [{...build, status: "uncertain"}, "status-effect"], [{...neutral, narrativePhase: "unknown"}, "status-effect"],
     [{...ordinaryStop, status: "neutral"}, "status-effect"], [{...reportEntry, status: "neutral"}, "status-effect"],
+    [{...ordinaryStop, evidenceIds: [10]}, "target-evidence"], [{...continuityGap, evidenceIds: [10]}, "target-evidence"],
     [{...reportEntry, fact: "span-end"}, "transition-fact"],
     [{...reportEntry, evidenceIds: [10]}, "target-evidence"], [{...neutral, scopeId: 9}, "scope-id"],
   ]) {

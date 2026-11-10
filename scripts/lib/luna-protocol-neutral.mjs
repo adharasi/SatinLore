@@ -10,6 +10,34 @@ import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "./whole-story-con
 const fixtureVersion = "neutral-stories-v1";
 const fixtureDigest = "40cd3c8f193ba7fb44b75234a1917b577ec5d742bceb532ea634cd0643691d6d";
 const referenceScope = "Four pinned development fixtures for smoke checks. Release qualification requires an independent, frozen corpus.";
+const behaviorReferenceVersion = "neutral-behavior-v1";
+const behaviorReferenceDigest = "8fb2b416829e9cbc542bf03738b4da3563cdc668256a15b04f13b459c07b71f9";
+const cueKinds = ["narrativeBuildup", "directEnacted", "continuation"];
+const behaviorReference = {
+  "first-dance": {
+    narrativeBuildup: [2, 3, 9], directEnacted: [4, 10], continuation: [5],
+    playbackGate: ["quiet", "quiet", "active", "active", "active", "active", "carry-optional", "hard-stop", "quiet", "quiet", "active"],
+  },
+  "old-letter": {
+    narrativeBuildup: [], directEnacted: [7], continuation: [],
+    playbackGate: ["quiet", "reset", "quiet", "quiet", "reset", "quiet", "quiet", "active"],
+  },
+  "reading-room": {
+    narrativeBuildup: [7], directEnacted: [1, 8], continuation: [],
+    playbackGate: ["quiet", "active", "quiet", "quiet", "quiet", "quiet", "quiet", "quiet", "active"],
+  },
+  "practice-drill": {
+    narrativeBuildup: [], directEnacted: [], continuation: [],
+    playbackGate: ["quiet", "quiet", "quiet", "quiet", "quiet"],
+  },
+};
+const gateProfiles = Object.freeze({Baseline: "quiet", Stop: "hard-stop", Reset: "reset", Divider: "reset"});
+const activeProfiles = new Set(["Undertone", "Gradual build", "Deepening build", "Onset rise", "Rebuild rise", "Sustain wave",
+  "Deep sustain", "Crest approach", "Crest", "Taper", "Recovery", "Hold"]);
+const activeCuePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
+const behaviorStages = ["discovery", "prefix", "accepted", "applied"];
+const unknownCueKinds = Object.freeze(Object.fromEntries(cueKinds.map(kind => [kind, null])));
+const noCueKinds = Object.freeze(Object.fromEntries(cueKinds.map(kind => [kind, false])));
 const stageDimensions = {
   discovery: ["cue", "narrativePhase", "transition"],
   prefix: ["cue", "narrativePhase"],
@@ -48,6 +76,9 @@ function prepareFixtures(now) {
   if (createHash("sha256").update(JSON.stringify(wholeStoryAnnotationFixtures)).digest("hex") !== fixtureDigest) {
     throw new Error("The built-in neutral fixtures or reference have changed.");
   }
+  if (createHash("sha256").update(JSON.stringify([fixtureDigest, behaviorReference])).digest("hex") !== behaviorReferenceDigest) {
+    throw new Error("The built-in neutral behavior reference has changed.");
+  }
   return wholeStoryAnnotationFixtures.map(({id, paragraphs, phases, events, evidence}) => {
     const text = paragraphs.join("\n\n");
     const {editionDigest, segmentationVersion, units} = buildWholeStoryIndex(text);
@@ -56,15 +87,32 @@ function prepareFixtures(now) {
     }
     const spans = units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}));
     const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: now + 300_000, spans};
-    const reference = {id, sourceSha256: editionDigest, units: units.map(({id, paragraph, digest}) => {
-      const narrativePhase = phases[id] === "restart" ? "rebuild" : phases[id];
-      const transition = events[id] === "stop" ? "hard-stop" : events[id] ?? "none";
-      return {id, paragraph, unitSha256: digest, narrativePhase, transition, cue: narrativePhase !== "quiet",
+    const behavior = behaviorReference[id];
+    if (behavior?.playbackGate.length !== units.length || cueKinds.some(kind => validIds(behavior[kind], units.length) === null)) {
+      throw new Error("The built-in behavior reference no longer matches reader units.");
+    }
+    const reference = {id, sourceSha256: editionDigest, units: units.map(({id: unitId, paragraph, digest}) => {
+      const narrativePhase = phases[unitId] === "restart" ? "rebuild" : phases[unitId];
+      const transition = events[unitId] === "stop" ? "hard-stop" : events[unitId] ?? "none";
+      return {id: unitId, paragraph, unitSha256: digest, narrativePhase, transition, cue: narrativePhase !== "quiet",
         frame: "uncertain", depiction: "unknown", structural: false, legacyCue: narrativePhase !== "quiet",
-        legacyCueKnown: true, hardAction: transition === "hard-stop", protectedReference: false};
+        legacyCueKnown: true, hardAction: transition === "hard-stop", protectedReference: false,
+        behavior: {...Object.fromEntries(cueKinds.map(kind => [kind, behavior[kind].includes(unitId)])),
+          playbackGate: behavior.playbackGate[unitId]}};
     })};
     return {id, text, grant, reference, evidence};
   });
+}
+
+export function getNeutralProtocolReference() {
+  return {fixtureVersion, fixtureDigest, behaviorReferenceVersion, behaviorReferenceDigest,
+    works: prepareFixtures(0).map(({reference}) => reference)};
+}
+
+export function scoreNeutralPlaybackGate(expected, pattern) {
+  const actual = Object.hasOwn(gateProfiles, pattern) ? gateProfiles[pattern] : activeProfiles.has(pattern) ? "active" : null;
+  return {expected, actual, matches: actual !== null && (actual === expected ||
+    expected === "carry-optional" && ["quiet", "active"].includes(actual))};
 }
 
 function mockProvider({reference, evidence}) {
@@ -72,11 +120,11 @@ function mockProvider({reference, evidence}) {
     const submitted = new Set(units.map(({id}) => id));
     const facts = targetIds.map(unitId => {
       const {narrativePhase, transition, cue} = reference.units[unitId];
+      const frame = reference.id === "old-letter" && unitId >= 1 && unitId <= 3 ? "reported" : "current";
       if (mode === "transition") {
         const fact = LUNA_PROTOCOL_TRANSITION_FACTS[transition]?.[0] ?? "none";
         return {unitId, status: transition === "none" ? "neutral" : "verified", depiction: "unknown",
-          frame: transition === "reported-entry" ? "reported" : "current",
-          narrativePhase: "unknown", transition, action: "unknown", fact, scopeId: null,
+          frame, narrativePhase: "unknown", transition, action: "unknown", fact, scopeId: null,
           priorAnchor: null, evidenceIds: transition === "none" ? [] : [unitId]};
       }
       const reviewed = cue || transition !== "none";
@@ -86,7 +134,7 @@ function mockProvider({reference, evidence}) {
           transition: "none", action: "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: []};
       }
       return {unitId, status: reviewed ? mode === "discovery" ? "candidate" : "verified" : "neutral",
-        depiction: cue ? "romantic" : "neutral", frame: "current", narrativePhase, transition,
+        depiction: cue ? "romantic" : "neutral", frame, narrativePhase, transition,
         action: actionForPhase[narrativePhase] ?? "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds};
     });
     return {status: "ok", facts, usage: {inputTokens: 0, outputTokens: 0}};
@@ -271,6 +319,37 @@ function appliedMismatch(expected, actual, negative, label) {
   return [actual === negative ? `missing-${label}` : `${label}-type-mismatch`];
 }
 
+function semanticCueKinds(status, fact) {
+  if (!observedStatuses.has(status) || !fact) return unknownCueKinds;
+  if (status === "neutral") return noCueKinds;
+  if (["mixed", "uncertain"].includes(fact.frame)) return unknownCueKinds;
+  if (fact.frame !== "current") return noCueKinds;
+  if (fact.narrativePhase === "unknown" || fact.action === "unknown") return unknownCueKinds;
+  const active = activeCuePhases.has(fact.narrativePhase);
+  return {narrativeBuildup: fact.narrativePhase === "build" && fact.action === "anticipation",
+    directEnacted: active && ["contact", "change"].includes(fact.action),
+    continuation: active && fact.action === "continuation"};
+}
+
+function behaviorDiagnostic(row, expected) {
+  const discovery = observation(row, "discovery");
+  const accepted = semanticCueKinds(row.status, row.prefixVerified ? row : null);
+  const gated = (kind, observed) => typeof observed !== "boolean" ? null :
+    observed ? accepted[kind] : false;
+  return {discovery: semanticCueKinds(discovery.result.status, discovery.labels),
+    prefix: semanticCueKinds(row.primaryPrefix?.status, row.primaryPrefix), accepted,
+    applied: {narrativeBuildup: gated("narrativeBuildup", row.readerCue), directEnacted: gated("directEnacted", row.cue),
+      continuation: gated("continuation", row.readerCue)},
+    playbackGate: scoreNeutralPlaybackGate(expected.playbackGate, row.pattern)};
+}
+
+function compilerAnchor(value, story, kind, size) {
+  const prefix = `${story}:${kind}:`;
+  if (typeof value !== "string" || !value.startsWith(prefix)) return null;
+  const id = Number(value.slice(prefix.length));
+  return natural(id) && id < size && value === `${prefix}${id}` ? id : null;
+}
+
 function diagnosticWork(fixture, run) {
   const stages = new Map([...rawStages, "cueRecovery"].map(stage => [stage, new Map()]));
   const size = fixture.reference.units.length;
@@ -289,7 +368,9 @@ function diagnosticWork(fixture, run) {
     const prefixTransition = row.primaryPrefix?.transition;
     const primaryCue = observedStatuses.has(rawCue.status) ? rawCue.cue : undefined;
     return {id: gold.id, unitSha256: gold.unitSha256, paragraph: gold.paragraph,
-      expected: {narrativePhase: gold.narrativePhase, cue: gold.cue, transition: gold.transition, cueEvidenceIds},
+      expected: {narrativePhase: gold.narrativePhase, cue: gold.cue, transition: gold.transition, cueEvidenceIds,
+        behavior: gold.behavior},
+      behavior: behaviorDiagnostic(row, gold.behavior),
       pipelineFlags: [row.playbackDisposition, row.transitionFlag, row.cueGuard].filter(flag => pipelineFlags.has(flag)),
       applied: {status: applied.status, cue: applied.cue ?? null, transition: applied.transition ?? null, transitionOrigin,
         cuePrefixTransition: typedTransitions.has(prefixTransition) ? prefixTransition : null,
@@ -302,7 +383,9 @@ function diagnosticWork(fixture, run) {
           ...appliedMismatch(gold.transition, applied.transition, "none", "transition")]},
       compiler: {pattern: row.pattern, phase: row.phase, decision: row.trace.decision,
         appliedTransition: row.appliedTransition ?? null, evidenceIds: validIds(row.evidenceIds, size),
-        continuityGuard: row.continuityGuard === "elapsed-time-gap" ? row.continuityGuard : null},
+        continuityGuard: row.continuityGuard === "elapsed-time-gap" ? row.continuityGuard : null,
+        beatAnchor: compilerAnchor(row.beatId, run.id, "beat", gold.id + 1),
+        sceneAnchor: compilerAnchor(row.sceneId, run.id, "scene", gold.id + 1)},
       ...Object.fromEntries([...stages].map(([stage, attempts]) =>
         [stage, stageDiagnostic(gold, row, stage, attempts.get(gold.id), cueEvidenceIds, size)]))};
   })};
@@ -310,6 +393,38 @@ function diagnosticWork(fixture, run) {
 
 const countValues = (rows, key) => Object.fromEntries(Object.entries(Object.groupBy(rows, key))
   .map(([value, group]) => [value, group.length]));
+
+function behaviorReport(diagnostics) {
+  const summarize = units => {
+    const classify = (stage, kind) => {
+      const expected = row => row.expected.behavior[kind] && (stage !== "applied" || row.expected.behavior.playbackGate === "active");
+      const predicted = row => row.behavior[stage][kind];
+      const referencePositives = units.filter(expected).length;
+      const matched = units.filter(row => expected(row) && predicted(row) === true).length;
+      const extra = units.filter(row => !expected(row) && predicted(row) === true).length;
+      return {targets: units.length, observedTargets: units.filter(row => predicted(row) !== null).length,
+        referencePositives, matched, missed: referencePositives - matched, extra,
+        precision: ratio(matched, matched + extra), recall: ratio(matched, referencePositives)};
+    };
+    const gates = units.map(row => row.behavior.playbackGate);
+    const summarizeGates = rows => ({targets: rows.length, observedTargets: rows.filter(row => row.actual !== null).length,
+      matched: rows.filter(row => row.matches).length, missed: rows.filter(row => !row.matches).length});
+    const stages = Object.fromEntries(behaviorStages.map(stage => [stage, Object.fromEntries(cueKinds.map(kind =>
+      [kind, classify(stage, kind)]))]));
+    const byExpected = Object.fromEntries(Object.entries(Object.groupBy(gates, row => row.expected))
+      .map(([expected, rows]) => [expected, summarizeGates(rows)]));
+    return {...stages, playbackGate: {...summarizeGates(gates), byExpected}};
+  };
+  return {...summarize(diagnostics.flatMap(work => work.units)),
+    definitions: {
+      narrativeBuildup: "Supported accumulation of present tension without fresh enactment at the target.",
+      directEnacted: "Fresh, directly depicted enactment at the target.",
+      continuation: "Direct support that an established beat is continuing. Neutral connectors can allow carry without a new cue.",
+      accepted: "Final accepted cue label after any recheck, measured against the semantic reference.",
+      applied: "Effective cue kinds after gating. Only semantic positives that require active playback count as expected here.",
+      playbackGate: "Computed qualitative effect. Optional carry accepts quiet or active playback. This score does not measure device commands.",
+    }, works: diagnostics.map(({id, units}) => ({id, ...summarize(units)}))};
+}
 
 function rawTargetReport(diagnostics, stage) {
   const summarize = units => {
@@ -426,7 +541,7 @@ function mergeUsage(rows) {
 
 /** Reassemble two exact, disjoint fixed-fixture reports without pooling percentages or replaying requests. */
 export function combineNeutralReports(reports) {
-  const pins = prepareFixtures(0).map(({reference}) => reference);
+  const {works: pins} = getNeutralProtocolReference();
   const allIds = pins.map(({id}) => id);
   const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
   const keys = ["arm", "verificationContext", "measurement", "model", "rubricVersion", "segmentationVersion"];
@@ -445,6 +560,15 @@ export function combineNeutralReports(reports) {
       })) throw new TypeError(invalidShards);
   const canonical = rows => allIds.map(id => rows.find(row => row.id === id));
   const diagnostics = canonical([...workById.values()]);
+  const hasBehavior = reports.every(report => report.behaviorReferenceVersion === behaviorReferenceVersion &&
+    report.behaviorReferenceDigest === behaviorReferenceDigest);
+  if (!hasBehavior && reports.some(report => report.behavior || report.behaviorReferenceVersion || report.behaviorReferenceDigest) ||
+      hasBehavior && pins.some((pin, i) => pin.units.some(({behavior}, j) => {
+        const row = diagnostics[i].units[j];
+        return !equal(row.expected?.behavior, behavior) || !behaviorStages.every(stage => cueKinds.every(kind =>
+          row.behavior?.[stage]?.[kind] === null || typeof row.behavior?.[stage]?.[kind] === "boolean")) ||
+          !equal(row.behavior.playbackGate, scoreNeutralPlaybackGate(behavior.playbackGate, row.compiler?.pattern));
+      }))) throw new TypeError(invalidShards);
   const recoveryReports = reports.map(report => report.cueRecovery);
   const hasRecovery = reports.every(report => report.reader && report.cueRecovery);
   if (!hasRecovery && reports.some(report => report.reader || report.cueRecovery)) throw new TypeError(invalidShards);
@@ -500,6 +624,7 @@ export function combineNeutralReports(reports) {
     ...Object.fromEntries(Object.keys(stageDimensions).filter(name => name !== "reader" || hasRecovery)
       .map(name => [name, stage(name)])),
     ...(hasRecovery ? {cueRecovery: cueRecoveryReport(diagnostics, mergeUsage(recoveryReports.map(row => row.usage)))} : {}),
+    ...(hasBehavior ? {behaviorReferenceVersion, behaviorReferenceDigest, behavior: behaviorReport(diagnostics)} : {}),
     diagnostics};
 }
 
@@ -567,7 +692,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
     ...(mode === "live" ? {} : {externalCalls: 0}),
     prefixPolicy: "Freeze all native cue targets before discovery. The transition-only stage has a separate target allowance.",
     cueDefinition: "An exact fixture unit with a non-quiet reference phase.",
-    appliedCueDefinition: "A direct, verified enacted cue after the merged gate. Compared descriptively to non-quiet reference phases. The fixtures have no direct-cue reference.",
+    appliedCueDefinition: "Legacy direct cue after the merged gate, compared descriptively to non-quiet reference phases. The separate behavior scores use an explicit direct-enactment reference.",
     readerCueDefinition: "A supported direct cue, independent low cue, or scoped continuation after the merged gate, scored against the same fixture reference.",
     transitionDefinition: "An exact fixture unit and typed event. Nearby matching uses the same event type within one paragraph.",
     boundaryDefinition: {types: [...boundaryTransitions],
@@ -580,5 +705,6 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
       cueChanges: appliedCounts("cueChange"), transitionChanges: appliedCounts("transitionChange")},
     reader: {...stageReport(reference, runs, "reader"), cueChanges: readerCueChanges(diagnostics)},
     cueRecovery: cueRecoveryReport(diagnostics, attemptReport(runs, "cueRecovery")),
+    behaviorReferenceVersion, behaviorReferenceDigest, behavior: behaviorReport(diagnostics),
     diagnostics};
 }

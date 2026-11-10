@@ -20,6 +20,8 @@ const WHOLE_STORY_STUDY = "/api/scene-analysis/whole-story-luna-study";
 const WHOLE_STORY_SUITE = "nocturne-whole-story-luna-v1";
 const NEUTRAL_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
 const NEUTRAL_PROTOCOL_FORM = "benchmark=luna-protocol-neutral-v2-complete-a";
+const FULL_NEUTRAL_HEADROOM = { remainingToday: 512, remainingThisMonth: 4096,
+  dayRetryAfterSeconds: 66, monthRetryAfterSeconds: 3600 };
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
   { id: 9, phase: "sustain", rhythm: "steady", previous: "build", next: "sustain", movementCount: 1, shape: "sustained" },
@@ -41,20 +43,25 @@ function upstream(labels = LABELS) {
   return Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
 }
 function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204, quotaWindow,
+  quotaHeadroom = FULL_NEUTRAL_HEADROOM,
   wholeStoryLunaComparison } = {}) {
-  const calls = [], reservations = [];
+  const calls = [], reservations = [], headroomChecks = [];
   const worker = createPrivateAppWorker({ keyResolver, wholeStoryLunaComparison, analysisFetcher: async (url, options) => {
     calls.push({ url, options });
     return provider(url, options);
   } });
   const env = { ...CONFIG, OPENAI_API_KEY: KEY, SCENE_ANALYSIS_BUDGET: {
     idFromName: value => value, get: name => ({ async fetch(request) {
+      if (request.url === "https://scene-analysis.internal/founder-neutral-quota" && request.method === "GET") {
+        headroomChecks.push(name);
+        return Response.json(quotaHeadroom);
+      }
       reservations.push({ name, url: request.url, method: request.method, body: await request.json() });
       const status = typeof quotaStatus === "function" ? quotaStatus(reservations.length) : quotaStatus;
       return new Response(null, { status, headers: { "Retry-After": "66", ...(quotaWindow ? { "X-Scene-Quota-Window": quotaWindow } : {}) } });
     } }),
   } };
-  return { worker, env, calls, reservations };
+  return { worker, env, calls, reservations, headroomChecks };
 }
 
 function benchmarkRequest(jwt, options = {}) {
@@ -99,11 +106,14 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   const html = await page.text();
   assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
+  assert.match(html, /Luna rubric v8 is active/);
+  assert.match(html, /Founder neutral headroom is 512 attempts today and 4096 this UTC month/);
   for (const arm of ["complete", "windowed"]) for (const shard of ["a", "b"]) {
     assert.ok(html.includes(`value="luna-protocol-neutral-v2-${arm}-${shard}"`));
   }
   assert.doesNotMatch(html, /multipart|<input|<textarea/);
   assert.equal(await (await f.worker.fetch(wholeStoryRequest(founder, { ...get, method: "HEAD" }), env)).text(), "");
+  assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
   assert.deepEqual(f.reservations, []);
   assert.deepEqual(f.calls, []);
 });
@@ -141,7 +151,10 @@ test("the four fixed neutral protocol forms cover both cohorts within the reques
     assert.equal(result.measurement, "live-neutral-provider");
     assert.equal(result.hostedStudyVersion, NEUTRAL_PROTOCOL_SUITE);
     assert.equal(result.hostedShard, shard);
-    assert.deepEqual(result.hostedQuota, { lane: "founder-neutral", perRun: 48, perUtcDay: 256, perUtcMonth: 2000 });
+    assert.deepEqual(result.hostedQuota, { lane: "founder-neutral", perRun: 48, perUtcDay: 512, perUtcMonth: 4096 });
+    assert.deepEqual(result.hostedQuotaPreflight, { requiredAttempts: discovery + 2 * targets + 4,
+      remainingToday: 512, remainingThisMonth: 4096 });
+    assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
     assert.equal(result.quotaLimited, false);
     assert.equal(result.hostedTermination, "completed");
     assert.equal(result.arm, arm);
@@ -191,6 +204,28 @@ test("the fixed neutral protocol uses its founder quota suite and rejects spendi
   assert.equal(f.reservations[0].body.suite, NEUTRAL_PROTOCOL_SUITE);
 });
 
+test("neutral protocol preflight rejects inadequate headroom for the whole shard without dispatch or reservation", async () => {
+  const founder = await token();
+  for (const [remainingToday, remainingThisMonth, window, retryAfterSeconds] of [[43, 4096, "day", 66], [43, 43, "month", 3600]]) {
+    const f = fixture({ quotaHeadroom: { ...FULL_NEUTRAL_HEADROOM, remainingToday, remainingThisMonth } });
+    const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }), enableWholeStory(f.env));
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("Retry-After"), String(retryAfterSeconds));
+    const { error, ...details } = await response.json();
+    assert.match(error, /insufficient room for the full shard/);
+    assert.deepEqual(details, { code: "rate_limited", requiredAttempts: 44, remainingToday, remainingThisMonth, window, retryAfterSeconds });
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.reservations, []);
+    assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
+  }
+  const f = fixture({ quotaHeadroom: { ...FULL_NEUTRAL_HEADROOM, remainingToday: "44" } });
+  const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }), enableWholeStory(f.env));
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, "budget_unavailable");
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.reservations, []);
+});
+
 test("neutral protocol quota cutoff keeps completed rows and accounts only for forwarded requests", async () => {
   const founder = await token();
   let oneCallCharge;
@@ -204,6 +239,7 @@ test("neutral protocol quota cutoff keeps completed rows and accounts only for f
     assert.equal(result.quotaLimited, true);
     assert.equal(result.hostedTermination, "durable-quota");
     assert.deepEqual(result.hostedQuotaCutoff, { window: accepted === 1 ? "day" : "month", retryAfterSeconds: 66 });
+    assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
     assert.equal(result.externalCalls, accepted);
     assert.equal(f.calls.length, accepted);
     assert.equal(f.reservations.length, accepted + 1);
@@ -808,24 +844,24 @@ async function studyBudget(t) {
           if (new URL(request.url).pathname !== "/seed-neutral-month") return super.fetch(request);
           const now = new Date();
           const nextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
-          this.sql.exec("INSERT INTO quota(key,expires_at,count) VALUES(?,?,?)", "founder-neutral-month", nextMonth, 1999);
+          this.sql.exec("INSERT INTO quota(key,expires_at,count) VALUES(?,?,?)", "founder-neutral-month", nextMonth, 4095);
           return new Response(null, { status: 204 });
         }
       }
       export default { fetch(request, env) {
         const stub = env.SCENE_ANALYSIS_BUDGET.get(env.SCENE_ANALYSIS_BUDGET.idFromName("scene-analysis:v1"));
-        const path = new URL(request.url).pathname === "/seed-neutral-month" ? "/seed-neutral-month" : "/reserve";
-        return stub.fetch(new Request("https://scene-analysis.internal" + path, request));
+        return stub.fetch(new Request("https://scene-analysis.internal" + new URL(request.url).pathname, request));
       } };` },
     ...await sceneModules(root),
   ], compatibilityDate: "2026-05-22", cf: false, port: 0, inspectorPort: 0,
   durableObjects: { SCENE_ANALYSIS_BUDGET: { className: "SceneAnalysisBudget", useSQLite: true } } });
   t.after(() => mf.dispose());
-  const reserve = (id, suite) => mf.dispatchFetch("https://app.satinlore.com/fixture", {
+  const reserve = (id, suite) => mf.dispatchFetch("https://app.satinlore.com/reserve", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader: id.toString(16).padStart(64, "0"), ...(suite ? { suite } : {}) }),
   });
-  return { reserve, seedNeutralMonth: () => mf.dispatchFetch("https://app.satinlore.com/seed-neutral-month", { method: "POST" }) };
+  return { reserve, seedNeutralMonth: () => mf.dispatchFetch("https://app.satinlore.com/seed-neutral-month", { method: "POST" }),
+    neutralHeadroom: async () => (await mf.dispatchFetch("https://app.satinlore.com/founder-neutral-quota")).json() };
 }
 
 test("the SQLite budget admits concurrent work up to per-reader and deployment limits", { timeout: 30000 }, async t => {
@@ -851,24 +887,34 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
 });
 
 test("founder neutral and ordinary daily quotas are independently enforced", { timeout: 30000 }, async t => {
-  const { reserve } = await studyBudget(t);
+  const { reserve, neutralHeadroom } = await studyBudget(t);
   const ordinary = await Promise.all(Array.from({ length: 99 }, (_, index) => reserve(index + 1)));
   assert.ok(ordinary.every(response => response.status === 204));
-  const neutral = await Promise.all(Array.from({ length: 258 }, (_, index) => reserve(index + 1, NEUTRAL_PROTOCOL_SUITE)));
-  assert.equal(neutral.filter(response => response.status === 204).length, 256);
+  for (const read of [await neutralHeadroom(), await neutralHeadroom()]) {
+    assert.equal(read.remainingToday, 512);
+    assert.equal(read.remainingThisMonth, 4096);
+    assert.ok(read.dayRetryAfterSeconds > 0 && read.monthRetryAfterSeconds >= read.dayRetryAfterSeconds);
+  }
+  const neutral = await Promise.all(Array.from({ length: 514 }, (_, index) => reserve(index + 1, NEUTRAL_PROTOCOL_SUITE)));
+  assert.equal(neutral.filter(response => response.status === 204).length, 512);
   assert.equal(neutral.filter(response => response.status === 429).length, 2);
   assert.equal(neutral.find(response => response.status === 429).headers.get("X-Scene-Quota-Window"), "day");
+  const remaining = await neutralHeadroom();
+  assert.equal(remaining.remainingToday, 0);
+  assert.equal(remaining.remainingThisMonth, 4096 - 512);
   assert.equal((await reserve(100, WHOLE_STORY_SUITE)).status, 204);
   assert.equal((await reserve(101)).status, 429);
 });
 
 test("concurrent founder neutral reservations respect the monthly cap without affecting ordinary quota", { timeout: 30000 }, async t => {
-  const { reserve, seedNeutralMonth } = await studyBudget(t);
+  const { reserve, seedNeutralMonth, neutralHeadroom } = await studyBudget(t);
   assert.equal((await seedNeutralMonth()).status, 204);
+  assert.equal((await neutralHeadroom()).remainingThisMonth, 1);
   const responses = await Promise.all([reserve(1, NEUTRAL_PROTOCOL_SUITE), reserve(2, NEUTRAL_PROTOCOL_SUITE)]);
   assert.deepEqual(responses.map(response => response.status).sort(), [204, 429]);
   assert.match(responses.find(response => response.status === 429).headers.get("Retry-After"), /^\d+$/);
   assert.equal(responses.find(response => response.status === 429).headers.get("X-Scene-Quota-Window"), "month");
+  assert.equal((await neutralHeadroom()).remainingThisMonth, 0);
   assert.equal((await reserve(1, WHOLE_STORY_SUITE)).status, 204);
   assert.equal((await reserve(1)).status, 204);
 });

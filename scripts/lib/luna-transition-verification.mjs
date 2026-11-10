@@ -20,9 +20,9 @@ export function exactCurrentCue(cue, id) {
   return cue?.status === "verified" && cue.frame === "current" && cue.evidenceIds.includes(id);
 }
 
-export function freshEnactedStart(cue, transition, id) {
+export function freshEnactedStart(cue, id) {
   return exactCurrentCue(cue, id) && enacted.has(cue.action) &&
-    (cueStarts.has(cue.transition) || cueStarts.has(transition) && ["onset", "rebuild"].includes(cue.narrativePhase));
+    (cueStarts.has(cue.transition) || ["onset", "rebuild"].includes(cue.narrativePhase));
 }
 
 export function verifiedContextCut(annotation, id) {
@@ -49,15 +49,15 @@ export function mergeTransitionVerdict(cue, verdict) {
       nonClosingEvents.has(verdict.transition)) return {annotation: cue, flag: "transition-conflict"};
   if (verdict.status === "neutral") {
     if (!cue) return {annotation: cue};
-    if (freshEnactedStart(cue, cue.transition, cue.unitId) || cue.status === "verified" &&
+    if (freshEnactedStart(cue, cue.unitId) || cue.status === "verified" &&
         cue.evidenceIds.includes(cue.unitId) && (cue.transition === "uncertain-continuity" || cue.fact === "neutralize")) {
-      return {annotation: cue, flag: "transition-conflict"};
+      return {annotation: cue, flag: conflict ? "transition-conflict" : undefined};
     }
     const fact = boundaryFacts.has(cue.fact) && !protectiveCue ? "none" : cue.fact;
     return {annotation: {...cue, fact, transition: "none", priorAnchor: fact === "none" ? null : cue.priorAnchor},
       flag: conflict ? "transition-conflict" : undefined};
   }
-  if (cueStarts.has(verdict.transition) && !freshEnactedStart(cue, verdict.transition, verdict.unitId)) {
+  if (cueStarts.has(verdict.transition) && !freshEnactedStart(cue, verdict.unitId)) {
     return {annotation: cue, flag: "transition-conflict"};
   }
   const effect = cue?.fact === "protective" || verdict.fact === "none" && cue?.fact && !boundaryFacts.has(cue.fact) ?

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
 import test from "node:test";
 import {fileURLToPath} from "node:url";
-import {combineNeutralReports, runLunaProtocolNeutral} from "../scripts/lib/luna-protocol-neutral.mjs";
+import {combineNeutralReports, getNeutralProtocolReference, runLunaProtocolNeutral, scoreNeutralPlaybackGate}
+  from "../scripts/lib/luna-protocol-neutral.mjs";
 import {wholeStoryAnnotationFixtures} from "./whole-story-annotation-fixtures.mjs";
 
 const cli = fileURLToPath(new URL("../scripts/run-luna-protocol-neutral.mjs", import.meta.url));
@@ -15,7 +16,7 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
   assert.equal(report.measurement, "offline-planning");
   assert.equal(report.independentCorpusBenchmark, false);
   assert.match(report.referenceScope, /development fixtures.*independent/u);
-  assert.match(report.appliedCueDefinition, /no direct-cue reference/u);
+  assert.match(report.appliedCueDefinition, /separate behavior scores/u);
   assert.equal(report.sourceProseIncluded, false);
   assert.equal(report.externalCalls, 0);
   assert.equal(report.planning.referenceTargets, 33);
@@ -37,6 +38,11 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
   assert.equal(report.applied.observedCueTargets, 0);
   assert.equal(report.reader.exactCues.missed, 10);
   assert.equal(report.reader.observedCueTargets, 0);
+  assert.equal(report.behavior.prefix.narrativeBuildup.missed, 4);
+  assert.equal(report.behavior.prefix.directEnacted.missed, 5);
+  assert.equal(report.behavior.prefix.continuation.missed, 1);
+  assert.equal(report.behavior.prefix.directEnacted.observedTargets, 0);
+  assert.equal(report.behavior.playbackGate.byExpected["hard-stop"].missed, 1);
   assert.equal(report.cueRecovery.attemptedTargets, 0);
   assert.equal(report.prefix.exactTypedTransitions, undefined);
   assert.equal(report.transition.exactCues, undefined);
@@ -66,6 +72,9 @@ test("reference mock exercises all pinned cues and typed events in each arm", as
       assert.equal(stage.returnedTargets, 33);
       assert.deepEqual(stage.exactTypedTransitions, {matched: 7, missed: 0, extra: 0, precision: 1, recall: 1});
     }
+    assert.equal(report.behavior.applied.directEnacted.matched, 5);
+    assert.equal(report.behavior.applied.directEnacted.extra, 0);
+    assert.equal(report.behavior.playbackGate.matched, 33);
     const stop = report.diagnostics[0].units[7];
     assert.equal(stop.expected.transition, "hard-stop");
     assert.equal(stop.transition.transition, "hard-stop");
@@ -75,6 +84,39 @@ test("reference mock exercises all pinned cues and typed events in each arm", as
     assert.ok(stop.transition.submittedIds.includes(7));
     assert.equal(report.prefix.usage.measuredUsage, 33);
   }
+});
+
+test("explicit cue-kind references separate buildup, enactment, continuation, and playback gates", async () => {
+  const pins = getNeutralProtocolReference();
+  const report = await runLunaProtocolNeutral({mode: "mock", arm: "complete", now});
+  assert.equal(report.fixtureDigest, pins.fixtureDigest);
+  assert.equal(report.behaviorReferenceVersion, pins.behaviorReferenceVersion);
+  assert.equal(report.behaviorReferenceDigest, pins.behaviorReferenceDigest);
+  assert.notEqual(report.fixtureDigest, report.behaviorReferenceDigest);
+  const {prefix, accepted, applied, playbackGate} = report.behavior;
+  assert.deepEqual([prefix.narrativeBuildup.matched, prefix.directEnacted.matched, prefix.continuation.matched], [4, 5, 1]);
+  assert.equal(accepted.narrativeBuildup.referencePositives, 4);
+  assert.equal(applied.narrativeBuildup.referencePositives, 2);
+  assert.equal(applied.narrativeBuildup.missed, 0);
+  assert.equal(playbackGate.byExpected["hard-stop"].matched, 1);
+  assert.equal(playbackGate.byExpected.reset.matched, 2);
+  const firstDance = report.diagnostics[0].units;
+  assert.deepEqual(firstDance[5].expected.behavior,
+    {narrativeBuildup: false, directEnacted: false, continuation: true, playbackGate: "active"});
+  assert.equal(firstDance[5].behavior.applied.continuation, true);
+  assert.equal(firstDance[5].behavior.applied.directEnacted, false);
+  assert.equal(firstDance[5].compiler.beatAnchor, firstDance[2].compiler.beatAnchor);
+  assert.equal(firstDance[5].compiler.sceneAnchor, 0);
+  assert.equal(firstDance[9].behavior.accepted.narrativeBuildup, true);
+  assert.equal(firstDance[9].behavior.applied.narrativeBuildup, false);
+  assert.deepEqual(firstDance[9].behavior.playbackGate, {expected: "quiet", actual: "quiet", matches: true});
+  const oldLetter = report.diagnostics[1].units;
+  assert.equal(oldLetter[2].prefix.labels.frame, "reported");
+  assert.equal(oldLetter[2].behavior.playbackGate.matches, true);
+  assert.equal(scoreNeutralPlaybackGate("carry-optional", "Undertone").matches, true);
+  assert.equal(scoreNeutralPlaybackGate("carry-optional", "Baseline").matches, true);
+  assert.equal(scoreNeutralPlaybackGate("carry-optional", "Stop").matches, false);
+  assert.equal(scoreNeutralPlaybackGate("active", "unknown").actual, null);
 });
 
 test("discovery, cue-prefix, and transition-only results are scored independently", async () => {
@@ -159,11 +201,20 @@ test("complementary fixture shards combine exact scores and usage in canonical o
   assert.deepEqual(combined.applied.exactTypedTransitions, whole.applied.exactTypedTransitions);
   assert.deepEqual(combined.reader.exactCues, whole.reader.exactCues);
   assert.deepEqual(combined.reader.cueChanges, whole.reader.cueChanges);
+  assert.deepEqual(combined.behavior, whole.behavior);
+  assert.equal(combined.behaviorReferenceDigest, whole.behaviorReferenceDigest);
   assert.equal(combined.cueRecovery.targets, 33);
   assert.equal(combined.cueRecovery.usage.attempts, 0);
   assert.throws(() => combineNeutralReports([left, left]), /complementary reports/u);
   assert.throws(() => combineNeutralReports([left, {...right, rubricVersion: "other"}]), /complementary reports/u);
   assert.throws(() => combineNeutralReports([left, {...right, transition: undefined}]), /complementary reports/u);
+  assert.throws(() => combineNeutralReports([left, {...right, behaviorReferenceDigest: "0".repeat(64)}]), /complementary reports/u);
+  const changed = structuredClone(right);
+  changed.diagnostics[0].units[0].expected.behavior.narrativeBuildup = true;
+  assert.throws(() => combineNeutralReports([left, changed]), /complementary reports/u);
+  const legacy = ({behavior, behaviorReferenceVersion, behaviorReferenceDigest, ...report}) => report;
+  assert.deepEqual(combineNeutralReports([legacy(left), legacy(right)]).prefix.exactCues, whole.prefix.exactCues);
+  assert.equal(combineNeutralReports([legacy(left), legacy(right)]).behavior, undefined);
   await assert.rejects(() => runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "first-dance"]}),
     /Invalid neutral benchmark options/u);
 });

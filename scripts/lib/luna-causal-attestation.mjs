@@ -48,7 +48,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       if (fact === "protective" && scopeId != null) run.protectedScopes.add(scopeId);
       if (fact === "protective" || transition === "hard-stop" || transition === "declined-restart") run.needsRestart = true;
       else if (contextCut) run.needsRestart = false;
-      const restart = freshEnactedStart(rawCue, transition, id);
+      const restart = freshEnactedStart(rawCue, id);
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
       if (status !== "verified" || frame !== "current" || !exactCurrentCue(rawCue, id) ||

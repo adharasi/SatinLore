@@ -193,7 +193,7 @@ function playbackInputs(index, decisions, blocked) {
       // annotation with supporting evidence contributes intensity to it.
       recent = [...recent.slice(-7), current && ownCueEvidence ? rawCue.depiction : "unknown"];
     }
-    const restart = freshEnactedStart(rawCue, transition, unit.id);
+    const restart = freshEnactedStart(rawCue, unit.id);
     // Earlier stops establish history for a fresh enacted restart. They never
     // count as positive evidence or restore an old continuation anchor.
     const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId);

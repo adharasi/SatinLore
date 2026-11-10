@@ -298,6 +298,21 @@ test("a neutral transition check does not erase a verified continuity veto or mu
   }
 });
 
+test("an independently enacted onset after a frame return may cite that return as context", async () => {
+  const text = "She finished reading the old note. She put it down. They took each other's hands.";
+  const provider = fake((id, mode) => {
+    if (mode === "transition") return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: []});
+    if (id === 0) return {...neutral(id), frame: "reported"};
+    if (id === 1) return active(id, mode, {fact: "cut", action: "none", narrativePhase: "quiet", transition: "present-return"});
+    return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", evidenceIds: [1, 2]});
+  });
+  const run = await runLunaProtocolShadow({...fixture(text), provider, verificationTargets: [0, 1, 2],
+    verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [2]});
+  assert.deepEqual(run.units.map(row => row.pattern), ["Baseline", "Reset", "Onset rise"]);
+  assert.equal(run.units[2].cue, true);
+  assert.equal(run.units[2].appliedTransition, "none");
+});
+
 test("an opaque time interval clears carry and attestation only without renewed target evidence", async () => {
   const cases = [
     {target: "They stayed by the shelves for a while.", pattern: "Baseline", carryGap: true},
