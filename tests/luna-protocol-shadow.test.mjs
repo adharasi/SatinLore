@@ -807,6 +807,81 @@ test("a continuation can cite the enacted start that opened its new scope while 
   }
 });
 
+test("an exact linked change remains a direct cue without restarting the beat", async () => {
+  const input = fixture("They exchanged a warm smile. They walked side by side. He changed how he held her hand.");
+  const run = (action, attested) => runLunaProtocolShadow({...input, verificationTargets: [0, 1, 2],
+    verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [2], provider: fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {transition: "onset", fact: "none"});
+      if (id === 0 && attested) return active(id, mode, {narrativePhase: "build"});
+      if (id === 2) return active(id, mode, {fact: "continue", action, narrativePhase: "sustain", priorAnchor: 0, evidenceIds: [0, 2]});
+      return neutral(id);
+    })});
+  const changed = await run("change", true);
+  const ordinary = await run("continuation", true);
+  const unlinked = await run("change", false);
+  assert.equal(changed.units[2].cue, true);
+  assert.equal(changed.units[2].readerCue, true);
+  assert.equal(changed.units[2].transitionVerification.transition, "onset");
+  assert.equal(changed.units[2].appliedTransition, "none");
+  assert.equal(changed.units[2].beatId, changed.units[0].beatId);
+  assert.equal(changed.units[2].pattern, ordinary.units[2].pattern);
+  assert.deepEqual(changed.units[2].trace, ordinary.units[2].trace);
+  assert.equal(ordinary.units[2].cue, false);
+  assert.equal(ordinary.units[2].readerCue, true);
+  assert.equal(unlinked.units[2].cue, false);
+  assert.equal(unlinked.units[2].playbackDisposition, "unattested-scope");
+});
+
+test("an exact scene cut cannot reuse a continuation from before the cut or clear its gate", async () => {
+  const input = fixture("They exchanged a warm smile. Later they adjusted their steps. She looked forward to dancing. The clock chimed. The doors opened.");
+  for (const gate of [null, "blocked", "protective", "hard-stop", "declined-restart"]) {
+    const calls = [];
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {fact: "cut", transition: "scene-cut", scopeId: 1, evidenceIds: [0, 1]});
+      if (id === 0 && ["protective", "hard-stop", "declined-restart"].includes(gate)) {
+        return active(id, mode, {fact: gate === "protective" ? "protective" : "neutralize", action: "none",
+          transition: gate === "declined-restart" ? gate : "hard-stop"});
+      }
+      if (id === 0) return active(id, mode);
+      if (id === 1) return active(id, mode, {fact: "continue", action: "change", narrativePhase: "sustain", priorAnchor: 0, evidenceIds: [0, 1]});
+      if (id === 2) return active(id, mode, {scopeId: 1, narrativePhase: "build"});
+      return neutral(id);
+    }, request => calls.push(request));
+    const run = await runLunaProtocolShadow({...input, provider, prefixUnits: 2, verificationTargets: [0, 1, 2, 3, 4],
+      blockedIds: gate === "blocked" ? [0] : [], verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [1]});
+    const cut = run.units[1];
+    assert.equal(cut.primaryPrefix.fact, "continue");
+    assert.equal(cut.appliedTransition, "scene-cut");
+    assert.equal(cut.pattern, "Reset");
+    assert.equal(cut.beatId, null);
+    assert.equal(cut.sceneId, "fixture:scene:1");
+    assert.equal(cut.cue, false);
+    assert.equal(cut.readerCue, false);
+    assert.equal(run.units[2].pattern, gate ? "Baseline" : "Undertone");
+    assert.deepEqual(calls.find(call => call.mode === "verify" && call.targetIds[0] === 4).attested, gate ? undefined :
+      [{unitId: 2, scopeId: 1, frame: "current", action: "anticipation", narrativePhase: "build"}]);
+  }
+});
+
+test("a verified scene cut can start a new beat on independent target evidence when the target is open", async () => {
+  const input = fixture("They exchanged a warm smile. Hours later they took hands at the dance. The clock chimed.");
+  const provider = fake((id, mode) => {
+    if (mode === "transition") return typedTransition(id, {fact: "cut", transition: "scene-cut", scopeId: 1, evidenceIds: [0, 1]});
+    if (id === 0) return active(id, mode);
+    if (id === 1) return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset", scopeId: 1});
+    return neutral(id);
+  });
+  for (const blocked of [false, true]) {
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2], blockedIds: blocked ? [1] : [],
+      verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [1]});
+    const cut = run.units[1];
+    assert.equal(cut.appliedTransition, "scene-cut");
+    assert.equal(cut.pattern, blocked ? "Stop" : "Onset rise");
+    assert.equal(cut.cue, !blocked);
+    assert.equal(cut.beatId, blocked ? null : "fixture:beat:1");
+  }
+});
+
 test("deferred context can support an exact low cue but cannot carry playback or suppress a prior block", async () => {
   for (const blocked of [false, true]) {
     const provider = fake((id, mode) => {

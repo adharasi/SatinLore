@@ -293,6 +293,31 @@ The regression tests check earlier supported carry, tight call and byte headroom
 
 For qualification, first compare v13 and v14 on the frozen reviewed sample with the same model, clip text, target IDs and spend cap. Then independently review the provisional cue labels and compile a new set of clearly eligible beats with both short and complete causal context. Measure direct cue recall and precision, typed event recall and false positives, active-pattern recall, false activation, taper timing and exact profile match. Keep actual reader behavior, simulator output and physical device qualification as separate checks.
 
+### Paired live results
+
+The v14 founder run completed all 77 approved clips and all 148 targets across 31 of the 41 rostered stories. It recorded 420 calls and $0.196649 in estimated charges, including 42 supporting checks. The run had no unsettled attempts. The 17 withheld clips and seven historical holds remain in the coverage record. Use the following common usable denominators for the paired changes.
+
+| Measure | Main sample, v13 → v14 | Stress panel, v13 → v14 |
+| --- | ---: | ---: |
+| Exact playback pattern | 72/124 → 78/124 | 8/24 → 8/24 |
+| Active playback intent recall | 4/45 → 19/45 | 2/14 → 6/14 |
+| False active playback intent | 0 → 2 | 0 → 0 |
+| Raw direct cue recall | 1/6 → 1/6 | 1/2 → 1/2 |
+| Applied direct cue recall | 1/6 → 1/6 | 1/2 → 0/2 |
+| Exact typed transitions | 106/121 → 102/121 | 11/23 → 10/23 |
+
+Exact patterns rose to 86/148. An always-Baseline control matches 85/148. Of the 62 remaining pattern errors, 28 fell to Baseline and 30 had the expected applied phase and transition. The two new false activations followed a supporting cue into neutral units through the fade and floor rules. Keep support evidence distinct from authority to sustain a beat. Verify same-scope continuity through consecutive neutral targets and measure the time spent above baseline after a reference stop. Evaluate this alongside ordinary in-scene dialogue so the fix preserves legitimate carry.
+
+The typed lane found more main-panel events and added false events. Across both panels it added five scene cuts and four onsets on no-event targets. Three typed responses failed the prior-anchor contract. Recheck the exact boundary trigger and new frame or scope in a focused lane, keep onset separate from within-beat change, and measure contract failures separately from semantic misses. For causal evaluation, five frozen transition labels in this roster were only knowable one unit later. Preserve the original retrospective labels and record the first time the reader could have known each event.
+
+Two blinded model reviewers agreed on all 12 selected direct-cue cases and differed from the frozen binary label on three. Both live versions recognized three of the seven direct cues in that exploratory review. Independently adjudicate action, transition and playback intent as separate fields on a new sample with more positives. Report the frozen scores alongside the new reference. Avoid using one scoring field for both an enacted change and every label that should affect playback.
+
+### Compiler follow-up after the live comparison
+
+The recognition pass can verify a new action within an established beat while the transition pass calls it onset. Keep the same beat and waveform when a verified `change` has exact target evidence and a verified same-scope continuation link. Record the change as an applied direct cue. Ordinary continuation remains a continuity signal.
+
+A verified scene cut can replace the merged continuation fact and hide its old anchor. Check the original primary fact before accepting a new cue or clearing an existing playback gate. Preserve the cut and clear carry. Apply the same check in the attestation ledger so later requests cannot reuse the stale cue. Tests cover open playback, blocked targets, a protective scope, hard stop, decline, and fresh local evidence at a genuine cut. These compiler tests followed the paired live run's build and have separate verification.
+
 ## Qualification
 
 Compare exact reviewed compiler output separately from semantic recognition. The shadow study reports usable model coverage, cue and typed-transition precision and recall, profile agreement, continuity links and causal trace violations. Compare current reader and archival provider outputs in separate lanes. For a paid paired run, hold the target roster and recent prefix fixed, use a shared run budget and stop the comparison for a refused run. Report both effective scores on every planned target and accuracy among targets both arms resolved. Compare recovered and lost matches and added false positives. Earlier eligibility evidence and earlier continuity anchors are separate strata. Verify timing and simulator behavior after model qualification.

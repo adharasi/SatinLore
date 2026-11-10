@@ -275,6 +275,8 @@ function playbackInputs(index, decisions, blocked) {
     const scopeChange = enactedStart && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
     const cut = contextCut || frameChange || scopeChange && !restartBoundary;
+    // A typed cut can replace the primary fact, but its earlier link still cannot cross the cut.
+    const preCutContinuation = cut && rawCue?.fact === "continue";
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
       cut ? mark("cut", contextCut ? "Verified scene or narrative-frame boundary." : "A changed frame or fresh scope isolates earlier playback.") :
       beatEnd ? mark("beat-end", "Verified narrative beat ending.") :
@@ -282,7 +284,7 @@ function playbackInputs(index, decisions, blocked) {
     if (independentBlock) restartBoundary = "blocked";
     else if (restrictedScope) restartBoundary = "protective";
     else if (transition === "hard-stop" || transition === "declined-restart") restartBoundary = transition;
-    else if (contextCut && result?.transitionVerification?.status !== "neutral") restartBoundary = null;
+    else if (contextCut && !preCutContinuation && result?.transitionVerification?.status !== "neutral") restartBoundary = null;
     if (neutralize || protective || cut || beatEnd) {
       recent = [];
       last = "Baseline";
@@ -297,7 +299,8 @@ function playbackInputs(index, decisions, blocked) {
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
       // Context can occupy a position in the trailing window. Only a causal
       // annotation with supporting evidence on an open gate contributes intensity.
-      recent = [...recent.slice(-7), current && ownCueEvidence && (!restartBoundary || restart) ? rawCue.depiction : "unknown"];
+      recent = [...recent.slice(-7), current && ownCueEvidence && !preCutContinuation && (!restartBoundary || restart) ?
+        rawCue.depiction : "unknown"];
     }
     if (pendingRestart && startTransitions.has(transition)) result.appliedTransitionOverride = "none";
     // Earlier stops establish history for a fresh enacted restart. They never
@@ -305,7 +308,8 @@ function playbackInputs(index, decisions, blocked) {
     const hasAnchor = kind === "continue" && prior >= evidenceBarrierId && anchors.has(prior) &&
       scopeId !== null && anchors.get(prior) === scopeId;
     // A start on a cut belongs to the new scope once this pass attests it.
-    const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > evidenceBarrierId || hasAnchor && id === prior);
+    const freshEvidence = cut ? !preCutContinuation && evidence.includes(unit.id) :
+      restart || evidence.every(id => id > evidenceBarrierId || hasAnchor && id === prior);
     const clear = !protective && !neutralize && !beatEnd && (!restartBoundary || restart) && current && fact?.status === "verified" &&
       freshEvidence;
     const linked = clear && hasAnchor;
@@ -335,8 +339,10 @@ function playbackInputs(index, decisions, blocked) {
       else if (!freshEvidence) result.cueGuard = "cue-stale-evidence";
     }
     if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
-      result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase));
-      result.readerCue = result.cue || Boolean(ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase) &&
+      const observedCue = ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase);
+      result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase) ||
+        linked && observedCue && rawCue.action === "change");
+      result.readerCue = result.cue || Boolean(observedCue &&
         (canSignal && rawCue.action === "anticipation" || linked && rawCue.action === "continuation"));
     }
     let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" :
