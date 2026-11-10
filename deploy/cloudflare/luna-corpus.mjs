@@ -73,6 +73,7 @@ function mapResult(result, first) {
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
         evidence: coordinates(row.trace.evidence)}})),
     summary: {...result.summary, nativeVerification: result.summary.nativeVerification.map(row => ({...row, id: coordinate(row.id)})),
+      supportingVerification: result.summary.supportingVerification?.map(row => ({...row, id: coordinate(row.id)})),
       attempts: result.summary.attempts.map(row => ({...row, targetIds: coordinates(row.targetIds), contextIds: coordinates(row.contextIds),
         attestedIds: coordinates(row.attestedIds), rejectedFacts: row.rejectedFacts?.map(item => ({...item, id: coordinate(item.id)})),
         normalizedFacts: row.normalizedFacts?.map(item => ({...item, id: coordinate(item.id)}))}))},
@@ -136,7 +137,8 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const execution = AbortSignal.any([signal, AbortSignal.timeout(Math.max(0, reservation.expiresAt - Date.now()))]);
   const targets = clip.targetIds.map(id => id - first);
   const maxCueChecks = Math.min(2, targets.length);
-  const maxAttempts = 1 + 2 * targets.length + maxCueChecks;
+  const maxSupportingVerification = Math.min(2, index.units.length - targets.length);
+  const maxAttempts = 1 + 2 * targets.length + maxCueChecks + maxSupportingVerification;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
   try {
@@ -155,7 +157,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
     result = await runLunaProtocolShadow({id: clip.storyId, text, sourceSha256: clip.sourceSha256, grant, provider, budget,
       signal: execution, limits: CLIP_LIMITS, prefixUnits: MAX_UNITS, maxVerification: targets.length,
       verificationTargets: targets, verifyTransitions: true, maxTransitionVerification: targets.length,
-      transitionTargets: targets, maxCueChecks});
+      transitionTargets: targets, maxCueChecks, maxSupportingVerification});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

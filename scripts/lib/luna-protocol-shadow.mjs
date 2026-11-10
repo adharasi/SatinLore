@@ -2,7 +2,7 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, possibleRestartClosure, restartCheckPending, transitionPriority,
+import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, isDeferredCurrentContext, mergeTransitionVerdict, possibleRestartClosure, restartCheckPending, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
@@ -99,39 +99,48 @@ function factViolation(fact, ids, target, mode, attested) {
   return lunaProtocolCueViolation(fact, mode);
 }
 
+const requestPrice = (input, output) => Math.ceil((input * (input > 272_000 ? 0.25 : 0.125) +
+  output * (input > 272_000 ? 0.75 : 0.50)) * 1.10);
+
+function requestQuote(body, targets) {
+  const sourceBytes = Buffer.byteLength(body);
+  return {sourceBytes, reservedMicros: requestPrice(sourceBytes + lunaProtocolInputOverhead, lunaProtocolOutputTokens(targets))};
+}
+
 export function createLunaShadowBudget({maxAttempts = 96, maxSourceBytes = 500_000, maxMicros = 100_000} = {}) {
   if (![maxAttempts, maxSourceBytes, maxMicros].every(int) || maxAttempts > 2000 || maxMicros > MAX_SHADOW_MICROS) {
     throw new RangeError("Invalid shadow budget.");
   }
   let attempts = 0, sourceBytes = 0, reservedMicros = 0, chargedMicros = 0, unsettled = 0;
   let breached = false, spendLimited = false;
-  const price = (input, output) => Math.ceil((input * (input > 272_000 ? 0.25 : 0.125) +
-    output * (input > 272_000 ? 0.75 : 0.50)) * 1.10);
+  function reserve(body, targets, retained = null) {
+    // Bound the short-context input by UTF-8 bytes plus a fixed prompt/schema allowance.
+    const {sourceBytes: bytes, reservedMicros: reserve} = requestQuote(body, targets);
+    const proposedMicros = chargedMicros + reservedMicros + reserve + (retained?.reservedMicros ?? 0);
+    if (breached || proposedMicros > maxMicros) {
+      if (!retained) spendLimited = true;
+      return null;
+    }
+    if (attempts + 1 + (retained?.attempts ?? 0) > maxAttempts ||
+        sourceBytes + bytes + (retained?.sourceBytes ?? 0) > maxSourceBytes) return null;
+    attempts++;
+    sourceBytes += bytes;
+    reservedMicros += reserve;
+    unsettled++;
+    let settled = false;
+    return usage => {
+      if (settled || !int(usage?.inputTokens) || !int(usage?.outputTokens)) return;
+      settled = true;
+      const actual = requestPrice(usage.inputTokens, usage.outputTokens);
+      if (actual > reserve) breached = true;
+      reservedMicros -= reserve;
+      chargedMicros += actual;
+      unsettled--;
+    };
+  }
   return {
-    reserve(body, targets) {
-      // Bound the short-context input by UTF-8 bytes plus a fixed prompt/schema allowance.
-      const bytes = Buffer.byteLength(body);
-      const reserve = price(bytes + lunaProtocolInputOverhead, lunaProtocolOutputTokens(targets));
-      if (breached || chargedMicros + reservedMicros + reserve > maxMicros) {
-        spendLimited = true;
-        return null;
-      }
-      if (attempts >= maxAttempts || sourceBytes + bytes > maxSourceBytes) return null;
-      attempts++;
-      sourceBytes += bytes;
-      reservedMicros += reserve;
-      unsettled++;
-      let settled = false;
-      return usage => {
-        if (settled || !int(usage?.inputTokens) || !int(usage?.outputTokens)) return;
-        settled = true;
-        const actual = price(usage.inputTokens, usage.outputTokens);
-        if (actual > reserve) breached = true;
-        reservedMicros -= reserve;
-        chargedMicros += actual;
-        unsettled--;
-      };
-    },
+    reserve: (body, targets) => reserve(body, targets),
+    reserveSupporting: (body, targets, retained) => reserve(body, targets, retained),
     snapshot: () => ({capMicros: maxMicros, attempts, attemptedPayloadBytes: sourceBytes, reservedMicros, chargedMicros,
       unsettled, reservationBreach: breached, spendLimited}),
   };
@@ -148,6 +157,44 @@ function prefixJob(window, unitId, index, limit, mode = "verify") {
   }
   const contextIds = units.slice(0, -1).map(({id}) => id);
   return {id: `${mode}:${unitId}`, runId: window.runId, targetIds, contextIds, body};
+}
+
+function pinnedPrefixQuote(window, verificationContext) {
+  const {units, targetIds} = inputFor(window);
+  const mode = window.id.split(":", 1)[0];
+  const previousUnits = units[0].id - window.runId;
+  const anchorLimit = verificationContext === "attested" ? Math.min(previousUnits, LUNA_PROTOCOL_LIMITS.maxAttested) : 0;
+  // Use upper-length fields for the later attestations whose exact values are still unknown.
+  const upperAnchor = {unitId: targetIds[0], scopeId: targetIds[0], frame: "remembered", action: "anticipation", narrativePhase: "rebuild"};
+  const attested = anchorLimit > 0 ? Array(anchorLimit).fill(upperAnchor) : [];
+  return requestQuote(JSON.stringify({mode, units, targetIds, ...(attested.length ? {attested} : {})}), targetIds.length);
+}
+
+function supportingPrefixJobs(pinned, scheduled, index, decisions, proposals, blocked, prefixUnits, limit) {
+  const candidates = new Map();
+  for (const target of pinned) {
+    const id = target.targetIds[0], proposed = proposals.get(id)?.fact;
+    for (let i = target.contextIds.length - 1; i >= 0; i--) {
+      const prior = target.contextIds[i];
+      if (blocked.has(prior)) break;
+      if (scheduled.has(prior)) continue;
+      const row = decisions.get(prior), fact = proposals.get(prior)?.fact;
+      if (row?.window?.runId !== target.runId) continue;
+      const cited = fact?.status === "candidate" && fact.evidenceIds.includes(prior);
+      const closure = possibleRestartClosure(index.units[prior], fact) || cited && transitionCuts.has(fact.transition);
+      const referenced = proposed?.status === "candidate" && proposed.evidenceIds.includes(id) &&
+        (proposed.priorAnchor === prior || proposed.action === "continuation" && proposed.scopeId === prior);
+      const cue = cited && fact.frame === "current" && reviewable(fact) && fact.fact !== "continue";
+      const rank = closure ? 3 : referenced ? 2 : cue ? 1 : 0;
+      if (!rank) continue;
+      const distance = id - prior, existing = candidates.get(prior);
+      if (!existing || rank > existing.rank || rank === existing.rank && distance < existing.distance) {
+        candidates.set(prior, {rank, distance, window: row.window});
+      }
+    }
+  }
+  return [...candidates].sort((a, b) => b[1].rank - a[1].rank || a[1].distance - b[1].distance || a[0] - b[0])
+    .slice(0, limit).map(([id, {window}]) => prefixJob(window, id, index, prefixUnits));
 }
 
 function pickVerification(priority, important, routine, controls, limit) {
@@ -184,7 +231,7 @@ function profileFor(fact, recent, last) {
 }
 
 function playbackInputs(index, decisions, blocked) {
-  let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, barrierId = -1;
+  let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
   let restartBoundary = null, lastAnchor = null;
   const anchors = new Map(), blockedScopes = new Set();
   return index.units.map(unit => {
@@ -205,6 +252,7 @@ function playbackInputs(index, decisions, blocked) {
     const ownCueEvidence = exactCurrentCue(rawCue, unit.id);
     const effectVerified = result?.prefixVerified || result?.transitionVerification?.status === "verified";
     const evidence = fact?.evidenceIds ?? [];
+    const previousEvidenceBarrier = evidenceBarrierId;
     const mark = (kind, reason, proof = evidence) => ({kind, knownAt: unit.id, evidence: proof, reason});
     const independentBlock = blocked.has(unit.id);
     const gap = !fact || !usable.has(fact.status) || fact.frame === "uncertain" ||
@@ -220,28 +268,30 @@ function playbackInputs(index, decisions, blocked) {
     if (elapsedGap) result.continuityGuard = "elapsed-time-gap";
     const neutralize = gap && !unit.structuralBoundary || kind === "neutralize" || transition === "uncertain-continuity" || elapsedGap;
     const beatEnd = kind === "beat-end" || closingTransitions.has(transition);
-    const frame = effectVerified ? fact.frame : null;
+    const frame = effectVerified ? fact?.frame ?? null : null;
     const current = frame === "current";
     const frameChange = editorialFrames.has(frame) && crossesCurrentFrame(frame, lastFrame);
-    const scopeChange = effectVerified && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
+    const enactedStart = freshEnactedStart(rawCue, unit.id);
+    const scopeChange = enactedStart && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
     const cut = contextCut || frameChange || scopeChange && !restartBoundary;
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
-      cut ? mark("cut", "Verified scene or narrative-frame boundary.") :
+      cut ? mark("cut", contextCut ? "Verified scene or narrative-frame boundary." : "A changed frame or fresh scope isolates earlier playback.") :
       beatEnd ? mark("beat-end", "Verified narrative beat ending.") :
       kind === "span-end" || transition === "span-end" ? mark("span-end", "Verified release of the current span.") : null;
     if (independentBlock) restartBoundary = "blocked";
     else if (restrictedScope) restartBoundary = "protective";
     else if (transition === "hard-stop" || transition === "declined-restart") restartBoundary = transition;
-    else if (contextCut) restartBoundary = null;
+    else if (contextCut && result?.transitionVerification?.status !== "neutral") restartBoundary = null;
     if (neutralize || protective || cut || beatEnd) {
       recent = [];
       last = "Baseline";
       anchors.clear();
       lastAnchor = null;
-      barrierId = unit.id;
+      // A deferred positive proposal cannot carry playback. Its cleared text
+      // may still contextualize a later independently verified target.
+      if (protective || cut || beatEnd || !gap || !isDeferredCurrentContext(result)) evidenceBarrierId = unit.id;
     }
-    const enactedStart = freshEnactedStart(rawCue, unit.id);
     const pendingRestart = enactedStart && restartCheckPending(restartBoundary, result);
     const restart = enactedStart && !pendingRestart;
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
@@ -252,17 +302,22 @@ function playbackInputs(index, decisions, blocked) {
     if (pendingRestart && startTransitions.has(transition)) result.appliedTransitionOverride = "none";
     // Earlier stops establish history for a fresh enacted restart. They never
     // count as positive evidence or restore an old continuation anchor.
-    const hasAnchor = kind === "continue" && prior >= barrierId && anchors.has(prior) &&
+    const hasAnchor = kind === "continue" && prior >= evidenceBarrierId && anchors.has(prior) &&
       scopeId !== null && anchors.get(prior) === scopeId;
     // A start on a cut belongs to the new scope once this pass attests it.
-    const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId || hasAnchor && id === prior);
+    const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > evidenceBarrierId || hasAnchor && id === prior);
     const clear = !protective && !neutralize && !beatEnd && (!restartBoundary || restart) && current && fact?.status === "verified" &&
       freshEvidence;
     const linked = clear && hasAnchor;
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
     else if (result && linked && scopeId !== fact.scopeId) result.playbackDisposition = "continuation-scope-alias";
     const scope = linked ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;
-    const ease = clear && (kind === "ease" || transition === "ease" ||
+    const localRelease = !protective && !neutralize && !cut && !restartBoundary && current && ownCueEvidence &&
+      rawCue.action === "release" && ["ease", "recover"].includes(rawCue.narrativePhase) &&
+      ["none", "ease", "recover", "interruption", "span-end", "beat-end"].includes(transition) &&
+      (["ease", "span-end", "beat-end"].includes(kind) || transition === "interruption" && rawCue.fact === "span-end") &&
+      evidence.every(id => id > previousEvidenceBarrier);
+    const ease = localRelease || clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
     const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
     const rebuild = restart && (restartBoundary || transition === "restart" || fact.narrativePhase === "rebuild");
@@ -285,8 +340,9 @@ function playbackInputs(index, decisions, blocked) {
         (canSignal && rawCue.action === "anticipation" || linked && rawCue.action === "continuation"));
     }
     let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" :
-      cut && !low && !canSignal ? "Reset" : canSignal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
-    if (cut && !low && pattern === "Baseline") pattern = "Reset";
+      localRelease ? beatEnd || fact.narrativePhase === "ease" ? "Taper" : "Recovery" :
+      canSignal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
+    if (contextCut && !low && pattern === "Baseline") pattern = "Reset";
     if ((canSignal && (activePhases.has(fact.narrativePhase) || pattern === "Undertone")) || low) {
       anchors.set(unit.id, scopeId ?? unit.id);
       lastAnchor = unit.id;
@@ -314,10 +370,11 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   signal = new AbortController().signal, startId = 0, blockedIds = [], arm = "windowed",
   limits = {}, maxVerification = 96, prefixUnits = 24, negativeStride = 20, now = Date.now,
   verificationTargets = [], verificationContext = "attested", verifyTransitions = false,
-  maxTransitionVerification = 32, transitionTargets = [], maxCueChecks = 0} = {}) {
+  maxTransitionVerification = 32, transitionTargets = [], maxCueChecks = 0, maxSupportingVerification = 0} = {}) {
   if (typeof id !== "string" || !/^[a-z0-9-]{1,48}$/iu.test(id) || typeof now !== "function" ||
       !["windowed", "complete"].includes(arm) || !["recent", "attested"].includes(verificationContext) ||
       !int(maxVerification) || maxVerification > MAX_SHADOW_VERIFICATIONS || !Array.isArray(verificationTargets) ||
+      !int(maxSupportingVerification) || maxSupportingVerification > 8 || maxVerification + maxSupportingVerification > MAX_SHADOW_VERIFICATIONS ||
       typeof verifyTransitions !== "boolean" || !int(maxTransitionVerification) || maxTransitionVerification > MAX_SHADOW_VERIFICATIONS ||
       !int(maxCueChecks) || maxCueChecks > 8 ||
       !Array.isArray(transitionTargets) || (!verifyTransitions && transitionTargets.length > 0) ||
@@ -350,7 +407,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       [{id: "complete", runId: 0, body, targetIds, contextIds: []}] : [];
     if (!discovery.length) for (const id of approved) decisions.set(id, {status: "complete-arm-ineligible"});
   }
-  const telemetry = [];
+  const telemetry = [], supportingIds = new Set(), pendingPinned = new Map();
   let cueChecksStarted = 0, restartCheckReserved = false;
   const refusedRuns = new Set();
   const invalidated = window => refusedRuns.has(window.runId);
@@ -391,7 +448,10 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         ["fact", "transition", "narrativePhase", "frame", "depiction", "action"].some(field => verdict[field] !== before.discovery[field])) {
       row.playbackDisposition = "prefix-disagreement";
     }
-    const merged = mergeTransitionVerdict(row.annotation, row.transitionVerification);
+    const previous = decisions.get(id - 1);
+    const prior = previous?.window?.runId === row.window?.runId && previous?.prefixVerified && !blocked.has(id - 1) ?
+      previous.effectiveAnnotation ?? previous.annotation : null;
+    const merged = mergeTransitionVerdict(row.annotation, row.transitionVerification, row.discovery, prior);
     row.effectiveAnnotation = merged.annotation;
     row.transitionFlag = merged.flag;
     decisions.set(id, row);
@@ -402,26 +462,28 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       maxRetries: 0, serialWithinRun: true, allowPartial: stage === "discovery",
       request: async window => {
         const mode = stage === "discovery" ? stage : window.id.split(":", 1)[0];
+        const id = window.targetIds[0];
+        const supportingPrefix = mode === "verify" && supportingIds.has(id);
         const started = performance.now();
         const record = {mode, id: window.id, status: "budget-deferred", targetIds: window.targetIds,
-          contextIds: window.contextIds};
+          contextIds: window.contextIds, ...(supportingPrefix ? {supportingPrefix} : {})};
         telemetry.push(record);
         attempts.set(window.id, record);
         const payload = inputFor(window);
         const submitted = new Set(payload.units.map(({id}) => id));
-        if (mode === "verify") {
-          const id = window.targetIds[0];
+        if (mode === "verify" && !supportingPrefix) {
           storePrefixResult(mode, id, undefined, "verification-deferred");
         }
         if (signal.aborted || now() >= grant.expiresAt || ![...submitted].every(id => approved.has(id))) {
+          pendingPinned.delete(window.id);
           record.status = "cancelled";
           return {status: "failed"};
         }
         if (invalidated(window)) {
+          pendingPinned.delete(window.id);
           record.status = "refusal-dependent";
           return {status: "failed"};
         }
-        const id = window.targetIds[0];
         const causal = mode === "discovery" ? null : attest({runId: window.runId, firstId: payload.units[0].id, target: id});
         if (mode === "cue-check") {
           const row = decisions.get(id);
@@ -456,8 +518,17 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         const focus = cueCheckFocus[record.cueCheckReason];
         const request = {mode, units: payload.units, targetIds: window.targetIds, ...(attested.length ? {attested} : {}),
           ...(focus ? {focus} : {})};
-        const settle = budget.reserve(JSON.stringify(request), window.targetIds.length);
+        const body = JSON.stringify(request);
+        const optional = mode !== "discovery" && maxSupportingVerification > 0 && !pendingPinned.has(window.id);
+        const retained = {attempts: pendingPinned.size, sourceBytes: 0, reservedMicros: 0};
+        if (optional) for (const quote of pendingPinned.values()) {
+          retained.sourceBytes += quote.sourceBytes;
+          retained.reservedMicros += quote.reservedMicros;
+        }
+        const settle = optional ? budget.reserveSupporting?.(body, window.targetIds.length, retained) :
+          budget.reserve(body, window.targetIds.length);
         if (!settle) return {status: "failed"};
+        pendingPinned.delete(window.id);
         if (mode === "cue-check") cueChecksStarted++;
         record.attempted = true;
         record.contextUnits = payload.units.length - window.targetIds.length;
@@ -499,7 +570,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           if (rejections.size) record.rejectedFacts = [...rejections].map(([id, reason]) => ({id, reason}));
           record.status = ["incomplete", "invalid-response", "transient", "failed", "cancelled", "timed-out",
             "invalid-request"].includes(answer?.status) ? answer.status : "failed";
-          if (mode === "verify" && record.status === "invalid-response") {
+          if (mode === "verify" && !supportingPrefix && record.status === "invalid-response") {
             storePrefixResult(mode, window.targetIds[0], undefined, record.status, rejections.get(window.targetIds[0]));
           }
           return {status: "failed"};
@@ -528,7 +599,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         }
         if (!annotations.length || mode !== "discovery" && partial) {
           record.status = "invalid-response";
-          if (mode === "verify") storePrefixResult(mode, window.targetIds[0], undefined, record.status, rejections.get(window.targetIds[0]));
+          if (mode === "verify" && !supportingPrefix) storePrefixResult(mode, id, undefined, record.status, rejections.get(id));
           return {status: "failed"};
         }
         record.status = partial ? "partial" : "returned";
@@ -592,18 +663,31 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     for (const {id, window} of transitionJobs.sort((a, b) => b.rank - a.rank || a.id - b.id).slice(0, maxTransitionVerification)) {
       verification.push(prefixJob(window, id, index, prefixUnits, "transition"));
     }
+    let supporting = [];
+    if (maxSupportingVerification) {
+      const pinned = verification.filter(window =>
+        (window.id.startsWith("verify:") ? nativeTargets : typedTargets).has(window.targetIds[0]));
+      for (const window of pinned) pendingPinned.set(window.id, pinnedPrefixQuote(window, verificationContext));
+      supporting = supportingPrefixJobs(pinned, new Set(verification.map(window => window.targetIds[0])),
+        index, decisions, proposals, blocked, prefixUnits, maxSupportingVerification);
+      for (const window of supporting) supportingIds.add(window.targetIds[0]);
+    }
     if (maxCueChecks) {
       const checkTargets = new Map(verification.map(window => [window.targetIds[0], window]));
-      restartCheckReserved = [...checkTargets.keys()].some(id => possibleRestartClosure(index.units[id], proposals.get(id)?.fact));
+      restartCheckReserved = [...checkTargets.keys(), ...supportingIds].some(id =>
+        possibleRestartClosure(index.units[id], proposals.get(id)?.fact));
       for (const [id, window] of checkTargets) verification.push(prefixJob(window, id, index, prefixUnits, "cue-check"));
     }
+    verification.push(...supporting);
     // Both model passes see only their own prefix and earlier attestations.
     // Finish both checks at a unit before exposing a merged earlier fact.
     verification.sort((a, b) => a.targetIds[0] - b.targetIds[0] || prefixOrder[a.id.split(":", 1)[0]] -
       prefixOrder[b.id.split(":", 1)[0]]);
     for (let start = 0; start < verification.length; start += MAX_WHOLE_STORY_REQUESTS) {
       for (const {window, result, status, rejectedFacts, cueCheckReason} of await execute(verification.slice(start, start + MAX_WHOLE_STORY_REQUESTS), "prefix")) {
-        storePrefixResult(window.id.split(":", 1)[0], window.targetIds[0],
+        const [mode] = window.id.split(":", 1), id = window.targetIds[0];
+        if (mode === "verify" && supportingIds.has(id) && status !== "returned") continue;
+        storePrefixResult(mode, id,
           status === "returned" ? result.annotations[0] : undefined, status, rejectedFacts[0]?.reason, cueCheckReason);
       }
     }
@@ -644,8 +728,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     .map(([status, rows]) => [status, rows.length]));
   const nativeVerification = verificationTargets.map(id => ({id,
     status: decisions.get(id).verificationStatus ?? decisions.get(id).status}));
+  const supportingVerification = telemetry.filter(row => row.supportingPrefix).map(row => ({id: row.targetIds[0], status: row.status}));
   return {id, sourceSha256, editionDigest, segmentationVersion, rubricVersion: LUNA_PROTOCOL_RUBRIC_VERSION,
     arm, verificationContext, verifyTransitions, units,
-    summary: {plan: plan.summary, discoveryWindows: discovery.length, outcomes, attempts: telemetry, nativeVerification,
+    summary: {plan: plan.summary, discoveryWindows: discovery.length, outcomes, attempts: telemetry, nativeVerification, supportingVerification,
       budget: budget.snapshot()}};
 }

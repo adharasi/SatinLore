@@ -147,6 +147,8 @@ Timing review v5 adds a separate restart check behind a closed gate. The full 41
 
 The founder corpus sample now has exact excerpt review, one-time dispatch under a shared spend cap, and a roster-aware scorer for raw and applied results. The first review packet proposes clips from 34 of 41 editions. Seven remain held pending reconciliation of earlier requests. Corpus accuracy requires the reviewed live results. [Founder live corpus sample](nocturne-beat-protocol-shadow.md#founder-live-corpus-sample)
 
+The v14 founder shadow candidate separates cue and boundary semantics, reserves bounded verification for earlier approved context, and fixes verified release and frame arbitration in the compiler. The paired scorer reports decision changes and coverage changes separately. The local regressions and Worker dry run pass. Compare against v13 on the exact reviewed excerpts before expanding the live corpus. [Discrepancy map and evaluation plan](nocturne-beat-protocol-shadow.md#v14-discrepancy-repair-and-evaluation)
+
 The founder evidence recovery phase compares the same exact target with and without approved earlier anchors. It separates source coverage, interpretation, and transport before a source-selected candidate reaches reader qualification. [Paired diagnostic and release sequence](nocturne-evidence-recovery.md)
 
 A founder-only whole story research harness compares one complete cleared edition, concurrent paragraph windows and a causal sentence prefix on four pinned original neutral fixtures. It reports typed labels, coverage, exact transitions, timing and usage through a separately enabled Access-protected route. The next check is a billed Responses run on the deployed candidate. [Commands, schema and runtime flag](nocturne-luna-comparison.md)

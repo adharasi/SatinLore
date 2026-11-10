@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import test from "node:test";
 import {buildReferenceCorpus, scoreBeatContinuityCorpus} from "../scripts/lib/beat-continuity-evaluation.mjs";
-import {buildLunaSampleReference, scoreLunaSample} from "../scripts/lib/luna-sample-evaluation.mjs";
+import {buildLunaSampleReference, compareLunaSamples, scoreLunaSample} from "../scripts/lib/luna-sample-evaluation.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 
@@ -143,4 +143,29 @@ test("scores a frozen sampled roster with raw and applied lanes, separate stress
     /Sample clip target differs or is duplicated/);
   const limited = scoreLunaSample(reference, {...shadow, clips: [{storyId: id, targetIds: [2], status: "spend-cap"}]});
   assert.equal(limited.summary.sample.rawCue.dispositions["budget-deferred"], 1);
+});
+
+test("compares paired Luna results without treating lost coverage as a changed verdict", () => {
+  const {source, approved, candidate} = fixture();
+  const {id, sourceSha256} = source.works[0];
+  const editionDigest = hash("reviewed reader edition");
+  approved.works[0].units[2].continuity.evidence = [0, 2];
+  const roster = {schema: "luna-v13-review-roster-v1", works: [{id, sourceSha256, editionDigest,
+    targetIds: [0, 2], transitionTargetIds: [], stressTargetIds: []}]};
+  const reference = buildLunaSampleReference(source, approved, roster);
+  const neutral = {status: "neutral"};
+  const before = candidate([{id: 0, primaryPrefix: neutral}, {id: 2, primaryPrefix: neutral, cueGuard: "untrusted prose"}]);
+  before.works[0].editionDigest = editionDigest;
+  before.works[0].summary = {attempts: [{mode: "verify", targetIds: [2], contextIds: [1], attempted: true}]};
+  const after = candidate([{id: 0, primaryPrefix: {status: "verified", frame: "current", action: "contact",
+    narrativePhase: "onset", evidenceIds: [0]}}]);
+  after.works[0].editionDigest = editionDigest;
+  const score = scoreLunaSample(reference, before, {includeDiscrepancies: true});
+  const mismatch = score.discrepancies.find(row => row.unitId === 2 && row.lane === "rawCue");
+  assert.deepEqual(mismatch.referenceEvidenceOutsidePrefix, [0]);
+  assert.equal(Object.hasOwn(mismatch, "cueGuard"), false);
+  assert.deepEqual(compareLunaSamples(reference, before, after).sample.rawCue, {
+    knownTargets: 2, commonUsable: 1, gainedUsable: 0, lostUsable: 1, baselineExact: 0, candidateExact: 1,
+    improved: 1, regressed: 0, commonGoldPositives: 1, baselineMatches: 0, candidateMatches: 1, baselineExtras: 0, candidateExtras: 0,
+  });
 });

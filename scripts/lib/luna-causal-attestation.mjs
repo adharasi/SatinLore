@@ -1,4 +1,4 @@
-import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, restartCheckPending,
+import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, isDeferredCurrentContext, restartCheckPending,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
@@ -33,7 +33,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
           !["verified", "neutral", "candidate"].includes(annotation.status) || annotation.frame === "uncertain" ||
           annotation.narrativePhase === "unknown" && !verified) {
         run.anchors = [];
-        run.barrierId = id;
+        if (blocked.has(id) || row?.window?.runId !== runId || !isDeferredCurrentContext(row)) run.barrierId = id;
         if (blocked.has(id)) run.restartBoundary = "blocked";
         continue;
       }
@@ -41,7 +41,8 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const {frame, action, narrativePhase, fact, transition, status, evidenceIds, priorAnchor} = annotation;
       const scopeId = continuationScope(annotation, run.anchors.find(anchor => anchor.unitId === priorAnchor)?.scopeId);
       const elapsedGap = elapsedContinuityGap(units[id], rawCue, annotation, run.anchors.at(-1)?.unitId);
-      const independentScope = scopeId === id && run.scope !== null && scopeId !== run.scope;
+      const enactedStart = freshEnactedStart(rawCue, id);
+      const independentScope = enactedStart && scopeId === id && run.scope !== null && scopeId !== run.scope;
       const frameChange = frames.has(frame) && crossesCurrentFrame(frame, run.frame);
       const contextCut = verifiedContextCut(annotation, id);
       const cut = contextCut || frameChange || independentScope && !run.restartBoundary;
@@ -55,8 +56,8 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       if (fact === "protective" && scopeId != null) run.protectedScopes.add(scopeId);
       if (fact === "protective") run.restartBoundary = "protective";
       else if (transition === "hard-stop" || transition === "declined-restart") run.restartBoundary = transition;
-      else if (contextCut) run.restartBoundary = null;
-      const restart = freshEnactedStart(rawCue, id) && !restartCheckPending(run.restartBoundary, row);
+      else if (contextCut && row.transitionVerification?.status !== "neutral") run.restartBoundary = null;
+      const restart = enactedStart && !restartCheckPending(run.restartBoundary, row);
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
       if (status !== "verified" || frame !== "current" || !exactCurrentCue(rawCue, id) ||

@@ -12,6 +12,10 @@ const transitions = new Set(LUNA_PROTOCOL_ENUMS.transition.filter(value => value
 const activePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
 const enacted = new Set(["contact", "change"]);
 const validResults = new Set(["verified", "neutral", "classified"]);
+const cueGuards = new Set(["cue-boundary-suppressed", "cue-frame-ineligible", "cue-target-uncited", "cue-restart-unconfirmed",
+  "cue-restart-required", "cue-stale-evidence"]);
+const playbackDispositions = new Set(["repeated-decline", "duplicate-frame-entry", "duplicate-frame-return", "unattested-scope",
+  "continuation-scope-alias", "prefix-disagreement"]);
 const hardPatterns = new Set(["Stop", "Reset", "Divider"]);
 const approvedPatterns = new Set(["Baseline", "Undertone", "Gradual build", "Deepening build", "Onset rise", "Rebuild rise",
   "Sustain wave", "Deep sustain", "Crest approach", "Crest", "Taper", "Recovery", "Hold", ...hardPatterns]);
@@ -66,7 +70,7 @@ function indexPredictions(reference, candidate, loom) {
     }
     const attempts = new Map();
     for (const attempt of work.summary?.attempts ?? []) {
-      if (!modes.has(attempt.mode) || !Array.isArray(attempt.targetIds)) continue;
+      if (!modes.has(attempt.mode) || attempt.supportingPrefix || !Array.isArray(attempt.targetIds)) continue;
       for (const id of attempt.targetIds) attempts.set(`${attempt.mode}:${id}`, attempt);
     }
     indexed.set(work.id, {rows, attempts});
@@ -146,7 +150,7 @@ const lanes = {
   appliedCue: {gold: "cue", selection: "cue", negative: false},
   typedTransition: {gold: "transition", selection: "transition", negative: "none", dispatch: true},
   appliedTransition: {gold: "transition", selection: "transition", negative: "none"},
-  compiledPattern: {gold: "pattern", selection: "playback"},
+  compiledPattern: {gold: "pattern", selection: "playback", negative: "Baseline"},
   compiledPhase: {gold: "phase", selection: "playback"},
   loomCue: {gold: "cue", selection: "cue", negative: false},
 };
@@ -190,6 +194,25 @@ function panelIds(work, selection, stress) {
   return ids.filter(id => work.stressIds.has(id) === stress);
 }
 
+function discrepancyContext(work, gold, lane) {
+  const row = work?.rows.get(gold.id);
+  const mode = lane === "typedTransition" ? "transition" : "verify";
+  const attempt = work?.attempts.get(`${mode}:${gold.id}`);
+  const contextIds = attempt?.attempted && Array.isArray(attempt.contextIds) ?
+    new Set([gold.id, ...attempt.contextIds, ...(Array.isArray(attempt.attestedIds) ? attempt.attestedIds : [])]) : null;
+  const referenceEvidenceOutsidePrefix = contextIds && lane !== "loomCue" ? gold.evidenceIds.filter(id => !contextIds.has(id)) : null;
+  if (!row && !contextIds) return {};
+  const primary = row?.primaryPrefix;
+  const typed = row?.transitionVerification;
+  return {referenceNarrativePhase: gold.narrativePhase, referenceEvidenceOutsidePrefix,
+    ...(LUNA_PROTOCOL_ENUMS.action.includes(primary?.action) ? {primaryAction: primary.action} : {}),
+    ...(LUNA_PROTOCOL_ENUMS.fact.includes(primary?.fact) ? {primaryFact: primary.fact} : {}),
+    ...(transitions.has(primary?.transition) ? {primaryTransition: primary.transition} : {}),
+    ...(transitions.has(typed?.transition) ? {independentTransition: typed.transition} : {}),
+    ...(cueGuards.has(row?.cueGuard) ? {cueGuard: row.cueGuard} : {}),
+    ...(playbackDispositions.has(row?.playbackDisposition) ? {playbackDisposition: row.playbackDisposition} : {})};
+}
+
 export function scoreLunaSample(reference, candidate, {loom, includeDiscrepancies = false} = {}) {
   const indexed = indexPredictions(reference, candidate, false);
   const baseline = loom ? indexPredictions(reference, loom, true) : null;
@@ -202,13 +225,15 @@ export function scoreLunaSample(reference, candidate, {loom, includeDiscrepancie
     panels: Object.fromEntries(panels.map(([panel, stress]) => [panel, Object.fromEntries(definitions.map(([name, lane]) => {
       const local = emptyScore();
       for (const id of panelIds(work, lane.selection, stress)) {
-        const expected = work.gold.get(id)[lane.gold];
-        const observed = rowObservation((name === "loomCue" ? baseline : indexed).get(work.id), id, name);
+        const gold = work.gold.get(id);
+        const expected = gold[lane.gold];
+        const predictions = (name === "loomCue" ? baseline : indexed).get(work.id);
+        const observed = rowObservation(predictions, id, name);
         scoreRow(local, expected, observed, lane);
         scoreRow(totals.get(panel).get(name), expected, observed, lane);
         if (includeDiscrepancies && observed.value !== expected) {
           discrepancies.push({storyId: work.id, unitId: id, panel, lane: name, expected, observed: observed.value,
-            status: observed.status, referenceResolved: referenceResolved(expected)});
+            status: observed.status, referenceResolved: referenceResolved(expected), ...discrepancyContext(predictions, gold, name)});
         }
       }
       return [name, metrics(local, lane)];
@@ -217,8 +242,44 @@ export function scoreLunaSample(reference, candidate, {loom, includeDiscrepancie
   return {measurement: "unweighted-frozen-sample-diagnostic", sourceProseIncluded: false,
     candidateProvenance: {measurement: candidate.measurement === "live-corpus-luna" ? "live-corpus-luna" : null,
       model: candidate.model === LUNA_PROTOCOL_MODEL ? candidate.model : null,
-      rubricVersion: candidate.rubricVersion === LUNA_PROTOCOL_RUBRIC_VERSION ? candidate.rubricVersion : null},
+      rubricVersion: ["nocturne-luna-protocol-v13", LUNA_PROTOCOL_RUBRIC_VERSION].includes(candidate.rubricVersion) ? candidate.rubricVersion : null},
     summary: Object.fromEntries(panels.map(([panel]) => [panel, Object.fromEntries(definitions.map(([name, lane]) =>
       [name, metrics(totals.get(panel).get(name), lane)]))])),
     works, ...(includeDiscrepancies ? {discrepancies} : {})};
+}
+
+export function compareLunaSamples(reference, baseline, candidate) {
+  const left = indexPredictions(reference, baseline, false), right = indexPredictions(reference, candidate, false);
+  const definitions = Object.entries(lanes).filter(([name]) => name !== "loomCue");
+  return Object.fromEntries([["sample", false], ["stress", true]].map(([panel, stress]) => [panel,
+    Object.fromEntries(definitions.map(([name, lane]) => {
+      const counts = {knownTargets: 0, commonUsable: 0, gainedUsable: 0, lostUsable: 0, baselineExact: 0,
+        candidateExact: 0, improved: 0, regressed: 0};
+      const positives = {commonGoldPositives: 0, baselineMatches: 0, candidateMatches: 0, baselineExtras: 0, candidateExtras: 0};
+      for (const work of reference) for (const id of panelIds(work, lane.selection, stress)) {
+        const expected = work.gold.get(id)[lane.gold];
+        if (!referenceResolved(expected)) continue;
+        const before = rowObservation(left.get(work.id), id, name).value;
+        const after = rowObservation(right.get(work.id), id, name).value;
+        counts.knownTargets++;
+        if (before === null) counts.gainedUsable += Number(after !== null);
+        else if (after === null) counts.lostUsable++;
+        else {
+          counts.commonUsable++;
+          const hadMatch = before === expected, hasMatch = after === expected;
+          counts.baselineExact += Number(hadMatch);
+          counts.candidateExact += Number(hasMatch);
+          counts.improved += Number(!hadMatch && hasMatch);
+          counts.regressed += Number(hadMatch && !hasMatch);
+          if (Object.hasOwn(lane, "negative")) {
+            positives.commonGoldPositives += Number(expected !== lane.negative);
+            positives.baselineMatches += Number(expected !== lane.negative && hadMatch);
+            positives.candidateMatches += Number(expected !== lane.negative && hasMatch);
+            positives.baselineExtras += Number(before !== lane.negative && !hadMatch);
+            positives.candidateExtras += Number(after !== lane.negative && !hasMatch);
+          }
+        }
+      }
+      return [name, {...counts, ...(Object.hasOwn(lane, "negative") ? positives : {})}];
+    }))]));
 }

@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v13/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v14/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -264,7 +264,14 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /An earlier closing event is context only/u);
   assert.match(sent.instructions, /Contact serving an ordinary purpose supplies no romantic cue, onset, accent or restart/u);
   assert.match(sent.instructions, /final repetition or change in speed while the activity continues supplies no stop/u);
+  assert.match(sent.instructions, /An unrelated object becoming still supplies no stop by itself/u);
+  assert.match(sent.instructions, /Require the effect of the disruption as well as the trigger/u);
+  assert.match(sent.instructions, /A definite temporal jump into a new episode can suffice in the same location/u);
+  assert.match(sent.instructions, /prefer a supported scene or frame boundary over the smaller event/u);
+  assert.match(sent.instructions, /An imagined scenario starts when its events are first presented/u);
   assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
+  assert.match(sent.instructions, /Movement inside the noncurrent frame and a later reference after the return supply no additional return/u);
+  assert.match(sent.instructions, /Use beat-end when the target establishes that the interaction itself concludes/u);
   assert.match(sent.instructions, /use status uncertain or abstain with transition unknown/u);
   assert.match(sent.instructions, /reported or remembered action does not establish a prior current start/u);
   assert.match(sent.instructions, /If the target ends before participation begins, it has no restart/u);
@@ -284,6 +291,7 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
   const permitted = [transitionRow("hard-stop", "neutralize"), transitionRow("hard-stop", "protective"),
     transitionRow("interruption", "none"), transitionRow("declined-restart", "neutralize"), transitionRow("restart", "none"),
     transitionRow("non-romantic-activity-stop", "none"), transitionRow("reported-entry", "cut", {frame: "reported"}),
+    transitionRow("non-romantic-activity-stop", "none", {frame: "neutral"}),
     transitionRow("present-return", "cut"), transitionRow("uncertain-continuity", "neutralize"), transitionRow("none", "none", noEvent),
     transitionRow("none", "none", {...noEvent, frame: "reported"}),
     transitionRow("unknown", "none", {...noEvent, status: "abstain", frame: "uncertain"})];
@@ -297,6 +305,7 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
     [transitionRow("non-romantic-activity-stop", "protective"), "transition-fact"],
     [transitionRow("non-romantic-activity-stop", "neutralize"), "transition-fact"],
     [transitionRow("non-romantic-activity-stop", "none", {evidenceIds: [10]}), "target-evidence"],
+    [transitionRow("non-romantic-activity-stop", "none", {frame: "reported"}), "transition-frame"],
     [transitionRow("declined-restart", "none"), "transition-fact"],
     [transitionRow("restart", "low"), "transition-fact"],
     [transitionRow("restart", "none", {evidenceIds: [10]}), "target-evidence"],
@@ -464,6 +473,29 @@ test("keeps local cue, continuity, frame and neutral decisions independently gro
     assert.deepEqual(await run(supplied), rejected([targetFailure(11, reason)]));
     assert.ok(LUNA_PROTOCOL_TARGET_FAILURES.includes(reason));
   }
+});
+
+test("independent current contribution keeps ongoing and winding-down cues with target evidence", async () => {
+  const supplied = {mode: "verify", units: units.slice(0, 2), targetIds: [11]};
+  for (const [narrativePhase, action, factType] of [
+    ["build", "anticipation", "none"], ["sustain", "continuation", "none"],
+    ["ease", "release", "ease"], ["recover", "release", "none"],
+  ]) {
+    const row = fact(11, {status: "verified", depiction: "romantic", narrativePhase, action,
+      fact: factType, evidenceIds: [10, 11]});
+    const run = provider(async (_url, {body}) => {
+      const {instructions} = JSON.parse(body);
+      assert.match(instructions, /use sustain with continuation even when an earlier anchor is unavailable/u);
+      assert.match(instructions, /A target can show an easing or recovery cue without a new onset or typed event/u);
+      return response([row]);
+    });
+    assert.deepEqual(await run(supplied), success([row]));
+    const missingTarget = provider(async () => response([{...row, evidenceIds: [10]}]));
+    assert.deepEqual(await missingTarget(supplied), rejected([targetFailure(11, "target-evidence")]));
+  }
+  const reportedStop = fact(11, {status: "verified", frame: "reported", transition: "non-romantic-activity-stop", evidenceIds: [11]});
+  const noncurrent = provider(async () => response([reportedStop]));
+  assert.deepEqual(await noncurrent(supplied), rejected([targetFailure(11, "transition-frame")]));
 });
 
 test("bounds source and request tokens before transport", async () => {

@@ -93,6 +93,43 @@ test("a continuation cannot enter from a prior anchor rejected by prefix verific
   assert.equal(run.units[1].beatId, null);
 });
 
+test("a sampled continuation independently verifies its cleared unsampled prior anchor", async () => {
+  const run = async (maxSupportingVerification, budgetOptions) => {
+    const calls = [];
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: []});
+      if (id === 1) return active(id, mode, {scopeId: 1});
+      if (id === 2) return active(id, mode, {scopeId: 1, fact: "continue", action: "continuation",
+        narrativePhase: "sustain", priorAnchor: 1, evidenceIds: [1, 2]});
+      return neutral(id);
+    }, request => calls.push(request));
+    const result = await runLunaProtocolShadow({...fixture(), provider, maxVerification: 1, verificationTargets: [2],
+      verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [2], maxSupportingVerification,
+      budget: createLunaShadowBudget(budgetOptions)});
+    return {result, calls};
+  };
+  const without = await run(0, {maxAttempts: 4});
+  assert.equal(without.result.units[2].playbackDisposition, "unattested-scope");
+  assert.equal(without.result.units[2].pattern, "Baseline");
+  const {result, calls} = await run(1, {maxAttempts: 4});
+  assert.deepEqual(calls.slice(1).map(({mode, targetIds}) => [mode, targetIds[0]]), [["verify", 1], ["verify", 2], ["transition", 2]]);
+  assert.deepEqual(calls[1].units.map(({id}) => id), [0, 1]);
+  assert.deepEqual(result.summary.supportingVerification, [{id: 1, status: "returned"}]);
+  assert.equal(result.summary.attempts.find(row => row.supportingPrefix).mode, "verify");
+  assert.deepEqual(result.summary.nativeVerification, [{id: 2, status: "verified"}]);
+  assert.equal(result.units[2].pattern, "Undertone");
+  assert.equal(result.units[2].beatId, result.units[1].beatId);
+  assert.equal(result.units[2].cue, false);
+
+  for (const budgetOptions of [{maxAttempts: 3}, {maxSourceBytes: without.result.summary.budget.attemptedPayloadBytes}]) {
+    const tight = await run(1, budgetOptions);
+    assert.deepEqual(tight.calls.slice(1).map(({mode, targetIds}) => [mode, targetIds[0]]), [["verify", 2], ["transition", 2]]);
+    assert.deepEqual(tight.result.summary.supportingVerification, [{id: 1, status: "budget-deferred"}]);
+    assert.deepEqual(tight.result.summary.nativeVerification, [{id: 2, status: "verified"}]);
+    assert.equal(tight.result.units[2].transitionVerification.status, "neutral");
+  }
+});
+
 test("a missing verification budget defers a positive without converting it to a quiet label", async () => {
   const provider = fake((id, mode) => id === 0 ? active(id, mode) : neutral(id));
   const run = await runLunaProtocolShadow({...fixture(), provider, maxVerification: 0,
@@ -141,7 +178,8 @@ test("ordinary stop needs fresh enacted restart evidence while its earlier evide
   const run = await runLunaProtocolShadow({...fixture(), provider, maxCueChecks: 1});
   assert.deepEqual(run.units.map(({pattern}) => pattern), ["Undertone", "Stop", "Baseline", "Baseline", "Rebuild rise"]);
   assert.deepEqual(run.units[1].evidenceIds, [1]);
-  assert.deepEqual(run.units[2].labelEvidenceIds, [1]);
+  assert.deepEqual(run.units[2].labelEvidenceIds, []);
+  assert.equal(run.units[2].primaryFailure, "target-evidence");
   assert.equal(run.units[2].beatId, null);
   assert.notEqual(run.units[4].beatId, run.units[0].beatId);
 });
@@ -210,7 +248,9 @@ test("a frozen native target can be verified independently after an incomplete d
 
 test("shared spend cap rejects a second unknown reservation and freezes after a reservation breach", () => {
   assert.throws(() => createLunaShadowBudget({maxMicros: 3_000_001}), /budget/u);
-  const budget = createLunaShadowBudget({maxMicros: 3_000});
+  const quote = createLunaShadowBudget();
+  quote.reserve("{}", 1);
+  const budget = createLunaShadowBudget({maxMicros: quote.snapshot().reservedMicros});
   const settle = budget.reserve("{}", 1);
   assert.equal(typeof settle, "function");
   assert.equal(budget.reserve("{}", 1), null);
@@ -491,11 +531,12 @@ test("a transition citation cannot supply a missing exact target citation for a 
   const row = run.units[2];
   assert.equal(row.transitionVerification.transition, "onset");
   assert.deepEqual(row.transitionEvidenceIds, [2]);
-  assert.deepEqual(row.labelEvidenceIds, [1]);
-  assert.equal(row.cue, false);
-  assert.equal(row.cueGuard, "cue-target-uncited");
+  assert.deepEqual(row.labelEvidenceIds, []);
+  assert.equal(row.primaryFailure, "target-evidence");
+  assert.equal(row.transitionFlag, "transition-conflict");
+  assert.equal(row.cue, undefined);
   assert.equal(row.pattern, "Baseline");
-  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.appliedTransition, undefined);
 });
 
 test("a typed onset on ordinary activity remains a raw prediction when the cue pass is neutral", async () => {
@@ -764,6 +805,102 @@ test("a continuation can cite the enacted start that opened its new scope while 
     assert.equal(run.units[2].readerCue, !stale);
     assert.equal(run.units[2].cueGuard, stale ? "cue-stale-evidence" : undefined);
   }
+});
+
+test("deferred context can support an exact low cue but cannot carry playback or suppress a prior block", async () => {
+  for (const blocked of [false, true]) {
+    const provider = fake((id, mode) => {
+      if (id === 0) return active(id, mode, {narrativePhase: "build"});
+      if (id === 1) return active(id, mode, {narrativePhase: "build", evidenceIds: [0, 1]});
+      return neutral(id);
+    });
+    const input = fixture("They exchanged a look. She noticed his nervous smile. The door opened.");
+    const run = await runLunaProtocolShadow({...input, provider, maxVerification: 1,
+      verificationTargets: [1], blockedIds: blocked ? [0] : []});
+    assert.deepEqual(run.units.slice(0, 2).map(row => row.pattern), blocked ? ["Stop", "Baseline"] : ["Baseline", "Undertone"]);
+    assert.equal(run.units[0].status, "verification-deferred");
+    assert.equal(run.units[1].cue, false);
+    assert.equal(run.units[1].readerCue, !blocked);
+    if (!blocked) assert.deepEqual(run.units[1].trace.evidence, [0, 1]);
+  }
+});
+
+test("an independently verified local release can taper an isolated sample without inventing prior carry", async () => {
+  for (const [fact, event, typedFact] of [["ease", "interruption", "none"], ["span-end", "interruption", "none"],
+    ["beat-end", "beat-end", "beat-end"], ["none", "interruption", "none"]]) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {fact: typedFact, transition: event});
+      if (id === 0) return active(id, mode, {narrativePhase: "build"});
+      if (id === 1 && fact !== "none") return active(id, mode, {fact, narrativePhase: "ease", action: "release",
+        transition: event, evidenceIds: [0, 1]});
+      return neutral(id);
+    });
+    const input = fixture("They exchanged a warm look. They let the moment soften. The door opened.");
+    const run = await runLunaProtocolShadow({...input, provider, maxVerification: 1, verificationTargets: [1],
+      verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [1]});
+    assert.equal(run.units[0].pattern, "Baseline");
+    assert.equal(run.units[1].pattern, fact === "none" ? "Baseline" : "Taper");
+    assert.equal(run.units[1].cue, false);
+    if (fact === "beat-end") assert.equal(run.units[1].beatId, null);
+  }
+});
+
+test("neutral scope numbering and quiet frame observations do not invent reset output", async () => {
+  const provider = fake((id, mode) => {
+    if (id === 0) return active(id, mode, {narrativePhase: "build"});
+    if (id === 1) return {...neutral(id), scopeId: 1};
+    if (id === 2) return {...neutral(id), frame: "remembered"};
+    return neutral(id);
+  });
+  const run = await runLunaProtocolShadow({...fixture(), provider, verificationTargets: [0, 1, 2, 3]});
+  assert.deepEqual(run.units.slice(0, 4).map(row => row.pattern), ["Undertone", "Undertone", "Baseline", "Baseline"]);
+  assert.equal(run.units[1].sceneId, run.units[0].sceneId);
+  assert.equal(run.units[2].beatId, null);
+  assert.equal(run.units[2].appliedTransition, "none");
+});
+
+test("an exact frame entry survives typed silence, and a mixed return waits for current evidence", async () => {
+  for (const futureCited of [false, true]) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return id === 2 ? typedTransition(id, {fact: "cut", frame: "mixed", transition: "present-return"}) :
+        typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
+      if (id === 1) return active(id, mode, {fact: "cut", frame: "imagined", action: "none", narrativePhase: "quiet",
+        transition: "imagined-entry", scopeId: 1, evidenceIds: mode === "discovery" && futureCited ? [1, 2] : [1]});
+      if (id === 2) return {...neutral(id), frame: "imagined", evidenceIds: [2]};
+      if (id === 3 && mode !== "discovery") return active(id, mode, {fact: "cut", action: "none", narrativePhase: "quiet",
+        transition: "present-return", evidenceIds: [2, 3]});
+      return neutral(id);
+    });
+    const input = fixture("They talked by the window. She imagined the trip. The imagined train crossed a bridge. She came back to the room.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2, 3],
+      verifyTransitions: true, maxTransitionVerification: 3, transitionTargets: [1, 2, 3]});
+    assert.equal(run.units[1].transitionVerification.transition, "none");
+    assert.equal(run.units[1].appliedTransition, futureCited ? "none" : "imagined-entry");
+    assert.equal(run.units[1].pattern, futureCited ? "Baseline" : "Reset");
+    assert.equal(run.units[2].transitionVerification.transition, "present-return");
+    assert.equal(run.units[2].appliedTransition, "none");
+    assert.equal(run.units[2].pattern, "Baseline");
+    assert.equal(run.units[3].transitionVerification.transition, "none");
+    assert.equal(run.units[3].appliedTransition, "present-return");
+  }
+});
+
+test("a recovered frame edge and a local release cannot clear a verified stop", async () => {
+  const provider = fake((id, mode) => {
+    if (mode === "transition") return id === 0 ? typedTransition(id, {fact: "neutralize", transition: "hard-stop"}) :
+      typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
+    if (id === 0) return active(id, mode, {fact: "neutralize", action: "release", narrativePhase: "quiet", transition: "hard-stop"});
+    if (id === 1) return active(id, mode, {fact: "cut", frame: "imagined", action: "none", narrativePhase: "quiet",
+      transition: "imagined-entry", scopeId: 1});
+    if (id === 2) return active(id, mode, {fact: "cut", action: "none", narrativePhase: "quiet", transition: "present-return"});
+    if (id === 3) return active(id, mode, {fact: "ease", action: "release", narrativePhase: "ease", transition: "ease"});
+    return active(id, mode, {narrativePhase: "build", scopeId: 4});
+  });
+  const input = fixture("They agreed to stop. She imagined a trip. She came back to the room. They let the moment soften. He offered a smile.");
+  const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2, 3, 4],
+    verifyTransitions: true, maxTransitionVerification: 5, transitionTargets: [0, 1, 2, 3, 4]});
+  assert.deepEqual(run.units.map(row => row.pattern), ["Stop", "Reset", "Reset", "Baseline", "Baseline"]);
+  assert.equal(run.units[4].cueGuard, "cue-restart-required");
 });
 
 test("one blinded check can replace an invalid semantic tuple without making it a primary success", async () => {

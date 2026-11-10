@@ -5,6 +5,9 @@ const nonClosingEvents = new Set(["onset", "restart", "accent", "ease", "recover
 const enacted = new Set(["contact", "change"]);
 const explicitCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
 const frameEntries = new Set(["memory-entry", "imagined-entry", "reported-entry"]);
+const earlierFrames = new Set(["remembered", "imagined", "reported"]);
+const pendingContextEffects = new Set(["none", "low", "continue", "ease"]);
+const pendingContextEvents = new Set(["none", "onset", "accent", "ease", "recover"]);
 const elapsedInterval = /^\s*(?:(?:after (?:a while|some time)|some time later|(?:a few|several) (?:minutes|hours) later|(?:minutes|hours) passed)\b|[^“"‘’\n.!?]{0,60}\b(?:stayed|waited|remained|lingered)\b[^“"‘’\n.!?]{0,90}\bfor (?:a while|some time)\b)/iu;
 const voluntaryBoundaryHint = /\b(?:called time|called (?:for )?a (?:break|halt)|asked (?:for (?:a )?break|(?:them|him|her) to stop)|let go|stepped apart|withdrew|declined|refused|would rather|said no|stop(?:ped)?)\b/iu;
 const explicitBoundary = /\b(?:interrupted|ended|put (?:the|their|his|her) (?:letter|note|journal|diary|book) down|set (?:the|their|his|her) (?:letter|note|journal|diary|book) aside|read (?:the|their|his|her|an?) (?:account|letter|note|diary|journal)|read aloud|recounted|recalled|remembered|back in the present|returned to the present|for a while)\b/iu;
@@ -39,6 +42,12 @@ export function possibleRestartClosure(unit, proposal) {
 export function verifiedContextCut(annotation, id) {
   return annotation?.status === "verified" && annotation.evidenceIds.includes(id) &&
     (annotation.fact === "cut" || explicitCuts.has(annotation.transition));
+}
+
+export function isDeferredCurrentContext(row) {
+  const proposed = row?.discovery;
+  return row?.status === "verification-deferred" && proposed?.status === "candidate" && proposed.frame === "current" &&
+    pendingContextEffects.has(proposed.fact) && pendingContextEvents.has(proposed.transition);
 }
 
 export function repeatedFrameEntry(annotation, previousFrame, previousScope) {
@@ -85,7 +94,7 @@ export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {
 
 // Separate model verdicts remain in the diagnostic record. Playback applies
 // the checked boundary while retaining cue semantics from its independent pass.
-export function mergeTransitionVerdict(cue, verdict) {
+export function mergeTransitionVerdict(cue, verdict, discovery, prior) {
   if (!verdict || !["verified", "neutral"].includes(verdict.status)) return {annotation: cue};
   const protectiveCue = cue?.fact === "protective" || cue?.transition === "hard-stop";
   const conflict = cue && !noEvent.has(cue.transition) && cue.transition !== verdict.transition;
@@ -94,8 +103,20 @@ export function mergeTransitionVerdict(cue, verdict) {
   }
   if (cue?.status === "verified" && cue.transition === "declined-restart" && cue.evidenceIds.includes(cue.unitId) &&
       nonClosingEvents.has(verdict.transition)) return {annotation: cue, flag: "transition-conflict"};
+  if (verdict.status === "verified" && verdict.transition === "present-return" && verdict.frame === "mixed" &&
+      cue?.status === "neutral" && earlierFrames.has(cue.frame) && cue.evidenceIds.includes(cue.unitId)) {
+    return {annotation: cue, flag: "transition-conflict"};
+  }
   if (verdict.status === "neutral") {
     if (!cue) return {annotation: cue};
+    const matchedFrameEntry = frameEntries.has(cue.transition) && discovery?.status === "candidate" &&
+      discovery.frame === cue.frame && discovery.transition === cue.transition &&
+      discovery.evidenceIds.includes(cue.unitId) && discovery.evidenceIds.every(id => id <= cue.unitId);
+    const matchedFrameReturn = cue.transition === "present-return" && cue.frame === "current" && verdict.frame === "current" &&
+      ["verified", "neutral"].includes(prior?.status) && earlierFrames.has(prior.frame) &&
+      prior.evidenceIds.includes(prior.unitId);
+    if (cue.status === "verified" && cue.fact === "cut" && cue.evidenceIds.includes(cue.unitId) &&
+        (matchedFrameEntry || matchedFrameReturn)) return {annotation: cue, flag: "transition-conflict"};
     if (freshEnactedStart(cue, cue.unitId) || cue.status === "verified" &&
         cue.evidenceIds.includes(cue.unitId) && (cue.transition === "uncertain-continuity" || cue.fact === "neutralize")) {
       return {annotation: cue, flag: conflict ? "transition-conflict" : undefined};

@@ -3,7 +3,7 @@ import {chmod, readFile, writeFile} from "node:fs/promises";
 import {resolve} from "node:path";
 import {parseArgs} from "node:util";
 import {buildReferenceCorpus, scoreBeatContinuityCorpus} from "./lib/beat-continuity-evaluation.mjs";
-import {buildLunaSampleReference, scoreLunaSample} from "./lib/luna-sample-evaluation.mjs";
+import {buildLunaSampleReference, compareLunaSamples, scoreLunaSample} from "./lib/luna-sample-evaluation.mjs";
 
 const usage = "Usage: node scripts/evaluate-beat-continuity-corpus.mjs --source PRIVATE_SOURCE --reference APPROVED_LABELS --candidate name=PRIVATE_PREDICTIONS [--candidate name=PRIVATE_PREDICTIONS] [--target-roster FROZEN_SAMPLE [--loom PRIVATE_LOOM]] [--output PRIVATE_REPORT] [--discrepancies]";
 const candidateName = /^[a-z][a-z0-9-]{0,47}$/;
@@ -53,11 +53,15 @@ async function run() {
     candidateSha256: candidates[i].sha256,
     ...score(reference, candidates[i].data, options),
   }]));
+  const [baselineName, ...otherNames] = files.keys();
+  const pairedComparisons = roster && otherNames.length ? Object.fromEntries(otherNames.map((name, i) => [name, {
+    baseline: baselineName, ...compareLunaSamples(reference, candidates[0].data, candidates[i + 1].data),
+  }])) : null;
   const report = {schema: roster ? "satinlore-luna-sample-evaluation-v1" : "satinlore-beat-continuity-evaluation-v1",
     cohort: roster ? reference.map(work => work.id) : reference.cohort,
     ...(roster ? {rosterSha256: roster.sha256} : {}), ...(loom ? {loomSha256: loom.sha256} : {}),
     sourceSha256: source.sha256, referenceSha256: approved.sha256, sourceProseIncluded: false,
-    scoringExternalCalls: 0, comparisons};
+    scoringExternalCalls: 0, comparisons, ...(pairedComparisons ? {pairedComparisons} : {})};
   if (output) {
     await writeFile(output, JSON.stringify(report) + "\n", {mode: 0o600});
     await chmod(output, 0o600);
