@@ -27,48 +27,50 @@ const anchorLinks = new Set(["continue", "ease", "span-end", "beat-end"]);
 export const MAX_SHADOW_MICROS = 3_000_000;
 export const MAX_SHADOW_VERIFICATIONS = 384;
 
-function validateFact(fact, ids, target, mode, attested) {
+function factViolation(fact, ids, target, mode, attested) {
   const verify = mode !== "discovery";
   const anchors = new Map(attested.map(row => [row.unitId, row]));
   const scopeAllowed = id => id === null || id <= target &&
     (ids.has(id) || attested.some(row => row.scopeId === id && row.frame === fact.frame));
   if (!fact || Object.keys(fact).length !== fields.length || !fields.every(field => Object.hasOwn(fact, field)) ||
-      fact.unitId !== target || !Object.entries(LUNA_PROTOCOL_ENUMS).every(([key, values]) => values.includes(fact[key])) ||
-      !scopeAllowed(fact.scopeId) ||
-      !Array.isArray(fact.evidenceIds) || fact.evidenceIds.length > LUNA_PROTOCOL_LIMITS.maxEvidenceIds ||
-      !fact.evidenceIds.every((id, i, all) => (ids.has(id) || anchors.has(id)) && (!i || id > all[i - 1])) ||
-      (fact.priorAnchor !== null && (fact.priorAnchor >= target || !fact.evidenceIds.includes(fact.priorAnchor)))) return false;
+      fact.unitId !== target || !Object.entries(LUNA_PROTOCOL_ENUMS).every(([key, values]) => values.includes(fact[key]))) return "row-shape";
+  if (!scopeAllowed(fact.scopeId)) return "scope-id";
+  if (!Array.isArray(fact.evidenceIds) || fact.evidenceIds.length > LUNA_PROTOCOL_LIMITS.maxEvidenceIds ||
+      !fact.evidenceIds.every((id, i, all) => (ids.has(id) || anchors.has(id)) && (!i || id > all[i - 1]))) return "evidence-id";
+  if (fact.priorAnchor !== null && (fact.priorAnchor >= target || !fact.evidenceIds.includes(fact.priorAnchor))) return "prior-anchor";
   for (const id of fact.evidenceIds) {
     if (ids.has(id)) continue;
     const anchor = anchors.get(id);
     if (!verify || !anchorLinks.has(fact.fact) || fact.priorAnchor !== id || !fact.evidenceIds.includes(target) ||
-        anchor.scopeId !== fact.scopeId || anchor.frame !== fact.frame) return false;
+        anchor.scopeId !== fact.scopeId || anchor.frame !== fact.frame) return "attested-evidence";
   }
   if (mode === "transition") {
     if (["low", "continue"].includes(fact.fact) || fact.action !== "unknown" || fact.narrativePhase !== "unknown" ||
-        fact.depiction !== "unknown" || fact.status === "candidate") return false;
-    if (fact.status === "verified") return Boolean(LUNA_PROTOCOL_TRANSITION_FACTS[fact.transition]?.includes(fact.fact) &&
-      fact.evidenceIds.includes(target));
+        fact.depiction !== "unknown" || fact.status === "candidate") return "transition-shape";
+    if (fact.status === "verified") {
+      if (!LUNA_PROTOCOL_TRANSITION_FACTS[fact.transition]?.includes(fact.fact)) return "transition-fact";
+      return fact.evidenceIds.includes(target) ? null : "target-evidence";
+    }
     return fact.fact === "none" && fact.priorAnchor === null && fact.evidenceIds.length === 0 &&
-      fact.transition === (fact.status === "neutral" ? "none" : "unknown");
+      fact.transition === (fact.status === "neutral" ? "none" : "unknown") ? null : "status-effect";
   }
   const effect = reviewable(fact);
   if ((verify && fact.status === "candidate") || (!verify && fact.status === "verified") ||
       (effect && (!["candidate", "verified"].includes(fact.status) || !fact.evidenceIds.length)) ||
-      (fact.status === "neutral" && (effect || fact.narrativePhase !== "quiet")) ||
-      (fact.fact === "continue" && (fact.priorAnchor === null || fact.scopeId === null || fact.scopeId > fact.priorAnchor)) ||
-      (fact.priorAnchor !== null && !["continue", "ease", "span-end", "beat-end"].includes(fact.fact))) return false;
+      (fact.status === "neutral" && (effect || fact.narrativePhase !== "quiet"))) return "status-effect";
+  if ((fact.fact === "continue" && (fact.priorAnchor === null || fact.scopeId === null || fact.scopeId > fact.priorAnchor)) ||
+      (fact.priorAnchor !== null && !["continue", "ease", "span-end", "beat-end"].includes(fact.fact))) return "prior-anchor";
   if ((transitionCuts.has(fact.transition) || fact.transition === "hard-stop" ||
-      ["cut", "beat-end", "neutralize", "protective"].includes(fact.fact)) && !fact.evidenceIds.includes(target)) return false;
-  if (["low", "continue", "ease"].includes(fact.fact) && fact.frame !== "current") return false;
-  if (fact.fact === "low" && !["anticipation", "contact", "change", "release"].includes(fact.action)) return false;
-  if (verify && fact.fact === "low" && !fact.evidenceIds.includes(target)) return false;
-  if (fact.fact === "ease" && !["ease", "recover"].includes(fact.narrativePhase)) return false;
+      ["cut", "beat-end", "neutralize", "protective"].includes(fact.fact)) && !fact.evidenceIds.includes(target)) return "target-evidence";
+  if (["low", "continue", "ease"].includes(fact.fact) && fact.frame !== "current") return "fact-frame";
+  if (fact.fact === "low" && !["anticipation", "contact", "change", "release"].includes(fact.action)) return "fact-action";
+  if (verify && fact.fact === "low" && !fact.evidenceIds.includes(target)) return "target-evidence";
+  if (fact.fact === "ease" && !["ease", "recover"].includes(fact.narrativePhase)) return "fact-phase";
   if (activePhases.has(fact.narrativePhase) && fact.frame === "current" && fact.fact === "none" &&
-      !(fact.narrativePhase === "build" ? activeActions : enactedActions).has(fact.action)) return false;
-  if (["restart", "onset"].includes(fact.transition) && fact.frame === "current" && !enactedActions.has(fact.action)) return false;
-  if (transitionCuts.has(fact.transition) && !["cut", "low", "none", "protective"].includes(fact.fact)) return false;
-  return true;
+      !(fact.narrativePhase === "build" ? activeActions : enactedActions).has(fact.action)) return "phase-action";
+  if (["restart", "onset"].includes(fact.transition) && fact.frame === "current" && !enactedActions.has(fact.action)) return "transition-action";
+  if (transitionCuts.has(fact.transition) && !["cut", "low", "none", "protective"].includes(fact.fact)) return "transition-fact";
+  return null;
 }
 
 export function createLunaShadowBudget({maxAttempts = 96, maxSourceBytes = 500_000, maxMicros = 100_000} = {}) {
@@ -361,10 +363,14 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           return {status: "failed"};
         }
         const byTarget = new Map(Array.isArray(answer.facts) ? answer.facts.map(fact => [fact?.unitId, fact]) : []);
-        if (answer.facts?.length !== window.targetIds.length || byTarget.size !== window.targetIds.length ||
-            !window.targetIds.every(id => validateFact(byTarget.get(id), submitted, id, mode, attested))) {
+        const rejectedFacts = window.targetIds.map(id => ({id, reason: factViolation(byTarget.get(id), submitted, id, mode, attested)}))
+          .filter(row => row.reason !== null);
+        const targetCoverageMismatch = answer.facts?.length !== window.targetIds.length || byTarget.size !== window.targetIds.length;
+        if (targetCoverageMismatch || rejectedFacts.length) {
           record.status = "invalid-response";
           record.failureReason = "rejected-fact-contract";
+          record.rejectedFacts = rejectedFacts;
+          record.targetCoverageMismatch = targetCoverageMismatch;
           return {status: "failed"};
         }
         record.status = "returned";

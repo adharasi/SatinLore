@@ -258,6 +258,7 @@ test("typed transitions require evidence at the exact target and report rejectio
   assert.equal(run.units[2].pattern, "Baseline");
   const attempt = run.summary.attempts.find(row => row.mode === "transition");
   assert.equal(attempt.failureReason, "rejected-fact-contract");
+  assert.deepEqual(attempt.rejectedFacts, [{id: 2, reason: "target-evidence"}]);
   assert.deepEqual(attempt.targetIds, [2]);
   assert.deepEqual(attempt.contextIds, [0, 1]);
   assert.equal(Object.hasOwn(attempt, "text"), false);

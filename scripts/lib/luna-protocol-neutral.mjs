@@ -147,6 +147,8 @@ function stageDiagnostic(gold, row, stage, attempt, referenceCueEvidenceIds, siz
   return {status: result.status, returned, dispatched: Boolean(attempt?.attempted), submittedIds, attestedIds,
     requestStatus: attempt ? disposition(attempt.status) : null,
     requestFailure: failureReasons.has(attempt?.failureReason) ? attempt.failureReason : null,
+    contractRejection: attempt?.rejectedFacts?.find(row => row.id === gold.id)?.reason ?? null,
+    targetCoverageMismatch: attempt?.targetCoverageMismatch ?? false,
     citedIds, missingReferenceCueEvidenceIds, reasons,
     ...(stage !== "transition" ? {narrativePhase: result.narrativePhase ?? null, cue: result.cue ?? null} : {}),
     ...(stage !== "prefix" ? {transition: result.transition ?? null} : {})};
@@ -166,6 +168,8 @@ function diagnosticWork(fixture, run) {
     return {id: gold.id, unitSha256: gold.unitSha256, paragraph: gold.paragraph,
       expected: {narrativePhase: gold.narrativePhase, cue: gold.cue, transition: gold.transition, cueEvidenceIds},
       pipelineFlags: [row.playbackDisposition, row.transitionFlag].filter(flag => pipelineFlags.has(flag)),
+      compiler: {pattern: row.pattern, phase: row.phase, decision: row.trace.decision,
+        appliedTransition: row.appliedTransition ?? null, evidenceIds: validIds(row.evidenceIds, size)},
       ...Object.fromEntries([...stages].map(([stage, attempts]) =>
         [stage, stageDiagnostic(gold, row, stage, attempts.get(gold.id), cueEvidenceIds, size)]))};
   })};

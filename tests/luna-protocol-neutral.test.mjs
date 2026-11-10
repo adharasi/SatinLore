@@ -101,6 +101,10 @@ test("a capped transition stage retains the planned denominator and marks deferr
   assert.equal(report.transition.dispositions["not-requested"], 18);
   assert.equal(report.diagnostics.flatMap(work => work.units).filter(row => row.transition.dispatched).length, 15);
   assert.equal(report.transition.exactTypedTransitions.matched + report.transition.exactTypedTransitions.missed, 7);
+  const hardStop = report.diagnostics[0].units.find(row => row.expected.transition === "hard-stop");
+  assert.equal(hardStop.compiler.pattern, "Stop");
+  assert.equal(hardStop.compiler.appliedTransition, "hard-stop");
+  assert.deepEqual(hardStop.compiler.evidenceIds, [hardStop.id]);
 });
 
 test("only fixed request diagnostics and permitted usage reach the neutral report", async () => {
