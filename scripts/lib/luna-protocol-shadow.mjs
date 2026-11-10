@@ -2,7 +2,7 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
+import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, possibleRestartClosure, restartCheckPending, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
@@ -32,7 +32,7 @@ const inputFor = window => JSON.parse(window.body);
 const anchorLinks = new Set(["continue", "ease", "span-end", "beat-end"]);
 const repairableCueContracts = new Set(["status-effect", "phase-action", "transition-fact", "transition-action", "fact-phase", "fact-action"]);
 const cueCheckFocus = {"opening-buildup": "buildup", "romantic-context": "buildup", "adjacent-start": "enactment",
-  "restart-state": "enactment", "typed-start": "enactment"};
+  "restart-state": "restart-gate", "typed-start": "enactment"};
 const startTransitions = new Set(["onset", "restart"]);
 export const MAX_SHADOW_MICROS = 3_000_000;
 export const MAX_SHADOW_VERIFICATIONS = 384;
@@ -185,7 +185,7 @@ function profileFor(fact, recent, last) {
 
 function playbackInputs(index, decisions, blocked) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, barrierId = -1;
-  let needsRestart = false, lastAnchor = null;
+  let restartBoundary = null, lastAnchor = null;
   const anchors = new Map(), blockedScopes = new Set();
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
@@ -196,7 +196,7 @@ function playbackInputs(index, decisions, blocked) {
     const priorFact = previous?.window && previous.window.runId === result?.window?.runId && !blocked.has(unit.id - 1) ?
       previous.effectiveAnnotation ?? previous.annotation : null;
     const returned = applyRepeatedReturn(framed, blockedScopes.has(priorFact?.scopeId) ? null : priorFact, rawCue, unit.id);
-    const fact = needsRestart ? applyLatchedDecline(returned, priorFact, result?.transitionVerification, unit.id) : returned;
+    const fact = restartBoundary ? applyLatchedDecline(returned, priorFact, result?.transitionVerification, unit.id) : returned;
     if (fact !== proposed) {
       result.appliedTransitionOverride = "none";
       result.playbackDisposition = fact !== returned ? "repeated-decline" :
@@ -213,9 +213,9 @@ function playbackInputs(index, decisions, blocked) {
     const kind = fact?.fact;
     const prior = fact?.priorAnchor;
     const scopeId = continuationScope(fact, anchors.get(prior));
-    const blocksScope = kind === "protective" || transition === "hard-stop";
     if (kind === "protective" && scopeId != null) blockedScopes.add(scopeId);
-    const protective = independentBlock || blocksScope || blockedScopes.has(scopeId) || blockedScopes.has(fact?.scopeId);
+    const restrictedScope = kind === "protective" || blockedScopes.has(scopeId) || blockedScopes.has(fact?.scopeId);
+    const protective = independentBlock || restrictedScope || transition === "hard-stop";
     const elapsedGap = !protective && elapsedContinuityGap(unit, rawCue, fact, lastAnchor);
     if (elapsedGap) result.continuityGuard = "elapsed-time-gap";
     const neutralize = gap && !unit.structuralBoundary || kind === "neutralize" || transition === "uncertain-continuity" || elapsedGap;
@@ -225,13 +225,15 @@ function playbackInputs(index, decisions, blocked) {
     const frameChange = editorialFrames.has(frame) && crossesCurrentFrame(frame, lastFrame);
     const scopeChange = effectVerified && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
-    const cut = contextCut || frameChange || scopeChange && !needsRestart;
+    const cut = contextCut || frameChange || scopeChange && !restartBoundary;
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
       cut ? mark("cut", "Verified scene or narrative-frame boundary.") :
       beatEnd ? mark("beat-end", "Verified narrative beat ending.") :
       kind === "span-end" || transition === "span-end" ? mark("span-end", "Verified release of the current span.") : null;
-    if (protective || transition === "declined-restart") needsRestart = true;
-    else if (contextCut) needsRestart = false;
+    if (independentBlock) restartBoundary = "blocked";
+    else if (restrictedScope) restartBoundary = "protective";
+    else if (transition === "hard-stop" || transition === "declined-restart") restartBoundary = transition;
+    else if (contextCut) restartBoundary = null;
     if (neutralize || protective || cut || beatEnd) {
       recent = [];
       last = "Baseline";
@@ -239,19 +241,22 @@ function playbackInputs(index, decisions, blocked) {
       lastAnchor = null;
       barrierId = unit.id;
     }
+    const enactedStart = freshEnactedStart(rawCue, unit.id);
+    const pendingRestart = enactedStart && restartCheckPending(restartBoundary, result);
+    const restart = enactedStart && !pendingRestart;
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
       // Context can occupy a position in the trailing window. Only a causal
-      // annotation with supporting evidence contributes intensity to it.
-      recent = [...recent.slice(-7), current && ownCueEvidence ? rawCue.depiction : "unknown"];
+      // annotation with supporting evidence on an open gate contributes intensity.
+      recent = [...recent.slice(-7), current && ownCueEvidence && (!restartBoundary || restart) ? rawCue.depiction : "unknown"];
     }
-    const restart = freshEnactedStart(rawCue, unit.id);
+    if (pendingRestart && startTransitions.has(transition)) result.appliedTransitionOverride = "none";
     // Earlier stops establish history for a fresh enacted restart. They never
     // count as positive evidence or restore an old continuation anchor.
     const hasAnchor = kind === "continue" && prior >= barrierId && anchors.has(prior) &&
       scopeId !== null && anchors.get(prior) === scopeId;
     // A start on a cut belongs to the new scope once this pass attests it.
     const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId || hasAnchor && id === prior);
-    const clear = !protective && !neutralize && !beatEnd && (!needsRestart || restart) && current && fact?.status === "verified" &&
+    const clear = !protective && !neutralize && !beatEnd && (!restartBoundary || restart) && current && fact?.status === "verified" &&
       freshEvidence;
     const linked = clear && hasAnchor;
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
@@ -260,16 +265,18 @@ function playbackInputs(index, decisions, blocked) {
     const ease = clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
     const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
-    const rebuild = restart && (needsRestart || transition === "restart" || fact.narrativePhase === "rebuild");
+    const rebuild = restart && (restartBoundary || transition === "restart" || fact.narrativePhase === "rebuild");
     const low = clear && ownCueEvidence && !quietBoundary && kind === "low" && !restart ?
       {...mark("low", "Prefix evidence establishes an independent low cue."),
         profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone"} : null;
     const canSignal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);
+    if (canSignal && rebuild && restartCheckPending(restartBoundary)) result.appliedTransitionOverride = "restart";
     if (rawCue?.status === "verified" && activePhases.has(rawCue.narrativePhase)) {
       if (quietBoundary) result.cueGuard = "cue-boundary-suppressed";
       else if (rawCue.frame !== "current" || !current) result.cueGuard = "cue-frame-ineligible";
       else if (!ownCueEvidence) result.cueGuard = "cue-target-uncited";
-      else if (needsRestart && !restart) result.cueGuard = "cue-restart-required";
+      else if (pendingRestart) result.cueGuard = "cue-restart-unconfirmed";
+      else if (restartBoundary && !restart) result.cueGuard = "cue-restart-required";
       else if (!freshEvidence) result.cueGuard = "cue-stale-evidence";
     }
     if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
@@ -283,7 +290,7 @@ function playbackInputs(index, decisions, blocked) {
     if ((canSignal && (activePhases.has(fact.narrativePhase) || pattern === "Undertone")) || low) {
       anchors.set(unit.id, scopeId ?? unit.id);
       lastAnchor = unit.id;
-      needsRestart = false;
+      restartBoundary = null;
     }
     if (pattern !== "Baseline" && pattern !== "Divider") last = pattern;
     const size = unit.structuralBoundary ? 0 : words(unit.text);
@@ -293,7 +300,8 @@ function playbackInputs(index, decisions, blocked) {
     if (editorialFrames.has(frame)) lastFrame = frame;
     if (effectVerified && scopeId != null) lastScope = scopeId;
     return {id: unit.id, words: size, paragraph: unit.paragraph,
-      profile: {id: unit.id, pattern, block: null, phase_used: canSignal && rebuild ? "rebuild" : fact?.narrativePhase ?? "unknown",
+      profile: {id: unit.id, pattern, block: null,
+        phase_used: pendingRestart ? "quiet" : canSignal && rebuild ? "rebuild" : fact?.narrativePhase ?? "unknown",
         reason: protective ? "Playback gate blocks automatic activation." : "Compiled from available protocol evidence.",
         gate: protective ? "Blocked" : clearance},
       boundary, scope, ease, low, connector, protective,
@@ -343,7 +351,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (!discovery.length) for (const id of approved) decisions.set(id, {status: "complete-arm-ineligible"});
   }
   const telemetry = [];
-  let cueChecksStarted = 0;
+  let cueChecksStarted = 0, restartCheckReserved = false;
   const refusedRuns = new Set();
   const invalidated = window => refusedRuns.has(window.runId);
   const attest = createCausalAttestationLedger(decisions, blocked, LUNA_PROTOCOL_LIMITS.maxAttested, index.units);
@@ -356,18 +364,20 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       const candidate = currentCueAt(verdict, id, "verified");
       const opening = cueCheckReason === "opening-buildup";
       const adjacent = cueCheckReason === "adjacent-start";
-      const needsStart = ["restart-state", "typed-start"].includes(cueCheckReason);
+      const restartState = cueCheckReason === "restart-state";
+      const enactedStart = candidate && freshEnactedStart(verdict, id);
+      const protective = verdict?.status === "verified" && (verdict.fact === "protective" || verdict.transition === "hard-stop" ||
+        restartState && verdict.transition === "declined-restart");
       const support = recentRomanticContext(decisions, blocked, id, before.window?.runId);
       const linked = candidate && verdict.fact === "continue" && verdict.action === "continuation" &&
         verdict.narrativePhase === "sustain" && verdict.priorAnchor === id - 1;
       const correction = opening && verdict?.status === "neutral" && ["current", "neutral"].includes(verdict.frame) ? "quiet-opening" :
         adjacent && linked ? "linked-continuation" : undefined;
       const recoveryGuard = candidate && adjacent && !linked && !freshEnactedStart(verdict, id) ? "recovery-continuation-unlinked" :
-        candidate && needsStart && !freshEnactedStart(verdict, id) ? "recovery-start-unproved" :
+        (restartState && !protective || candidate && cueCheckReason === "typed-start") && !enactedStart ? "recovery-start-unproved" :
         candidate && verdict.action === "anticipation" && verdict.depiction === "romantic" &&
         !opening && !verdict.evidenceIds.some(evidence => support.includes(evidence)) ? "recovery-buildup-unlinked" : undefined;
       const recovered = candidate && !opening && !adjacent && !recoveryGuard;
-      const protective = verdict?.status === "verified" && (verdict.fact === "protective" || verdict.transition === "hard-stop");
       const repaired = repairableCueContracts.has(before.primaryFailure) && verdict?.status === "neutral";
       row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status, cueRecovered: recovered,
         cueRecoveryReason: cueCheckReason, cueRecoveryGuard: recoveryGuard, cueRecoveryCorrection: correction,
@@ -418,8 +428,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           const primary = row.primaryPrefix;
           const typed = row.transitionVerification;
           const unresolved = ["neutral", "uncertain"].includes(primary?.status);
-          const restartState = ["hard-stop", "declined-restart"].includes(causal.restartBoundary) &&
-            exactCurrentCue(primary, id) && primary.action === "continuation";
+          const restartState = restartCheckPending(causal.restartBoundary) &&
+            (freshEnactedStart(primary, id) || exactCurrentCue(primary, id) && primary.action === "continuation" || exactTypedStart(typed, id));
           const typedStart = !causal.restartBoundary && typed?.status === "verified" && typed.transition === "onset" &&
             exactCurrentCue(primary, id) && primary.action === "anticipation" && primary.narrativePhase === "build";
           const support = recentRomanticContext(decisions, blocked, id, window.runId);
@@ -438,7 +448,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
             record.status = "not-needed";
             return {status: "failed"};
           }
-          if (cueChecksStarted >= maxCueChecks) return {status: "failed"};
+          if (cueChecksStarted >= maxCueChecks || restartCheckReserved && !restartState && cueChecksStarted + 1 >= maxCueChecks) {
+            return {status: "failed"};
+          }
         }
         const attested = causal && verificationContext === "attested" ? causal.anchors : [];
         const focus = cueCheckFocus[record.cueCheckReason];
@@ -577,14 +589,13 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       }
     }
     const verification = pickVerification(priority, important, routine, controls, maxVerification);
-    if (maxCueChecks) {
-      for (const window of verification.slice()) {
-        const id = window.targetIds[0];
-        verification.push(prefixJob(window, id, index, prefixUnits, "cue-check"));
-      }
-    }
     for (const {id, window} of transitionJobs.sort((a, b) => b.rank - a.rank || a.id - b.id).slice(0, maxTransitionVerification)) {
       verification.push(prefixJob(window, id, index, prefixUnits, "transition"));
+    }
+    if (maxCueChecks) {
+      const checkTargets = new Map(verification.map(window => [window.targetIds[0], window]));
+      restartCheckReserved = [...checkTargets.keys()].some(id => possibleRestartClosure(index.units[id], proposals.get(id)?.fact));
+      for (const [id, window] of checkTargets) verification.push(prefixJob(window, id, index, prefixUnits, "cue-check"));
     }
     // Both model passes see only their own prefix and earlier attestations.
     // Finish both checks at a unit before exposing a merged earlier fact.

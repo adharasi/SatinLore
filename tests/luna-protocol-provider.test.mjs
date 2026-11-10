@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v12/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v13/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -130,6 +130,7 @@ test("focuses independent cue rechecks without transmitting a prior judgment or 
   for (const [focus, instruction] of [
     ["buildup", /A general statement of excitement before the other person responds is quiet setup/u],
     ["enactment", /use fact continue, cite both units and name the earlier enacted unit as priorAnchor/u],
+    ["restart-gate", /offering a hand and accepting the offer do not establish hand-holding/u],
     ["frame", /A sentence describing an event inside an established account remains in that account/u],
   ]) {
     assert.deepEqual(await run({...cueCheck, focus, previous: {action: "contact"}}), success([neutral]));
@@ -141,7 +142,7 @@ test("focuses independent cue rechecks without transmitting a prior judgment or 
     {...cueCheck, mode: "verify", focus: "enactment"}]) {
     assert.deepEqual(await run(invalid), failure("invalid-request", "request-shape"));
   }
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 4);
 });
 
 test("requires present target evidence for activation and preserves no-cue and stop verdicts", async () => {
@@ -237,9 +238,9 @@ test("the spend reserve covers the largest actual rubric, attestation and schema
     observed.push(Buffer.byteLength(request.instructions) + Buffer.byteLength(JSON.stringify(request.text.format)));
     return new Response(null, {status: 500});
   });
-  const focused = [undefined, "buildup", "enactment", "frame"].map(focus => ({...withAttested, mode: "cue-check", focus}));
+  const focused = [undefined, "buildup", "enactment", "restart-gate", "frame"].map(focus => ({...withAttested, mode: "cue-check", focus}));
   for (const supplied of [request(), withAttested, transitionRequest, ...focused]) await run(supplied);
-  assert.equal(observed.length, 7);
+  assert.equal(observed.length, 8);
   assert.equal(lunaProtocolInputOverhead, Math.max(...observed) + 512);
 });
 

@@ -1,4 +1,4 @@
-import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
+import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, restartCheckPending,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
@@ -56,7 +56,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       if (fact === "protective") run.restartBoundary = "protective";
       else if (transition === "hard-stop" || transition === "declined-restart") run.restartBoundary = transition;
       else if (contextCut) run.restartBoundary = null;
-      const restart = freshEnactedStart(rawCue, id);
+      const restart = freshEnactedStart(rawCue, id) && !restartCheckPending(run.restartBoundary, row);
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
       if (status !== "verified" || frame !== "current" || !exactCurrentCue(rawCue, id) ||

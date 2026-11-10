@@ -20,7 +20,8 @@ async function main() {
       return fetch(...args);
     }});
   }
-  const report = await runLunaProtocolNeutral({mode, arm: values.arm, provider, signal: AbortSignal.timeout(300_000)});
+  const report = await runLunaProtocolNeutral({mode, arm: values.arm, provider, maxCueChecks: mode === "offline" ? 0 : 6,
+    signal: AbortSignal.timeout(300_000)});
   console.log(JSON.stringify({...report, externalCalls}, null, 2));
 }
 

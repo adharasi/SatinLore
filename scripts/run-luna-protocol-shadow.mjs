@@ -12,6 +12,7 @@ const args = {
   "max-attempts": {type: "string", default: "960"}, "max-payload-bytes": {type: "string", default: "5000000"},
   "max-micros": {type: "string", default: "1000000"}, "max-verification": {type: "string", default: "96"},
   "max-windows": {type: "string", default: "96"}, "prefix-units": {type: "string", default: "24"},
+  "max-cue-checks": {type: "string", default: "6"},
   "verification-context": {type: "string", default: "attested"}, "target-roster": {type: "string"},
   "max-transition-verification": {type: "string", default: "32"}, "no-transition-verification": {type: "boolean"},
 };
@@ -46,13 +47,15 @@ async function main(options) {
   }
   const maxVerification = number(options["max-verification"]);
   const maxTransitionVerification = number(options["max-transition-verification"]);
+  const maxCueChecks = number(options["max-cue-checks"]);
+  const verifyTransitions = !options["no-transition-verification"];
   const prefixUnits = number(options["prefix-units"]);
   const verificationContext = options["verification-context"];
   const limits = {maxRequests: number(options["max-windows"])};
   const budget = createLunaShadowBudget({maxAttempts: number(options["max-attempts"]),
     maxSourceBytes: number(options["max-payload-bytes"]), maxMicros: number(options["max-micros"])});
   if (!["windowed", "complete"].includes(options.arm) || !["recent", "attested"].includes(verificationContext) ||
-      Math.max(maxVerification, maxTransitionVerification) > MAX_SHADOW_VERIFICATIONS || prefixUnits < 1 || prefixUnits > 32) {
+      Math.max(maxVerification, maxTransitionVerification) > MAX_SHADOW_VERIFICATIONS || maxCueChecks > 8 || prefixUnits < 1 || prefixUnits > 32) {
     throw new Error("Use a supported arm and bounded verification limit.");
   }
   // Validate the entire cohort before any dispatch. Clearance input comes from
@@ -71,9 +74,12 @@ async function main(options) {
     const targets = roster.get(id);
     if (targets) {
       const approved = new Set(grant?.spans.map(({id}) => id) ?? []);
-      if (targets.editionDigest !== index.editionDigest || !Array.isArray(targets.targetIds) ||
-          new Set(targets.targetIds).size !== targets.targetIds.length || targets.targetIds.length > maxVerification ||
-          !targets.targetIds.every(id => approved.has(id))) throw new Error("Use exact granted native targets.");
+      const grantedTargets = (ids, max) => Array.isArray(ids) && ids.length <= max &&
+        new Set(ids).size === ids.length && ids.every(id => approved.has(id));
+      if (targets.editionDigest !== index.editionDigest || !grantedTargets(targets.targetIds, maxVerification) ||
+          !grantedTargets(targets.transitionTargetIds ?? [], verifyTransitions ? maxTransitionVerification : 0)) {
+        throw new Error("Use exact granted native targets.");
+      }
     }
   }
   const file = await open(output, "wx", 0o600);
@@ -85,10 +91,12 @@ async function main(options) {
     for (const {id, text, sourceSha256} of selected) {
       const {grant, blockedIds} = byId.get(id) ?? {};
       const verificationTargets = roster.get(id)?.targetIds ?? [];
+      const transitionTargets = roster.get(id)?.transitionTargetIds ?? [];
+      const pinnedTargets = [...verificationTargets, ...transitionTargets];
       results.push(await runLunaProtocolShadow({id, text, sourceSha256, grant, blockedIds, provider, budget, signal,
-        arm: options.arm, maxVerification, limits, prefixUnits, verificationContext, verificationTargets,
-        verifyTransitions: !options["no-transition-verification"], maxTransitionVerification,
-        startId: verificationTargets.length ? Math.min(...verificationTargets) : 0}));
+        arm: options.arm, maxVerification, maxCueChecks, limits, prefixUnits, verificationContext, verificationTargets,
+        verifyTransitions, maxTransitionVerification, transitionTargets,
+        startId: pinnedTargets.length ? Math.min(...pinnedTargets) : 0}));
     }
     const manifest = {method: options.live ? "luna-protocol-live" : "luna-protocol-offline",
       model: options.live ? LUNA_PROTOCOL_MODEL : null,

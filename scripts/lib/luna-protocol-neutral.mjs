@@ -46,7 +46,7 @@ const discrepancyVersion = "neutral-discrepancies-v2";
 const semanticContractFailures = new Set(["status-effect", "target-evidence", "transition-fact", "transition-frame", "cue-action",
   "phase-action", "transition-action", "fact-phase", "fact-action", "fact-frame", "scope-id", "prior-anchor", "attested-evidence"]);
 const structuralResponseFailures = new Set(["output-schema", "response-envelope", "response-body"]);
-const guardCauses = {"cue-restart-required": "refractory-gate", "unattested-scope": "scope-unattested",
+const guardCauses = {"cue-restart-required": "refractory-gate", "cue-restart-unconfirmed": "restart-confirmation", "unattested-scope": "scope-unattested",
   "cue-stale-evidence": "stale-evidence", "cue-boundary-suppressed": "boundary-gate",
   "cue-frame-ineligible": "wrong-frame", "cue-target-uncited": "target-uncited"};
 const recoveryReasons = new Set(["restart-state", "typed-start", "romantic-context", "discovery-disagreement", "contract-repair",
@@ -79,7 +79,7 @@ const failureReasons = new Set([...LUNA_PROTOCOL_FAILURE_REASONS, "rejected-fact
 const targetFailureReasons = new Set(LUNA_PROTOCOL_TARGET_FAILURES);
 const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "continuation-scope-alias", "duplicate-frame-entry", "duplicate-frame-return", "repeated-decline",
   "transition-conflict", "protective-transition-conflict", "cue-boundary-suppressed", "cue-target-uncited", "cue-frame-ineligible",
-  "cue-restart-required", "cue-stale-evidence"]);
+  "cue-restart-required", "cue-restart-unconfirmed", "cue-stale-evidence"]);
 const dispositions = new Set([...observedStatuses, "uncertain", "abstain", "withheld", "unavailable", "unverified",
   "failed", "missing", "budget-deferred", "provider-unavailable", "complete-arm-ineligible", "provider-refused",
   "refusal-dependent", "incomplete", "invalid-response", "transient", "cancelled", "timed-out", "invalid-request",

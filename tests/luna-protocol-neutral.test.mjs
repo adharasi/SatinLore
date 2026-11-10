@@ -59,7 +59,7 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
 
 test("reference mock exercises all pinned cues and typed events in each arm", async () => {
   for (const arm of ["windowed", "complete"]) {
-    const report = await runLunaProtocolNeutral({mode: "mock", arm, now});
+    const report = await runLunaProtocolNeutral({mode: "mock", arm, now, maxCueChecks: 6});
     assert.equal(report.arm, arm);
     assert.equal(report.measurement, "offline-reference-mock");
     assert.equal(report.externalCalls, 0);
@@ -342,9 +342,9 @@ test("targeted cue checks preserve primary scores and separate direct and reader
       fact: low ? "low" : "none", scopeId: null, priorAnchor: null, evidenceIds: active ? [unitId] : []};
   }), usage: {inputTokens: 4, outputTokens: 2}});
   const report = await runLunaProtocolNeutral({mode: "mock", provider, now, arm: "complete",
-    fixtureIds: ["first-dance"], maxCueChecks: 2});
+    fixtureIds: ["first-dance"], maxCueChecks: 3});
   const units = report.diagnostics[0].units;
-  assert.equal(report.planning.cueCheckTargetLimit, 2);
+  assert.equal(report.planning.cueCheckTargetLimit, 3);
   assert.equal(report.planning.cueCheckAttempts, 2);
   assert.equal(report.prefix.exactCues.matched, 1);
   assert.equal(report.applied.exactCues.matched, 2);
@@ -379,13 +379,13 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(units[5].cueRecovery.status, "budget-deferred");
   assert.equal(units[5].cueRecovery.selected, true);
 
-  const options = {mode: "mock", provider, now, arm: "complete", maxCueChecks: 2, maxAttempts: 48};
+  const options = {mode: "mock", provider, now, arm: "complete", maxCueChecks: 3, maxAttempts: 48};
   const left = await runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "old-letter"], transitionLimit: 19});
   const right = await runLunaProtocolNeutral({...options, fixtureIds: ["reading-room", "practice-drill"], transitionLimit: 14});
   const combined = combineNeutralReports([left, right]);
-  assert.equal(combined.cueRecovery.attemptedTargets, 8);
-  assert.equal(combined.cueRecovery.usage.attempts, 8);
-  assert.equal(combined.cueRecovery.usage.inputTokens, 32);
+  assert.equal(combined.cueRecovery.attemptedTargets, 9);
+  assert.equal(combined.cueRecovery.usage.attempts, 9);
+  assert.equal(combined.cueRecovery.usage.inputTokens, 36);
   assert.equal(combined.cueRecovery.recoveredTargets, 8);
   assert.equal(combined.reader.targets, 33);
 });
@@ -398,7 +398,7 @@ test("a repaired neutral row stays missing in primary scores and is applied sepa
     fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
   }))});
   const report = await runLunaProtocolNeutral({mode: "mock", provider, now, arm: "complete",
-    fixtureIds: ["first-dance"], maxCueChecks: 1});
+    fixtureIds: ["first-dance"], maxCueChecks: 2});
   const row = report.diagnostics[0].units[0];
   assert.equal(row.prefix.targetDisposition, "rejected");
   assert.equal(row.prefix.cue, null);
