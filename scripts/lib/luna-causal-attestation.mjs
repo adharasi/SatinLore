@@ -1,4 +1,4 @@
-import {applyFrameScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
+import {applyFrameScope, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
@@ -32,7 +32,8 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
         continue;
       }
       if (!verified) continue;
-      const {frame, scopeId, action, narrativePhase, fact, transition, status, evidenceIds} = annotation;
+      const {frame, action, narrativePhase, fact, transition, status, evidenceIds, priorAnchor} = annotation;
+      const scopeId = continuationScope(annotation, run.anchors.find(anchor => anchor.unitId === priorAnchor)?.scopeId);
       const rawCue = row.prefixVerified ? row.annotation : null;
       const elapsedGap = elapsedContinuityGap(units[id], rawCue, annotation, run.anchors.at(-1)?.unitId);
       const independentScope = scopeId === id && run.scope !== null && scopeId !== run.scope;
@@ -54,7 +55,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
       if (status !== "verified" || frame !== "current" || !exactCurrentCue(rawCue, id) ||
-          run.protectedScopes.has(scopeId) || run.restartBoundary && !restart || elapsedGap ||
+          run.protectedScopes.has(scopeId) || run.protectedScopes.has(annotation.scopeId) || run.restartBoundary && !restart || elapsedGap ||
           ["neutralize", "protective", "beat-end"].includes(fact) ||
           ["hard-stop", "declined-restart", "uncertain-continuity", "beat-end", "interruption",
             "non-romantic-activity-stop", "span-end"].includes(transition) ||

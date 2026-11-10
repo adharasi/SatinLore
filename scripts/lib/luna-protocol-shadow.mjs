@@ -2,7 +2,7 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {applyFrameScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
+import {applyFrameScope, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
@@ -202,10 +202,11 @@ function playbackInputs(index, decisions, blocked) {
       fact.narrativePhase === "unknown" && !reviewable(fact);
     const transition = fact?.transition;
     const kind = fact?.fact;
-    const scopeId = fact?.scopeId;
+    const prior = fact?.priorAnchor;
+    const scopeId = continuationScope(fact, anchors.get(prior));
     const blocksScope = kind === "protective" || transition === "hard-stop";
     if (kind === "protective" && scopeId != null) blockedScopes.add(scopeId);
-    const protective = independentBlock || blocksScope || blockedScopes.has(scopeId);
+    const protective = independentBlock || blocksScope || blockedScopes.has(scopeId) || blockedScopes.has(fact?.scopeId);
     const elapsedGap = !protective && elapsedContinuityGap(unit, rawCue, fact, lastAnchor);
     if (elapsedGap) result.continuityGuard = "elapsed-time-gap";
     const neutralize = gap && !unit.structuralBoundary || kind === "neutralize" || transition === "uncertain-continuity" || elapsedGap;
@@ -240,10 +241,10 @@ function playbackInputs(index, decisions, blocked) {
     const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId);
     const clear = !protective && !neutralize && !beatEnd && (!needsRestart || restart) && current && fact?.status === "verified" &&
       freshEvidence;
-    const prior = fact?.priorAnchor;
     const linked = clear && prior > barrierId && anchors.has(prior) &&
-      fact.scopeId !== null && anchors.get(prior) === fact.scopeId;
+      scopeId !== null && anchors.get(prior) === scopeId;
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
+    else if (result && linked && scopeId !== fact.scopeId) result.playbackDisposition = "continuation-scope-alias";
     const scope = linked ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;
     const ease = clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
@@ -269,7 +270,7 @@ function playbackInputs(index, decisions, blocked) {
       cut && !low && !canSignal ? "Reset" : canSignal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
     if (cut && !low && pattern === "Baseline") pattern = "Reset";
     if ((canSignal && (activePhases.has(fact.narrativePhase) || pattern === "Undertone")) || low) {
-      anchors.set(unit.id, fact.scopeId ?? unit.id);
+      anchors.set(unit.id, scopeId ?? unit.id);
       lastAnchor = unit.id;
       needsRestart = false;
     }
@@ -350,7 +351,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         verdict.narrativePhase === "sustain" && verdict.priorAnchor === id - 1;
       const correction = opening && verdict?.status === "neutral" && ["current", "neutral"].includes(verdict.frame) ? "quiet-opening" :
         adjacent && linked ? "linked-continuation" : undefined;
-      const recoveryGuard = candidate && adjacent && !linked ? "recovery-continuation-unlinked" :
+      const recoveryGuard = candidate && adjacent && !linked && !freshEnactedStart(verdict, id) ? "recovery-continuation-unlinked" :
         candidate && needsStart && !freshEnactedStart(verdict, id) ? "recovery-start-unproved" :
         candidate && verdict.action === "anticipation" && verdict.depiction === "romantic" &&
         !opening && !verdict.evidenceIds.some(evidence => support.includes(evidence)) ? "recovery-buildup-unlinked" : undefined;
@@ -413,7 +414,10 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           const support = recentRomanticContext(decisions, blocked, id, window.runId);
           const opening = !causal.restartBoundary && exactCurrentCue(primary, id) && primary.depiction === "romantic" &&
             primary.action === "anticipation" && primary.narrativePhase === "build" && !support.length;
-          const adjacent = !causal.restartBoundary && !exactTypedStart(typed, id) &&
+          const prior = decisions.get(id - 1);
+          const duplicatedOnset = typed?.transition === "onset" && primary?.scopeId != null &&
+            prior?.prefixVerified && prior.annotation.scopeId === primary.scopeId && freshEnactedStart(prior.annotation, id - 1);
+          const adjacent = !causal.restartBoundary && (!exactTypedStart(typed, id) || duplicatedOnset) &&
             followsDisputedStart(decisions, blocked, id, window.runId, primary);
           const romanticContext = primary?.status === "neutral" && primary.frame === "current" &&
             romanticDepictions.has(primary.depiction) && support.length > 0;

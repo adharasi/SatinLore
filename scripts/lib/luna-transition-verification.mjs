@@ -45,6 +45,11 @@ export function crossesCurrentFrame(frame, previousFrame) {
   return previousFrame != null && (frame === "current") !== (previousFrame === "current");
 }
 
+export function continuationScope(annotation, anchorScope) {
+  return annotation?.fact === "continue" && annotation.scopeId === annotation.priorAnchor && anchorScope != null ?
+    anchorScope : annotation?.scopeId;
+}
+
 export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {
   return lastAnchor != null && unit.id - lastAnchor <= 2 && cue?.status === "neutral" &&
     cue.frame === "current" && annotation?.status === "neutral" && noEvent.has(annotation.transition) &&

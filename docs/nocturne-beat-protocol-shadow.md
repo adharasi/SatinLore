@@ -190,6 +190,24 @@ Both v9 shards completed on the same 33 targets as the v8 windowed arm. They use
 
 The timing report pins five exact enacted starts. `startTiming.typed` scores the explicit event, and `startTiming.enactedPhase` scores exact enactment with the correct phase. Each lane records adjacent shifts without awarding an exact match. `replayNeutralStartTiming(report)` also works on saved source-free reports carrying the existing behavior reference. Compare discovery, primary verification, accepted corrections and applied behavior separately. A timing correction leaves earlier evidence and raw scores intact.
 
+### v10 live results and v11 follow-up
+
+The four windowed fixture submissions used 76 provider calls, and a First Dance replicate used 25 more. All 101 calls settled under one $3 run ID for an estimated $0.037724, leaving $2.962276 available. The old page showed 27 requests remaining before deployment. The v10 page and grouped run used no daily or monthly benchmark request counter. The durable ledger also passed a local 1,000-call-equivalent test under a single run ID.
+
+| Exact measure | v9 windowed | v10 windowed |
+| --- | ---: | ---: |
+| Primary buildup matches and extras | 4/4, 2 extras | 4/4, 0 extras |
+| Accepted enacted starts and extras | 4/5, 1 extra | 5/5, 1 extra |
+| Independent typed starts and extras | 5/5, 1 extra | 4/5, 1 extra |
+| Applied sustained continuation | 0/1 | 0/1 |
+| Applied reader cues and extras | 8/10, 1 extra | 8/10, 0 extras |
+| Playback gates | 32/33 | 33/33 |
+| Exact typed boundaries and extras | 7/7, 0 extras | 7/7, 0 extras |
+
+The primary v10 run fixed the early setup and placed the first onset correctly. At the next sentence, discovery identified continuation while both causal passes called a second onset. The replicate identified continuation there but named its scope with the already verified onset ID, so the compiler dropped the link. The independent typed pass rejected one true restart in each of the two affected fixtures because Luna put the earlier context in the anchor field.
+
+The v11 follow-up reviews consecutive onsets in the same verified scope even when both passes agree. A linked continuation can replace the second onset after an independent review. It also recognizes the exact prior anchor as an alias for the already verified scope. Unrelated scope mismatches, withheld anchors and earlier barriers remain ineligible. The typed adapter accepts a redundant earlier anchor only when the cited ID is in the submitted prefix and the verified start cites its own target. It keeps the cited history in the evidence list and records the normalization. These three corrections are tested independently of the live model.
+
 ## Qualification
 
 Compare exact reviewed compiler output separately from semantic recognition. The shadow study reports usable model coverage, cue and typed-transition precision and recall, profile agreement, continuity links and causal trace violations. Compare current reader and archival provider outputs in separate lanes. For a paid paired run, hold the target roster and recent prefix fixed, use a shared run budget and stop the comparison for a refused run. Report both effective scores on every planned target and accuracy among targets both arms resolved. Compare recovered and lost matches and added false positives. Earlier eligibility evidence and earlier continuity anchors are separate strata. Verify timing and simulator behavior after model qualification.

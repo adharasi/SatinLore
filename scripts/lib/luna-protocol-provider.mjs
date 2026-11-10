@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v10";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v11";
 export const LUNA_PROTOCOL_LIMITS = Object.freeze({
   maxUnits: 256, maxTargets: 192, maxVerifyUnits: 32, maxUnitBytes: 24_000,
   maxSourceBytes: 128_000, maxBodyBytes: 192_000, maxEvidenceIds: 8, maxAttested: 16,
@@ -36,7 +36,8 @@ export const LUNA_PROTOCOL_TARGET_FAILURES = Object.freeze([
   "fact-frame", "fact-action", "fact-phase", "phase-action", "transition-action",
 ]);
 const canonicalNoEvent = "canonical-no-event";
-export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([canonicalNoEvent]);
+const startContextAnchor = "start-context-anchor";
+export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([canonicalNoEvent, startContextAnchor]);
 
 const url = "https://api.openai.com/v1/responses";
 const safetyCodes = new Set(["content_filter", "content_policy_violation", "safety_violation"]);
@@ -119,6 +120,7 @@ const transitionInstructions = [
   freshStart,
   targetEnactment,
   "Declined-restart requires a refused or deferred attempt to resume the romantic or sexual interaction and uses neutralize. Accent marks a change within an already enacted interaction. Restart, onset and accent use fact none.",
+  "For onset or restart use priorAnchor null. Cite a relevant earlier stop or break in evidenceIds as context along with the exact start target.",
   "Use memory-entry, imagined-entry or reported-entry only when the narrative starts depicting events in that frame. A target that begins reading or recounting a past account can be reported-entry. Set frame to reported if the target enters the account, or mixed if it also depicts live action. The speaker's physical presence alone does not make the destination current or mixed. A passing reference remains in its surrounding frame. Frame transitions use cut and the destination frame or mixed. A return alone supplies no action. Events within a recollection, imagined scene or report do not establish a transition of the live interaction. If the target remains inside that frame, return neutral unless the target itself establishes a true narrative boundary.",
   frameReturn,
   targetFrame,
@@ -211,7 +213,10 @@ export function lunaProtocolTransitionViolation(row) {
 }
 
 function canonicalTransition(row, raw) {
-  const {status, transition, fact, scopeId, evidenceIds, priorAnchor} = row;
+  const {status, transition, fact, frame, unitId, scopeId, evidenceIds, priorAnchor} = row;
+  // Start context can remain in the evidence without asserting a continuation link.
+  if (status === "verified" && starts.has(transition) && fact === "none" && frame === "current" &&
+      raw(priorAnchor) && evidenceIds.includes(priorAnchor) && evidenceIds.includes(unitId)) return {...row, priorAnchor: null};
   if (status === "verified" || fact !== "none" || priorAnchor !== null ||
       (scopeId !== null && !raw(scopeId)) || !evidenceIds.every(raw)) return row;
   const unresolved = status === "uncertain" || status === "abstain";
@@ -317,7 +322,7 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
     if (reason) targetFailures.push({unitId, reason});
     else {
       facts.push(mode === "transition" ? {...row, depiction: "unknown", narrativePhase: "unknown", action: "unknown"} : row);
-      if (row !== submitted) targetNormalizations.push({unitId, reason: canonicalNoEvent});
+      if (row !== submitted) targetNormalizations.push({unitId, reason: row.status === "verified" ? startContextAnchor : canonicalNoEvent});
     }
   }
   return {facts, targetFailures, targetNormalizations};

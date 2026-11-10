@@ -585,10 +585,10 @@ test("an opening buildup is suppressed only by an independent definitive quiet r
 });
 
 test("an adjacent disputed onset can become a linked continuation without moving evidence backward", async () => {
-  for (const linked of [true, false]) {
+  for (const [linked, typedAgrees] of [[true, false], [true, true], [false, true]]) {
     const calls = [];
     const provider = fake((id, mode) => {
-      if (mode === "transition") return id === 1 ? typedTransition(id, {fact: "none", transition: "onset"}) :
+      if (mode === "transition") return id === 1 || typedAgrees ? typedTransition(id, {fact: "none", transition: "onset"}) :
         typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
       if (mode === "cue-check") return active(id, "verify", {fact: linked ? "continue" : "none",
         priorAnchor: linked ? 1 : null, evidenceIds: [1, 2], narrativePhase: "sustain", action: "continuation"});
@@ -606,6 +606,22 @@ test("an adjacent disputed onset can become a linked continuation without moving
     assert.equal(row.cueRecoveryGuard, linked ? undefined : "recovery-continuation-unlinked");
     assert.equal(row.action, linked ? "continuation" : "contact");
     assert.equal(run.units[1].pattern, "Onset rise");
+  }
+});
+
+test("a verified continuation can use the exact prior anchor as a scope alias", async () => {
+  for (const scopeId of [2, 1]) {
+    const provider = fake((id, mode) => {
+      if (id === 2) return active(id, mode, {fact: "none", narrativePhase: "onset", action: "contact", transition: "onset"});
+      if (id === 3) return active(id, mode, {fact: "continue", narrativePhase: "sustain", action: "continuation", scopeId,
+        priorAnchor: 2, evidenceIds: [2, 3]});
+      return neutral(id);
+    });
+    const input = fixture("They arrived together. The doors opened. He took her hand. They kept holding hands as they walked.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2, 3]});
+    assert.equal(run.units[3].scopeId, scopeId);
+    assert.equal(run.units[3].readerCue, scopeId === 2);
+    assert.equal(run.units[3].playbackDisposition, scopeId === 2 ? "continuation-scope-alias" : "unattested-scope");
   }
 });
 

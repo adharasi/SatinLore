@@ -77,8 +77,9 @@ const boundaryTransitions = new Set(["interruption", "span-end", "beat-end", "sc
   "non-romantic-activity-stop"]);
 const failureReasons = new Set([...LUNA_PROTOCOL_FAILURE_REASONS, "rejected-fact-contract"]);
 const targetFailureReasons = new Set(LUNA_PROTOCOL_TARGET_FAILURES);
-const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "duplicate-frame-entry", "transition-conflict", "protective-transition-conflict",
-  "cue-boundary-suppressed", "cue-target-uncited", "cue-frame-ineligible", "cue-restart-required", "cue-stale-evidence"]);
+const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "continuation-scope-alias", "duplicate-frame-entry",
+  "transition-conflict", "protective-transition-conflict", "cue-boundary-suppressed", "cue-target-uncited", "cue-frame-ineligible",
+  "cue-restart-required", "cue-stale-evidence"]);
 const dispositions = new Set([...observedStatuses, "uncertain", "abstain", "withheld", "unavailable", "unverified",
   "failed", "missing", "budget-deferred", "provider-unavailable", "complete-arm-ineligible", "provider-refused",
   "refusal-dependent", "incomplete", "invalid-response", "transient", "cancelled", "timed-out", "invalid-request",

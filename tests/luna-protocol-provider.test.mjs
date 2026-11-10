@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v10/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v11/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -266,6 +266,7 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /use status uncertain or abstain with transition unknown/u);
   assert.match(sent.instructions, /reported or remembered action does not establish a prior current start/u);
   assert.match(sent.instructions, /If the target ends before participation begins, it has no restart/u);
+  assert.match(sent.instructions, /For onset or restart use priorAnchor null/u);
   assert.match(sent.instructions, /Interior sentences in the same account have no entry, return, or live-interaction transition/u);
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
@@ -333,6 +334,28 @@ test("canonicalizes only benign no-event metadata after validating the response 
   ]) {
     const run = provider(async () => response([{...neutral, ...extra}]));
     assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
+  }
+});
+
+test("retains verified starts and their evidence when an in-prefix context ID is also named as an anchor", async () => {
+  const reason = "start-context-anchor";
+  assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));
+  const valid = transitionRow("restart", "none", {scopeId: 10, priorAnchor: 10, evidenceIds: [10, 11]});
+  for (const transition of ["onset", "restart"]) {
+    const row = {...valid, transition};
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), {...success([normalizedTransitionRow({...row, priorAnchor: null})]),
+      targetNormalizations: [{unitId: 11, reason}]});
+  }
+  for (const [extra, rejectedReason] of [
+    [{priorAnchor: 9}, "prior-anchor"], [{priorAnchor: 11}, "prior-anchor"],
+    [{priorAnchor: 5, evidenceIds: [5, 11]}, "attested-evidence"],
+    [{evidenceIds: [11]}, "prior-anchor"], [{evidenceIds: [10]}, "prior-anchor"],
+    [{frame: "reported"}, "prior-anchor"], [{fact: "cut"}, "prior-anchor"],
+    [{status: "uncertain"}, "prior-anchor"], [{transition: "accent"}, "prior-anchor"],
+  ]) {
+    const run = provider(async () => response([{...valid, ...extra}]));
+    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, rejectedReason)]));
   }
 });
 
