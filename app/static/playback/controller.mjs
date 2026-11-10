@@ -174,23 +174,30 @@ export class PlaybackController {
 
   setPosition(index) {
     const next = this._position(index);
-    let scopedForward = false;
+    let allowAttenuation = false;
     if (next !== this.position) {
       this.levelAdjustment = 0;
       const previousProfile = this.sceneProfiles[this.position], nextProfile = this.sceneProfiles[next];
       const patternChanged = scenePatternChanged(previousProfile, nextProfile, this.feel.automaticMovement, true);
-      if (this.state === "PLAYING" && !this.readingSeeking && (patternChanged ||
-          this.sceneProfiles[next]?.phase && this.levels[this.position] !== this.levels[next])) {
+      if (this.state === "PLAYING" && !this.readingSeeking) {
         const sameContextScene = nextProfile?.simulatorSceneId !== undefined &&
           nextProfile.simulatorSceneId === previousProfile?.simulatorSceneId;
-        scopedForward = sameContextScene && next === this.position + 1;
-        const keepStageTime = !patternChanged && (sameContextScene || repeatingSimulatorScenePattern(previousProfile, "scene") &&
-          repeatingSimulatorScenePattern(nextProfile, "scene"));
-        this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output, keepStageTime, sameContextScene);
+        const previousScene = previousProfile?.simulatorSceneId ?? previousProfile?.sceneId;
+        const nextScene = nextProfile?.simulatorSceneId ?? nextProfile?.sceneId;
+        const continuousBackground = this.feel.settings.mode === "continuous" &&
+          nextProfile?.phase === "quiet" && this.levels[next] === 0;
+        allowAttenuation = next === this.position + 1 && this.feel.playbackMode === "story" && previousScene != null &&
+          !previousProfile.manual && nextProfile?.phase && !nextProfile.manual && !nextProfile.quiet &&
+          (previousScene === nextScene || continuousBackground);
+        if (patternChanged || nextProfile?.phase && this.levels[this.position] !== this.levels[next]) {
+          const keepStageTime = !patternChanged && (sameContextScene || repeatingSimulatorScenePattern(previousProfile, "scene") &&
+            repeatingSimulatorScenePattern(nextProfile, "scene"));
+          this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output, keepStageTime, sameContextScene);
+        }
       }
     }
     this.position = next;
-    return this._desiredChanged(scopedForward);
+    return this._desiredChanged(allowAttenuation);
   }
 
   setReadingSeeking(active) {
@@ -289,17 +296,22 @@ export class PlaybackController {
     return this._desiredChanged();
   }
 
-  _desiredChanged(scopedForward = false) {
-    // Reductions never wait behind the next dispatch. Resume only on its normal cadence.
+  _desiredChanged(allowAttenuation = false) {
+    // Reductions take effect immediately. Positive dispatch still uses the normal cadence.
     const intent=this._intent();
     const reduced=this.outputLevels&&intent.levels&&Object.keys(this.outputLevels).some(id=>this.outputLevels[id]>(intent.levels[id]??0));
     if (this.state === "PLAYING" && (intent.level < this.output || reduced)) {
-      // A software pulse can ease within its original expiry on the next
-      // verified sentence of the same scene.
-      if (scopedForward && !intent.levels && intent.level > 0 && typeof this.device.attenuate === "function") {
-        try { this.output = this._invoke("attenuate", intent.level); }
-        catch { return this._fail(); }
-      } else if (!this._stopDevice()) return this._fail();
+      // A software pulse can ease in place without extending its original expiry.
+      if (allowAttenuation && !intent.levels && intent.level > 0 && typeof this.device.attenuate === "function") {
+        try {
+          const level = this._invoke("attenuate", intent.level);
+          if (Number.isInteger(level) && level >= 0 && level <= intent.level) {
+            this.output = level;
+            return this._notify();
+          }
+        } catch { return this._fail(); }
+      }
+      if (!this._stopDevice()) return this._fail();
     }
     return this._notify();
   }

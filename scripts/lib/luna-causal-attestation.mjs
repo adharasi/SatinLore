@@ -15,7 +15,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
   const runs = new Map();
   return ({runId, firstId, target}) => {
     if (!runs.has(runId)) runs.set(runId, {cursor: runId, anchors: [], frame: null, scope: null,
-      barrierId: -1, needsRestart: false, protectedScopes: new Set()});
+      barrierId: -1, restartBoundary: null, protectedScopes: new Set()});
     const run = runs.get(runId);
     if (target < run.cursor) throw new Error("Verification must advance in source order.");
     for (; run.cursor < target; run.cursor++) {
@@ -28,7 +28,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
           annotation.narrativePhase === "unknown" && !verified) {
         run.anchors = [];
         run.barrierId = id;
-        if (blocked.has(id)) run.needsRestart = true;
+        if (blocked.has(id)) run.restartBoundary = "blocked";
         continue;
       }
       if (!verified) continue;
@@ -38,7 +38,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const independentScope = scopeId === id && run.scope !== null && scopeId !== run.scope;
       const frameChange = frames.has(frame) && crossesCurrentFrame(frame, run.frame);
       const contextCut = verifiedContextCut(annotation, id);
-      const cut = contextCut || frameChange || independentScope && !run.needsRestart;
+      const cut = contextCut || frameChange || independentScope && !run.restartBoundary;
       const barrier = exits.has(fact) || endings.has(transition) || cut || elapsedGap;
       if (barrier) {
         run.anchors = [];
@@ -47,22 +47,24 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       if (frames.has(frame)) run.frame = frame;
       if (scopeId != null) run.scope = scopeId;
       if (fact === "protective" && scopeId != null) run.protectedScopes.add(scopeId);
-      if (fact === "protective" || transition === "hard-stop" || transition === "declined-restart") run.needsRestart = true;
-      else if (contextCut) run.needsRestart = false;
+      if (fact === "protective") run.restartBoundary = "protective";
+      else if (transition === "hard-stop" || transition === "declined-restart") run.restartBoundary = transition;
+      else if (contextCut) run.restartBoundary = null;
       const restart = freshEnactedStart(rawCue, id);
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
       if (status !== "verified" || frame !== "current" || !exactCurrentCue(rawCue, id) ||
-          run.protectedScopes.has(scopeId) || run.needsRestart && !restart || elapsedGap ||
+          run.protectedScopes.has(scopeId) || run.restartBoundary && !restart || elapsedGap ||
           ["neutralize", "protective", "beat-end"].includes(fact) ||
           ["hard-stop", "declined-restart", "uncertain-continuity", "beat-end", "interruption",
             "non-romantic-activity-stop", "span-end"].includes(transition) ||
           !evidenceIds.includes(id) || !cut && !restart && evidenceIds.some(id => id <= run.barrierId) ||
           !(fact === "low" || fact === "none" && rises.has(narrativePhase) && actions.has(action))) continue;
       run.anchors.push({unitId: id, scopeId: scopeId ?? id, frame, action, narrativePhase});
-      run.needsRestart = false;
+      run.restartBoundary = null;
     }
     run.anchors = run.anchors.filter(({unitId}) => target - unitId <= MAX_ANCHOR_DISTANCE);
-    return run.anchors.filter(({unitId}) => unitId < firstId).slice(-maxAttested);
+    return {anchors: run.anchors.filter(({unitId}) => unitId < firstId).slice(-maxAttested), restartBoundary: run.restartBoundary,
+      protectedScopes: run.protectedScopes};
   };
 }

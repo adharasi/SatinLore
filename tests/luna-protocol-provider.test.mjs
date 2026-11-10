@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createLunaProtocolProvider, LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_MODEL,
-  LUNA_PROTOCOL_TARGET_FAILURES, lunaProtocolOutputTokens} from "../scripts/lib/luna-protocol-provider.mjs";
+  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolOutputTokens}
+  from "../scripts/lib/luna-protocol-provider.mjs";
 
 const units = [{id: 10, text: "June noticed Lee watching her."}, {id: 11, text: "She smiled."}, {id: 12, text: "The clock chimed."}];
 const secret = "test-key-never-returned";
@@ -94,12 +95,16 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v8/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v9/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
   assert.match(sent.instructions, /Mere politeness, small talk, shared logistics/u);
-  assert.match(sent.instructions, /immediate offer and acceptance can support build and anticipation/u);
+  assert.match(sent.instructions, /deliberate echo with a meaningful reaction, gesture, or specific shared desire/u);
+  assert.match(sent.instructions, /visible invitation that advances an already mutually wanted immediate interaction/u);
+  assert.match(sent.instructions, /isolated opening request to which nobody responds at the target stays quiet/u);
+  assert.match(sent.instructions, /present physical reach to begin the accepted interaction/u);
+  assert.match(sent.instructions, /Use restart for the first renewed enacted action after a current stop, decline or break/u);
   assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
@@ -119,7 +124,8 @@ test("requires present target evidence for activation and preserves no-cue and s
   }
   for (const [row, reason] of [[{...enactedRestart, evidenceIds: [10]}, "target-evidence"],
     [{...enactedRestart, evidenceIds: [11, 12]}, "evidence-id"], [{...enactedRestart, status: "candidate"}, "status-mode"],
-    [{...enactedRestart, action: "anticipation"}, "cue-action"], [{...enactedRestart, frame: "reported"}, "cue-action"],
+    [{...enactedRestart, action: "anticipation"}, "cue-action"], [{...enactedRestart, action: "continuation"}, "cue-action"],
+    [{...enactedRestart, frame: "reported"}, "cue-action"],
     [{...noCue, narrativePhase: "build"}, "status-effect"], [{...uncertain, action: "contact"}, "status-effect"],
     [{...stop, narrativePhase: "build"}, "transition-fact"], [{...stop, fact: "low"}, "transition-fact"],
     [{...stop, transition: "non-romantic-activity-stop", fact: "protective"}, "transition-fact"]]) {
@@ -215,7 +221,8 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /Contact serving an ordinary purpose supplies no romantic cue, onset, accent or restart/u);
   assert.match(sent.instructions, /final repetition or change in speed while the activity continues supplies no stop/u);
   assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
-  assert.match(sent.instructions, /Use uncertain or abstain with transition unknown/u);
+  assert.match(sent.instructions, /use status uncertain or abstain with transition unknown/u);
+  assert.match(sent.instructions, /reported or remembered action does not establish a prior current start/u);
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
   assert.equal(rows.items.additionalProperties, false);
@@ -252,7 +259,7 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
     [transitionRow("span-end", "span-end", {frame: "reported"}), "transition-frame"],
     [transitionRow("uncertain-continuity", "neutralize", {evidenceIds: [10]}), "target-evidence"],
     [transitionRow("none", "none"), "transition-fact"],
-    [transitionRow("none", "none", {status: "neutral"}), "status-effect"],
+    [transitionRow("unknown", "none", {...noEvent, status: "neutral"}), "status-effect"],
     [transitionRow("uncertain-continuity", "neutralize", {...noEvent, status: "uncertain"}), "status-effect"],
     [transitionRow("hard-stop", "neutralize", {evidenceIds: [11, 12]}), "evidence-id"],
     [transitionRow("restart", "none", {action: "contact"}), "row-shape"],
@@ -260,6 +267,27 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
   ];
   for (const [row, reason] of invalid) {
     const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
+  }
+});
+
+test("canonicalizes only benign no-event metadata after validating the response and exact prefix IDs", async () => {
+  const neutral = transitionRow("none", "none", {status: "neutral", scopeId: 10, evidenceIds: [10, 11]});
+  for (const row of [neutral, {...neutral, status: "uncertain"}, {...neutral, status: "abstain", transition: "unknown"}]) {
+    const run = provider(async () => response([row]));
+    const expected = normalizedTransitionRow({...row, transition: row.status === "neutral" ? "none" : "unknown",
+      scopeId: null, evidenceIds: []});
+    const reason = "canonical-no-event";
+    assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));
+    assert.deepEqual(await run(transitionRequest), {...success([expected]), targetNormalizations: [{unitId: 11, reason}]});
+  }
+  for (const [extra, reason] of [
+    [{transition: "uncertain-continuity"}, "status-effect"], [{fact: "protective"}, "status-effect"],
+    [{priorAnchor: 10}, "prior-anchor"], [{scopeId: 3}, "status-effect"], [{scopeId: 9}, "scope-id"],
+    [{evidenceIds: [5, 11]}, "attested-evidence"], [{evidenceIds: [10, 12]}, "evidence-id"],
+    [{evidenceIds: [11, 10]}, "evidence-id"], [{untyped: units[0].text}, "row-shape"],
+  ]) {
+    const run = provider(async () => response([{...neutral, ...extra}]));
     assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
   }
 });
@@ -331,11 +359,13 @@ test("keeps discovery-only suffix evidence provisional and retains no-proposal o
 test("keeps local cue, continuity, frame and neutral decisions independently grounded", async () => {
   const supplied = {mode: "verify", units: units.slice(0, 2), targetIds: [11]};
   const build = fact(11, {status: "verified", narrativePhase: "build", action: "anticipation", evidenceIds: [10, 11]});
+  const onset = {...build, narrativePhase: "onset", action: "contact", transition: "onset"};
   const neutral = fact(11, {depiction: "romantic"});
   const ordinaryStop = fact(11, {status: "verified", transition: "non-romantic-activity-stop", evidenceIds: [11]});
   const continuityGap = fact(11, {status: "verified", transition: "uncertain-continuity", fact: "neutralize", evidenceIds: [11]});
   const reportEntry = fact(11, {status: "verified", frame: "reported", transition: "reported-entry", fact: "cut", evidenceIds: [11]});
-  for (const row of [build, neutral, {...neutral, frame: "reported"}, ordinaryStop, continuityGap, reportEntry]) {
+  for (const row of [build, onset, {...onset, transition: "restart", narrativePhase: "rebuild"},
+    neutral, {...neutral, frame: "reported"}, ordinaryStop, continuityGap, reportEntry]) {
     const run = provider(async (_url, {body}) => {
       const {instructions} = JSON.parse(body);
       assert.match(instructions, /routine line in a live beat can be neutral/u);
@@ -349,6 +379,9 @@ test("keeps local cue, continuity, frame and neutral decisions independently gro
     [{...build, fact: "low", evidenceIds: [10]}, "target-evidence"], [{...build, fact: "low", frame: "reported"}, "fact-frame"],
     [{...build, fact: "low", action: "continuation"}, "fact-action"], [{...build, fact: "ease"}, "fact-phase"],
     [{...build, priorAnchor: 10}, "prior-anchor"], [{...build, transition: "restart"}, "transition-action"],
+    [{...onset, action: "continuation"}, "phase-action"],
+    [{...onset, action: "continuation", narrativePhase: "rebuild", transition: "restart"}, "transition-action"],
+    [{...onset, fact: "continue", scopeId: 10, priorAnchor: 10}, "transition-fact"],
     [{...build, status: "uncertain"}, "status-effect"], [{...neutral, narrativePhase: "unknown"}, "status-effect"],
     [{...ordinaryStop, status: "neutral"}, "status-effect"], [{...reportEntry, status: "neutral"}, "status-effect"],
     [{...ordinaryStop, evidenceIds: [10]}, "target-evidence"], [{...continuityGap, evidenceIds: [10]}, "target-evidence"],

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {PlaybackController} from "../app/static/playback/controller.mjs";
 import {MockDevice} from "../app/static/devices/mock.mjs";
+import {ProfileSimulator} from "../app/static/devices/profile-simulator.mjs";
 
 class Clock {
   time = 0;
@@ -77,6 +78,54 @@ test("Rapid positions coalesce to the newest level with finite one-second dispat
     {strength: 2, seconds: 2, at: 0}, {strength: 4, seconds: 2, at: 1000},
   ]);
   assert.equal(controller.snapshot().position, 3);
+});
+
+test("Forward automatic carry and background fade lower an existing simulator pulse without renewing it", () => {
+  const clock = new Clock();
+  const device = new ProfileSimulator({now: clock.now});
+  const commands = [];
+  const command = device.command.bind(device);
+  device.command = (level, seconds) => { command(level, seconds); commands.push({level, seconds, at: clock.now()}); };
+  const controller = new PlaybackController({device, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer});
+  controller.connect();
+  controller.setFeel({mode: "continuous"});
+  controller.setStory([3, 2, 0, 0], [
+    {phase: "sustain", rhythm: "steady", quiet: false, sceneId: 1, currentCue: true, simulatorSceneId: 1},
+    {phase: "sustain", rhythm: "steady", quiet: false, sceneId: 1},
+    {phase: "quiet", rhythm: "steady", quiet: false},
+    {phase: "quiet", rhythm: "steady", quiet: true},
+  ]);
+  controller.start();
+  const expiry = device.deadline;
+  clock.advance(100);
+  controller.setPosition(1);
+  assert.equal(device.snapshot().strength, 2);
+  clock.advance(100);
+  controller.setPosition(2);
+  assert.equal(device.snapshot().strength, 1);
+  assert.equal(device.deadline, expiry);
+  assert.deepEqual(commands, [{level: 3, seconds: 2, at: 0}]);
+  clock.advance(100);
+  controller.setPosition(3);
+  assert.equal(device.snapshot().strength, 0);
+  clock.advance(1000);
+  assert.equal(commands.length, 1);
+});
+
+test("Automatic simulator attenuation fails closed when an adapter leaves stronger output", () => {
+  const clock = new Clock();
+  const device = new ProfileSimulator({now: clock.now});
+  const controller = new PlaybackController({device, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer});
+  controller.connect();
+  const scene = {phase: "sustain", rhythm: "steady", quiet: false, sceneId: 1};
+  controller.setStory([3, 2], [scene, scene]);
+  controller.start();
+  device.attenuate = () => 3;
+  clock.advance(100);
+  controller.setPosition(1);
+  assert.equal(device.snapshot().strength, 0);
+  clock.advance(900);
+  assert.equal(device.snapshot().strength, 2);
 });
 
 test("Ceiling reductions and zero corrections Stop now and never replay stale intensity", () => {

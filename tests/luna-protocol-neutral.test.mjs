@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
 import test from "node:test";
 import {fileURLToPath} from "node:url";
-import {combineNeutralReports, getNeutralProtocolReference, runLunaProtocolNeutral, scoreNeutralPlaybackGate}
+import {combineNeutralReports, getNeutralProtocolReference, replayNeutralDiscrepancies, runLunaProtocolNeutral, scoreNeutralPlaybackGate}
   from "../scripts/lib/luna-protocol-neutral.mjs";
 import {wholeStoryAnnotationFixtures} from "./whole-story-annotation-fixtures.mjs";
 
@@ -229,7 +229,7 @@ test("targeted cue checks preserve primary scores and separate direct and reader
     const typed = mode === "transition";
     const low = active && unitId === 2;
     return {unitId, status: proposed ? "candidate" : active ? "verified" : uncertain ? "uncertain" : "neutral",
-      depiction: active ? "romantic" : typed || uncertain ? "unknown" : "neutral",
+      depiction: active ? recovered && low ? "suggestive" : "romantic" : typed || uncertain ? "unknown" : "neutral",
       frame: uncertain ? "uncertain" : "current",
       narrativePhase: active ? low ? "build" : "onset" : typed || uncertain ? "unknown" : "quiet",
       transition: "none",
@@ -253,6 +253,7 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(report.cueRecovery.directCuesAfterRecovery, 1);
   assert.equal(report.cueRecovery.readerCuesAfterRecovery, 2);
   assert.equal(report.cueRecovery.usage.inputTokens, 8);
+  assert.equal(report.cueRecovery.selectionReasons["discovery-disagreement"], 3);
   assert.equal(units[2].prefix.status, "neutral");
   assert.equal(units[2].prefix.cue, false);
   assert.equal(units[2].cueRecovery.action, "anticipation");
@@ -319,6 +320,77 @@ test("elapsed-time gap is reported as compiler recovery rather than a model boun
   assert.equal(row.applied.transitionChange, "recovered-match");
   assert.equal(row.compiler.continuityGuard, "elapsed-time-gap");
   assert.equal(row.compiler.pattern, "Baseline");
+});
+
+test("source-free replay assigns one primary cause per mismatched label, boundary and playback gate", async () => {
+  const original = await runLunaProtocolNeutral({mode: "mock", arm: "complete", now});
+  const report = JSON.parse(JSON.stringify(original));
+  assert.deepEqual(original.discrepancies, replayNeutralDiscrepancies(report));
+  const [dance, letter, room, drill] = report.diagnostics.map(work => work.units);
+
+  dance[2].behavior.prefix.narrativeBuildup = false;
+  dance[2].prefix.status = "neutral";
+  dance[4].behavior.prefix.directEnacted = false;
+  Object.assign(dance[4].prefix.labels, {action: "anticipation", narrativePhase: "build"});
+  dance[5].behavior.applied.continuation = false;
+  dance[5].pipelineFlags.push("unattested-scope");
+  dance[10].behavior.applied.directEnacted = false;
+  dance[10].pipelineFlags.push("cue-restart-required");
+  dance[10].compiler.pattern = "Baseline";
+
+  letter[1].applied.transition = "none";
+  letter[4].transition.transition = "reported-entry";
+  letter[7].behavior.discovery.directEnacted = null;
+  Object.assign(letter[7].discovery, {returned: false, status: "invalid-response", contractRejection: "row-shape"});
+  room[1].behavior.prefix.directEnacted = null;
+  Object.assign(room[1].prefix, {returned: false, status: "timed-out", requestFailure: "request-timeout"});
+  room[3].compiler.pattern = "Undertone";
+  room[7].behavior.accepted.narrativeBuildup = false;
+  Object.assign(room[7].cueRecovery, {status: "verified", applicationGuard: "recovery-buildup-unlinked",
+    labels: {frame: "current", narrativePhase: "build", action: "anticipation"}});
+  room[8].behavior.discovery.directEnacted = null;
+  Object.assign(room[8].discovery, {returned: false, status: "invalid-response", contractRejection: "transition-action"});
+  drill[0].behavior.accepted.narrativeBuildup = true;
+  drill[0].behavior.applied.narrativeBuildup = true;
+  drill[0].cueRecovery.recovered = true;
+  drill[0].compiler.pattern = "Undertone";
+
+  const {cases, count} = replayNeutralDiscrepancies(report);
+  const at = (work, unit, stage, dimension) => cases.find(row => row.work === work && row.unit === unit &&
+    row.stage === stage && row.dimension === dimension)?.cause;
+  assert.equal(at("first-dance", 2, "prefix", "narrativeBuildup"), "model-neutral");
+  assert.equal(at("first-dance", 4, "prefix", "directEnacted"), "wrong-action");
+  assert.equal(at("first-dance", 5, "applied", "continuation"), "scope-unattested");
+  assert.equal(at("first-dance", 10, "compiler", "playbackGate"), "refractory-gate");
+  assert.equal(at("old-letter", 1, "applied", "typedBoundary"), "transition-merge");
+  assert.equal(at("old-letter", 4, "transition", "typedBoundary"), "wrong-transition-type");
+  assert.equal(at("old-letter", 7, "discovery", "directEnacted"), "structural-invalid");
+  assert.equal(at("reading-room", 1, "prefix", "directEnacted"), "unavailable");
+  assert.equal(at("reading-room", 3, "compiler", "playbackGate"), "compiler-carry");
+  assert.equal(at("reading-room", 7, "accepted", "narrativeBuildup"), "recovery-buildup-unlinked");
+  assert.equal(at("reading-room", 8, "discovery", "directEnacted"), "semantic-contract-invalid");
+  assert.equal(at("practice-drill", 0, "applied", "narrativeBuildup"), "false-recovery");
+  assert.equal(at("practice-drill", 0, "compiler", "playbackGate"), "false-recovery");
+  assert.equal(new Set(cases.map(({work, unit, stage, dimension}) => [work, unit, stage, dimension].join("/"))).size, count);
+  assert.throws(() => replayNeutralDiscrepancies({...report, sourceProseIncluded: true}), /source-free pinned/u);
+});
+
+test("accepted canonical transition rows have separate source-free normalization receipts", async () => {
+  const privateValue = "synthetic private normalization metadata";
+  const provider = async ({mode, targetIds}) => ({status: "ok", facts: targetIds.map(unitId => ({
+    unitId, status: "neutral", depiction: mode === "transition" ? "unknown" : "neutral", frame: "current",
+    narrativePhase: mode === "transition" ? "unknown" : "quiet", transition: "none",
+    action: mode === "transition" ? "unknown" : "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
+  })), ...(mode === "transition" && targetIds[0] === 0 ? {targetNormalizations: [
+    {unitId: 0, reason: "canonical-no-event"}, {unitId: 0, reason: privateValue}, {unitId: 100, reason: "canonical-no-event"},
+  ]} : {})});
+  const report = await runLunaProtocolNeutral({mode: "mock", provider, now, arm: "complete", fixtureIds: ["first-dance"]});
+  const diagnostics = report.transition.targetDiagnostics;
+  assert.equal(report.diagnostics[0].units[0].transition.factNormalization, "canonical-no-event");
+  assert.equal(diagnostics.normalizedTargets, 1);
+  assert.equal(diagnostics.rejectedTargets, 0);
+  assert.deepEqual(diagnostics.works[0].normalizedTargets, [{id: 0, reason: "canonical-no-event"}]);
+  assert.equal(JSON.stringify(report).includes(privateValue), false);
 });
 
 test("a capped transition stage retains the planned denominator and marks deferred rows", async () => {

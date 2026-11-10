@@ -106,7 +106,7 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   const html = await page.text();
   assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
-  assert.match(html, /Luna rubric v8 is active/);
+  assert.match(html, /Luna rubric v9 is active/);
   assert.match(html, /Founder neutral headroom is 512 attempts today and 4096 this UTC month/);
   for (const arm of ["complete", "windowed"]) for (const shard of ["a", "b"]) {
     assert.ok(html.includes(`value="luna-protocol-neutral-v2-${arm}-${shard}"`));

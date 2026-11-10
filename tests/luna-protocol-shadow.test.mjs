@@ -504,6 +504,64 @@ test("a blinded cue check can recover a causal disagreement and preserves the pr
   assert.equal(run.units[2].readerCue, true);
 });
 
+test("quiet romantic context gets a blinded check and weak recovery needs prior causal evidence", async () => {
+  const cases = [
+    {priorRomance: true, citesPrior: true, reason: "romantic-context", pattern: "Undertone"},
+    {priorRomance: true, citesPrior: false, reason: "romantic-context", pattern: "Baseline"},
+    {priorRomance: false, citesPrior: true, reason: "discovery-disagreement", pattern: "Baseline"},
+  ];
+  for (const {priorRomance, citesPrior, reason, pattern} of cases) {
+    const calls = [];
+    const provider = fake((id, mode) => {
+      if (id === 0) return {...neutral(id), depiction: priorRomance ? "romantic" : "neutral"};
+      if (mode === "discovery" && !priorRomance) return active(id, mode, {narrativePhase: "build"});
+      if (mode === "cue-check") return active(id, "verify", {narrativePhase: "build", evidenceIds: citesPrior ? [0, 1] : [1]});
+      return {...neutral(id), depiction: "romantic"};
+    }, request => calls.push(request));
+    const input = fixture("Nora looked forward to their date. Eli smiled and said he felt the same.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1], maxCueChecks: 1});
+    assert.equal(run.units[1].cueRecoveryReason, reason);
+    assert.equal(run.units[1].primaryPrefix.status, "neutral");
+    assert.equal(run.units[1].cueRecoveryGuard, pattern === "Baseline" ? "recovery-buildup-unlinked" : undefined);
+    assert.equal(run.units[1].pattern, pattern);
+    assert.deepEqual(Object.keys(calls.find(call => call.mode === "cue-check")).sort(), ["mode", "targetIds", "units"]);
+  }
+});
+
+test("a continuation after a decline gets a fresh restart check without weakening the gate", async () => {
+  for (const enacted of [true, false]) {
+    const provider = fake((id, mode) => {
+      if (id === 0) return active(id, mode, {fact: "neutralize", action: "none", transition: "declined-restart"});
+      if (id === 1) return active(id, mode, {narrativePhase: "build"});
+      if (mode === "cue-check" && enacted) return active(id, "verify", {action: "contact", narrativePhase: "onset"});
+      return active(id, mode === "cue-check" ? "verify" : mode, {fact: "continue", action: "continuation", narrativePhase: "sustain",
+        priorAnchor: 1, evidenceIds: [1, 2]});
+    });
+    const input = fixture("They declined another dance. She offered her hand and he said yes. They took each other's hands.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2], maxCueChecks: 1});
+    assert.deepEqual(run.units.map(row => row.pattern), ["Baseline", "Baseline", enacted ? "Rebuild rise" : "Baseline"]);
+    assert.equal(run.units[2].primaryPrefix.action, "continuation");
+    assert.equal(run.units[2].cueRecoveryReason, "restart-state");
+    assert.equal(run.units[2].cueRecoveryGuard, enacted ? undefined : "recovery-start-unproved");
+  }
+});
+
+test("a typed start can ask the cue pass to reconsider anticipation without supplying activation proof", async () => {
+  const provider = fake((id, mode) => {
+    if (mode === "transition") return typedTransition(id, {fact: "none", transition: "onset"});
+    if (mode === "cue-check") return active(id, "verify", {action: "contact", narrativePhase: "onset"});
+    if (id === 1) return active(id, mode, {narrativePhase: "build"});
+    return neutral(id);
+  });
+  const input = fixture("She asked if they should dance. He said yes and took her hand.");
+  const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1], verifyTransitions: true,
+    maxTransitionVerification: 1, transitionTargets: [1], maxCueChecks: 1});
+  assert.equal(run.units[1].primaryPrefix.action, "anticipation");
+  assert.equal(run.units[1].cueRecoveryReason, "typed-start");
+  assert.equal(run.units[1].cueRecovery.action, "contact");
+  assert.equal(run.units[1].pattern, "Onset rise");
+});
+
 test("one blinded check can replace an invalid semantic tuple without making it a primary success", async () => {
   for (const viaAdapter of [false, true]) {
     const calls = [];
