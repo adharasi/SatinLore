@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { Miniflare } from "miniflare";
 import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
+import { LUNA_CORPUS_PATH } from "../deploy/cloudflare/luna-corpus.mjs";
 import { validateNocturneContext } from "../app/static/reader/nocturne-context-contract.mjs";
 import { wholeStoryAnnotationFixtures } from "./whole-story-annotation-fixtures.mjs";
 
@@ -840,9 +841,11 @@ async function studyBudget(t) {
       import { SceneAnalysisBudget as Budget } from "./${source}";
       export class SceneAnalysisBudget extends Budget {
         async fetch(request) {
-          if (new URL(request.url).pathname !== "/expire-neutral-run") return super.fetch(request);
+          const path = new URL(request.url).pathname;
+          if (!["/expire-neutral-run", "/expire-reviewed-lease"].includes(path)) return super.fetch(request);
           const { runId } = await request.json();
-          this.sql.exec("UPDATE neutral_spend_run SET expires_at=? WHERE id=?", Date.now() - 1, runId);
+          if (path === "/expire-neutral-run") this.sql.exec("UPDATE neutral_spend_run SET expires_at=? WHERE id=?", Date.now() - 1, runId);
+          else this.sql.exec("UPDATE luna_corpus_review SET lease_until=? WHERE run_id=?", Date.now() - 1, runId);
           return new Response(null, { status: 204 });
         }
       }
@@ -864,8 +867,124 @@ async function studyBudget(t) {
   const spend = (runId, shardId, operation, usedMicros, reader = "a".repeat(64)) => post("founder-neutral-spend", {
     runId, shardId, operation, reader, ...(usedMicros === undefined ? {} : { usedMicros }),
   });
-  return { reserve, spend, expireRun: runId => post("expire-neutral-run", { runId }) };
+  return { reserve, spend, reviewedSpend: value => post("founder-neutral-spend", value),
+    expireRun: runId => post("expire-neutral-run", { runId }), expireReviewedLease: runId => post("expire-reviewed-lease", {runId}) };
 }
+
+const sha256 = value => createHash("sha256").update(value).digest("hex");
+
+function reviewedClip(first = 32, sentence = "The kettle started to sing.") {
+  const texts = ["The window was open.", sentence];
+  let offset = 110;
+  return {id: randomUUID(), storyId: "neutral-research-example", sourceSha256: "a".repeat(64), editionDigest: "b".repeat(64),
+    units: texts.map((text, position) => {
+      const byteStart = offset, byteEnd = byteStart + Buffer.byteLength(text);
+      offset = byteEnd + 1;
+      return {id: first + position, paragraph: 9, byteStart, byteEnd, digest: sha256(text), text};
+    }), targetIds: [first + 1]};
+}
+
+test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows to original coordinates", {timeout: 30000}, async t => {
+  const {reviewedSpend} = await studyBudget(t);
+  const f = fixture({provider: neutralProtocolUpstream, spend: reviewedSpend});
+  const founder = await token(), tester = await token(TESTER_EMAIL), env = enableWholeStory(f.env);
+  const clip = reviewedClip(), runId = randomUUID(), clipDigest = sha256(JSON.stringify(clip));
+  const approval = {runId, clips: [{id: clip.id, digest: clipDigest}], reviewConfirmed: true};
+  const post = (path, body, options = {}) => f.worker.fetch(request(founder, {path: `${LUNA_CORPUS_PATH}/${path}`, body, ...options}), env);
+  assert.equal((await f.worker.fetch(request(founder, {method: "GET", path: LUNA_CORPUS_PATH}), f.env)).status, 404);
+  assert.equal((await f.worker.fetch(request(tester, {method: "GET", path: LUNA_CORPUS_PATH}), env)).status, 403);
+  assert.equal((await f.worker.fetch(request(founder, {method: "GET", path: LUNA_CORPUS_PATH, host: BETA}), env)).status, 404);
+  const page = await f.worker.fetch(request(founder, {method: "GET", path: LUNA_CORPUS_PATH}), env);
+  assert.match(await page.text(), /SatinLore founder Luna corpus review/u);
+  assert.equal(page.headers.get("Cache-Control"), "no-store");
+  assert.equal((await post("approve", approval, {origin: "https://other.example"})).status, 403);
+  assert.equal((await post("approve", {...approval, reviewConfirmed: false})).status, 400);
+  const unapproved = await post("shard", {runId, clip});
+  assert.equal(unapproved.status, 403);
+  assert.equal((await unapproved.json()).code, "clip_not_approved");
+  assert.equal(f.calls.length, 0);
+
+  const approved = await post("approve", approval);
+  assert.equal(approved.status, 200);
+  assert.equal((await approved.json()).clipCount, 1);
+  assert.equal((await post("approve", approval)).status, 200);
+  const changed = {...reviewedClip(32, "The radio started to play."), id: clip.id};
+  assert.equal((await post("shard", {runId, clip: changed})).status, 403);
+  assert.equal((await post("approve", {...approval, clips: [{id: clip.id, digest: sha256(JSON.stringify(changed))}]})).status, 409);
+  assert.equal(f.calls.length, 0);
+
+  const live = await post("shard", {runId, clip});
+  assert.equal(live.status, 200);
+  const serialized = await live.text();
+  const result = JSON.parse(serialized);
+  assert.equal(result.status, "completed");
+  assert.equal(result.clipDigest, clipDigest);
+  assert.equal(result.externalCalls, 3);
+  assert.equal(result.hostedSpend.capMicros, 3_000_000);
+  assert.equal(result.hostedSpend.settled, true);
+  assert.ok(result.hostedSpend.remainingMicros < 3_000_000);
+  assert.deepEqual(result.units.map(row => [row.id, row.unitSha256]), clip.units.map(row => [row.id, row.digest]));
+  assert.deepEqual(result.summary.attempts.filter(row => row.attempted).map(row => row.targetIds), [[32, 33], [33], [33]]);
+  assert.equal(result.units[1].primaryPrefix.unitId, 33);
+  assert.equal(result.units[1].transitionVerification.unitId, 33);
+  assert.ok(f.calls.every(({url, options}) => url === studyProvider && options.redirect === "manual" && options.headers.Authorization === `Bearer ${KEY}`));
+  const sent = f.calls.flatMap(({options}) => JSON.parse(JSON.parse(options.body).input).units.map(row => row.text));
+  assert.ok(sent.every(text => clip.units.some(unit => unit.text === text)));
+  assert.ok(clip.units.every(unit => !serialized.includes(unit.text) && !JSON.stringify(f.spendRequests).includes(unit.text)));
+  assert.equal(serialized.includes(KEY), false);
+  const duplicate = await post("shard", {runId, clip});
+  assert.equal(duplicate.status, 409);
+  assert.equal((await duplicate.json()).code, "shard_already_started");
+  assert.equal(f.calls.length, 3);
+});
+
+test("a Luna corpus refusal halts the approved run without replaying another clip", {timeout: 30000}, async t => {
+  const {reviewedSpend} = await studyBudget(t);
+  const f = fixture({spend: reviewedSpend, provider: () => Response.json({status: "completed", model: "gpt-6-luna",
+    usage: {input_tokens: 20, output_tokens: 5, total_tokens: 25}, output: [{type: "message", role: "assistant",
+      content: [{type: "refusal", refusal: "private response canary"}]}]})});
+  const founder = await token(), runId = randomUUID(), env = enableWholeStory(f.env);
+  const first = reviewedClip(), second = reviewedClip(63);
+  const post = (path, body) => f.worker.fetch(request(founder, {path: `${LUNA_CORPUS_PATH}/${path}`, body}), env);
+  const approved = await post("approve", {runId, clips: [first, second].map(clip => ({id: clip.id, digest: sha256(JSON.stringify(clip))})), reviewConfirmed: true});
+  assert.equal(approved.status, 200);
+  const refused = await post("shard", {runId, clip: first});
+  assert.equal(refused.status, 200);
+  const body = await refused.text();
+  assert.doesNotMatch(body, /private response canary/u);
+  assert.equal(JSON.parse(body).status, "provider-refused");
+  const halted = await post("shard", {runId, clip: second});
+  assert.equal(halted.status, 409);
+  assert.equal((await halted.json()).code, "run_halted");
+  assert.equal(f.calls.length, 1);
+});
+
+test("a Luna corpus unknown shard keeps its spend hold and releases the in-flight lease for a different clip", {timeout: 30000}, async t => {
+  const {reviewedSpend, expireReviewedLease} = await studyBudget(t);
+  const runId = randomUUID();
+  const clips = ["a", "b", "c"].map(character => ({id: randomUUID(), digest: character.repeat(64)}));
+  const shared = {runId, reader: "e".repeat(64), rubricVersion: "nocturne-luna-protocol-v13"};
+  assert.equal((await reviewedSpend({...shared, operation: "approve-reviewed", clips})).status, 200);
+  const use = (position, operation = "reserve-reviewed", rest = {}) => reviewedSpend({...shared, operation,
+    shardId: clips[position].id, clipDigest: clips[position].digest, ...rest});
+  assert.equal((await use(0, "reserve-reviewed", {reader: "f".repeat(64)})).status, 409);
+  assert.equal((await use(0, "reserve-reviewed", {rubricVersion: "different-rubric"})).status, 403);
+  const first = await use(0);
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).remainingMicros, 2_850_000);
+  const blocked = await use(1);
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.headers.get("X-Study-Error"), "shard_in_flight");
+  assert.equal((await expireReviewedLease(runId)).status, 204);
+  assert.equal((await use(0)).headers.get("X-Study-Error"), "shard_already_started");
+  const second = await use(1);
+  assert.equal(second.status, 200);
+  assert.equal((await second.json()).remainingMicros, 2_700_000);
+  assert.equal((await use(0, "settle-reviewed", {usedMicros: 500, providerRefused: false})).status, 200);
+  assert.equal((await use(2)).headers.get("X-Study-Error"), "shard_in_flight", "A late receipt cannot release the current lease.");
+  assert.equal((await use(1, "settle-reviewed", {usedMicros: 1000, providerRefused: false})).status, 200);
+  assert.equal((await use(2)).status, 200);
+});
 
 test("the SQLite budget admits concurrent work up to per-reader and deployment limits", { timeout: 30000 }, async t => {
   const { reserve } = await studyBudget(t);

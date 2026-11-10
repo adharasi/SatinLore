@@ -145,6 +145,8 @@ The approved beat protocol now has a JavaScript continuity compiler and a founde
 
 Timing review v5 adds a separate restart check behind a closed gate. The full 41-story local rerun reproduced all approved profiles and traces. The independent Loom run matched 19 of 1,250 known direct cues across the same editions. Live corpus recognition and physical-device qualification remain open. [Timing review and 41-story results](nocturne-beat-protocol-shadow.md#timing-review-v5-and-the-41-story-run)
 
+The founder corpus sample now has exact excerpt review, one-time dispatch under a shared spend cap, and a roster-aware scorer for raw and applied results. The first review packet proposes clips from 34 of 41 editions. Seven remain held pending reconciliation of earlier requests. Corpus accuracy requires the reviewed live results. [Founder live corpus sample](nocturne-beat-protocol-shadow.md#founder-live-corpus-sample)
+
 The founder evidence recovery phase compares the same exact target with and without approved earlier anchors. It separates source coverage, interpretation, and transport before a source-selected candidate reaches reader qualification. [Paired diagnostic and release sequence](nocturne-evidence-recovery.md)
 
 A founder-only whole story research harness compares one complete cleared edition, concurrent paragraph windows and a causal sentence prefix on four pinned original neutral fixtures. It reports typed labels, coverage, exact transitions, timing and usage through a separately enabled Access-protected route. The next check is a billed Responses run on the deployed candidate. [Commands, schema and runtime flag](nocturne-luna-comparison.md)

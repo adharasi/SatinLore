@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import test from "node:test";
 import {buildReferenceCorpus, scoreBeatContinuityCorpus} from "../scripts/lib/beat-continuity-evaluation.mjs";
+import {buildLunaSampleReference, scoreLunaSample} from "../scripts/lib/luna-sample-evaluation.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 
@@ -89,4 +90,57 @@ test("scores causal IDs, adjacent links, short baseline dips, and one-to-one eve
   assert.deepEqual(summary.typedTransitions.withinOneParagraph, {matched: 2, missed: 0, extra: 1, precision: 2 / 3, recall: 1});
   assert.equal(reference.works[0].units[0].depiction, "overt-sexual");
   assert.equal(reference.works[0].units[1].transition, "ease");
+});
+
+test("scores a frozen sampled roster with raw and applied lanes, separate stress rows, and retained coverage gaps", () => {
+  const {source, approved, candidate} = fixture();
+  const {id, sourceSha256} = source.works[0];
+  const editionDigest = hash("reviewed reader edition");
+  const roster = {schema: "luna-v13-review-roster-v1", works: [{id, sourceSha256, editionDigest,
+    targetIds: [0, 1, 2, 4], transitionTargetIds: [0, 1, 3], stressTargetIds: [1]}]};
+  const reference = buildLunaSampleReference(source, approved, roster);
+  const shadow = candidate([
+    {id: 0, status: "verified", primaryPrefix: {status: "verified", frame: "current", action: "contact",
+      narrativePhase: "onset", evidenceIds: [0]}, cue: false, transitionVerification: {status: "neutral", transition: "none"},
+      appliedTransition: "none", playbackStatus: "computed", pattern: "Baseline", phase: "quiet"},
+    {id: 1, status: "verified", primaryPrefix: {status: "neutral"}, cue: false,
+      transitionVerification: {status: "verified", transition: "ease", evidenceIds: [1]}, appliedTransition: "none"},
+    {id: 3, status: "withheld", transitionVerificationStatus: "not-requested"},
+    {id: 4, status: "neutral", primaryPrefix: {status: "neutral"}, cue: false},
+  ]);
+  shadow.works[0].editionDigest = editionDigest;
+  shadow.works[0].summary = {attempts: [
+    {mode: "verify", attempted: true, targetIds: [0]},
+    {mode: "transition", attempted: true, targetIds: [0]},
+  ]};
+  shadow.clips = [{storyId: id, targetIds: [2], status: "provider-refused"},
+    {storyId: id, targetIds: [3], status: "withheld"}];
+  const loom = candidate([{id: 0, status: "classified", cue: true}, {id: 1, status: "classified", cue: false},
+    {id: 2, status: "classified", cue: false}, {id: 4, status: "classified", cue: false}]);
+  const result = scoreLunaSample(reference, shadow, {loom, includeDiscrepancies: true});
+  const {sample, stress} = result.summary;
+  assert.equal(result.measurement, "unweighted-frozen-sample-diagnostic");
+  assert.equal(sample.rawCue.planned, 3);
+  assert.equal(sample.rawCue.dispatched, 1);
+  assert.equal(sample.rawCue.usable, 2);
+  assert.equal(sample.rawCue.unresolvedReference, 1);
+  assert.equal(sample.rawCue.effectiveRecall, 0.5);
+  assert.equal(sample.rawCue.usableRecall, 1);
+  assert.equal(sample.rawCue.dispositions["provider-refused"], 1);
+  assert.equal(sample.appliedCue.effectiveRecall, 0);
+  assert.equal(sample.loomCue.effectiveRecall, 0.5);
+  assert.equal(sample.typedTransition.dispositions.withheld, 1);
+  assert.equal(stress.typedTransition.effectiveRecall, 1);
+  assert.equal(stress.appliedTransition.effectiveRecall, 0);
+  assert.equal(stress.rawCue.effectiveRecall, null);
+  assert.equal(sample.compiledPattern.exact, 0);
+  assert.equal(JSON.stringify(result).includes("Unit 0."), false);
+  assert.throws(() => buildLunaSampleReference(source, approved, {...roster,
+    works: [{...roster.works[0], targetIds: [5]}]}), /Invalid sample target roster/);
+  assert.throws(() => scoreLunaSample(reference, {...shadow, works: [{...shadow.works[0], editionDigest: hash("stale")}]}),
+    /Sample prediction edition differs/);
+  assert.throws(() => scoreLunaSample(reference, {...shadow, clips: [...shadow.clips, shadow.clips[0]]}),
+    /Sample clip target differs or is duplicated/);
+  const limited = scoreLunaSample(reference, {...shadow, clips: [{storyId: id, targetIds: [2], status: "spend-cap"}]});
+  assert.equal(limited.summary.sample.rawCue.dispositions["budget-deferred"], 1);
 });

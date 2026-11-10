@@ -256,6 +256,26 @@ Loom direct-cue precision was 31.67% and recall was 1.52%. The current Luna runn
 
 A shape-only planning pass found that 25 of 41 editions fit complete context. Under the current windowed source and request bounds, 427 discovery windows could cover 17,613 of 17,827 text units before checking clearance. A live study spanning all 41 can start with frozen cue and transition samples, then expand with resumable shards. Exhaustive two-pass verification would require 35,654 verification requests before discovery or focused checks. Report the approved, planned, dispatched, observed and scored denominators separately.
 
+### Founder live corpus sample
+
+Keep the private review packet, workbook and frozen scoring roster outside Git. Open `/api/scene-analysis/luna-corpus` in a founder session on the app origin. Load the review JSON. Every exact target and its context appears in the browser before selection. The workbook provides an offline review view. The selection in the founder page is the approval used for dispatch. An unchecked excerpt is recorded as withheld. The review must cover permission to send the excerpt and the eligibility of all the context included in it.
+
+Seal the selected excerpts, then start the sealed run. Sealing sends clip fingerprints and a run ID. The Worker uses the existing server-held OpenAI secret. It verifies each subsequent clip against the sealed roster before dispatch. A one-time clip reservation and shared $3 estimated spend ledger prevent repeated charges when a browser response is interrupted. Pause stops after the current clip. Reload the same packet in the same browser to resume clips that have not started. Download the results checkpoint to retain the source-free attempt records. Unconfirmed requests are recorded separately and require investigation before a deliberate rerun. Keep the scoring reference separate from any packet submitted to Luna.
+
+Score the downloaded results against the frozen target roster and reference. Retain withheld, refused, unavailable and budget-deferred targets in coverage. Measure raw primary direct cue recognition, independent typed transitions, applied phase and pattern, and fallback behavior separately. Per-story recall needs at least one resolved positive target. This sample measures the proposed targets with their cleared causal context. A 41-story sample leaves unsampled sentences outside that denominator.
+
+```sh
+node scripts/evaluate-beat-continuity-corpus.mjs \
+  --source /private/corpus-source.json \
+  --reference /private/approved-labels.json \
+  --target-roster /private/frozen-scoring-roster.json \
+  --candidate v13=/private/satinlore-luna-corpus-results.json \
+  --loom /private/loom-predictions.json \
+  --output /private/luna-corpus-score.json --discrepancies
+```
+
+The first review packet covers 94 proposed clips and 181 targets across 34 editions, including 36 targets in the separate stress panel. The roster retains all 41 editions. Seven editions have unresolved transport receipts or dependent holds from an earlier study and contribute no proposed live excerpt. Clear those receipts and separately review exact ranges before adding any of the held editions. With every proposed clip selected, the conservative planning quote reserves an estimated $1.945977 across at most 637 requests. The estimate sums the maximum permitted calls for those exact clips. Actual usage settles per request under the durable run cap.
+
 ## Qualification
 
 Compare exact reviewed compiler output separately from semantic recognition. The shadow study reports usable model coverage, cue and typed-transition precision and recall, profile agreement, continuity links and causal trace violations. Compare current reader and archival provider outputs in separate lanes. For a paid paired run, hold the target roster and recent prefix fixed, use a shared run budget and stop the comparison for a refused run. Report both effective scores on every planned target and accuracy among targets both arms resolved. Compare recovered and lost matches and added false positives. Earlier eligibility evidence and earlier continuity anchors are separate strata. Verify timing and simulator behavior after model qualification.

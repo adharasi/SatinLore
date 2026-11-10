@@ -10,6 +10,7 @@ import { DECISIONS_STORY_STUDY_PATH, WHOLE_STORY_LUNA_STUDY_PATH, handleDecision
   handleWholeStoryLunaStudy } from "./scene-analysis.mjs";
 import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
 import { CORPUS_BATCH_STREAM_TYPE, CORPUS_STUDY_PATH, handleCorpusStudy } from "./corpus-study.mjs";
+import { LUNA_CORPUS_PATH, handleLunaCorpus } from "./luna-corpus.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
@@ -299,11 +300,12 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
       const wholeStoryStudy = url.pathname === WHOLE_STORY_LUNA_STUDY_PATH;
       const corpusStudy = url.pathname === CORPUS_STUDY_PATH || url.pathname.startsWith(CORPUS_STUDY_PATH+"/");
-      if ((wholeStoryStudy || corpusStudy) && (url.origin !== APP_ORIGIN || env.WHOLE_STORY_LUNA_STUDY_ENABLED !== "true")) {
+      const lunaCorpus = url.pathname === LUNA_CORPUS_PATH || url.pathname.startsWith(`${LUNA_CORPUS_PATH}/`);
+      if ((wholeStoryStudy || corpusStudy || lunaCorpus) && (url.origin !== APP_ORIGIN || env.WHOLE_STORY_LUNA_STUDY_ENABLED !== "true")) {
         return finish(json({ error: "Not found." }, 404));
       }
       const decisionsBenchmark = ["/api/scene-analysis/decisions-benchmark", DECISIONS_STORY_STUDY_PATH].includes(url.pathname);
-      const publicAuth = !decisionsBenchmark && !wholeStoryStudy && !corpusStudy && url.origin === APP_ORIGIN && env.PUBLIC_READER_ENABLED === "true";
+      const publicAuth = !decisionsBenchmark && !wholeStoryStudy && !corpusStudy && !lunaCorpus && url.origin === APP_ORIGIN && env.PUBLIC_READER_ENABLED === "true";
       const config = publicAuth ? publicReaderConfiguration(env) : privateAppConfiguration(env, url.origin);
       if (!config) return finish(json({ error: publicAuth ? "Email sign-in is temporarily unavailable." : "The private preview is not available." }, 503));
       responseOrigin = config.origin;
@@ -324,10 +326,11 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       if (publicAuth && !session) return finish(json({ error: "Sign in to SatinLore to continue." }, 401));
       if (!session) return finish(json({ error: "Founder access required." }, 403));
-      if (decisionsBenchmark || wholeStoryStudy || corpusStudy) {
+      if (decisionsBenchmark || wholeStoryStudy || corpusStudy || lunaCorpus) {
         const context = { config, session, analysisFetcher, reverify };
-        const result = corpusStudy ? await handleCorpusStudy(request, env, context) : wholeStoryStudy ? await handleWholeStoryLunaStudy(request, env, { ...context, runComparison: wholeStoryLunaComparison }) :
-          await handleDecisionsBenchmark(request, env, context);
+        const result = lunaCorpus ? await handleLunaCorpus(request, env, context) : corpusStudy ? await handleCorpusStudy(request, env, context) :
+          wholeStoryStudy ? await handleWholeStoryLunaStudy(request, env, { ...context, runComparison: wholeStoryLunaComparison }) :
+            await handleDecisionsBenchmark(request, env, context);
         const response = finish(result);
         if (corpusStudy && response.headers.get("Content-Type")?.split(";", 1)[0] === CORPUS_BATCH_STREAM_TYPE) {
           response.headers.set("Cache-Control", "no-store, no-transform");

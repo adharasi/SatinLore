@@ -24,10 +24,11 @@ const WHOLE_STORY_LUNA_TIMEOUT_MS = 180_000;
 const NEUTRAL_LUNA_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
 const NEUTRAL_SHARD_ATTEMPTS = 48;
 const NEUTRAL_SHARD_CAP_MICROS = 150_000;
-const NEUTRAL_RUN_CAP_MICROS = 3_000_000;
+export const NEUTRAL_RUN_CAP_MICROS = 3_000_000;
 const NEUTRAL_RUN_LIFETIME_MS = 24 * 60 * 60 * 1000;
 const NEUTRAL_RUN_RETENTION_MS = 7 * NEUTRAL_RUN_LIFETIME_MS;
-const studyId = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
+const REVIEWED_SHARD_LEASE_MS = 135_000;
+export const studyId = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS = 300_000;
 const NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS = 2;
 const NEUTRAL_LUNA_PROTOCOL_SHARDS = {
@@ -172,7 +173,7 @@ async function readBoundedText(message, maxBytes, signal, mediaType) {
   return new TextDecoder("utf-8", { fatal: true }).decode(await readBoundedBody(message, maxBytes, signal, mediaType));
 }
 
-async function readBoundedJson(message, maxBytes, signal) {
+export async function readBoundedJson(message, maxBytes, signal) {
   return JSON.parse(await readBoundedText(message, maxBytes, signal, "application/json"));
 }
 
@@ -303,7 +304,7 @@ function budgetStub(namespace) {
   return namespace.get(namespace.idFromName("scene-analysis:v1"));
 }
 
-async function budgetReader(config, session) {
+export async function budgetReader(config, session) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:scene-budget:v1:${config.issuer}:${session.subject}`));
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -316,12 +317,15 @@ async function reserveBudget(namespace, config, session, suite, signal) {
   }));
 }
 
-async function neutralSpend(namespace, payload, signal) {
+export async function neutralSpend(namespace, payload, signal) {
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(3000)]);
   const response = await budgetStub(namespace).fetch(new Request(NEUTRAL_SPEND_URL, {
     method: "POST", signal: deadline, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   }));
-  if (response.status !== 200) return { status: response.status };
+  if (response.status !== 200) {
+    const code = response.headers.get("X-Study-Error");
+    return { status: response.status, ...(code ? { code } : {}) };
+  }
   const spend = await readBoundedJson(response, 512, deadline);
   if (!exactObject(spend, ["shardCapMicros", "remainingMicros", "expiresAt"]) ||
       !Number.isSafeInteger(spend.shardCapMicros) || spend.shardCapMicros < 1 || spend.shardCapMicros > NEUTRAL_SHARD_CAP_MICROS ||
@@ -332,7 +336,7 @@ async function neutralSpend(namespace, payload, signal) {
 
 const providerKeyConfigured = key => typeof key === "string" && /^sk-[A-Za-z0-9_-]{12,512}$/.test(key) && !key.startsWith("sk-admin-");
 
-function analysisConfigured(key, budget) {
+export function analysisConfigured(key, budget) {
   return providerKeyConfigured(key) &&
     typeof budget?.idFromName === "function" && typeof budget.get === "function";
 }
@@ -695,6 +699,7 @@ function utcQuotaEnds(now) {
 }
 
 function pruneNeutralSpend(sql, now) {
+  sql.exec("DELETE FROM luna_corpus_review WHERE run_id IN (SELECT id FROM neutral_spend_run WHERE retain_until<=?)", now);
   sql.exec("DELETE FROM neutral_spend_shard WHERE run_id IN (SELECT id FROM neutral_spend_run WHERE retain_until<=?)", now);
   sql.exec("DELETE FROM neutral_spend_run WHERE retain_until<=?", now);
 }
@@ -707,6 +712,7 @@ export class SceneAnalysisBudget {
     this.sql.exec("CREATE TABLE IF NOT EXISTS quota (key TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, count INTEGER NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS neutral_spend_run (id TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL, retain_until INTEGER NOT NULL, allocated_micros INTEGER NOT NULL DEFAULT 0, breached INTEGER NOT NULL DEFAULT 0)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS neutral_spend_shard (run_id TEXT NOT NULL, id TEXT NOT NULL, reserve_micros INTEGER NOT NULL, used_micros INTEGER, PRIMARY KEY (run_id,id))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS luna_corpus_review (run_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, rubric TEXT NOT NULL, halted INTEGER NOT NULL DEFAULT 0, active_shard TEXT, lease_until INTEGER NOT NULL DEFAULT 0)");
     initializeCorpusBudget(this.sql);
   }
 
@@ -719,39 +725,70 @@ export class SceneAnalysisBudget {
   }
 
   async handleNeutralSpend(request) {
-    const value = await readBoundedJson(request, 512, AbortSignal.timeout(3000));
-    const { operation, reader, runId, shardId, usedMicros } = value ?? {};
-    const fields = ["operation", "reader", "runId", "shardId"];
-    if (operation === "settle") fields.push("usedMicros");
-    if (!exactObject(value, fields) || !["reserve", "settle"].includes(operation) ||
-        typeof reader !== "string" || !/^[a-f0-9]{64}$/.test(reader) || !studyId(runId) || !studyId(shardId) ||
-        operation === "settle" && (!Number.isSafeInteger(usedMicros) || usedMicros < 0)) {
+    const value = await readBoundedJson(request, 24_000, AbortSignal.timeout(3000));
+    const { operation, reader, runId, shardId, usedMicros, clips, clipDigest, rubricVersion, providerRefused } = value ?? {};
+    const approval = operation === "approve-reviewed";
+    const reviewed = approval || operation === "reserve-reviewed" || operation === "settle-reviewed";
+    const reserving = operation === "reserve" || operation === "reserve-reviewed";
+    const settling = operation === "settle" || operation === "settle-reviewed";
+    const fields = ["operation", "reader", "runId"];
+    if (approval) fields.push("clips");
+    else fields.push("shardId");
+    if (reviewed) fields.push("rubricVersion");
+    if (reviewed && !approval) fields.push("clipDigest");
+    if (settling) fields.push("usedMicros");
+    if (operation === "settle-reviewed") fields.push("providerRefused");
+    const digest = input => typeof input === "string" && /^[a-f0-9]{64}$/.test(input);
+    if (!exactObject(value, fields) || !approval && !reserving && !settling || !digest(reader) || !studyId(runId) ||
+        !approval && !studyId(shardId) || reviewed && (typeof rubricVersion !== "string" || !/^[a-z0-9-]{1,64}$/.test(rubricVersion)) ||
+        approval && (!Array.isArray(clips) || !clips.length || clips.length > 123 ||
+          !clips.every(clip => exactObject(clip, ["id", "digest"]) && studyId(clip.id) && digest(clip.digest)) ||
+          new Set(clips.map(clip => clip.id)).size !== clips.length) || reviewed && !approval && !digest(clipDigest) ||
+        settling && (!Number.isSafeInteger(usedMicros) || usedMicros < 0 || reviewed && typeof providerRefused !== "boolean")) {
       return new Response(null, { status: 400 });
     }
     const now = Date.now();
     const result = this.storage.transactionSync(() => {
       pruneNeutralSpend(this.sql, now);
       let run = this.sql.exec("SELECT * FROM neutral_spend_run WHERE id=?", runId).toArray()[0];
-      if (run && run.owner !== reader || !run && operation === "settle") return new Response(null, { status: 409 });
+      const denied = (status, code) => new Response(null, { status, headers: { "X-Study-Error": code } });
+      if (run && run.owner !== reader || !run && settling && !reviewed) return denied(409, "run_conflict");
+      const review = this.sql.exec("SELECT manifest,rubric,halted,lease_until FROM luna_corpus_review WHERE run_id=?", runId).toArray()[0];
+      const manifest = approval ? JSON.stringify(Object.fromEntries(clips.map(({id, digest}) => [id, digest]).sort(([a], [b]) => a.localeCompare(b)))) : null;
+      if (approval && run && (!review || review.manifest !== manifest || review.rubric !== rubricVersion || run.expires_at <= now)) {
+        return denied(409, "run_conflict");
+      }
+      if (reviewed && !approval && (!run || !review || review.rubric !== rubricVersion || JSON.parse(review.manifest)[shardId] !== clipDigest)) {
+        return denied(403, "clip_not_approved");
+      }
+      if (!reviewed && review) return denied(409, "run_conflict");
       if (!run) {
         run = { expires_at: now + NEUTRAL_RUN_LIFETIME_MS, allocated_micros: 0, breached: 0 };
         this.sql.exec("INSERT INTO neutral_spend_run (id,owner,expires_at,retain_until) VALUES (?,?,?,?)",
           runId, reader, run.expires_at, now + NEUTRAL_RUN_RETENTION_MS);
+        if (approval) this.sql.exec("INSERT INTO luna_corpus_review (run_id,manifest,rubric) VALUES (?,?,?)", runId, manifest, rubricVersion);
       }
       const reply = shardCapMicros => Response.json({ shardCapMicros, expiresAt: run.expires_at,
         remainingMicros: run.breached ? 0 : Math.max(0, NEUTRAL_RUN_CAP_MICROS - run.allocated_micros) });
+      if (approval) return reply(NEUTRAL_SHARD_CAP_MICROS);
       const shard = this.sql.exec("SELECT * FROM neutral_spend_shard WHERE run_id=? AND id=?", runId, shardId).toArray()[0];
       let reserveMicros = shard?.reserve_micros;
-      if (operation === "reserve") {
-        if (shard || run.expires_at <= now) return new Response(null, { status: 409 });
+      if (reserving) {
+        if (shard) return denied(409, reviewed ? "shard_already_started" : "run_conflict");
+        if (run.expires_at <= now) return denied(409, "run_conflict");
+        if (reviewed && review.halted) return denied(409, "run_halted");
+        if (reviewed && review.lease_until > now) return denied(409, "shard_in_flight");
         reserveMicros = Math.min(NEUTRAL_SHARD_CAP_MICROS, NEUTRAL_RUN_CAP_MICROS - run.allocated_micros);
         if (run.breached || reserveMicros <= 0) return new Response(null, { status: 429 });
         this.sql.exec("INSERT INTO neutral_spend_shard (run_id,id,reserve_micros) VALUES (?,?,?)", runId, shardId, reserveMicros);
+        if (reviewed) this.sql.exec("UPDATE luna_corpus_review SET active_shard=?,lease_until=? WHERE run_id=?", shardId, now + REVIEWED_SHARD_LEASE_MS, runId);
         run.allocated_micros += reserveMicros;
       } else {
         if (!shard || shard.used_micros !== null && shard.used_micros !== usedMicros) return new Response(null, { status: 409 });
         if (shard.used_micros !== null) return reply(shard.reserve_micros);
         this.sql.exec("UPDATE neutral_spend_shard SET used_micros=? WHERE run_id=? AND id=?", usedMicros, runId, shardId);
+        if (reviewed) this.sql.exec("UPDATE luna_corpus_review SET active_shard=NULL,lease_until=0 WHERE run_id=? AND active_shard=?", runId, shardId);
+        if (providerRefused) this.sql.exec("UPDATE luna_corpus_review SET halted=1 WHERE run_id=?", runId);
         if (usedMicros > shard.reserve_micros) run.breached = 1;
         run.allocated_micros = Math.min(NEUTRAL_RUN_CAP_MICROS, run.allocated_micros - shard.reserve_micros + usedMicros);
       }
