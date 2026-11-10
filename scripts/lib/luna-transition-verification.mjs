@@ -57,8 +57,7 @@ export function mergeTransitionVerdict(cue, verdict) {
     return {annotation: {...cue, fact, transition: "none", priorAnchor: fact === "none" ? null : cue.priorAnchor},
       flag: conflict ? "transition-conflict" : undefined};
   }
-  if (cue?.status === "verified" && cueStarts.has(verdict.transition) &&
-      !freshEnactedStart(cue, verdict.transition, verdict.unitId)) {
+  if (cueStarts.has(verdict.transition) && !freshEnactedStart(cue, verdict.transition, verdict.unitId)) {
     return {annotation: cue, flag: "transition-conflict"};
   }
   const effect = cue?.fact === "protective" || verdict.fact === "none" && cue?.fact && !boundaryFacts.has(cue.fact) ?

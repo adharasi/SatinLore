@@ -253,15 +253,16 @@ test("an independent neutral verdict cannot clear a protective cue verification"
 test("an exact enacted restart may cite the earlier stop and survive a neutral transition check", async () => {
   const text = "They held hands. She asked for a break and he let go. She took his hand again. " +
     "They kept holding hands. The clock ticked.";
-  const typedCases = [null, {status: "neutral", transition: "none", fact: "none", evidenceIds: []},
-    {status: "verified", transition: "restart", fact: "none", evidenceIds: [1, 2]}];
-  for (const typed of typedCases) {
+  const neutralTyped = {status: "neutral", transition: "none", fact: "none", evidenceIds: []};
+  const confirmedTyped = {status: "verified", transition: "restart", fact: "none", evidenceIds: [1, 2]};
+  for (const [typed, phase, effect] of [[null, "rebuild", "none"], [neutralTyped, "rebuild", "none"],
+    [confirmedTyped, "rebuild", "none"], [confirmedTyped, "onset", "low"]]) {
     const calls = [];
     const provider = fake((id, mode) => {
       if (mode === "transition") return typedTransition(id, typed);
       if (id === 0) return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset"});
       if (id === 1) return active(id, mode, {fact: "neutralize", action: "release", narrativePhase: "quiet", transition: "hard-stop"});
-      if (id === 2) return active(id, mode, {fact: "none", action: "contact", narrativePhase: "rebuild",
+      if (id === 2) return active(id, mode, {fact: effect, action: "contact", narrativePhase: phase,
         transition: "restart", scopeId: null, evidenceIds: typed?.status === "verified" ? [2] : [1, 2]});
       if (id === 3) return active(id, mode, {fact: "none", action: "continuation", narrativePhase: "sustain", scopeId: null});
       return neutral(id);
@@ -273,7 +274,7 @@ test("an exact enacted restart may cite the earlier stop and survive a neutral t
     assert.equal(run.units[2].readerCue, true);
     assert.equal(run.units[2].appliedTransition, "restart");
     assert.deepEqual(calls.find(call => call.mode === "verify" && call.targetIds[0] === 4).attested,
-      [{unitId: 2, scopeId: 2, frame: "current", action: "contact", narrativePhase: "rebuild"}]);
+      [{unitId: 2, scopeId: 2, frame: "current", action: "contact", narrativePhase: phase}]);
   }
 });
 
@@ -434,6 +435,19 @@ test("a transition citation cannot supply a missing exact target citation for a 
   assert.deepEqual(row.labelEvidenceIds, [1]);
   assert.equal(row.cue, false);
   assert.equal(row.cueGuard, "cue-target-uncited");
+  assert.equal(row.pattern, "Baseline");
+  assert.equal(row.appliedTransition, "none");
+});
+
+test("a typed onset on ordinary activity remains a raw prediction when the cue pass is neutral", async () => {
+  const provider = fake((id, mode) => mode === "transition" ?
+    typedTransition(id, {fact: "none", transition: "onset"}) : neutral(id));
+  const run = await runLunaProtocolShadow({...fixture(), provider, verificationTargets: [1],
+    verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [1]});
+  const row = run.units[1];
+  assert.equal(row.transitionVerification.transition, "onset");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.readerCue, false);
   assert.equal(row.pattern, "Baseline");
 });
 

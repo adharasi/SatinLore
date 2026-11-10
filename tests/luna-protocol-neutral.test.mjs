@@ -124,9 +124,11 @@ test("applied scores retain stage origins, gated cue changes, and the boundary-o
   assert.equal(report.transition.exactTypedTransitions.extra, 8);
   assert.equal(report.transition.boundary.exact.extra, 4);
   assert.deepEqual(report.transition.boundary.excludedNonBoundaryPredictions, {onset: 4});
-  assert.equal(report.applied.exactTypedTransitions.extra, 8);
+  assert.equal(report.applied.exactTypedTransitions.extra, 4);
   assert.equal(report.applied.boundary.exact.extra, 4);
-  assert.equal(report.applied.transitionOrigins["transition-pass"], 8);
+  assert.equal(report.applied.transitionOrigins["transition-pass"], 4);
+  assert.equal(report.diagnostics[0].units[1].transition.transition, "onset");
+  assert.equal(report.diagnostics[0].units[1].applied.transition, "none");
   assert.deepEqual(report.diagnostics[0].units[0].applied, {status: "verified", cue: false,
     transition: "reported-entry", transitionOrigin: "transition-pass", cuePrefixTransition: "none",
     readerCue: false, cueChange: "removed-false-positive", readerCueChange: "removed-false-positive",

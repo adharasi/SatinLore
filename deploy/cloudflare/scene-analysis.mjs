@@ -384,7 +384,7 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   const stop = new AbortController();
   const timeout = AbortSignal.timeout(Math.max(0, Math.min(startedAt + duration, session.expiresAt) - Date.now()));
   const signal = AbortSignal.any([request.signal, timeout, stop.signal]);
-  let attempts = 0, dispatched = 0, blocked, abort, hostedTermination;
+  let attempts = 0, dispatched = 0, blocked, abort, hostedTermination, hostedQuotaCutoff;
   const deny = response => {
     blocked ??= response;
     stop.abort();
@@ -428,6 +428,12 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
       deny(providerUnavailable(session, "budget_unavailable"));
     }
     if (permission.status === 429) {
+      if (neutralStudy) {
+        const window = permission.headers.get("X-Scene-Quota-Window");
+        const retry = permission.headers.get("Retry-After");
+        hostedQuotaCutoff = { window: ["day", "month"].includes(window) ? window : null,
+          retryAfterSeconds: retry && /^\d{1,7}$/.test(retry) ? Number(retry) : null };
+      }
       limitQuota("durable-quota", budgetLimited(permission));
       checkQuota();
     }
@@ -467,6 +473,7 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
         if (!await authorized()) return expired();
         return Response.json({ ...result, hostedStudyVersion: suite, hostedShard: shard,
           hostedQuota: NEUTRAL_LUNA_PROTOCOL_QUOTA,
+          ...(hostedQuotaCutoff ? { hostedQuotaCutoff } : {}),
           externalCalls: dispatched,
           quotaLimited: hostedTermination !== undefined, hostedTermination: hostedTermination ??
             (result.providerStops.all ? "provider-terminal" : Object.keys(result.providerStops).length ? "provider-mode-terminal" : "completed") });
@@ -686,18 +693,23 @@ export class SceneAnalysisBudget {
         ...deploymentWindows,
       ];
       const attempts = suite === CUE_CONTINUITY_STUDY_SUITE ? CUE_CONTINUITY_STUDY_REQUESTS : 1;
-      const retryAt = this.storage.transactionSync(() => {
+      const limited = this.storage.transactionSync(() => {
         this.sql.exec("DELETE FROM quota WHERE expires_at<=?", now);
         const limited = windows.filter(({ key, limit }) =>
           (this.sql.exec("SELECT count FROM quota WHERE key=?", key).toArray()[0]?.count ?? 0) + attempts > limit);
-        if (limited.length) return Math.max(...limited.map(window => window.expires));
+        if (limited.length) return limited;
         for (const { key, expires } of windows) this.sql.exec("INSERT INTO quota(key,expires_at,count) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET count=count+excluded.count",
           key, expires, attempts);
-        return 0;
+        return [];
       });
       await this.scheduleExpiry();
-      return retryAt ? new Response(null, { status: 429, headers: { "Retry-After": String(Math.ceil((retryAt - now) / 1000)) } }) :
-        new Response(null, { status: 204 });
+      if (!limited.length) return new Response(null, { status: 204 });
+      const retryAt = Math.max(...limited.map(window => window.expires));
+      const headers = { "Retry-After": String(Math.ceil((retryAt - now) / 1000)) };
+      if (suite === NEUTRAL_LUNA_PROTOCOL_SUITE) {
+        headers["X-Scene-Quota-Window"] = limited.some(({ key }) => key === "founder-neutral-month") ? "month" : "day";
+      }
+      return new Response(null, { status: 429, headers });
     } catch { return new Response(null, { status: 503 }); }
   }
 

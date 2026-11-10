@@ -207,7 +207,8 @@ function playbackInputs(index, decisions, blocked) {
     const ease = clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
     const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
-    const low = clear && ownCueEvidence && !quietBoundary && kind === "low" ?
+    const rebuild = restart && (transition === "restart" || fact.narrativePhase === "rebuild");
+    const low = clear && ownCueEvidence && !quietBoundary && kind === "low" && !rebuild ?
       {...mark("low", "Prefix evidence establishes an independent low cue."),
         profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone"} : null;
     const canSignal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);

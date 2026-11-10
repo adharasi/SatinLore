@@ -40,7 +40,8 @@ function request(jwt, { host = ORIGIN, origin = host, path = "/api/scene-analysi
 function upstream(labels = LABELS) {
   return Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
 }
-function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204, wholeStoryLunaComparison } = {}) {
+function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204, quotaWindow,
+  wholeStoryLunaComparison } = {}) {
   const calls = [], reservations = [];
   const worker = createPrivateAppWorker({ keyResolver, wholeStoryLunaComparison, analysisFetcher: async (url, options) => {
     calls.push({ url, options });
@@ -50,7 +51,7 @@ function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaSt
     idFromName: value => value, get: name => ({ async fetch(request) {
       reservations.push({ name, url: request.url, method: request.method, body: await request.json() });
       const status = typeof quotaStatus === "function" ? quotaStatus(reservations.length) : quotaStatus;
-      return new Response(null, { status, headers: { "Retry-After": "66" } });
+      return new Response(null, { status, headers: { "Retry-After": "66", ...(quotaWindow ? { "X-Scene-Quota-Window": quotaWindow } : {}) } });
     } }),
   } };
   return { worker, env, calls, reservations };
@@ -194,13 +195,15 @@ test("neutral protocol quota cutoff keeps completed rows and accounts only for f
   const founder = await token();
   let oneCallCharge;
   for (const accepted of [1, 2]) {
-    const f = fixture({ provider: neutralProtocolUpstream, quotaStatus: count => count <= accepted ? 204 : 429 });
+    const f = fixture({ provider: neutralProtocolUpstream, quotaStatus: count => count <= accepted ? 204 : 429,
+      quotaWindow: accepted === 1 ? "day" : "month" });
     const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }),
       enableWholeStory(f.env));
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.quotaLimited, true);
     assert.equal(result.hostedTermination, "durable-quota");
+    assert.deepEqual(result.hostedQuotaCutoff, { window: accepted === 1 ? "day" : "month", retryAfterSeconds: 66 });
     assert.equal(result.externalCalls, accepted);
     assert.equal(f.calls.length, accepted);
     assert.equal(f.reservations.length, accepted + 1);
@@ -854,6 +857,7 @@ test("founder neutral and ordinary daily quotas are independently enforced", { t
   const neutral = await Promise.all(Array.from({ length: 258 }, (_, index) => reserve(index + 1, NEUTRAL_PROTOCOL_SUITE)));
   assert.equal(neutral.filter(response => response.status === 204).length, 256);
   assert.equal(neutral.filter(response => response.status === 429).length, 2);
+  assert.equal(neutral.find(response => response.status === 429).headers.get("X-Scene-Quota-Window"), "day");
   assert.equal((await reserve(100, WHOLE_STORY_SUITE)).status, 204);
   assert.equal((await reserve(101)).status, 429);
 });
@@ -864,6 +868,7 @@ test("concurrent founder neutral reservations respect the monthly cap without af
   const responses = await Promise.all([reserve(1, NEUTRAL_PROTOCOL_SUITE), reserve(2, NEUTRAL_PROTOCOL_SUITE)]);
   assert.deepEqual(responses.map(response => response.status).sort(), [204, 429]);
   assert.match(responses.find(response => response.status === 429).headers.get("Retry-After"), /^\d+$/);
+  assert.equal(responses.find(response => response.status === 429).headers.get("X-Scene-Quota-Window"), "month");
   assert.equal((await reserve(1, WHOLE_STORY_SUITE)).status, 204);
   assert.equal((await reserve(1)).status, 204);
 });

@@ -68,11 +68,28 @@ The v6 baseline used four pinned original fixtures with 33 targets. Discovery re
 
 For the next corpus comparison, freeze edition hashes, references, eligibility decisions, sampling slices and both arms before dispatch. Include slow buildup, reported-to-current frame changes, soft interruptions, explicit stops, declined restarts and long continuation spans. Record every miss or false positive by unit, stage and reason. Check complete-context and windowed arms on matched eligible editions. Review unresolved reference disagreements blind to the candidate and keep those revisions versioned. The [release qualification](nocturne-release-qualification.md) defines the independent 1,000-story holdout and gates of 92% cue precision, 90% cue recall, 85% transition precision and recall, at most 5% neutral false cues and preservation of every explicit stop and hard quiet.
 
+### Live v7 results on the fixed complete-context arm
+
+| Measure | v6 | v7 |
+| --- | ---: | ---: |
+| Usable discovery rows | 30/33 | 33/33 |
+| Usable primary cue rows | 29/33 | 29/33 |
+| Exact primary cue matches and extras | 8/10, 1 extra | 9/10, 1 extra |
+| Applied reader cue matches and extras | 5/10, 0 extras | 7/10, 0 extras |
+| Exact typed boundaries and extras | 6/7, 2 extras | 5/7, 0 extras |
+| Applied exact boundaries and extras | 6/7, 2 extras | 6/7, 1 extra |
+
+The live run dispatched 61 requests at an estimated $0.017568. Shard B finished and the founder request ledger cut off shard A. The cutoff deferred four primary checks and five typed checks on `old-letter`, including the reference return at unit 4 and positive cue at unit 7. The sixth unobserved typed row was a contract rejection at `practice-drill` 2. The fixed 33-unit denominator keeps all of these rows visible. Request quota ended the run independently of the spend cap. The two runs contain separate live model calls, so changes across aggregate model scores include run-to-run variation.
+
+The two confirmed restarts at `first-dance` 10 and `reading-room` 8 activated. `first-dance` 5 kept its continuation despite a competing onset verdict. `reading-room` 2 cleared carry through the compiler guard after both model passes said neutral. The hard stop at `first-dance` 7 still produced Stop. Two of the three unplayed reference cues were grounded anticipation at `first-dance` 9 and `reading-room` 7. Each was classified as build, and the stop or decline still required enacted evidence before automatic restart. The remaining cue was deferred. The extra applied boundary came from a premature ordinary-activity stop at `practice-drill` 2 and produced no new activation.
+
+The follow-up compiler change keeps the restart profile when an exact enacted restart also carries a low-cue effect, and keeps a typed-only onset out of applied events. Targeted regression tests cover those combinations. The next live comparison should finish the deferred rows and distinguish onset and restart labels from boundary annotations. Verify explicit frame returns and ordinary activity endings on matched positive and negative examples. Before running multiple large shards, check founder quota headroom and reserve room for the whole comparison. A resumable evaluation ledger should reuse completed requests and submit only unresolved targets.
+
 ### Request quotas and spend
 
 The old research routes and normal reader share a deployment-wide 100-attempt UTC day and 1,000-attempt UTC month. The reader also has a per-reader allowance. Research routes have their own suite allowances. Each reservation checks both the applicable suite or reader allowance and the shared deployment allowance. One benchmark can exhaust those counters even when it costs very little. The counters reserve requests before sending them, and a reserved request can later fail.
 
-The fixed founder neutral diagnostic uses its own atomic allowance of 256 attempts per UTC day and 2,000 per UTC month, with a shared 256-attempt suite ceiling across its parts. Reader and older study limits are separate. Each protected submission is capped at 48 provider attempts and a conservative $0.15 reservation. This leaves room below the 50 external subrequests per invocation on Cloudflare Workers Free. A combined complete-context test has a maximum $0.30 reservation across its two parts. Estimated charges and outstanding reservations are reported separately. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+The fixed founder neutral diagnostic uses its own atomic allowance of 256 attempts per UTC day and 2,000 per UTC month, with a shared 256-attempt suite ceiling across its parts. Reader and older study limits are separate. Each protected submission is capped at 48 provider attempts and a conservative $0.15 reservation. This leaves room below the 50 external subrequests per invocation on Cloudflare Workers Free. A combined complete-context test has a maximum $0.30 reservation across its two parts. A partial report identifies the limiting day or month and includes the time until the window resets. Estimated charges and outstanding reservations are reported separately. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 
 The exact compiler regression uses `scripts/replay-approved-beat-protocol.py`. Supply the frozen prior v9 labels and review inputs separately from the approved v6 output. Run the CLI with `--help` for the input and output flags. It hydrates the approved input shape with the historical replay adapter, then compares complete JavaScript profile and trace objects against the expected outputs.
 
