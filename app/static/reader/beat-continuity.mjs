@@ -24,6 +24,7 @@ class Beat {
     this.profile = profile;
     this.supportEnd = supportEnd;
     this.established = established;
+    this.provisional = false;
     this.paragraph = paragraph;
     this.easing = easing;
     this.quiet = false;
@@ -123,6 +124,8 @@ export function planStory(story, units) {
     if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile))) {
       throw new RangeError("Independent low evidence must name a low profile at its evidence unit.");
     }
+    const confirmsProvisional = scope?.confirmsProvisional === true && scope.knownAt === id && scope.priorAnchor != null &&
+      scope.evidence.includes(id);
     const protective = source.gate !== CLEAR_GATE || unit.protective;
     let prior;
     if (protective || pattern === "Stop" || pattern === "Reset" || barrier || unit.manualZero) {
@@ -130,9 +133,17 @@ export function planStory(story, units) {
       beat = parked = null;
       lastBarrier = id;
     } else {
-      if (!beat && scope?.priorAnchor != null && scopedTo(parked, scope)) {
+      if (!beat && scope?.priorAnchor != null && scopedTo(parked, scope) && (!parked.provisional || confirmsProvisional)) {
         beat = parked;
         parked = null;
+      }
+      if (beat?.provisional && confirmsProvisional && scopedTo(beat, scope)) {
+        beat.attest(id);
+        beat.supportEnd = wordEnd;
+        beat.provisional = false;
+        beat.established = true;
+        beat.quiet = beat.released = false;
+        beat.releaseEnd = null;
       }
       prior = beat;
     }
@@ -164,16 +175,27 @@ export function planStory(story, units) {
       rationale = boundary.reason;
       const replacement = pattern === "Baseline" || pattern === "Taper" ? pattern : prior ? "Taper" : "Baseline";
       Object.assign(result, {pattern: replacement, block: prior?.id ?? null, reason: rationale});
-    } else if (low && (!barrier || boundary.kind === "cut")) {
+    } else if (low?.localOnly && !barrier && !spanEnd && !beat && !parked) {
+      decision = "Local recovery";
+      rationale = low.reason;
+      mark = low;
+      floorWords = words;
+      Object.assign(result, {pattern: lowProfile, block: null, reason: rationale});
+    } else if (low && !low.localOnly && (!barrier || boundary.kind === "cut")) {
       const retained = scopedTo(beat, scope) || beat?.anchors.has(low.priorAnchor);
       if (!retained) {
-        beat = new Beat(story, id, lowProfile, wordEnd, true, paragraph);
+        beat = new Beat(story, id, lowProfile, wordEnd, !low.provisional, paragraph);
+        beat.provisional = low.provisional === true;
         parked = null;
       } else {
         beat.attest(id);
         beat.profile = lowProfile;
         beat.supportEnd = wordEnd;
         beat.quiet = false;
+        if (beat.provisional && !low.provisional) {
+          beat.provisional = false;
+          beat.established = true;
+        }
       }
       beat.easing = lowProfile === "Recovery";
       beat.released = beat.easing;
@@ -189,7 +211,7 @@ export function planStory(story, units) {
       Object.assign(result, {pattern: lowProfile, reason: rationale});
     } else {
       const signal = localSignal(unit, source);
-      let scoped = scopedTo(beat, scope);
+      let scoped = scopedTo(beat, scope) && !beat?.provisional;
       const connector = unit.connector;
       const localEase = EASING_PROFILES.has(pattern) && !INHERITED_REASONS.has(source.reason);
       const implicitRecovery = pattern === "Recovery" && scope && scope.priorAnchor == null && !beat;
@@ -239,6 +261,7 @@ export function planStory(story, units) {
           beat.profile = signal;
           beat.supportEnd = wordEnd;
           beat.established = established;
+          beat.provisional = false;
           beat.easing = false;
           beat.quiet = false;
           beat.recoveryEnd = null;
@@ -263,7 +286,7 @@ export function planStory(story, units) {
         const recoveryLeft = beat.profile === "Recovery" && recoveryConnector && beat.recoveryEnd !== null
           ? Math.max(0, beat.recoveryEnd + CONNECTOR_FLOOR_WORDS - cursor) : 0;
         const connectorLeft = connector ? Math.max(0, fadeEnd + CONNECTOR_FLOOR_WORDS - age) : 0;
-        const supportedFloor = scoped || (!beat.quiet && (recoveryLeft || connectorLeft));
+        const supportedFloor = scoped || (!beat.provisional && !beat.quiet && (recoveryLeft || connectorLeft));
         if (!weakSwitch && !beat.quiet && age < holding && !beat.released) {
           let retained = age < STRONG_HOLD_WORDS ? beat.profile : "Undertone";
           if (retained === "Crest") retained = "Deep sustain";

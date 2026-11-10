@@ -98,6 +98,31 @@ test("weak paragraph transitions release once and ordinary connectors cannot res
   ]);
 });
 
+test("provisional auxiliary low uses bounded carry and only an exact scoped target can establish its floor", () => {
+  const units = [
+    row(0, "Baseline", {low: fact(0, {provisional: true})}),
+    row(1, "Baseline", {words: 19, connector: true}),
+    row(2, "Baseline", {words: 15, connector: true}),
+    row(3, "Baseline", {words: 24, connector: true}),
+    row(4, "Baseline", {connector: true}),
+    row(5, "Baseline", {scope: link(5, 0)}),
+    row(6, "Baseline", {scope: {...link(6, 0), confirmsProvisional: true}}),
+    row(7, "Baseline"),
+  ];
+  const result = planStory("TEST", units);
+  assert.deepEqual(result.map(([profile, trace]) => [profile.pattern, trace.holdWords, trace.fadeWords, trace.floorWords]), [
+    ["Undertone", 0, 0, 1], ["Undertone", 16, 32, 0], ["Taper", 0, 13, 0], ["Baseline", 0, 0, 0],
+    ["Baseline", 0, 0, 0], ["Baseline", 0, 0, 0], ["Undertone", 32, 48, 48], ["Undertone", 32, 48, 0],
+  ]);
+  assert.equal(result[6][1].beat, "TEST:beat:0");
+  assert.equal(result[6][1].knownAt, 6);
+  assert.deepEqual(result[6][1].evidence, [0, 6]);
+  const blocked = planStory("TEST", [units[0], row(1, "Stop"),
+    row(2, "Baseline", {scope: {...link(2, 0), confirmsProvisional: true}})]);
+  assert.equal(blocked[2][0].pattern, "Baseline");
+  assert.equal(blocked[2][1].beat, null);
+});
+
 test("independent recovery has a bounded floor across inherited taper", () => {
   const result = planStory("TEST", [
     row(0, "Gradual build", {words: 8}),
@@ -133,6 +158,20 @@ test("span end eases an existing beat and permits independent low evidence", () 
   assert.equal(planStory("TEST", [row(0, "Baseline", {boundary: quietBoundary})])[0][0].pattern, "Baseline");
   assert.equal(planStory("TEST", [row(0, "Baseline", {boundary: quietBoundary, low: fact(0)})])[0][0].pattern,
     "Undertone");
+});
+
+test("local recovery after a closed beat never creates a continuation anchor", () => {
+  const result = planStory("TEST", [
+    row(0, "Gradual build"),
+    row(1, "Baseline", {boundary: fact(1, {kind: "beat-end"})}),
+    row(2, "Baseline", {words: 8, low: fact(2, {evidence: [1, 2], profile: "Recovery", localOnly: true})}),
+    row(3, "Baseline", {scope: link(3, 0), connector: true}),
+    row(4, "Baseline", {scope: link(4, 2), connector: true}),
+  ]);
+  assert.deepEqual(result.map(([profile]) => profile.pattern), ["Gradual build", "Baseline", "Recovery", "Baseline", "Baseline"]);
+  assert.equal(result[2][1].beat, null);
+  assert.equal(result[2][1].floorWords, 8);
+  assert.deepEqual(result[2][1].evidence, [1, 2]);
 });
 
 test("future overlays never seed carry and future citations never appear in a trace", () => {

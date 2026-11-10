@@ -233,8 +233,8 @@ function profileFor(fact, recent, last) {
 
 function playbackInputs(index, decisions, blocked, supportingIds) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
-  let restartBoundary = null, lastAnchor = null;
-  const anchors = new Map(), supportingAnchors = new Set(), blockedScopes = new Set();
+  let restartBoundary = null, lastAnchor = null, lastBarrierWasBeatEnd = false;
+  const anchors = new Map(), supportingAnchors = new Set(), provisionalAnchors = new Set(), blockedScopes = new Set();
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
     const proposed = result?.effectiveAnnotation ?? result?.annotation;
@@ -286,6 +286,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       (enactedStart && rawCue.transition === "onset" && rawCue.narrativePhase === "onset" && rawCue.fact === "none" ||
         rawCue.action === "anticipation" && rawCue.narrativePhase === "build" && rawCue.transition === "none" && rawCue.fact === "low");
     const supporting = auxiliary && !corroboratedSeed;
+    const provisionalSeed = corroboratedSeed && rawCue.action === "anticipation" && rawCue.evidenceIds.length === 1;
     // A typed cut can replace the primary fact, but its earlier link still cannot cross the cut.
     const preCutContinuation = cut && rawCue?.fact === "continue";
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
@@ -301,17 +302,22 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       last = "Baseline";
       anchors.clear();
       supportingAnchors.clear();
+      provisionalAnchors.clear();
       lastAnchor = null;
       // A deferred positive proposal cannot carry playback. Its cleared text
       // may still contextualize a later independently verified target.
-      if (protective || cut || beatEnd || !gap || !isDeferredCurrentContext(result)) evidenceBarrierId = unit.id;
+      if (protective || cut || beatEnd || !gap || !isDeferredCurrentContext(result)) {
+        evidenceBarrierId = unit.id;
+        lastBarrierWasBeatEnd = !protective && !cut && !neutralize && effectVerified && kind === "beat-end" &&
+          transition === "beat-end" && fact.status === "verified" && evidence.includes(unit.id);
+      }
     }
     const pendingRestart = enactedStart && restartCheckPending(restartBoundary, result);
     const restart = enactedStart && !pendingRestart;
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
       // Context can occupy a position in the trailing window. Only a causal
       // annotation with supporting evidence on an open gate contributes intensity.
-      recent = [...recent.slice(-7), !supporting && current && ownCueEvidence && !preCutContinuation && (!restartBoundary || restart) ?
+      recent = [...recent.slice(-7), !supporting && !provisionalSeed && current && ownCueEvidence && !preCutContinuation && (!restartBoundary || restart) ?
         rawCue.depiction : "unknown"];
     }
     if (pendingRestart && startTransitions.has(transition)) result.appliedTransitionOverride = "none";
@@ -325,8 +331,9 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const clear = !protective && !neutralize && !beatEnd && (!restartBoundary || restart) && current && fact?.status === "verified" &&
       freshEvidence;
     const linked = clear && hasAnchor;
-    const supportLinked = linked && ownCueEvidence && rawCue.fact === "continue" && rawCue.priorAnchor === prior &&
-      supportingAnchors.has(prior) && continuationScope(rawCue, anchors.get(prior)) === scopeId;
+    const exactLink = linked && ownCueEvidence && rawCue.fact === "continue" && rawCue.priorAnchor === prior &&
+      continuationScope(rawCue, anchors.get(prior)) === scopeId;
+    const supportLinked = exactLink && supportingAnchors.has(prior);
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
     else if (result && linked && scopeId !== fact.scopeId) result.playbackDisposition = "continuation-scope-alias";
     const localRelease = !protective && !neutralize && !cut && !restartBoundary && current && ownCueEvidence &&
@@ -337,6 +344,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const ease = localRelease || clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
     const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
+    const confirmsProvisional = !auxiliary && !quietBoundary && exactLink && provisionalAnchors.has(prior);
     const rebuild = restart && (restartBoundary || transition === "restart" || fact.narrativePhase === "rebuild");
     const hasLow = clear && ownCueEvidence && !quietBoundary && kind === "low" && !restart;
     const buildProgress = !auxiliary && !cut && hasLow && rawCue.narrativePhase === "build" && rawCue.action === "anticipation" &&
@@ -352,11 +360,21 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const linkedSustain = !auxiliary && !quietBoundary && supportLinked && rawCue.action === "contact" &&
       rawCue.narrativePhase === "sustain" && romanticDepictions.has(rawCue.depiction) &&
       freshEnactedStart(decisions.get(prior)?.annotation, prior);
-    const scope = linked && !supporting ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} :
+    const scope = linked && !supporting ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior,
+      ...(confirmsProvisional ? {confirmsProvisional} : {})} :
       buildProgress ? mark("build", "Exact buildup advances previously cited romantic context.") : null;
-    const low = !supporting && !quietBoundary && (hasLow && !buildProgress || supportLinked && !linkedSustain) ?
+    const typed = result?.transitionVerification;
+    const recoveryAfterEnd = !auxiliary && !quietBoundary && !cut && !restartBoundary && lastAnchor === null && lastBarrierWasBeatEnd &&
+      current && ownCueEvidence && rawCue.fact === "ease" && rawCue.narrativePhase === "recover" && rawCue.action === "contact" &&
+      rawCue.transition === "recover" && romanticDepictions.has(rawCue.depiction) &&
+      typed?.status === "verified" && typed.frame === "current" && typed.fact === "ease" && typed.transition === "recover" &&
+      typed.priorAnchor === previousEvidenceBarrier && typed.evidenceIds.includes(unit.id);
+    const low = recoveryAfterEnd ? {...mark("low", "Exact current contact supports local recovery after a verified beat end.",
+      [previousEvidenceBarrier, unit.id]), profile: "Recovery", localOnly: true} :
+      !supporting && !quietBoundary && (hasLow && !buildProgress || supportLinked && !linkedSustain) ?
       {...mark("low", supportLinked ? "Exact target evidence renews a beat supported by its prefix." :
-        "Prefix evidence establishes an independent low cue."), profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone"} : null;
+        "Prefix evidence establishes an independent low cue."), profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone",
+      ...(provisionalSeed ? {provisional: true} : {})} : null;
     const signal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);
     const canSignal = !supporting && signal;
     if (canSignal && rebuild && restartCheckPending(restartBoundary)) result.appliedTransitionOverride = "restart";
@@ -386,8 +404,10 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     if (supporting && !quietBoundary && (localAnchor || linked && ownCueEvidence)) {
       anchors.set(unit.id, scopeId ?? unit.id);
       supportingAnchors.add(unit.id);
-    } else if (!supporting && (localAnchor || low || linkedSustain)) {
+    } else if (!supporting && (localAnchor || low && !low.localOnly || linkedSustain || confirmsProvisional)) {
       anchors.set(unit.id, scopeId ?? unit.id);
+      if (provisionalSeed) provisionalAnchors.add(unit.id);
+      if (confirmsProvisional) provisionalAnchors.delete(prior);
       lastAnchor = unit.id;
       restartBoundary = null;
     }

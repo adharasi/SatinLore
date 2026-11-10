@@ -340,6 +340,37 @@ test("only scope- and action-corroborated active support can establish regular c
   }
 });
 
+test("self-only auxiliary buildup stays provisional until a scored target verifies its exact link", async () => {
+  const input = fixture("The doors opened. They looked forward to dancing. The musicians started putting away their instruments while the people who sat near the doorway gathered their coats. The room gradually emptied. The clock chimed.");
+  const cases = [
+    {expected: ["Undertone", "Taper", "Taper"], hold: 16},
+    {link: "exact", expected: ["Undertone", "Undertone", "Undertone"], hold: 16},
+    {link: "prior-only", expected: ["Undertone", "Taper", "Taper"], hold: 16},
+    {link: "wrong-scope", expected: ["Undertone", "Taper", "Taper"], hold: 16},
+    {prior: "scoped-build", expected: ["Undertone", "Undertone", "Undertone"], hold: 32},
+    {prior: "enacted", expected: ["Onset rise", "Undertone", "Undertone"], hold: 32},
+  ];
+  for (const {prior, link, expected, hold} of cases) {
+    const provider = fake((id, mode) => {
+      if (id === 1 && prior === "enacted") return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset", scopeId: 1});
+      if (id === 1) return active(id, mode, {narrativePhase: "build", scopeId: 1, evidenceIds: prior === "scoped-build" ? [0, 1] : [1]});
+      if (id === 3 && link) return active(id, mode, {fact: "continue", action: "continuation", priorAnchor: 1,
+        narrativePhase: link === "prior-only" ? "quiet" : "sustain", scopeId: link === "wrong-scope" ? 0 : 1,
+        evidenceIds: link === "prior-only" ? [1] : [1, 3]});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [2, 3, 4], maxVerification: 3,
+      maxSupportingVerification: 1});
+    assert.deepEqual(run.summary.supportingVerification, [{id: 1, status: "returned"}]);
+    assert.equal(run.units[2].trace.holdWords, hold);
+    assert.deepEqual(run.units.slice(2).map(row => row.pattern), expected, JSON.stringify({prior, link}));
+    if (link === "exact") {
+      assert.equal(run.units[3].trace.holdWords, 32);
+      assert.deepEqual(run.units[3].trace.evidence, [1, 3]);
+      assert.equal(run.units[4].trace.knownAt, 3);
+    }
+  }
+});
 test("an independently verified hard stop applies even when cue discovery and verification missed it", async () => {
   const calls = [];
   const provider = fake((id, mode) => mode === "transition" ? typedTransition(id) : neutral(id),
@@ -1034,6 +1065,49 @@ test("an independently verified local release can taper an isolated sample witho
     assert.equal(run.units[1].pattern, fact === "none" ? "Baseline" : "Taper");
     assert.equal(run.units[1].cue, false);
     if (fact === "beat-end") assert.equal(run.units[1].beatId, null);
+  }
+});
+
+test("exact recovery contact after a verified ordinary beat end stays local to the scored target", async () => {
+  const input = fixture("They took hands. They finished the dance. The musicians packed up. She pressed his hand in thanks. The lights dimmed.");
+  const cases = [
+    {ending: "beat-end", expected: "Recovery"},
+    {ending: "beat-end", rawAction: "release", expected: "Baseline"},
+    {ending: "beat-end", typedSupport: "old-anchor", expected: "Baseline"},
+    {ending: "beat-end", typedSupport: "neutral", expected: "Baseline"},
+    {ending: "scene-cut", expected: "Baseline"},
+    {ending: "hard-stop", expected: "Baseline"},
+    {ending: "declined-restart", expected: "Baseline"},
+    {ending: "protected", expected: "Stop"},
+  ];
+  for (const {ending, rawAction = "contact", typedSupport, expected} of cases) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") {
+        if (typedSupport === "neutral") return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: []});
+        const priorAnchor = typedSupport === "old-anchor" ? 0 : 1;
+        return typedTransition(id, {fact: "ease", transition: "recover", priorAnchor, evidenceIds: [priorAnchor, id]});
+      }
+      if (id === 0) return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset"});
+      if (id === 1) {
+        const fact = ending === "beat-end" ? "beat-end" : ending === "scene-cut" ? "cut" : ending === "protected" ? "protective" : "neutralize";
+        return active(id, mode, {fact, action: "none", transition: ending === "protected" ? "hard-stop" : ending});
+      }
+      if (id === 3) return active(id, mode, {fact: "ease", action: rawAction, narrativePhase: "recover", transition: "recover",
+        priorAnchor: 0, evidenceIds: [0, 3]});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 2, 3, 4], maxVerification: 4,
+      maxSupportingVerification: 1, verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [3]});
+    assert.equal(run.units[3].pattern, expected, JSON.stringify({ending, rawAction, typedSupport}));
+    assert.equal(run.units[3].cue, false);
+    assert.equal(run.units[3].beatId, null);
+    assert.equal(run.units[4].pattern, "Baseline");
+    assert.equal(run.units[4].beatId, null);
+    if (expected === "Recovery") {
+      assert.equal(run.units[3].phase, "recover");
+      assert.equal(run.units[3].appliedTransition, "recover");
+      assert.deepEqual(run.units[3].trace.evidence, [1, 3]);
+    }
   }
 });
 
