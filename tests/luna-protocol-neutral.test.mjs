@@ -14,6 +14,8 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
   const report = JSON.parse(output);
   assert.equal(report.measurement, "offline-planning");
   assert.equal(report.independentCorpusBenchmark, false);
+  assert.match(report.referenceScope, /development fixtures.*independent/u);
+  assert.match(report.appliedCueDefinition, /no direct-cue reference/u);
   assert.equal(report.sourceProseIncluded, false);
   assert.equal(report.externalCalls, 0);
   assert.equal(report.planning.referenceTargets, 33);
@@ -25,6 +27,8 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
     assert.equal(stage.returnedTargets, 0);
     assert.equal(stage.observedTargets, 0);
     assert.equal(stage.exactCues.missed, 10);
+    assert.equal(stage.targetDiagnostics.submittedTargets, 0);
+    assert.deepEqual(stage.targetDiagnostics.targetDispositions, {"no-attempt-record": 33});
   }
   assert.equal(report.discovery.exactTypedTransitions.missed, 7);
   assert.equal(report.transition.exactTypedTransitions.missed, 7);
@@ -66,6 +70,7 @@ test("reference mock exercises all pinned cues and typed events in each arm", as
     assert.equal(stop.expected.transition, "hard-stop");
     assert.equal(stop.transition.transition, "hard-stop");
     assert.equal(stop.prefix.transition, undefined);
+    assert.equal(stop.prefix.labels.transition, "hard-stop");
     assert.deepEqual(stop.transition.citedIds, [7]);
     assert.ok(stop.transition.submittedIds.includes(7));
     assert.equal(report.prefix.usage.measuredUsage, 33);
@@ -124,7 +129,8 @@ test("applied scores retain stage origins, gated cue changes, and the boundary-o
   assert.equal(report.applied.transitionOrigins["transition-pass"], 8);
   assert.deepEqual(report.diagnostics[0].units[0].applied, {status: "verified", cue: false,
     transition: "reported-entry", transitionOrigin: "transition-pass", cuePrefixTransition: "none",
-    readerCue: false, cueChange: "removed-false-positive", transitionChange: "unchanged"});
+    readerCue: false, cueChange: "removed-false-positive", readerCueChange: "removed-false-positive",
+    transitionChange: "unchanged", mismatches: ["extra-transition"]});
   assert.ok(report.diagnostics[0].units[0].pipelineFlags.includes("cue-frame-ineligible"));
   assert.equal(report.transition.usage.inputTokens, 363);
 });
@@ -145,10 +151,12 @@ test("complementary fixture shards combine exact scores and usage in canonical o
   assert.equal(combined.prefix.usage.attempts, 33);
   assert.equal(combined.prefix.usage.durationsMs.length, 33);
   assert.deepEqual(combined.prefix.exactCues, whole.prefix.exactCues);
+  assert.deepEqual(combined.prefix.targetDiagnostics, whole.prefix.targetDiagnostics);
   assert.deepEqual(combined.transition.boundary, whole.transition.boundary);
   assert.deepEqual(combined.applied.exactCues, whole.applied.exactCues);
   assert.deepEqual(combined.applied.exactTypedTransitions, whole.applied.exactTypedTransitions);
   assert.deepEqual(combined.reader.exactCues, whole.reader.exactCues);
+  assert.deepEqual(combined.reader.cueChanges, whole.reader.cueChanges);
   assert.equal(combined.cueRecovery.targets, 33);
   assert.equal(combined.cueRecovery.usage.attempts, 0);
   assert.throws(() => combineNeutralReports([left, left]), /complementary reports/u);
@@ -183,7 +191,8 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(report.prefix.exactCues.matched, 1);
   assert.equal(report.applied.exactCues.matched, 2);
   assert.equal(report.reader.exactCues.matched, 3);
-  assert.equal(report.cueRecovery.selectedTargets, 4);
+  assert.equal(report.cueRecovery.scheduledTargets, 11);
+  assert.equal(report.cueRecovery.selectedTargets, 3);
   assert.equal(report.cueRecovery.attemptedTargets, 2);
   assert.equal(report.cueRecovery.returnedTargets, 2);
   assert.equal(report.cueRecovery.recoveredReferenceCues, 2);
@@ -197,12 +206,18 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.deepEqual(units[2].cueRecovery.citedIds, [2]);
   assert.equal(units[2].applied.cue, false);
   assert.equal(units[2].applied.readerCue, true);
+  assert.equal(units[2].applied.readerCueChange, "recovered-match");
+  assert.deepEqual(units[2].applied.mismatches, []);
   assert.equal(units[3].prefix.status, "uncertain");
   assert.equal(units[3].cueRecovery.recovered, true);
   assert.equal(units[3].applied.cue, true);
+  assert.equal(units[3].applied.readerCueChange, "recovered-by-coverage");
+  assert.deepEqual(report.prefix.targetDiagnostics.works[0].unobservedSubmittedTargetIds, [3]);
   assert.equal(units[4].cueRecovery.status, "not-needed");
+  assert.equal(units[4].cueRecovery.selected, false);
   assert.equal(units[4].cueRecovery.submittedIds, null);
   assert.equal(units[5].cueRecovery.status, "budget-deferred");
+  assert.equal(units[5].cueRecovery.selected, true);
 
   const options = {mode: "mock", provider, now, arm: "complete", maxCueChecks: 2, maxAttempts: 48};
   const left = await runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "old-letter"], transitionLimit: 19});
@@ -213,6 +228,44 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(combined.cueRecovery.usage.inputTokens, 32);
   assert.equal(combined.cueRecovery.recoveredTargets, 8);
   assert.equal(combined.reader.targets, 33);
+});
+
+test("a repaired neutral row stays missing in primary scores and is applied separately", async () => {
+  const provider = async ({mode, targetIds}) => ({status: "ok", facts: targetIds.map(unitId => ({
+    unitId, status: "neutral", depiction: mode === "transition" ? "unknown" : "neutral", frame: "current",
+    narrativePhase: mode === "transition" ? "unknown" : "quiet", transition: "none",
+    action: mode === "verify" && unitId === 0 ? "contact" : mode === "transition" ? "unknown" : "none",
+    fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
+  }))});
+  const report = await runLunaProtocolNeutral({mode: "mock", provider, now, arm: "complete",
+    fixtureIds: ["first-dance"], maxCueChecks: 1});
+  const row = report.diagnostics[0].units[0];
+  assert.equal(row.prefix.targetDisposition, "rejected");
+  assert.equal(row.prefix.cue, null);
+  assert.equal(row.cueRecovery.primaryFailure, "status-effect");
+  assert.equal(row.cueRecovery.contractRepaired, true);
+  assert.equal(row.cueRecovery.recovered, false);
+  assert.equal(row.applied.readerCue, false);
+  assert.equal(report.cueRecovery.contractRepairedTargets, 1);
+});
+
+test("elapsed-time gap is reported as compiler recovery rather than a model boundary", async () => {
+  const provider = async ({mode, targetIds}) => ({status: "ok", facts: targetIds.map(unitId => {
+    const enactment = mode === "verify" && unitId === 1;
+    return {unitId, status: enactment ? "verified" : "neutral", depiction: enactment ? "romantic" :
+      mode === "transition" ? "unknown" : "neutral", frame: "current", narrativePhase: enactment ? "onset" :
+      mode === "transition" ? "unknown" : "quiet", transition: "none", action: enactment ? "contact" :
+      mode === "transition" ? "unknown" : "none", fact: "none", scopeId: null, priorAnchor: null,
+    evidenceIds: enactment ? [unitId] : []};
+  })});
+  const report = await runLunaProtocolNeutral({mode: "mock", provider, now, arm: "complete", fixtureIds: ["reading-room"]});
+  const row = report.diagnostics[0].units[2];
+  assert.equal(row.transition.transition, "none");
+  assert.equal(row.applied.transition, "uncertain-continuity");
+  assert.equal(row.applied.transitionOrigin, "compiler-continuity-guard");
+  assert.equal(row.applied.transitionChange, "recovered-match");
+  assert.equal(row.compiler.continuityGuard, "elapsed-time-gap");
+  assert.equal(row.compiler.pattern, "Baseline");
 });
 
 test("a capped transition stage retains the planned denominator and marks deferred rows", async () => {
@@ -238,8 +291,10 @@ test("only fixed request diagnostics and permitted usage reach the neutral repor
   const row = report.diagnostics[0].units[0];
   assert.equal(row.discovery.requestFailure, "output-schema");
   assert.equal(row.discovery.requestStatus, "failed");
+  assert.equal(row.discovery.targetDisposition, "no-fact-returned");
   assert.deepEqual(row.discovery.submittedIds, [0, 1, 2, 3]);
   assert.equal(row.discovery.citedIds, null);
+  assert.equal(row.discovery.labels, null);
   assert.equal(JSON.stringify(report).includes(secret), false);
 });
 
@@ -262,8 +317,14 @@ test("partial discovery keeps accepted rows and exposes unresolved targets separ
   assert.equal(missing.discovery.status, "missing");
   assert.equal(missing.discovery.requestStatus, "partial");
   assert.equal(missing.discovery.contractRejection, "missing-target");
+  assert.equal(missing.discovery.targetDisposition, "rejected");
   assert.equal(retained.discovery.status, "neutral");
   assert.equal(retained.discovery.requestStatus, "partial");
+  assert.equal(retained.discovery.targetDisposition, "returned");
+  assert.equal(report.discovery.targetDiagnostics.rejectedTargets, 1);
+  assert.deepEqual(report.discovery.targetDiagnostics.rejections, {"missing-target": 1});
+  assert.deepEqual(report.discovery.targetDiagnostics.works[0].unobservedSubmittedTargetIds, [0]);
+  assert.deepEqual(report.discovery.targetDiagnostics.works[0].rejectedTargets, [{id: 0, reason: "missing-target"}]);
 });
 
 test("live command requires the key and cannot be combined with a mock", () => {
@@ -290,4 +351,8 @@ test("terminal provider authorization stops the remaining study without hiding t
   assert.equal(report.planning.prefixAttempts, 0);
   assert.equal(report.planning.transitionAttempts, 0);
   assert.equal(report.budget.unsettled, 1);
+  const suppressed = report.diagnostics[1].units[0].discovery;
+  assert.equal(suppressed.targetDisposition, "not-dispatched");
+  assert.equal(suppressed.requestFailure, "http-auth");
+  assert.equal(suppressed.submittedIds, null);
 });

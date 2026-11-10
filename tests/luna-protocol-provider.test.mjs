@@ -20,7 +20,7 @@ const partial = (facts, targetFailures) => ({...success(facts), status: "partial
 
 test("submits only typed discovery inputs and accepts complete rows in target order", async () => {
   const proposed = fact(11, {status: "candidate", depiction: "romantic", narrativePhase: "build", fact: "low",
-    scopeId: 10, evidenceIds: [10, 11]});
+    action: "anticipation", scopeId: 10, evidenceIds: [10, 11]});
   let sent;
   const run = provider(async (url, options) => {
     assert.equal(url, "https://api.openai.com/v1/responses");
@@ -55,7 +55,8 @@ test("submits only typed discovery inputs and accepts complete rows in target or
 });
 
 test("verification accepts only an independent single-target prefix and ignores candidate hints", async () => {
-  const checked = fact(11, {status: "verified", depiction: "romantic", narrativePhase: "build", fact: "low", evidenceIds: [10, 11]});
+  const checked = fact(11, {status: "verified", depiction: "romantic", narrativePhase: "build", action: "anticipation",
+    fact: "low", evidenceIds: [10, 11]});
   const supplied = {mode: "verify", units: units.slice(0, 2), targetIds: [11]};
   let calls = 0;
   const run = provider(async (_url, {body}) => {
@@ -92,11 +93,12 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v6/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v7/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
   assert.match(sent.instructions, /Mere politeness, small talk, shared logistics/u);
+  assert.match(sent.instructions, /immediate offer and acceptance can support build and anticipation/u);
   assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
@@ -205,6 +207,9 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /protective only when the target directly establishes an active restriction/u);
   assert.match(sent.instructions, /Ordinary movement stopping/iu);
   assert.match(sent.instructions, /Set frame to reported if the target enters the account/u);
+  assert.match(sent.instructions, /Events within a recollection, imagined scene or report do not establish a transition/u);
+  assert.match(sent.instructions, /An explicit elapsed-time bridge can qualify/u);
+  assert.match(sent.instructions, /An earlier closing event is context only/u);
   assert.match(sent.instructions, /status uncertain and transition unknown/u);
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
@@ -221,6 +226,7 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
     transitionRow("interruption", "none"), transitionRow("declined-restart", "neutralize"), transitionRow("restart", "none"),
     transitionRow("non-romantic-activity-stop", "none"), transitionRow("reported-entry", "cut", {frame: "reported"}),
     transitionRow("present-return", "cut"), transitionRow("uncertain-continuity", "neutralize"), transitionRow("none", "none", noEvent),
+    transitionRow("none", "none", {...noEvent, frame: "reported"}),
     transitionRow("unknown", "none", {...noEvent, status: "abstain", frame: "uncertain"})];
   for (const row of permitted) {
     const run = provider(async () => response([row]));
@@ -237,6 +243,8 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
     [transitionRow("interruption", "ease", {scopeId: 3, evidenceIds: [5, 10], priorAnchor: 5}), "attested-evidence"],
     [transitionRow("reported-entry", "cut", {frame: "current"}), "transition-frame"],
     [transitionRow("present-return", "cut", {frame: "remembered"}), "transition-frame"],
+    [transitionRow("span-end", "span-end", {frame: "reported"}), "transition-frame"],
+    [transitionRow("uncertain-continuity", "neutralize", {evidenceIds: [10]}), "target-evidence"],
     [transitionRow("none", "none"), "transition-fact"],
     [transitionRow("none", "none", {status: "neutral"}), "status-effect"],
     [transitionRow("uncertain-continuity", "neutralize", {...noEvent, status: "uncertain"}), "status-effect"],
@@ -270,7 +278,7 @@ test("accepts only validated discovery rows and diagnoses requested targets with
   }
   for (const [extra, reason] of [[{evidenceIds: [11, 10]}, "evidence-id"], [{evidenceIds: [10, 10]}, "evidence-id"],
     [{scopeId: 9}, "scope-id"], [{priorAnchor: 11}, "prior-anchor"], [{evidenceIds: [11]}, "prior-anchor"],
-    [{status: "uncertain"}, "status-effect"], [{fact: "cut", evidenceIds: [10]}, "target-evidence"],
+    [{status: "uncertain"}, "status-effect"], [{fact: "cut", evidenceIds: [10], priorAnchor: null}, "target-evidence"],
     [{fact: "low", evidenceIds: []}, "target-evidence"], [{depiction: units[0].text}, "row-enum"]]) {
     const run = provider(async () => response([{...row, ...extra}, tail]));
     assert.deepEqual(await run(request()), partial([tail], [targetFailure(11, reason)]));
@@ -305,11 +313,43 @@ test("returns no partial rows from refusals, incomplete outputs or malformed env
 });
 
 test("keeps discovery-only suffix evidence provisional and retains no-proposal outcomes", async () => {
-  const candidate = fact(11, {status: "candidate", depiction: "romantic", narrativePhase: "build", fact: "low", evidenceIds: [11, 12]});
+  const candidate = fact(11, {status: "candidate", depiction: "romantic", narrativePhase: "build", action: "anticipation",
+    fact: "low", evidenceIds: [11, 12]});
   for (const status of ["neutral", "uncertain", "abstain"]) {
-    const noProposal = fact(12, {status, depiction: "unknown", narrativePhase: "unknown"});
+    const noProposal = fact(12, {status, depiction: "unknown", narrativePhase: status === "neutral" ? "quiet" : "unknown"});
     const run = provider(async () => response([candidate, noProposal]));
     assert.deepEqual(await run(request()), success([candidate, noProposal]));
+  }
+});
+
+test("keeps local cue, continuity, frame and neutral decisions independently grounded", async () => {
+  const supplied = {mode: "verify", units: units.slice(0, 2), targetIds: [11]};
+  const build = fact(11, {status: "verified", narrativePhase: "build", action: "anticipation", evidenceIds: [10, 11]});
+  const neutral = fact(11, {depiction: "romantic"});
+  const ordinaryStop = fact(11, {status: "verified", transition: "non-romantic-activity-stop", evidenceIds: [11]});
+  const reportEntry = fact(11, {status: "verified", frame: "reported", transition: "reported-entry", fact: "cut", evidenceIds: [11]});
+  for (const row of [build, neutral, {...neutral, frame: "reported"}, ordinaryStop, reportEntry]) {
+    const run = provider(async (_url, {body}) => {
+      const {instructions} = JSON.parse(body);
+      assert.match(instructions, /routine line in a live beat can be neutral/u);
+      assert.match(instructions, /Use an input unit ID at or before the target, or null/u);
+      return response([row]);
+    });
+    assert.deepEqual(await run(supplied), success([row]));
+  }
+  for (const [row, reason] of [
+    [{...build, action: "none"}, "phase-action"], [{...build, evidenceIds: []}, "target-evidence"],
+    [{...build, fact: "low", evidenceIds: [10]}, "target-evidence"], [{...build, fact: "low", frame: "reported"}, "fact-frame"],
+    [{...build, fact: "low", action: "continuation"}, "fact-action"], [{...build, fact: "ease"}, "fact-phase"],
+    [{...build, priorAnchor: 10}, "prior-anchor"], [{...build, transition: "restart"}, "transition-action"],
+    [{...build, status: "uncertain"}, "status-effect"], [{...neutral, narrativePhase: "unknown"}, "status-effect"],
+    [{...ordinaryStop, status: "neutral"}, "status-effect"], [{...reportEntry, status: "neutral"}, "status-effect"],
+    [{...reportEntry, fact: "span-end"}, "transition-fact"],
+    [{...reportEntry, evidenceIds: [10]}, "target-evidence"], [{...neutral, scopeId: 9}, "scope-id"],
+  ]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(supplied), rejected([targetFailure(11, reason)]));
+    assert.ok(LUNA_PROTOCOL_TARGET_FAILURES.includes(reason));
   }
 });
 

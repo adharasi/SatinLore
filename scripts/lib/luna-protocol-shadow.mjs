@@ -2,11 +2,11 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {mergeTransitionVerdict, transitionPriority} from "./luna-transition-verification.mjs";
+import {elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
+  verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
-  LUNA_PROTOCOL_TARGET_FAILURES,
-  LUNA_PROTOCOL_TRANSITION_FACTS,
-  lunaProtocolOutputTokens} from "./luna-protocol-provider.mjs";
+  LUNA_PROTOCOL_TARGET_FAILURES, lunaProtocolCueViolation, lunaProtocolOutputTokens,
+  lunaProtocolTransitionViolation} from "./luna-protocol-provider.mjs";
 
 const clearance = "No blocking event recorded";
 const transitionCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
@@ -28,6 +28,7 @@ const reviewable = fact => fact.fact !== "none" || !["none", "unknown"].includes
   activePhases.has(fact.narrativePhase) || ["ease", "recover"].includes(fact.narrativePhase) || activeActions.has(fact.action);
 const inputFor = window => JSON.parse(window.body);
 const anchorLinks = new Set(["continue", "ease", "span-end", "beat-end"]);
+const repairableCueContracts = new Set(["status-effect", "phase-action", "transition-fact", "transition-action", "fact-phase", "fact-action"]);
 export const MAX_SHADOW_MICROS = 3_000_000;
 export const MAX_SHADOW_VERIFICATIONS = 384;
 
@@ -56,31 +57,10 @@ function factViolation(fact, ids, target, mode, attested) {
   }
   if (mode === "transition") {
     if (["low", "continue"].includes(fact.fact) || fact.action !== "unknown" || fact.narrativePhase !== "unknown" ||
-        fact.depiction !== "unknown" || fact.status === "candidate") return "transition-shape";
-    if (fact.status === "verified") {
-      if (!LUNA_PROTOCOL_TRANSITION_FACTS[fact.transition]?.includes(fact.fact)) return "transition-fact";
-      return fact.evidenceIds.includes(target) ? null : "target-evidence";
-    }
-    return fact.fact === "none" && fact.priorAnchor === null && fact.evidenceIds.length === 0 &&
-      fact.transition === (fact.status === "neutral" ? "none" : "unknown") ? null : "status-effect";
+        fact.depiction !== "unknown") return "transition-shape";
+    return lunaProtocolTransitionViolation(fact);
   }
-  const effect = reviewable(fact);
-  if ((verify && fact.status === "candidate") || (!verify && fact.status === "verified") ||
-      (effect && (!["candidate", "verified"].includes(fact.status) || !fact.evidenceIds.length)) ||
-      (fact.status === "neutral" && (effect || fact.narrativePhase !== "quiet"))) return "status-effect";
-  if ((fact.fact === "continue" && (fact.priorAnchor === null || fact.scopeId === null || fact.scopeId > fact.priorAnchor)) ||
-      (fact.priorAnchor !== null && !["continue", "ease", "span-end", "beat-end"].includes(fact.fact))) return "prior-anchor";
-  if ((transitionCuts.has(fact.transition) || fact.transition === "hard-stop" ||
-      ["cut", "beat-end", "neutralize", "protective"].includes(fact.fact)) && !fact.evidenceIds.includes(target)) return "target-evidence";
-  if (["low", "continue", "ease"].includes(fact.fact) && fact.frame !== "current") return "fact-frame";
-  if (fact.fact === "low" && !["anticipation", "contact", "change", "release"].includes(fact.action)) return "fact-action";
-  if (verify && fact.fact === "low" && !fact.evidenceIds.includes(target)) return "target-evidence";
-  if (fact.fact === "ease" && !["ease", "recover"].includes(fact.narrativePhase)) return "fact-phase";
-  if (activePhases.has(fact.narrativePhase) && fact.frame === "current" && fact.fact === "none" &&
-      !(fact.narrativePhase === "build" ? activeActions : enactedActions).has(fact.action)) return "phase-action";
-  if (["restart", "onset"].includes(fact.transition) && fact.frame === "current" && !enactedActions.has(fact.action)) return "transition-action";
-  if (transitionCuts.has(fact.transition) && !["cut", "low", "none", "protective"].includes(fact.fact)) return "transition-fact";
-  return null;
+  return lunaProtocolCueViolation(fact, mode);
 }
 
 export function createLunaShadowBudget({maxAttempts = 96, maxSourceBytes = 500_000, maxMicros = 100_000} = {}) {
@@ -166,16 +146,16 @@ function profileFor(fact, recent, last) {
 
 function playbackInputs(index, decisions, blocked) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, barrierId = -1;
-  let needsRestart = false;
+  let needsRestart = false, lastAnchor = null;
   const anchors = new Map(), blockedScopes = new Set();
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
     const fact = result?.effectiveAnnotation ?? result?.annotation;
     const rawCue = result?.prefixVerified ? result.annotation : null;
-    const ownCueEvidence = rawCue?.status === "verified" && rawCue.frame === "current" && rawCue.evidenceIds.includes(unit.id);
+    const ownCueEvidence = exactCurrentCue(rawCue, unit.id);
     const effectVerified = result?.prefixVerified || result?.transitionVerification?.status === "verified";
     const evidence = fact?.evidenceIds ?? [];
-    const mark = (kind, reason) => ({kind, knownAt: unit.id, evidence, reason});
+    const mark = (kind, reason, proof = evidence) => ({kind, knownAt: unit.id, evidence: proof, reason});
     const independentBlock = blocked.has(unit.id);
     const gap = !fact || !usable.has(fact.status) || fact.frame === "uncertain" ||
       fact.narrativePhase === "unknown" && !reviewable(fact);
@@ -185,23 +165,27 @@ function playbackInputs(index, decisions, blocked) {
     const blocksScope = kind === "protective" || transition === "hard-stop";
     if (kind === "protective" && scopeId != null) blockedScopes.add(scopeId);
     const protective = independentBlock || blocksScope || blockedScopes.has(scopeId);
-    const neutralize = gap && !unit.structuralBoundary || kind === "neutralize" || transition === "uncertain-continuity";
+    const elapsedGap = !protective && elapsedContinuityGap(unit, rawCue, fact, lastAnchor);
+    if (elapsedGap) result.continuityGuard = "elapsed-time-gap";
+    const neutralize = gap && !unit.structuralBoundary || kind === "neutralize" || transition === "uncertain-continuity" || elapsedGap;
     const beatEnd = kind === "beat-end" || closingTransitions.has(transition);
     const frame = effectVerified ? fact.frame : null;
     const current = frame === "current";
     const frameChange = editorialFrames.has(frame) && lastFrame && frame !== lastFrame;
     const scopeChange = effectVerified && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
-    const cut = kind === "cut" || transitionCuts.has(transition) || frameChange || scopeChange;
+    const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
+    const cut = contextCut || frameChange || scopeChange && !needsRestart;
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
       cut ? mark("cut", "Verified scene or narrative-frame boundary.") :
       beatEnd ? mark("beat-end", "Verified narrative beat ending.") :
       kind === "span-end" || transition === "span-end" ? mark("span-end", "Verified release of the current span.") : null;
-    if (protective) needsRestart = true;
-    else if (cut) needsRestart = false;
+    if (protective || transition === "declined-restart") needsRestart = true;
+    else if (contextCut) needsRestart = false;
     if (neutralize || protective || cut || beatEnd) {
       recent = [];
       last = "Baseline";
       anchors.clear();
+      lastAnchor = null;
       barrierId = unit.id;
     }
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
@@ -209,11 +193,14 @@ function playbackInputs(index, decisions, blocked) {
       // annotation with supporting evidence contributes intensity to it.
       recent = [...recent.slice(-7), current && ownCueEvidence ? rawCue.depiction : "unknown"];
     }
-    const restart = ["restart", "onset"].includes(transition) && ownCueEvidence && enactedActions.has(rawCue.action);
+    const restart = freshEnactedStart(rawCue, transition, unit.id);
+    // Earlier stops establish history for a fresh enacted restart. They never
+    // count as positive evidence or restore an old continuation anchor.
+    const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId);
     const clear = !protective && !neutralize && !beatEnd && (!needsRestart || restart) && current && fact?.status === "verified" &&
-      (cut ? evidence.includes(unit.id) : evidence.every(id => id > barrierId));
+      freshEvidence;
     const prior = fact?.priorAnchor;
-    const linked = clear && prior !== null && prior !== undefined && anchors.has(prior) &&
+    const linked = clear && prior > barrierId && anchors.has(prior) &&
       fact.scopeId !== null && anchors.get(prior) === fact.scopeId;
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
     const scope = linked ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;
@@ -228,6 +215,8 @@ function playbackInputs(index, decisions, blocked) {
       if (quietBoundary) result.cueGuard = "cue-boundary-suppressed";
       else if (rawCue.frame !== "current" || !current) result.cueGuard = "cue-frame-ineligible";
       else if (!ownCueEvidence) result.cueGuard = "cue-target-uncited";
+      else if (needsRestart && !restart) result.cueGuard = "cue-restart-required";
+      else if (!freshEvidence) result.cueGuard = "cue-stale-evidence";
     }
     if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
       result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase));
@@ -239,6 +228,7 @@ function playbackInputs(index, decisions, blocked) {
     if (cut && !low && pattern === "Baseline") pattern = "Reset";
     if ((canSignal && (activePhases.has(fact.narrativePhase) || pattern === "Undertone")) || low) {
       anchors.set(unit.id, fact.scopeId ?? unit.id);
+      lastAnchor = unit.id;
       needsRestart = false;
     }
     if (pattern !== "Baseline" && pattern !== "Divider") last = pattern;
@@ -253,7 +243,8 @@ function playbackInputs(index, decisions, blocked) {
         reason: protective ? "Playback gate blocks automatic activation." : "Compiled from available protocol evidence.",
         gate: protective ? "Blocked" : clearance},
       boundary, scope, ease, low, connector, protective,
-      neutral: neutralize ? mark("neutralize", "Missing or unresolved scope clears carry.") : null};
+      neutral: neutralize ? elapsedGap ? mark("neutralize", "An elapsed interval leaves the earlier beat unresolved.", [unit.id]) :
+        mark("neutralize", "Missing or unresolved scope clears carry.") : null};
   });
 }
 
@@ -301,8 +292,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   let cueChecksStarted = 0;
   const refusedRuns = new Set();
   const invalidated = window => refusedRuns.has(window.runId);
-  const attest = createCausalAttestationLedger(decisions, blocked, LUNA_PROTOCOL_LIMITS.maxAttested);
-  function storePrefixResult(mode, id, verdict, status) {
+  const attest = createCausalAttestationLedger(decisions, blocked, LUNA_PROTOCOL_LIMITS.maxAttested, index.units);
+  function storePrefixResult(mode, id, verdict, status, reason) {
     const before = decisions.get(id);
     let row;
     if (mode === "transition") {
@@ -310,11 +301,13 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     } else if (mode === "cue-check") {
       const recovered = currentCueAt(verdict, id, "verified");
       const protective = verdict?.status === "verified" && (verdict.fact === "protective" || verdict.transition === "hard-stop");
-      row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status, cueRecovered: recovered};
-      if (recovered || protective) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
+      const repaired = repairableCueContracts.has(before.primaryFailure) && verdict?.status === "neutral";
+      row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status, cueRecovered: recovered,
+        cueContractRepaired: repaired || repairableCueContracts.has(before.primaryFailure) && (recovered || protective)};
+      if (recovered || protective || repaired) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
     } else {
       row = {...before, status: verdict?.status ?? status, annotation: verdict, primaryPrefix: verdict,
-        prefixVerified: Boolean(verdict), verificationStatus: verdict?.status ?? status};
+        prefixVerified: Boolean(verdict), verificationStatus: verdict?.status ?? status, primaryFailure: reason};
     }
     if (mode === "verify" && verdict && before.discovery &&
         ["fact", "transition", "narrativePhase", "frame", "depiction", "action"].some(field => verdict[field] !== before.discovery[field])) {
@@ -351,9 +344,11 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           return {status: "failed"};
         }
         if (mode === "cue-check") {
-          const row = decisions.get(window.targetIds[0]);
-          if (!["neutral", "uncertain"].includes(row.primaryPrefix?.status) ||
-              recoveryBarriers.has(row.transitionVerification?.transition) || blocked.has(window.targetIds[0])) {
+          const id = window.targetIds[0];
+          const row = decisions.get(id);
+          const disagreement = ["neutral", "uncertain"].includes(row.primaryPrefix?.status) && currentCueAt(row.discovery, id, "candidate");
+          if ((!disagreement && !repairableCueContracts.has(row.primaryFailure)) ||
+              recoveryBarriers.has(row.transitionVerification?.transition) || blocked.has(id)) {
             record.status = "not-needed";
             return {status: "failed"};
           }
@@ -405,6 +400,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           if (rejections.size) record.rejectedFacts = [...rejections].map(([id, reason]) => ({id, reason}));
           record.status = ["incomplete", "invalid-response", "transient", "failed", "cancelled", "timed-out",
             "invalid-request"].includes(answer?.status) ? answer.status : "failed";
+          if (mode === "verify" && record.status === "invalid-response") {
+            storePrefixResult(mode, window.targetIds[0], undefined, record.status, rejections.get(window.targetIds[0]));
+          }
           return {status: "failed"};
         }
         const facts = Array.isArray(answer.facts) ? answer.facts : [];
@@ -431,6 +429,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         }
         if (!annotations.length || mode !== "discovery" && partial) {
           record.status = "invalid-response";
+          if (mode === "verify") storePrefixResult(mode, window.targetIds[0], undefined, record.status, rejections.get(window.targetIds[0]));
           return {status: "failed"};
         }
         record.status = partial ? "partial" : "returned";
@@ -489,7 +488,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (maxCueChecks) {
       for (const window of verification.slice()) {
         const id = window.targetIds[0];
-        if (currentCueAt(proposals.get(id)?.fact, id, "candidate")) verification.push(prefixJob(window, id, index, prefixUnits, "cue-check"));
+        verification.push(prefixJob(window, id, index, prefixUnits, "cue-check"));
       }
     }
     for (const {id, window} of transitionJobs.sort((a, b) => b.rank - a.rank || a.id - b.id).slice(0, maxTransitionVerification)) {
@@ -500,9 +499,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     verification.sort((a, b) => a.targetIds[0] - b.targetIds[0] || prefixOrder[a.id.split(":", 1)[0]] -
       prefixOrder[b.id.split(":", 1)[0]]);
     for (let start = 0; start < verification.length; start += MAX_WHOLE_STORY_REQUESTS) {
-      for (const {window, result, status} of await execute(verification.slice(start, start + MAX_WHOLE_STORY_REQUESTS), "prefix")) {
+      for (const {window, result, status, rejectedFacts} of await execute(verification.slice(start, start + MAX_WHOLE_STORY_REQUESTS), "prefix")) {
         storePrefixResult(window.id.split(":", 1)[0], window.targetIds[0],
-          status === "returned" ? result.annotations[0] : undefined, status);
+          status === "returned" ? result.annotations[0] : undefined, status, rejectedFacts[0]?.reason);
       }
     }
     for (const [id, decision] of decisions) {
@@ -521,7 +520,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
       transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue,
-      primaryPrefix, cueRecovery, cueRecoveryStatus, cueRecovered} = decisions.get(unit.id);
+      primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered, cueContractRepaired,
+      continuityGuard} = decisions.get(unit.id);
     const {unitId: _target, id: _transportId, ...labels} = annotation ?? {};
     const {unitId: _discoveryTarget, id: _discoveryTransportId, ...provisionalLabels} = discovery ?? {};
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
@@ -532,8 +532,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       discoveryStatus: discoveryStatus ?? status,
       transitionVerification, transitionVerificationStatus: transitionVerificationStatus ?? (verifyTransitions ? "not-requested" : undefined),
       transitionEvidenceIds: transitionVerification?.evidenceIds,
-      transitionFlag, cueGuard, readerCue, primaryPrefix, cueRecovery, cueRecoveryStatus, cueRecovered,
-      appliedTransition: (effectiveAnnotation ?? annotation)?.transition,
+      transitionFlag, cueGuard, readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
+      cueContractRepaired, continuityGuard,
+      appliedTransition: continuityGuard ? "uncertain-continuity" : (effectiveAnnotation ?? annotation)?.transition,
       verificationStatus: verificationStatus ?? (status === "verification-deferred" ? status : undefined)};
   });
   const outcomes = Object.fromEntries(Object.entries(Object.groupBy(telemetry, row => row.status))

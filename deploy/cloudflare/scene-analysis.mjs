@@ -340,7 +340,7 @@ const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf
 <form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form>
 <h2>Luna protocol v2 neutral diagnostic</h2>
 <p>Send the selected original fixtures to OpenAI for discovery, causal cue checks and independent transition checks. The result includes sentence IDs and structured labels. Run both parts of the same diagnostic to cover all 33 sentences.</p>
-<p>Up to ${NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS} blinded cue rechecks per fixture investigate disagreements with discovery.</p>
+<p>Verified restart and temporal continuity checks are active. Up to ${NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS} blinded cue rechecks per fixture investigate discovery disagreements or invalid cue contracts.</p>
 <p>Each run has a five-minute deadline and up to ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun} attempts. The founder study permits ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay} attempts per UTC day and ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcMonth} per UTC month, separately from reader analysis.</p>
 <form method="post"><button name="benchmark" value="luna-protocol-neutral-v2-complete-a">Run v2 complete context A (19 sentences)</button>
 <button name="benchmark" value="luna-protocol-neutral-v2-complete-b">Run v2 complete context B (14 sentences)</button>
