@@ -22,6 +22,7 @@ const stages = {
   Taper: [2, "recover"], Recovery: [1, "recover"],
 };
 const referencePatterns = {build: "Gradual build", onset: "Onset rise", rebuild: "Rebuild rise", sustain: "Sustain wave"};
+const boundaryPatterns = {"hard-stop": "Stop", reset: "Reset"};
 const caps = {default: DEFAULT_EXPERIENCE.maximum, tight: DEFAULT_CHANNEL_CALIBRATION.background, zero: 0};
 const invalidReport = "Use a source-free report pinned to the neutral fixtures.";
 
@@ -46,8 +47,8 @@ function project(work, pin, isolated) {
   let previousBeat = null;
   return work.units.map((row, index) => {
     const {behavior: {playbackGate}, narrativePhase} = pin.units[index];
-    const pattern = isolated ? playbackGate === "active" ? referencePatterns[narrativePhase] :
-      playbackGate === "hard-stop" ? "Stop" : playbackGate === "reset" ? "Reset" : "Baseline" : row.compiler.pattern;
+    const referencePattern = playbackGate === "active" ? referencePatterns[narrativePhase] : boundaryPatterns[playbackGate] ?? "Baseline";
+    const pattern = isolated ? referencePattern : row.compiler.pattern;
     const [level, phase, rendererPattern] = stages[pattern];
     const currentCue = (isolated ? playbackGate === "active" : row.applied?.readerCue === true) &&
       ["build", "sustain", "peak"].includes(phase);
@@ -82,14 +83,14 @@ async function replay(work, pin, timings, wpm, maximum, isolated) {
   playback.start();
   const counts = {observedMs: 0, positiveTargetMs: 0, positiveTargetZeroMs: 0, capViolationMs: 0,
     authoritativeQuietTargets: 0, authoritativeQuietViolations: 0, quietAboveBackgroundMs: 0};
-  const episodes = [], firstDispatchDelaysMs = [];
+  const episodes = [], firstDispatchDelaysMs = [], positiveTargetZeroUnits = [];
   let episode = null;
   for (const [index, {playbackGate}] of projection.entries()) {
     const start = clock.now();
     const dwellMs = Math.max(sampleMs, Math.round(timings[index] * 60_000 / wpm / sampleMs) * sampleMs);
     const dispatchStart = index === 0 ? 0 : dispatches.length;
     const authoritativeQuiet = playbackGate === "hard-stop" || playbackGate === "reset";
-    let quietViolation = false, positiveTarget = false;
+    let quietViolation = false, positiveTarget = false, zeroMs = 0;
     playback.activity();
     playback.setPosition(index);
     if (playbackGate !== "active") episode = null;
@@ -104,7 +105,7 @@ async function replay(work, pin, timings, wpm, maximum, isolated) {
       positiveTarget ||= target > 0;
       counts.observedMs += sampleMs;
       if (target > 0) counts.positiveTargetMs += sampleMs;
-      if (target > 0 && output === 0) counts.positiveTargetZeroMs += sampleMs;
+      if (target > 0 && output === 0) zeroMs += sampleMs;
       if (output > maximum) counts.capViolationMs += sampleMs;
       if (playbackGate === "quiet" && output > background) counts.quietAboveBackgroundMs += sampleMs;
       if (authoritativeQuiet && output > 0) quietViolation = true;
@@ -117,6 +118,10 @@ async function replay(work, pin, timings, wpm, maximum, isolated) {
     }
     if (authoritativeQuiet) counts.authoritativeQuietTargets++;
     if (quietViolation) counts.authoritativeQuietViolations++;
+    if (zeroMs) {
+      counts.positiveTargetZeroMs += zeroMs;
+      positiveTargetZeroUnits.push({id: index, milliseconds: zeroMs, expectedGate: playbackGate});
+    }
     if (positiveTarget) {
       const dispatch = dispatches[dispatchStart];
       firstDispatchDelaysMs.push(dispatch && dispatch.at < start + dwellMs ? dispatch.at - start : null);
@@ -128,8 +133,9 @@ async function replay(work, pin, timings, wpm, maximum, isolated) {
   const qualified = episodes.filter(episode => maximum > background && episode.dwellMs >= minimumContrastDwellMs);
   return {id: pin.id, ...counts, contrastEpisodes: qualified.length,
     contrastedEpisodes: qualified.filter(episode => episode.longestContrastMs >= heartbeatMs).length,
-    missedContrastEpisodes: qualified.filter(episode => episode.longestContrastMs < heartbeatMs).map(episode => episode.unitIds),
-    firstDispatchDelaysMs, dispatchCount,
+    missedContrastEpisodes: qualified.filter(episode => episode.longestContrastMs < heartbeatMs)
+      .map(({unitIds, dwellMs, longestContrastMs}) => ({unitIds, dwellMs, longestContrastMs})),
+    firstDispatchDelaysMs, positiveTargetZeroUnits, dispatchCount,
     commandViolations: dispatches.filter(({level, seconds}, i) => level > maximum || seconds !== 2 ||
       (i > 0 && dispatches[i].at - dispatches[i - 1].at < heartbeatMs)).length,
     pauseViolation: Number(simulator.snapshot().strength !== 0 || dispatches.length !== dispatchCount)};
@@ -152,27 +158,38 @@ export async function runLunaProtocolSimulator({reports} = {}) {
   reports ??= [await runLunaProtocolNeutral({mode: "mock", arm: "complete"})];
   const reference = getNeutralProtocolReference();
   if (!Array.isArray(reports) || !reports.length) throw new TypeError(invalidReport);
-  const timings = fixtureTimings(), results = [];
+  const timings = fixtureTimings(), cohorts = new Map(), results = [];
   for (const report of reports) {
     if (report?.sourceProseIncluded !== false || report.fixtureDigest !== reference.fixtureDigest ||
         !["complete", "windowed"].includes(report.arm) || !/^nocturne-luna-protocol-v\d+$/u.test(report.rubricVersion) ||
         !["offline-reference-mock", "offline-injected-mock", "live-neutral-provider"].includes(report.measurement) ||
         !Array.isArray(report.diagnostics) || !report.diagnostics.length ||
         new Set(report.diagnostics.map(work => work?.id)).size !== report.diagnostics.length) throw new TypeError(invalidReport);
-    const pins = report.diagnostics.map(work => validateWork(work, reference.works));
+    const {arm, measurement, rubricVersion} = report;
+    const key = JSON.stringify([arm, measurement, rubricVersion]);
+    if (!cohorts.has(key)) cohorts.set(key, {arm, measurement, rubricVersion, workById: new Map()});
+    const cohort = cohorts.get(key);
+    for (const work of report.diagnostics) {
+      const pin = validateWork(work, reference.works);
+      if (cohort.workById.has(pin.id)) throw new TypeError(invalidReport);
+      cohort.workById.set(pin.id, work);
+    }
+  }
+  for (const {arm, measurement, rubricVersion, workById} of cohorts.values()) {
+    const pins = reference.works.filter(pin => workById.has(pin.id));
     for (const isolated of [true, false]) for (const wpm of [120, 240, 420]) for (const [calibration, maximum] of Object.entries(caps)) {
       const works = [];
-      for (const [i, work] of report.diagnostics.entries()) {
-        works.push(await replay(work, pins[i], timings.get(work.id), wpm, maximum, isolated));
+      for (const pin of pins) {
+        works.push(await replay(workById.get(pin.id), pin, timings.get(pin.id), wpm, maximum, isolated));
       }
-      results.push({arm: report.arm, measurement: report.measurement, rubricVersion: report.rubricVersion,
+      results.push({arm, measurement, rubricVersion,
         fixtureIds: pins.map(({id}) => id), lane: isolated ? "reference-projection" : "shadow-projection",
         wpm, calibration, maximum, summary: summarize(works), works});
     }
   }
   return {schemaVersion: 1, sourceProseIncluded: false, device: "lush", sampleMs, heartbeatMs, minimumContrastDwellMs,
     scope: "Research projection of fixed sentence profiles through the production synchronous simulator. No reader UI, physical transport or preference evidence.",
-    behaviorReferenceVersion: reference.behaviorReferenceVersion, results};
+    behaviorReferenceVersion: reference.behaviorReferenceVersion, behaviorReferenceDigest: reference.behaviorReferenceDigest, results};
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

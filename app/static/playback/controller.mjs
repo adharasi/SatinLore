@@ -174,6 +174,7 @@ export class PlaybackController {
 
   setPosition(index) {
     const next = this._position(index);
+    let scopedForward = false;
     if (next !== this.position) {
       this.levelAdjustment = 0;
       const previousProfile = this.sceneProfiles[this.position], nextProfile = this.sceneProfiles[next];
@@ -182,13 +183,14 @@ export class PlaybackController {
           this.sceneProfiles[next]?.phase && this.levels[this.position] !== this.levels[next])) {
         const sameContextScene = nextProfile?.simulatorSceneId !== undefined &&
           nextProfile.simulatorSceneId === previousProfile?.simulatorSceneId;
+        scopedForward = sameContextScene && next === this.position + 1;
         const keepStageTime = !patternChanged && (sameContextScene || repeatingSimulatorScenePattern(previousProfile, "scene") &&
           repeatingSimulatorScenePattern(nextProfile, "scene"));
         this.feel.reanchor(this.now(), this.feel.vector ? this.outputLevels : this.output, keepStageTime, sameContextScene);
       }
     }
     this.position = next;
-    return this._desiredChanged();
+    return this._desiredChanged(scopedForward);
   }
 
   setReadingSeeking(active) {
@@ -287,11 +289,18 @@ export class PlaybackController {
     return this._desiredChanged();
   }
 
-  _desiredChanged() {
+  _desiredChanged(scopedForward = false) {
     // Reductions never wait behind the next dispatch. Resume only on its normal cadence.
     const intent=this._intent();
     const reduced=this.outputLevels&&intent.levels&&Object.keys(this.outputLevels).some(id=>this.outputLevels[id]>(intent.levels[id]??0));
-    if (this.state === "PLAYING" && (intent.level < this.output || reduced) && !this._stopDevice()) return this._fail();
+    if (this.state === "PLAYING" && (intent.level < this.output || reduced)) {
+      // A software pulse can ease within its original expiry on the next
+      // verified sentence of the same scene.
+      if (scopedForward && !intent.levels && intent.level > 0 && typeof this.device.attenuate === "function") {
+        try { this.output = this._invoke("attenuate", intent.level); }
+        catch { return this._fail(); }
+      } else if (!this._stopDevice()) return this._fail();
+    }
     return this._notify();
   }
 

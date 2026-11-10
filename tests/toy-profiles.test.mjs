@@ -5,6 +5,20 @@ import {ProfileSimulator} from "../app/static/devices/profile-simulator.mjs";
 
 const raw = (model, extra = {}) => ({id: `toy-${model}`, toyType:model, connected:true, ...extra});
 
+test("attenuating a simulator pulse cannot raise, extend or restart it", () => {
+  let now = 0;
+  const simulator = new ProfileSimulator({now: () => now});
+  simulator.connect();
+  simulator.command(4, 2);
+  now = 1500;
+  assert.equal(simulator.attenuate(2), 2);
+  assert.equal(simulator.attenuate(3), 2);
+  assert.equal(simulator.snapshot().channels.vibrate, 2);
+  now = 2000;
+  assert.equal(simulator.attenuate(1), 0);
+  assert.equal(simulator.snapshot().channels.vibrate, 0);
+});
+
 test("the documented model catalogue has distinct bounded simulator identities", () => {
   assert.deepEqual(TOY_PROFILES.map(item=>item.id), [
     "lush","flexer","nora","domi","velvo","spinel","dolce","hush","osci3","ambi","calor","diamo","edge","exomoon",

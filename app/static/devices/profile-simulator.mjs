@@ -47,6 +47,16 @@ export class ProfileSimulator {
     if(!maximum){this.stop();return;}
     this.activeChannels={...levels};this.strength=maximum;this.deadline=this.now()+seconds*1000;
   }
+  attenuate(level) {
+    if (!Number.isInteger(level) || level < 1 || level > channelMaximum(this.channel)) throw new Error("Use a positive simulator level.");
+    const {strength} = this.snapshot();
+    const channels = Object.keys(this.activeChannels);
+    if (level < strength && channels.length === 1 && channels[0] === this.channel) {
+      this.activeChannels = {[this.channel]: level};
+      this.strength = level;
+    }
+    return this.strength;
+  }
   stop() { this.strength = 0; this.activeChannels = {}; this.deadline = 0; }
   injectFailure(kind) {
     if (!["disconnect", "command", "none"].includes(kind)) throw new Error("Choose a known simulator scenario.");

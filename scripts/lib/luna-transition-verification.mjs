@@ -4,6 +4,7 @@ const cueStarts = new Set(["onset", "restart"]);
 const nonClosingEvents = new Set(["onset", "restart", "accent", "ease", "recover", "interruption", "span-end", "non-romantic-activity-stop"]);
 const enacted = new Set(["contact", "continuation", "change"]);
 const explicitCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
+const frameEntries = new Set(["memory-entry", "imagined-entry", "reported-entry"]);
 const elapsedInterval = /^\s*(?:(?:after (?:a while|some time)|some time later|(?:a few|several) (?:minutes|hours) later|(?:minutes|hours) passed)\b|[^“"‘’\n.!?]{0,60}\b(?:stayed|waited|remained|lingered)\b[^“"‘’\n.!?]{0,90}\bfor (?:a while|some time)\b)/iu;
 const explicitBoundary = /\b(?:called time|called (?:for )?a (?:break|halt)|asked (?:for (?:a )?break|(?:them|him|her) to stop)|let go|stepped apart|interrupted|withdrew|declined|refused|would rather|said no|stop(?:ped)?|ended|put (?:the|their|his|her) (?:letter|note|journal|diary|book) down|set (?:the|their|his|her) (?:letter|note|journal|diary|book) aside|read (?:the|their|his|her|an?) (?:account|letter|note|diary|journal)|read aloud|recounted|recalled|remembered|back in the present|returned to the present|for a while)\b/iu;
 const contextChange = /\b(?:afterwards?|later|previously|then|back|again|apart|pause|waited|stayed|remained|wouldn't|didn't want|break|call|memory|account|old letter|time)\b/iu;
@@ -28,6 +29,20 @@ export function freshEnactedStart(cue, id) {
 export function verifiedContextCut(annotation, id) {
   return annotation?.status === "verified" && annotation.evidenceIds.includes(id) &&
     (annotation.fact === "cut" || explicitCuts.has(annotation.transition));
+}
+
+export function repeatedFrameEntry(annotation, previousFrame, previousScope) {
+  return frameEntries.has(annotation?.transition) && annotation.frame === previousFrame &&
+    (annotation.scopeId == null || annotation.scopeId === previousScope);
+}
+
+export function applyFrameScope(annotation, previousFrame, previousScope) {
+  return repeatedFrameEntry(annotation, previousFrame, previousScope) ?
+    {...annotation, transition: "none", fact: "none", priorAnchor: null} : annotation;
+}
+
+export function crossesCurrentFrame(frame, previousFrame) {
+  return previousFrame != null && (frame === "current") !== (previousFrame === "current");
 }
 
 export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {

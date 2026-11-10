@@ -209,11 +209,11 @@ export class ReadingFeel {
     // An explicit pulse at level 1 would otherwise be indistinguishable from a hold.
     const accent = floor && amplitude < 2 && stage?.accents?.includes(stageStep) ? 2 : 0;
     const target = Math.max(minimum, floor, accent, Math.floor(amplitude * modulation));
-    // A supported current cue can quantize to the same value as the continuous
-    // background. Use one available step of headroom for the simulator only.
-    // Keep distinct waveform steps, chosen easing, attenuation and user offsets.
+    // Keep a verified build perceptible while its rising stages quantize to
+    // background. Other waveforms retain their deliberate low steps.
     const backgroundLevel = Math.max(minimum, background);
-    const collapsed = target === backgroundLevel && Math.max(minimum, Math.floor(amplitude)) === backgroundLevel;
+    const unmodulated = Math.max(minimum, Math.floor(amplitude));
+    const collapsed = target === backgroundLevel && (unmodulated === backgroundLevel || stage === stagePatterns.build);
     const contrast = simulatorStagePatterns && mode === "continuous" && !quietEdging && scene?.currentCue === true &&
       !scene.quiet && !scene.manual && !scene.edging && strength >= 1 && this.settings.gain >= 1 && !stage?.accents &&
       collapsed && backgroundLevel < Math.min(ceiling, preferred);

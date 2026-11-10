@@ -2,7 +2,7 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
+import {applyFrameScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, lunaProtocolCueViolation, lunaProtocolOutputTokens,
@@ -150,7 +150,12 @@ function playbackInputs(index, decisions, blocked) {
   const anchors = new Map(), blockedScopes = new Set();
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
-    const fact = result?.effectiveAnnotation ?? result?.annotation;
+    const proposed = result?.effectiveAnnotation ?? result?.annotation;
+    const fact = applyFrameScope(proposed, lastFrame, lastScope);
+    if (fact !== proposed) {
+      result.appliedTransitionOverride = "none";
+      result.playbackDisposition = "duplicate-frame-entry";
+    }
     const rawCue = result?.prefixVerified ? result.annotation : null;
     const ownCueEvidence = exactCurrentCue(rawCue, unit.id);
     const effectVerified = result?.prefixVerified || result?.transitionVerification?.status === "verified";
@@ -171,7 +176,7 @@ function playbackInputs(index, decisions, blocked) {
     const beatEnd = kind === "beat-end" || closingTransitions.has(transition);
     const frame = effectVerified ? fact.frame : null;
     const current = frame === "current";
-    const frameChange = editorialFrames.has(frame) && lastFrame && frame !== lastFrame;
+    const frameChange = editorialFrames.has(frame) && crossesCurrentFrame(frame, lastFrame);
     const scopeChange = effectVerified && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
     const cut = contextCut || frameChange || scopeChange && !needsRestart;
@@ -522,7 +527,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
       transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue,
       primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered, cueContractRepaired,
-      continuityGuard} = decisions.get(unit.id);
+      continuityGuard, appliedTransitionOverride} = decisions.get(unit.id);
     const {unitId: _target, id: _transportId, ...labels} = annotation ?? {};
     const {unitId: _discoveryTarget, id: _discoveryTransportId, ...provisionalLabels} = discovery ?? {};
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
@@ -535,7 +540,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       transitionEvidenceIds: transitionVerification?.evidenceIds,
       transitionFlag, cueGuard, readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
       cueContractRepaired, continuityGuard,
-      appliedTransition: continuityGuard ? "uncertain-continuity" : (effectiveAnnotation ?? annotation)?.transition,
+      appliedTransition: continuityGuard ? "uncertain-continuity" : appliedTransitionOverride ?? (effectiveAnnotation ?? annotation)?.transition,
       verificationStatus: verificationStatus ?? (status === "verification-deferred" ? status : undefined)};
   });
   const outcomes = Object.fromEntries(Object.entries(Object.groupBy(telemetry, row => row.status))

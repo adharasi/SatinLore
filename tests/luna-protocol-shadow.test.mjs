@@ -313,6 +313,28 @@ test("an independently enacted onset after a frame return may cite that return a
   assert.equal(run.units[2].appliedTransition, "none");
 });
 
+test("a repeated frame entry and an interior frame disagreement do not reset the same account", async () => {
+  const text = "She picked up the letter. She began to read the account. They missed the last train. They waited on the platform. She put the letter down.";
+  for (const nested of [false, true]) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {fact: "cut", transition: "reported-entry", frame: "reported",
+        scopeId: nested ? 2 : null});
+      if (id === 1 || id === 2 && nested) return active(id, mode, {fact: "cut", action: "none", frame: "reported",
+        narrativePhase: "quiet", transition: "reported-entry", scopeId: id});
+      if (id === 2) return {...neutral(id), frame: "reported", scopeId: 1};
+      if (id === 3) return {...neutral(id), frame: "remembered", scopeId: nested ? 2 : 1};
+      if (id === 4) return active(id, mode, {fact: "cut", action: "none", narrativePhase: "quiet", transition: "present-return"});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...fixture(text), provider, verificationTargets: [0, 1, 2, 3, 4],
+      verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [2]});
+    assert.deepEqual(run.units.map(row => row.pattern), ["Baseline", "Reset", nested ? "Reset" : "Baseline", "Baseline", "Reset"]);
+    assert.equal(run.units[2].transitionVerification.transition, "reported-entry");
+    assert.equal(run.units[2].appliedTransition, nested ? "reported-entry" : "none");
+    assert.equal(run.units[2].playbackDisposition, nested ? undefined : "duplicate-frame-entry");
+  }
+});
+
 test("an opaque time interval clears carry and attestation only without renewed target evidence", async () => {
   const cases = [
     {target: "They stayed by the shelves for a while.", pattern: "Baseline", carryGap: true},

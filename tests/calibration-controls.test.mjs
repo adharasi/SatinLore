@@ -4,6 +4,7 @@ import {CombinedReadingFeel, ReadingFeel, normalizeChannelCalibration, clampCali
 import {PlaybackController} from "../app/static/playback/controller.mjs";
 import {AsyncPlaybackController} from "../app/static/playback/async-controller.mjs";
 import {MockDevice} from "../app/static/devices/mock.mjs";
+import {ProfileSimulator} from "../app/static/devices/profile-simulator.mjs";
 import {ScenarioTransport} from "../app/static/simulation/transport.mjs";
 import {SimulationClock} from "../app/static/simulation/clock.mjs";
 import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
@@ -468,13 +469,32 @@ test("simulator cue contrast uses one calibrated step and respects controls and 
   feel.configure({mode: "continuous"});
   assert.equal(feel.desired({...context, scene: {...scene, edging: true}}), 1);
   assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, scene: {...scene, shape: "accented"}, now})), [2, 1, 2]);
-  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, base: 2, now})), [1, 1, 2]);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, base: 2, now})), [2, 2, 2]);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, base: 3, now})), [2, 2, 3]);
+  assert.deepEqual([0, 2000, 4000].map(now => feel.desired({...context, base: 2, scene: {phase: "build", quiet: false}, now})), [1, 1, 2]);
   feel.hold(1);
   assert.equal(feel.desired(context), 1);
   feel.easeOff(0, 1);
   assert.equal(feel.desired(context), 0);
   feel.followStory(0);
   assert.equal(feel.desired(context), 0);
+});
+
+test("an adjacent verified simulator cue can ease without a zero between heartbeats", async () => {
+  const clock = new SimulationClock();
+  const device = new ProfileSimulator({now: clock.now});
+  const controller = new PlaybackController({device, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer});
+  const cue = {phase: "build", quiet: false, rhythm: "steady", currentCue: true, simulatorSceneId: 1};
+  controller.connect();
+  controller.setStory([3, 2, 0], [cue, cue, {phase: "quiet", quiet: true, rhythm: "steady"}]);
+  controller.start();
+  await clock.advance(300);
+  assert.equal(device.snapshot().strength, 3);
+  controller.setPosition(1);
+  assert.equal(device.snapshot().strength, 2);
+  assert.equal(controller.snapshot().output, 2);
+  controller.setPosition(2);
+  assert.equal(device.snapshot().strength, 0);
 });
 
 test("scene motion defaults to the selected movement, with opt-in switching and a safe fallback", async t => {

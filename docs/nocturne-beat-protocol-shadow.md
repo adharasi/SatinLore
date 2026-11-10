@@ -104,6 +104,36 @@ The exact compiler regression uses `scripts/replay-approved-beat-protocol.py`. S
 
 The approved 41-story local replay reproduced all 17,895 profiles and traces exactly, including all ten D2 stories. It supplied reviewed facts to the compiler. Live labeling on those editions requires a separate current exact-range grant and an authorized credential in the execution environment. Three of the ten D2 editions fit the current whole-story discovery bounds before checking clearance. The other seven need windowed discovery or a separately qualified whole-story strategy.
 
+## Matched v8 live results
+
+All four shards completed with the same fixture and behavior reference pins. The founder lane had 256 daily requests of headroom before dispatch. The comparison used 150 requests at an estimated $0.049311 with all usage settled. Both arms submitted every planned cue and transition target, including the return and enactment deferred in the previous `old-letter` run. The pinned behavior reference separately scores four buildup units, five enacted cues, one sustained continuation and 33 playback gates. It allows quiet on two recognized buildup units after a stop or decline.
+
+| Measure | Complete context | Windowed context |
+| --- | ---: | ---: |
+| Requests | 72 | 78 |
+| Usable primary cue rows | 32/33 | 33/33 |
+| Primary buildup matches and extras | 2/4, 0 extras | 3/4, 1 extra |
+| Primary enacted cue matches and extras | 4/5, 0 extras | 4/5, 0 extras |
+| Primary sustained continuation matches and extras | 0/1, 1 extra | 1/1, 0 extras |
+| Applied reader cue matches and extras, legacy reference | 4/10, 0 extras | 7/10, 1 extra |
+| Expected playback gates | 28/33 | 29/33 |
+| Exact typed boundaries and extras | 6/7, 1 extra | 7/7, 1 extra |
+| Applied exact boundaries and extras | 7/7, 1 extra | 7/7, 1 extra |
+
+Both arms correctly kept ordinary gym activity quiet and found its actual stop. The complete-context pass mislabeled enacted resumption at `reading-room` 8 as an already sustained interaction. The restart gate rejected that claim because the preceding offer supplied buildup without enacted action. The windowed pass found the restart there, while its recovery pass overcalled a cue at `old-letter` 6 and its primary pass described the actual enactment one sentence later as anticipation. Both arms missed the early buildup at `first-dance` 2. Typed rows with contradictory status and effect fields remain a separate coverage loss. The two arms use separate live calls, so the measured differences include model variation.
+
+Both arms repeated a report entry and then inferred another reset from a disagreement between two noncurrent frame labels. The follow-up compiler keeps an already open frame and suppresses the duplicate boundary while retaining the raw verdict. It still resets on a verified entry into a distinct scope and on the return to the present. The live table precedes that follow-up. Exact regressions cover the repeated entry, interior frame disagreement and new-scope control.
+
+### Simulator replay
+
+Run `node scripts/replay-luna-protocol-simulator.mjs` for the pinned reference and mock. Pass each saved source-free arm with `--report` to replay live results through the actual Lush simulator and controller. This uses a research mapping from shadow profiles to simulator inputs, with the same 120, 240 and 420 WPM cursors and default, tight and zero ceilings.
+
+The simulator follow-up keeps an automatic rising cue one step above the continuous background when a build step would round to background. An adjacent verified cue in the same simulator scene can lower an existing software pulse immediately within its original expiry. The reduction cannot start, increase or extend that pulse. With those changes the isolated reference reached contrast on all seven eligible pace-episode pairs, up from five. The windowed live-label projection reached all seven and complete context reached four. All 36 configurations preserved the tested stop, reset, ceiling, finite-command and pause requirements. The windowed projection still spent 4.03% of positive-target time at zero at 420 WPM, split between an optional carry and a quiet interval. This leaves the 2% timing gate open. Browser traversal and physical devices require their own checks.
+
+### Private corpus readiness
+
+The 41 source-pinned editions contain 17,827 text targets and 68 structural dividers. Twenty-five editions fit complete discovery by size and structure. The reviewed reference has 1,250 eligible direct-cue positives, 11,438 negatives and 5,139 unresolved text targets. Review those unresolved labels before using this development corpus to compare direct-cue recall. A current exact-range clearance manifest for these editions is still required before dispatch. The complete-context and windowed live results above cover the four original cleared fixtures.
+
 ## Qualification
 
 Compare exact reviewed compiler output separately from semantic recognition. The shadow study reports usable model coverage, cue and typed-transition precision and recall, profile agreement, continuity links and causal trace violations. Compare current reader and archival provider outputs in separate lanes. For a paid paired run, hold the target roster and recent prefix fixed, use a shared run budget and stop the comparison for a refused run. Report both effective scores on every planned target and accuracy among targets both arms resolved. Compare recovered and lost matches and added false positives. Earlier eligibility evidence and earlier continuity anchors are separate strata. Verify timing and simulator behavior after model qualification.

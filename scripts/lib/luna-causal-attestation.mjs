@@ -1,4 +1,5 @@
-import {elapsedContinuityGap, exactCurrentCue, freshEnactedStart, verifiedContextCut} from "./luna-transition-verification.mjs";
+import {applyFrameScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
+  verifiedContextCut} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
 const endings = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry",
@@ -20,7 +21,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
     for (; run.cursor < target; run.cursor++) {
       const id = run.cursor;
       const row = decisions.get(id);
-      const annotation = row?.effectiveAnnotation ?? row?.annotation;
+      const annotation = applyFrameScope(row?.effectiveAnnotation ?? row?.annotation, run.frame, run.scope);
       const verified = row?.prefixVerified || row?.transitionVerification?.status === "verified";
       if (blocked.has(id) || row?.window?.runId !== runId || !annotation ||
           !["verified", "neutral", "candidate"].includes(annotation.status) || annotation.frame === "uncertain" ||
@@ -35,7 +36,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const rawCue = row.prefixVerified ? row.annotation : null;
       const elapsedGap = elapsedContinuityGap(units[id], rawCue, annotation, run.anchors.at(-1)?.unitId);
       const independentScope = scopeId === id && run.scope !== null && scopeId !== run.scope;
-      const frameChange = frames.has(frame) && run.frame !== null && frame !== run.frame;
+      const frameChange = frames.has(frame) && crossesCurrentFrame(frame, run.frame);
       const contextCut = verifiedContextCut(annotation, id);
       const cut = contextCut || frameChange || independentScope && !run.needsRestart;
       const barrier = exits.has(fact) || endings.has(transition) || cut || elapsedGap;

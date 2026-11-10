@@ -21,6 +21,9 @@ test("neutral sentence projections dispatch finite simulator output and preserve
   assert.ok(isolated.summary.contrastEpisodes > 0);
   assert.equal(isolated.summary.contrastRate, 1);
   assert.ok(isolated.summary.p95FirstDispatchMs <= 1000);
+  const fast = report.results.find(row => row.lane === "reference-projection" && row.wpm === 420 && row.calibration === "default");
+  assert.ok(fast.summary.contrastEpisodes > 0);
+  assert.equal(fast.summary.contrastRate, 1);
 });
 
 test("simulator replay rejects reports without exact neutral fixture and compiler pins", async () => {
@@ -30,4 +33,5 @@ test("simulator replay rejects reports without exact neutral fixture and compile
     {...report, fixtureDigest: "0".repeat(64)},
     {...report, diagnostics: [{...report.diagnostics[0], units: report.diagnostics[0].units.slice(1)}]},
   ]) await assert.rejects(runLunaProtocolSimulator({reports: [invalid]}), /source-free report/u);
+  await assert.rejects(runLunaProtocolSimulator({reports: [report, report]}), /source-free report/u);
 });
