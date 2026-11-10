@@ -332,6 +332,18 @@ V14 had 144 usable typed rows among 148 returned targets. Three typed rows faile
 
 The 77 approved clips are a development comparison. Keep source stories and authored controls separate. Use a new eligible holdout with independent labels and the [release acceptance gates](release-acceptance.md) for qualification. The held excerpts and seven unresolved editions remain coverage gaps until reviewed separately.
 
+### Live comparison and compiler follow-up
+
+The sealed v15 run completed 77 approved clips and 148 targets with 413 calls, $0.192311 in estimated charges and zero unsettled attempts. Raw frozen direct matches increased from 2/8 to 3/8, and applied matches increased from 1/8 to 4/8. The same separate blinded audit found 5/7 local direct actions with v15 versus 3/7 with v14. One approved frozen direct positive lost raw and applied coverage after a `fact-frame` rejection. Usable typed transitions rose from 144/148 to 147/148. There were zero typed `prior-anchor` rejections and one `transition-fact` rejection. No response needed the new anchor normalizer in this run.
+
+| Measure | v14 live | v15 live with strict support | Guarded compiler replay of v15 facts |
+| --- | ---: | ---: | ---: |
+| Exact profiles | 86/148 | 85/148 | 87/148 |
+| Expected active intent | 25/59 | 14/59 | 19/59 |
+| False active intent | 2 | 0 | 0 |
+
+The compiler replay reproduced all 148 archived outputs in each live build with no provider calls. Strict support removed both false activations on identical v14 facts and also reduced active recall from 25/59 to 16/59. The guarded follow-up permits an earlier exact current start or buildup to establish carry when discovery and verification agree on the action, phase, event, effect and scope. Release-only support cannot open a beat. Hard gates, verified cuts and incompatible frames keep precedence. A support row does not create a new target cue. The same guard produced 20/59 active intent and 87/148 exact profiles with zero false activations on v14 facts. It still carries through some disputed boundaries under the existing arbitration. Resolve those with independent continuity evidence before broadening the rule or claiming qualification.
+
 ## Qualification
 
 Compare exact reviewed compiler output separately from semantic recognition. The shadow study reports usable model coverage, cue and typed-transition precision and recall, profile agreement, continuity links and causal trace violations. Compare current reader and archival provider outputs in separate lanes. For a paid paired run, hold the target roster and recent prefix fixed, use a shared run budget and stop the comparison for a refused run. Report both effective scores on every planned target and accuracy among targets both arms resolved. Compare recovered and lost matches and added false positives. Earlier eligibility evidence and earlier continuity anchors are separate strata. Verify timing and simulator behavior after model qualification.

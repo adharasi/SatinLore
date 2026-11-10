@@ -135,7 +135,7 @@ test("a sampled continuation independently verifies its cleared unsampled prior 
 test("supporting checks never carry into neutral targets before an exact same-scope confirmation", async () => {
   const input = fixture("They exchanged a warm smile. She smiled back. The clock ticked. The door closed. Their familiar glance returned. The music played on.");
   const provider = fake((id, mode) => {
-    if (id === 0) return active(id, mode, {narrativePhase: "build"});
+    if (id === 0) return active(id, mode, {narrativePhase: "build", scopeId: mode === "discovery" ? null : 0});
     if (id === 1 || id === 4) {
       const priorAnchor = id === 1 ? 0 : 1;
       return active(id, mode, {fact: "continue", action: "continuation", narrativePhase: "sustain", priorAnchor,
@@ -297,6 +297,48 @@ test("shared spend cap rejects a second unknown reservation and freezes after a 
 
 const typedTransition = (unitId, fields = {}) => ({...neutral(unitId), depiction: "unknown", narrativePhase: "unknown",
   action: "unknown", status: "verified", transition: "hard-stop", fact: "neutralize", evidenceIds: [unitId], ...fields});
+
+test("only scope- and action-corroborated active support can establish regular carry", async () => {
+  const input = fixture("The doors opened. They took hands at the dance. The clock ticked. The music played on.");
+  const cases = [
+    {prior: "onset", expected: ["Onset rise", "Onset rise", "Onset rise"]},
+    {prior: "anticipation", expected: ["Undertone", "Undertone", "Undertone"]},
+    {prior: "release", expected: ["Baseline", "Baseline", "Baseline"]},
+    {prior: "onset", conflict: "scope", expected: ["Baseline", "Baseline", "Baseline"]},
+    {prior: "onset", conflict: "action", expected: ["Baseline", "Baseline", "Baseline"]},
+    {prior: "onset", conflict: "frame", expected: ["Baseline", "Baseline", "Baseline"]},
+    {prior: "onset", conflict: "suffix", expected: ["Baseline", "Baseline", "Baseline"]},
+    {prior: "onset", cutoff: "hard-stop", expected: ["Onset rise", "Stop", "Baseline"]},
+    {prior: "onset", cutoff: "scene-cut", expected: ["Onset rise", "Reset", "Baseline"]},
+    {prior: "onset", earlierStop: true, expected: ["Baseline", "Baseline", "Baseline"]},
+  ];
+  for (const {prior, conflict, cutoff, earlierStop, expected} of cases) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") {
+        if (id === 2 && cutoff === "hard-stop") return typedTransition(id);
+        if (id === 2 && cutoff === "scene-cut") return typedTransition(id, {fact: "cut", transition: cutoff, scopeId: id, evidenceIds: [1, 2]});
+        return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: []});
+      }
+      if (id === 0 && earlierStop) return active(id, mode, {fact: "neutralize", action: "none", transition: "hard-stop"});
+      if (id !== 1) return neutral(id);
+      if (prior === "release") return active(id, mode, {fact: "ease", action: "release", narrativePhase: "ease", transition: "ease"});
+      if (prior === "anticipation") return active(id, mode, {narrativePhase: "build"});
+      if (conflict === "frame" && mode === "discovery") return active(id, mode, {fact: "cut", action: "none",
+        frame: "remembered", transition: "memory-entry"});
+      return active(id, mode, {fact: "none", action: conflict === "action" && mode === "discovery" ? "change" : "contact",
+        narrativePhase: "onset", transition: "onset", scopeId: conflict === "scope" && mode === "discovery" ? 1 : 0,
+        evidenceIds: conflict === "suffix" && mode === "discovery" ? [1, 2] : [1]});
+    });
+    const targets = earlierStop ? [0, 2, 3] : [2, 3];
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: targets, maxVerification: targets.length,
+      verifyTransitions: true, maxTransitionVerification: 2, transitionTargets: [2, 3], maxSupportingVerification: 1});
+    assert.deepEqual(run.summary.supportingVerification, [{id: 1, status: "returned"}]);
+    assert.deepEqual(run.units.slice(1).map(({pattern}) => pattern), expected, JSON.stringify({prior, conflict, cutoff, earlierStop}));
+    assert.deepEqual(run.units.slice(1).map(({cue}) => cue), [false, false, false]);
+    assert.deepEqual(run.units.slice(2).map(({primaryPrefix}) => primaryPrefix.status), ["neutral", "neutral"]);
+    if (cutoff) assert.equal(run.units[2].appliedTransition, cutoff);
+  }
+});
 
 test("an independently verified hard stop applies even when cue discovery and verification missed it", async () => {
   const calls = [];

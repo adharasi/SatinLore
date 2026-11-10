@@ -240,7 +240,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const framed = applyFrameScope(proposed, lastFrame, lastScope);
     const previous = decisions.get(unit.id - 1);
     const rawCue = result?.prefixVerified ? result.annotation : null;
-    const supporting = supportingIds.has(unit.id);
+    const auxiliary = supportingIds.has(unit.id);
     const priorFact = previous?.window && previous.window.runId === result?.window?.runId && !blocked.has(unit.id - 1) ?
       previous.effectiveAnnotation ?? previous.annotation : null;
     const returned = applyRepeatedReturn(framed, blockedScopes.has(priorFact?.scopeId) ? null : priorFact, rawCue, unit.id);
@@ -276,6 +276,15 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const scopeChange = enactedStart && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
     const cut = contextCut || frameChange || scopeChange && !restartBoundary;
+    const proposal = result?.discovery;
+    const corroboratedSeed = auxiliary && ownCueEvidence && current && !protective && !neutralize && !cut && !beatEnd && !restartBoundary &&
+      proposal?.status === "candidate" && proposal.frame === "current" && proposal.scopeId != null && proposal.scopeId === rawCue.scopeId &&
+      proposal.evidenceIds.includes(unit.id) && proposal.evidenceIds.every(id => id <= unit.id) &&
+      rawCue.evidenceIds.every(id => id >= previousEvidenceBarrier) &&
+      ["action", "narrativePhase", "transition", "fact"].every(key => proposal[key] === rawCue[key]) &&
+      (enactedStart && rawCue.transition === "onset" && rawCue.narrativePhase === "onset" && rawCue.fact === "none" ||
+        rawCue.action === "anticipation" && rawCue.narrativePhase === "build" && rawCue.transition === "none" && rawCue.fact === "low");
+    const supporting = auxiliary && !corroboratedSeed;
     // A typed cut can replace the primary fact, but its earlier link still cannot cross the cut.
     const preCutContinuation = cut && rawCue?.fact === "continue";
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
@@ -345,8 +354,8 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       else if (!freshEvidence) result.cueGuard = "cue-stale-evidence";
     }
     if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
-      const observedCue = !supporting && ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase);
-      result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase) ||
+      const observedCue = !auxiliary && ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase);
+      result.cue = Boolean(!auxiliary && canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase) ||
         linked && observedCue && rawCue.action === "change");
       result.readerCue = result.cue || Boolean(observedCue &&
         (canSignal && rawCue.action === "anticipation" || linked && rawCue.action === "continuation"));
