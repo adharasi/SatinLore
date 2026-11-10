@@ -336,6 +336,26 @@ test("a repeated frame entry and an interior frame disagreement do not reset the
   }
 });
 
+test("a disputed consecutive return stays in the current frame while the raw typed event stays visible", async () => {
+  for (const confirmed of [false, true]) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {fact: "cut", transition: "present-return"});
+      if (id === 0) return {...neutral(id), frame: "reported"};
+      if (id === 1 || confirmed) return active(id, mode, {fact: "cut", action: "none", narrativePhase: "quiet",
+        transition: "present-return"});
+      return neutral(id);
+    });
+    const input = fixture("She read the account aloud. She put the letter down. Jo pointed out its date.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2], verifyTransitions: true,
+      maxTransitionVerification: 1, transitionTargets: [2]});
+    assert.equal(run.units[1].pattern, "Reset");
+    assert.equal(run.units[2].transitionVerification.transition, "present-return");
+    assert.equal(run.units[2].appliedTransition, confirmed ? "present-return" : "none");
+    assert.equal(run.units[2].pattern, confirmed ? "Reset" : "Baseline");
+    assert.equal(run.units[2].playbackDisposition, confirmed ? undefined : "duplicate-frame-return");
+  }
+});
+
 test("an opaque time interval clears carry and attestation only without renewed target evidence", async () => {
   const cases = [
     {target: "They stayed by the shelves for a while.", pattern: "Baseline", carryGap: true},
@@ -649,6 +669,23 @@ test("a verified continuation can use the exact prior anchor as a scope alias", 
     assert.equal(run.units[3].scopeId, scopeId);
     assert.equal(run.units[3].readerCue, scopeId === 2);
     assert.equal(run.units[3].playbackDisposition, scopeId === 2 ? "continuation-scope-alias" : "unattested-scope");
+  }
+});
+
+test("a continuation can cite the enacted start that opened its new scope while earlier scope evidence stays stale", async () => {
+  for (const stale of [false, true]) {
+    const provider = fake((id, mode) => {
+      if (id === 0) return active(id, mode, {fact: "low", narrativePhase: "build", scopeId: 0});
+      if (id === 1) return active(id, mode, {fact: "none", narrativePhase: "onset", action: "contact", transition: "onset",
+        scopeId: 1, evidenceIds: [0, 1]});
+      return active(id, mode, {fact: "continue", narrativePhase: "sustain", action: "continuation", scopeId: 1,
+        priorAnchor: 1, evidenceIds: stale ? [0, 1, 2] : [1, 2]});
+    });
+    const input = fixture("They wanted to dance together. He took her hand. They kept holding hands as they walked.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2]});
+    assert.equal(run.units[1].trace.decision, "Fresh beat after cut");
+    assert.equal(run.units[2].readerCue, !stale);
+    assert.equal(run.units[2].cueGuard, stale ? "cue-stale-evidence" : undefined);
   }
 });
 

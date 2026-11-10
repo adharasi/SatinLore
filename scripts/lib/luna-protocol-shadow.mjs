@@ -2,7 +2,7 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {applyFrameScope, applyLatchedDecline, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
+import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
@@ -192,13 +192,16 @@ function playbackInputs(index, decisions, blocked) {
     const proposed = result?.effectiveAnnotation ?? result?.annotation;
     const framed = applyFrameScope(proposed, lastFrame, lastScope);
     const previous = decisions.get(unit.id - 1);
-    const fact = needsRestart && previous?.window?.runId === result?.window?.runId ?
-      applyLatchedDecline(framed, previous?.effectiveAnnotation ?? previous?.annotation, result?.transitionVerification, unit.id) : framed;
+    const rawCue = result?.prefixVerified ? result.annotation : null;
+    const priorFact = previous?.window && previous.window.runId === result?.window?.runId ?
+      previous.effectiveAnnotation ?? previous.annotation : null;
+    const returned = applyRepeatedReturn(framed, priorFact, rawCue, unit.id);
+    const fact = needsRestart ? applyLatchedDecline(returned, priorFact, result?.transitionVerification, unit.id) : returned;
     if (fact !== proposed) {
       result.appliedTransitionOverride = "none";
-      result.playbackDisposition = fact !== framed ? "repeated-decline" : "duplicate-frame-entry";
+      result.playbackDisposition = fact !== returned ? "repeated-decline" :
+        returned !== framed ? "duplicate-frame-return" : "duplicate-frame-entry";
     }
-    const rawCue = result?.prefixVerified ? result.annotation : null;
     const ownCueEvidence = exactCurrentCue(rawCue, unit.id);
     const effectVerified = result?.prefixVerified || result?.transitionVerification?.status === "verified";
     const evidence = fact?.evidenceIds ?? [];
@@ -244,11 +247,13 @@ function playbackInputs(index, decisions, blocked) {
     const restart = freshEnactedStart(rawCue, unit.id);
     // Earlier stops establish history for a fresh enacted restart. They never
     // count as positive evidence or restore an old continuation anchor.
-    const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId);
+    const hasAnchor = kind === "continue" && prior >= barrierId && anchors.has(prior) &&
+      scopeId !== null && anchors.get(prior) === scopeId;
+    // A start on a cut belongs to the new scope once this pass attests it.
+    const freshEvidence = cut ? evidence.includes(unit.id) : restart || evidence.every(id => id > barrierId || hasAnchor && id === prior);
     const clear = !protective && !neutralize && !beatEnd && (!needsRestart || restart) && current && fact?.status === "verified" &&
       freshEvidence;
-    const linked = clear && prior > barrierId && anchors.has(prior) &&
-      scopeId !== null && anchors.get(prior) === scopeId;
+    const linked = clear && hasAnchor;
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
     else if (result && linked && scopeId !== fact.scopeId) result.playbackDisposition = "continuation-scope-alias";
     const scope = linked ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;

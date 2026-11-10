@@ -1,4 +1,4 @@
-import {applyFrameScope, applyLatchedDecline, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
+import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
@@ -23,8 +23,11 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const row = decisions.get(id);
       const framed = applyFrameScope(row?.effectiveAnnotation ?? row?.annotation, run.frame, run.scope);
       const previous = decisions.get(id - 1);
+      const rawCue = row?.prefixVerified ? row.annotation : null;
+      const prior = previous?.window?.runId === runId ? previous.effectiveAnnotation ?? previous.annotation : null;
+      const current = applyRepeatedReturn(framed, prior, rawCue, id);
       const annotation = run.restartBoundary === "declined-restart" && previous?.window?.runId === runId ?
-        applyLatchedDecline(framed, previous.effectiveAnnotation ?? previous.annotation, row?.transitionVerification, id) : framed;
+        applyLatchedDecline(current, prior, row?.transitionVerification, id) : current;
       const verified = row?.prefixVerified || row?.transitionVerification?.status === "verified";
       if (blocked.has(id) || row?.window?.runId !== runId || !annotation ||
           !["verified", "neutral", "candidate"].includes(annotation.status) || annotation.frame === "uncertain" ||
@@ -37,7 +40,6 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       if (!verified) continue;
       const {frame, action, narrativePhase, fact, transition, status, evidenceIds, priorAnchor} = annotation;
       const scopeId = continuationScope(annotation, run.anchors.find(anchor => anchor.unitId === priorAnchor)?.scopeId);
-      const rawCue = row.prefixVerified ? row.annotation : null;
       const elapsedGap = elapsedContinuityGap(units[id], rawCue, annotation, run.anchors.at(-1)?.unitId);
       const independentScope = scopeId === id && run.scope !== null && scopeId !== run.scope;
       const frameChange = frames.has(frame) && crossesCurrentFrame(frame, run.frame);

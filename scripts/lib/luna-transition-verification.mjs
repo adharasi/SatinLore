@@ -41,6 +41,14 @@ export function applyFrameScope(annotation, previousFrame, previousScope) {
     {...annotation, transition: "none", fact: "none", priorAnchor: null} : annotation;
 }
 
+export function applyRepeatedReturn(annotation, previous, cue, id) {
+  if (annotation?.status !== "verified" || annotation.transition !== "present-return" || annotation.frame !== "current" ||
+      !annotation.evidenceIds.includes(id) || previous?.status !== "verified" || previous.transition !== "present-return" ||
+      previous.frame !== "current" || !previous.evidenceIds.includes(id - 1) ||
+      cue?.status !== "neutral" || cue.frame !== "current" || cue.transition !== "none") return annotation;
+  return cue;
+}
+
 export function crossesCurrentFrame(frame, previousFrame) {
   return previousFrame != null && (frame === "current") !== (previousFrame === "current");
 }
