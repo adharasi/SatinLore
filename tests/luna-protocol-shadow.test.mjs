@@ -117,8 +117,10 @@ test("a sampled continuation independently verifies its cleared unsampled prior 
   assert.deepEqual(result.summary.supportingVerification, [{id: 1, status: "returned"}]);
   assert.equal(result.summary.attempts.find(row => row.supportingPrefix).mode, "verify");
   assert.deepEqual(result.summary.nativeVerification, [{id: 2, status: "verified"}]);
+  assert.equal(result.units[1].pattern, "Baseline");
   assert.equal(result.units[2].pattern, "Undertone");
-  assert.equal(result.units[2].beatId, result.units[1].beatId);
+  assert.equal(result.units[2].beatId, "fixture:beat:2");
+  assert.deepEqual(result.units[2].trace.evidence, [1, 2]);
   assert.equal(result.units[2].cue, false);
 
   for (const budgetOptions of [{maxAttempts: 3}, {maxSourceBytes: without.result.summary.budget.attemptedPayloadBytes}]) {
@@ -128,6 +130,39 @@ test("a sampled continuation independently verifies its cleared unsampled prior 
     assert.deepEqual(tight.result.summary.nativeVerification, [{id: 2, status: "verified"}]);
     assert.equal(tight.result.units[2].transitionVerification.status, "neutral");
   }
+});
+
+test("supporting checks never carry into neutral targets before an exact same-scope confirmation", async () => {
+  const input = fixture("They exchanged a warm smile. She smiled back. The clock ticked. The door closed. Their familiar glance returned. The music played on.");
+  const provider = fake((id, mode) => {
+    if (id === 0) return active(id, mode, {narrativePhase: "build"});
+    if (id === 1 || id === 4) {
+      const priorAnchor = id === 1 ? 0 : 1;
+      return active(id, mode, {fact: "continue", action: "continuation", narrativePhase: "sustain", priorAnchor,
+        evidenceIds: [priorAnchor, id]});
+    }
+    return neutral(id);
+  });
+  const result = await runLunaProtocolShadow({...input, provider, maxVerification: 4,
+    verificationTargets: [2, 3, 4, 5], maxSupportingVerification: 2});
+  assert.deepEqual(result.summary.supportingVerification, [{id: 0, status: "returned"}, {id: 1, status: "returned"}]);
+  assert.deepEqual(result.units.map(({pattern}) => pattern), ["Baseline", "Baseline", "Baseline", "Baseline", "Undertone", "Undertone"]);
+  assert.deepEqual(result.units.slice(0, 4).map(({beatId}) => beatId), [null, null, null, null]);
+  assert.deepEqual(result.units[1].labelEvidenceIds, [0, 1]);
+  assert.deepEqual(result.units[4].trace.evidence, [1, 4]);
+  assert.equal(result.units[4].phase, "sustain");
+  assert.equal(result.units[4].readerCue, true);
+  assert.equal(result.units[4].cue, false);
+  assert.equal(result.units[4].beatId, "fixture:beat:4");
+  assert.equal(result.units[5].beatId, result.units[4].beatId);
+
+  const ordinary = await runLunaProtocolShadow({...input, provider, maxVerification: 5,
+    verificationTargets: [0, 2, 3, 4, 5], maxSupportingVerification: 2});
+  assert.deepEqual(ordinary.summary.supportingVerification, [{id: 1, status: "returned"}]);
+  assert.equal(ordinary.units[2].pattern, "Undertone");
+  assert.equal(ordinary.units[3].pattern, "Undertone");
+  assert.equal(ordinary.units[2].beatId, ordinary.units[0].beatId);
+  assert.equal(ordinary.units[3].beatId, ordinary.units[0].beatId);
 });
 
 test("a missing verification budget defers a positive without converting it to a quiet label", async () => {

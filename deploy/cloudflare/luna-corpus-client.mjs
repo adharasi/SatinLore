@@ -1,9 +1,11 @@
+import { LUNA_PROTOCOL_RUBRIC_VERSION } from "../../scripts/lib/luna-protocol-provider.mjs";
+
 export const LUNA_CORPUS_PAGE = `<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SatinLore founder Luna corpus review</title>
 <main><h1>SatinLore founder Luna corpus review</h1>
-<p>Luna rubric v14 with approved context verification.</p>
+<p>Luna rubric ${LUNA_PROTOCOL_RUBRIC_VERSION.split("-").at(-1)} with causal boundary and context verification.</p>
 <p>Open a private review packet. The file is read in this browser. Review every sentence in a clip before approving it, including the sentences supplied as context.</p>
-<p>Sealing sends clip fingerprints. Running sends the selected excerpts to the private Worker and OpenAI. One sealed run has a $3 estimated spend cap. Result checkpoints contain labels and IDs.</p>
+<p>Sealing sends clip fingerprints. Running sends the selected excerpts to the private Worker and OpenAI. One sealed run has a $3 estimated spend cap. Checkpoints include labels and evidence IDs for offline replay.</p>
 <p><label>Review packet <input id="packet" type="file" accept=".json,application/json"></label></p>
 <p id="status" role="status" aria-live="polite">Load a review packet to begin.</p>
 <p><button id="seal" type="button" disabled>Seal selected excerpts</button> <button id="run" type="button" disabled>Run sealed excerpts</button>
@@ -21,6 +23,9 @@ const digest = /^[a-f0-9]{64}$/u;
 const workId = /^[a-z][a-z0-9-]{0,47}$/u;
 const returned = new Set(["completed", "provider-refused", "provider-unavailable", "spend-cap", "timed-out"]);
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
+const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus", "cueRecoveryStatus"];
+const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
+const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery"];
 const encoder = new TextEncoder();
 const natural = n => Number.isSafeInteger(n) && n >= 0;
 let packet, packetDigest, state, busy = false, pausing = false;
@@ -229,8 +234,19 @@ run.addEventListener("click", async () => {
 
 pause.addEventListener("click", () => { pausing = true; updateControls(); });
 
+function fields(row, keys) {
+  return Object.fromEntries(keys.filter(key => Object.hasOwn(row, key)).map(key => [key, row[key]]));
+}
+
+function replayUnit(row) {
+  const result = fields(row, replayUnitKeys);
+  for (const stage of replayFactStages) if (row[stage]) result[stage] = fields(row[stage], replayFactKeys);
+  return result;
+}
+
 save.addEventListener("click", () => {
   const works = new Map();
+  const replayClips = [];
   for (const clip of packet.clips) {
     if (!works.has(clip.storyId)) works.set(clip.storyId, {id: clip.storyId, sourceSha256: clip.sourceSha256,
       editionDigest: clip.editionDigest, units: [], summary: {attempts: []}});
@@ -239,10 +255,11 @@ save.addEventListener("click", () => {
     const work = works.get(clip.storyId);
     work.units.push(...result.units.filter(unit => clip.targetIds.includes(unit.id)));
     work.summary.attempts.push(...result.attempts);
+    replayClips.push({id: clip.id, units: result.units.map(replayUnit), attempts: result.attempts});
   }
   for (const work of works.values()) work.units.sort((a, b) => a.id - b.id);
   const result = {schema: 1, measurement: "live-corpus-luna", sourceProseIncluded: false, runId: packet.runId,
-    rubricVersion: state.rubricVersion ?? null, model: state.model ?? null, works: [...works.values()],
+    rubricVersion: state.rubricVersion ?? null, model: state.model ?? null, works: [...works.values()], replayClips,
     clips: packet.clips.map(clip => ({id: clip.id, storyId: clip.storyId, targetIds: clip.targetIds,
       status: state.outcomes[clip.id] ?? "not-dispatched", externalCalls: state.results[clip.id]?.externalCalls ?? 0,
       budget: state.results[clip.id]?.budget, hostedSpend: state.results[clip.id]?.hostedSpend}))};

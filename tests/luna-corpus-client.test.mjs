@@ -172,6 +172,37 @@ test("a transport error checkpoints the uncertain clip and reopening the exact p
   assert.deepEqual(exported.clips.map(clip => [clip.id, clip.status]), [[first.id, "unconfirmed"], [second.id, "completed"]]);
 });
 
+test("a saved checkpoint exports source-free supporting labels with their own clip and attempt", async () => {
+  const context = first.units[0];
+  const unexpectedText = "Raw material is outside the replay schema.";
+  const fact = {id: context.id, status: "verified", action: "anticipation", evidenceIds: [context.id]};
+  const support = {mode: "verify", supportingPrefix: true, attempted: true, targetIds: [context.id], status: "returned"};
+  const initial = corpusPage({onShard: async ({clip}) => {
+    const response = shardResult(clip);
+    response.units.unshift({id: context.id, unitSha256: context.digest, text: unexpectedText,
+      primaryPrefix: {...fact, note: unexpectedText}});
+    response.summary.attempts.unshift(support);
+    return Response.json(response);
+  }});
+  await initial.open();
+  await initial.select(0);
+  await initial.get("seal").click();
+  await initial.get("run").click();
+
+  const resumed = corpusPage({storage: initial.storage});
+  await resumed.open();
+  await resumed.get("save").click();
+  const download = await resumed.downloads[0].blob.text();
+  const {works, replayClips} = JSON.parse(download);
+  assert.deepEqual(resumed.calls, []);
+  assert.deepEqual(works[0].units.map(row => row.id), first.targetIds);
+  assert.equal(replayClips.length, 1);
+  assert.equal(replayClips[0].id, first.id);
+  assert.deepEqual(replayClips[0].attempts[0], support);
+  assert.deepEqual(replayClips[0].units[0], {id: context.id, unitSha256: context.digest, primaryPrefix: fact});
+  assert.ok(!download.includes(unexpectedText));
+});
+
 test("a changed approved excerpt cannot resume a sealed corpus checkpoint", async () => {
   const initial = corpusPage();
   await initial.open();

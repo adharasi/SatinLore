@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v14/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v15/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -103,7 +103,8 @@ test("checks one target with the full cue schema and no prior judgment", async (
   assert.match(sent.instructions, /deliberate echo with a meaningful reaction, gesture, or specific shared desire/u);
   assert.match(sent.instructions, /visible invitation that advances an already mutually wanted immediate interaction/u);
   assert.match(sent.instructions, /isolated opening request to which nobody responds at the target stays quiet/u);
-  assert.match(sent.instructions, /present physical reach to begin the accepted interaction/u);
+  assert.match(sent.instructions, /Use onset for the first actual act that begins the current interaction/u);
+  assert.match(sent.instructions, /the first visible detail supplies no onset/u);
   assert.match(sent.instructions, /Use restart for the first renewed enacted action after a current stop, decline or break/u);
   assert.match(sent.instructions, /A later reciprocal response never supplies buildup to the earlier opening/u);
   assert.match(sent.instructions, /A specific private perception or bodily reaction grounded in attraction can be buildup without a reply/u);
@@ -267,6 +268,9 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /An unrelated object becoming still supplies no stop by itself/u);
   assert.match(sent.instructions, /Require the effect of the disruption as well as the trigger/u);
   assert.match(sent.instructions, /A definite temporal jump into a new episode can suffice in the same location/u);
+  assert.match(sent.instructions, /identify what was underway, what materially displaced it/u);
+  assert.match(sent.instructions, /new speaker, ordinary movement between nearby places or next task step alone leaves the current scene in place/u);
+  assert.match(sent.instructions, /Cite the preceding context and the exact new scene target when both are supplied/u);
   assert.match(sent.instructions, /prefer a supported scene or frame boundary over the smaller event/u);
   assert.match(sent.instructions, /An imagined scenario starts when its events are first presented/u);
   assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
@@ -363,10 +367,43 @@ test("retains verified starts and their evidence when an in-prefix context ID is
     [{priorAnchor: 5, evidenceIds: [5, 11]}, "attested-evidence"],
     [{evidenceIds: [11]}, "prior-anchor"], [{evidenceIds: [10]}, "prior-anchor"],
     [{frame: "reported"}, "prior-anchor"], [{fact: "cut"}, "prior-anchor"],
-    [{status: "uncertain"}, "prior-anchor"], [{transition: "accent"}, "prior-anchor"],
+    [{status: "uncertain"}, "prior-anchor"], [{transition: "hard-stop", fact: "neutralize"}, "prior-anchor"],
   ]) {
     const run = provider(async () => response([{...valid, ...extra}]));
     assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, rejectedReason)]));
+  }
+});
+
+test("repairs only a redundant cited earlier ID on a valid non-linking transition", async () => {
+  const reason = "transition-context-anchor";
+  const earlier = {scopeId: 11, priorAnchor: 10, evidenceIds: [10, 11]};
+  for (const row of [transitionRow("scene-cut", "cut", earlier),
+    transitionRow("imagined-entry", "cut", {...earlier, frame: "imagined"}),
+    transitionRow("present-return", "cut", earlier), transitionRow("accent", "none", earlier),
+    transitionRow("interruption", "none", earlier), transitionRow("non-romantic-activity-stop", "none", earlier)]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), {...success([normalizedTransitionRow({...row, priorAnchor: null})]),
+      targetNormalizations: [{unitId: 11, reason}]});
+  }
+  assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));
+  const cut = transitionRow("scene-cut", "cut", earlier);
+  for (const [row, expected] of [
+    [{...cut, evidenceIds: [11]}, "prior-anchor"], [{...cut, evidenceIds: [10]}, "prior-anchor"],
+    [{...cut, frame: "uncertain"}, "prior-anchor"], [{...cut, transition: "memory-entry"}, "prior-anchor"],
+    [{...cut, fact: "none"}, "prior-anchor"], [{...cut, priorAnchor: 11}, "prior-anchor"],
+    [{...cut, priorAnchor: 5, evidenceIds: [5, 11]}, "attested-evidence"],
+    [transitionRow("hard-stop", "protective", earlier), "prior-anchor"],
+    [transitionRow("declined-restart", "neutralize", earlier), "prior-anchor"],
+    [transitionRow("uncertain-continuity", "neutralize", earlier), "prior-anchor"],
+  ]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, expected)]));
+  }
+  const linkedEase = transitionRow("ease", "ease", {...earlier, scopeId: 10});
+  const protectiveStop = transitionRow("hard-stop", "protective");
+  for (const row of [linkedEase, protectiveStop]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), success([normalizedTransitionRow(row)]));
   }
 });
 
@@ -480,12 +517,15 @@ test("independent current contribution keeps ongoing and winding-down cues with 
   for (const [narrativePhase, action, factType] of [
     ["build", "anticipation", "none"], ["sustain", "continuation", "none"],
     ["ease", "release", "ease"], ["recover", "release", "none"],
+    ["ease", "contact", "ease"], ["recover", "change", "none"],
   ]) {
     const row = fact(11, {status: "verified", depiction: "romantic", narrativePhase, action,
       fact: factType, evidenceIds: [10, 11]});
     const run = provider(async (_url, {body}) => {
       const {instructions} = JSON.parse(body);
-      assert.match(instructions, /use sustain with continuation even when an earlier anchor is unavailable/u);
+      assert.match(instructions, /Use continuation when the target depicts only the same ongoing action/u);
+      assert.match(instructions, /If an easing or recovery target also depicts a distinct newly enacted contact or change/u);
+      assert.match(instructions, /A supported stop or restriction still takes priority/u);
       assert.match(instructions, /A target can show an easing or recovery cue without a new onset or typed event/u);
       return response([row]);
     });

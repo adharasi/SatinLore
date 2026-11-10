@@ -230,16 +230,17 @@ function profileFor(fact, recent, last) {
     "Undertone" : "Baseline";
 }
 
-function playbackInputs(index, decisions, blocked) {
+function playbackInputs(index, decisions, blocked, supportingIds) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
   let restartBoundary = null, lastAnchor = null;
-  const anchors = new Map(), blockedScopes = new Set();
+  const anchors = new Map(), supportingAnchors = new Set(), blockedScopes = new Set();
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
     const proposed = result?.effectiveAnnotation ?? result?.annotation;
     const framed = applyFrameScope(proposed, lastFrame, lastScope);
     const previous = decisions.get(unit.id - 1);
     const rawCue = result?.prefixVerified ? result.annotation : null;
+    const supporting = supportingIds.has(unit.id);
     const priorFact = previous?.window && previous.window.runId === result?.window?.runId && !blocked.has(unit.id - 1) ?
       previous.effectiveAnnotation ?? previous.annotation : null;
     const returned = applyRepeatedReturn(framed, blockedScopes.has(priorFact?.scopeId) ? null : priorFact, rawCue, unit.id);
@@ -289,6 +290,7 @@ function playbackInputs(index, decisions, blocked) {
       recent = [];
       last = "Baseline";
       anchors.clear();
+      supportingAnchors.clear();
       lastAnchor = null;
       // A deferred positive proposal cannot carry playback. Its cleared text
       // may still contextualize a later independently verified target.
@@ -299,7 +301,7 @@ function playbackInputs(index, decisions, blocked) {
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
       // Context can occupy a position in the trailing window. Only a causal
       // annotation with supporting evidence on an open gate contributes intensity.
-      recent = [...recent.slice(-7), current && ownCueEvidence && !preCutContinuation && (!restartBoundary || restart) ?
+      recent = [...recent.slice(-7), !supporting && current && ownCueEvidence && !preCutContinuation && (!restartBoundary || restart) ?
         rawCue.depiction : "unknown"];
     }
     if (pendingRestart && startTransitions.has(transition)) result.appliedTransitionOverride = "none";
@@ -313,9 +315,11 @@ function playbackInputs(index, decisions, blocked) {
     const clear = !protective && !neutralize && !beatEnd && (!restartBoundary || restart) && current && fact?.status === "verified" &&
       freshEvidence;
     const linked = clear && hasAnchor;
+    const supportLinked = linked && ownCueEvidence && rawCue.fact === "continue" && rawCue.priorAnchor === prior &&
+      supportingAnchors.has(prior) && continuationScope(rawCue, anchors.get(prior)) === scopeId;
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
     else if (result && linked && scopeId !== fact.scopeId) result.playbackDisposition = "continuation-scope-alias";
-    const scope = linked ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;
+    const scope = linked && !supporting ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;
     const localRelease = !protective && !neutralize && !cut && !restartBoundary && current && ownCueEvidence &&
       rawCue.action === "release" && ["ease", "recover"].includes(rawCue.narrativePhase) &&
       ["none", "ease", "recover", "interruption", "span-end", "beat-end"].includes(transition) &&
@@ -325,10 +329,12 @@ function playbackInputs(index, decisions, blocked) {
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
     const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
     const rebuild = restart && (restartBoundary || transition === "restart" || fact.narrativePhase === "rebuild");
-    const low = clear && ownCueEvidence && !quietBoundary && kind === "low" && !restart ?
-      {...mark("low", "Prefix evidence establishes an independent low cue."),
-        profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone"} : null;
-    const canSignal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);
+    const hasLow = clear && ownCueEvidence && !quietBoundary && kind === "low" && !restart;
+    const low = !supporting && !quietBoundary && (hasLow || supportLinked) ?
+      {...mark("low", supportLinked ? "Exact target evidence renews a beat supported by its prefix." :
+        "Prefix evidence establishes an independent low cue."), profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone"} : null;
+    const signal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);
+    const canSignal = !supporting && signal;
     if (canSignal && rebuild && restartCheckPending(restartBoundary)) result.appliedTransitionOverride = "restart";
     if (rawCue?.status === "verified" && activePhases.has(rawCue.narrativePhase)) {
       if (quietBoundary) result.cueGuard = "cue-boundary-suppressed";
@@ -339,17 +345,23 @@ function playbackInputs(index, decisions, blocked) {
       else if (!freshEvidence) result.cueGuard = "cue-stale-evidence";
     }
     if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
-      const observedCue = ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase);
+      const observedCue = !supporting && ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase);
       result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase) ||
         linked && observedCue && rawCue.action === "change");
       result.readerCue = result.cue || Boolean(observedCue &&
         (canSignal && rawCue.action === "anticipation" || linked && rawCue.action === "continuation"));
     }
+    const signalProfile = signal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
     let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" :
-      localRelease ? beatEnd || fact.narrativePhase === "ease" ? "Taper" : "Recovery" :
-      canSignal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
+      !supporting && localRelease ? beatEnd || fact.narrativePhase === "ease" ? "Taper" : "Recovery" :
+      canSignal ? signalProfile : "Baseline";
     if (contextCut && !low && pattern === "Baseline") pattern = "Reset";
-    if ((canSignal && (activePhases.has(fact.narrativePhase) || pattern === "Undertone")) || low) {
+    const localAnchor = hasLow || signal && (activePhases.has(fact.narrativePhase) || signalProfile === "Undertone");
+    // Auxiliary checks supply anchors. Only an exact playback target can start playback.
+    if (supporting && !quietBoundary && (localAnchor || linked && ownCueEvidence)) {
+      anchors.set(unit.id, scopeId ?? unit.id);
+      supportingAnchors.add(unit.id);
+    } else if (!supporting && (localAnchor || low)) {
       anchors.set(unit.id, scopeId ?? unit.id);
       lastAnchor = unit.id;
       restartBoundary = null;
@@ -708,7 +720,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       }
     }
   }
-  const playback = planStory(id, playbackInputs(index, decisions, blocked));
+  const playback = planStory(id, playbackInputs(index, decisions, blocked, supportingIds));
   const units = index.units.map((unit, i) => {
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
