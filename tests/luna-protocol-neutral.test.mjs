@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
 import test from "node:test";
 import {fileURLToPath} from "node:url";
-import {runLunaProtocolNeutral} from "../scripts/lib/luna-protocol-neutral.mjs";
+import {combineNeutralReports, runLunaProtocolNeutral} from "../scripts/lib/luna-protocol-neutral.mjs";
 import {wholeStoryAnnotationFixtures} from "./whole-story-annotation-fixtures.mjs";
 
 const cli = fileURLToPath(new URL("../scripts/run-luna-protocol-neutral.mjs", import.meta.url));
@@ -28,6 +28,9 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
   }
   assert.equal(report.discovery.exactTypedTransitions.missed, 7);
   assert.equal(report.transition.exactTypedTransitions.missed, 7);
+  assert.equal(report.applied.exactTypedTransitions.missed, 7);
+  assert.equal(report.applied.exactCues.missed, 10);
+  assert.equal(report.applied.observedCueTargets, 0);
   assert.equal(report.prefix.exactTypedTransitions, undefined);
   assert.equal(report.transition.exactCues, undefined);
   assert.equal(report.diagnostics.flatMap(work => work.units).length, 33);
@@ -92,6 +95,63 @@ test("discovery, cue-prefix, and transition-only results are scored independentl
   assert.deepEqual(row.transition.reasons, ["extra-transition"]);
 });
 
+test("applied scores retain stage origins, gated cue changes, and the boundary-only denominator", async () => {
+  const provider = async ({mode, targetIds}) => ({status: "ok", facts: targetIds.map(unitId => {
+    const cue = mode === "verify" && unitId === 0;
+    const typed = mode === "transition";
+    const transition = typed && unitId === 0 ? "reported-entry" : typed && unitId === 1 ? "onset" : "none";
+    return {unitId, status: cue || transition !== "none" ? "verified" : "neutral",
+      depiction: cue ? "romantic" : typed ? "unknown" : "neutral",
+      frame: transition === "reported-entry" ? "reported" : "current",
+      narrativePhase: cue ? "onset" : typed ? "unknown" : "quiet", transition,
+      action: cue ? "contact" : typed ? "unknown" : "none", fact: transition === "reported-entry" ? "cut" : "none",
+      scopeId: null, priorAnchor: null, evidenceIds: cue || transition !== "none" ? [unitId] : []};
+  }), usage: {inputTokens: 11, outputTokens: 3}});
+  const report = await runLunaProtocolNeutral({mode: "mock", provider, now});
+  assert.equal(report.prefix.exactCues.extra, 4);
+  assert.equal(report.applied.exactCues.extra, 0);
+  assert.equal(report.applied.cueChanges["removed-false-positive"], 4);
+  assert.equal(report.applied.targets, 33);
+  assert.equal(report.applied.phase, undefined);
+  assert.equal(report.transition.exactTypedTransitions.extra, 8);
+  assert.equal(report.transition.boundary.exact.extra, 4);
+  assert.deepEqual(report.transition.boundary.excludedNonBoundaryPredictions, {onset: 4});
+  assert.equal(report.applied.exactTypedTransitions.extra, 8);
+  assert.equal(report.applied.boundary.exact.extra, 4);
+  assert.equal(report.applied.transitionOrigins["transition-pass"], 8);
+  assert.deepEqual(report.diagnostics[0].units[0].applied, {status: "verified", cue: false,
+    transition: "reported-entry", transitionOrigin: "transition-pass", cuePrefixTransition: "none",
+    cueChange: "removed-false-positive", transitionChange: "unchanged"});
+  assert.ok(report.diagnostics[0].units[0].pipelineFlags.includes("cue-frame-ineligible"));
+  assert.equal(report.transition.usage.inputTokens, 363);
+});
+
+test("complementary fixture shards combine exact scores and usage in canonical order", async () => {
+  const options = {mode: "mock", arm: "complete", maxAttempts: 48, now};
+  const left = await runLunaProtocolNeutral({...options, fixtureIds: ["old-letter", "first-dance"], transitionLimit: 19});
+  const right = await runLunaProtocolNeutral({...options, fixtureIds: ["practice-drill", "reading-room"], transitionLimit: 14});
+  const combined = combineNeutralReports([right, left]);
+  const whole = await runLunaProtocolNeutral({mode: "mock", arm: "complete", now});
+  assert.deepEqual(left.fixtureIds, ["first-dance", "old-letter"]);
+  assert.deepEqual(right.fixtureIds, ["reading-room", "practice-drill"]);
+  assert.deepEqual(combined.fixtureIds, whole.fixtureIds);
+  assert.equal(combined.fixtureRosterSha256, whole.fixtureRosterSha256);
+  assert.equal(combined.planning.referenceTargets, 33);
+  assert.equal(combined.planning.transitionAttempts, 33);
+  assert.equal(combined.budget.attempts, 70);
+  assert.equal(combined.prefix.usage.attempts, 33);
+  assert.equal(combined.prefix.usage.durationsMs.length, 33);
+  assert.deepEqual(combined.prefix.exactCues, whole.prefix.exactCues);
+  assert.deepEqual(combined.transition.boundary, whole.transition.boundary);
+  assert.deepEqual(combined.applied.exactCues, whole.applied.exactCues);
+  assert.deepEqual(combined.applied.exactTypedTransitions, whole.applied.exactTypedTransitions);
+  assert.throws(() => combineNeutralReports([left, left]), /complementary reports/u);
+  assert.throws(() => combineNeutralReports([left, {...right, rubricVersion: "other"}]), /complementary reports/u);
+  assert.throws(() => combineNeutralReports([left, {...right, transition: undefined}]), /complementary reports/u);
+  await assert.rejects(() => runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "first-dance"]}),
+    /Invalid neutral benchmark options/u);
+});
+
 test("a capped transition stage retains the planned denominator and marks deferred rows", async () => {
   const report = await runLunaProtocolNeutral({mode: "mock", arm: "complete", now, transitionLimit: 15, maxAttempts: 52});
   assert.equal(report.budget.attempts, 52);
@@ -118,6 +178,29 @@ test("only fixed request diagnostics and permitted usage reach the neutral repor
   assert.deepEqual(row.discovery.submittedIds, [0, 1, 2, 3]);
   assert.equal(row.discovery.citedIds, null);
   assert.equal(JSON.stringify(report).includes(secret), false);
+});
+
+test("partial discovery keeps accepted rows and exposes unresolved targets separately", async () => {
+  let partial = true;
+  const provider = async ({mode, targetIds}) => {
+    const drop = mode === "discovery" && partial;
+    if (drop) partial = false;
+    return {status: drop ? "partial" : "ok", facts: targetIds.slice(drop ? 1 : 0).map(unitId => ({
+      unitId, status: "neutral", depiction: mode === "transition" ? "unknown" : "neutral",
+      frame: "current", narrativePhase: mode === "transition" ? "unknown" : "quiet",
+      transition: "none", action: mode === "transition" ? "unknown" : "none",
+      fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
+    })), usage: {inputTokens: 1, outputTokens: 0}};
+  };
+  const report = await runLunaProtocolNeutral({mode: "mock", provider, now});
+  const [missing, retained] = report.diagnostics[0].units;
+  assert.equal(report.discovery.observedCueTargets, 32);
+  assert.equal(report.prefix.observedCueTargets, 33);
+  assert.equal(missing.discovery.status, "missing");
+  assert.equal(missing.discovery.requestStatus, "partial");
+  assert.equal(missing.discovery.contractRejection, "missing-target");
+  assert.equal(retained.discovery.status, "neutral");
+  assert.equal(retained.discovery.requestStatus, "partial");
 });
 
 test("live command requires the key and cannot be combined with a mock", () => {

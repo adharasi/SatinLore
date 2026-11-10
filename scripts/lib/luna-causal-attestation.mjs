@@ -41,11 +41,14 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested) {
       else if (fact === "cut" || frameChange || independentScope ||
           ["scene-cut", "chapter-end", "present-return"].includes(transition)) run.needsRestart = false;
       const restart = ["restart", "onset"].includes(transition) && enacted.has(action);
+      const rawCue = row.prefixVerified ? row.annotation : null;
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
-      if (status !== "verified" || frame !== "current" || run.protectedScopes.has(scopeId) || run.needsRestart && !restart ||
+      if (status !== "verified" || frame !== "current" || rawCue?.status !== "verified" || rawCue.frame !== "current" ||
+          !rawCue.evidenceIds.includes(id) || run.protectedScopes.has(scopeId) || run.needsRestart && !restart ||
           ["neutralize", "protective", "beat-end"].includes(fact) ||
-          ["hard-stop", "declined-restart", "uncertain-continuity", "beat-end"].includes(transition) ||
+          ["hard-stop", "declined-restart", "uncertain-continuity", "beat-end", "interruption",
+            "non-romantic-activity-stop", "span-end"].includes(transition) ||
           !evidenceIds.includes(id) ||
           !(fact === "low" || fact === "none" && rises.has(narrativePhase) && actions.has(action))) continue;
       run.anchors.push({unitId: id, scopeId: scopeId ?? id, frame, action, narrativePhase});

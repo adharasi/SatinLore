@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createLunaProtocolProvider, LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_MODEL,
-  lunaProtocolOutputTokens} from "../scripts/lib/luna-protocol-provider.mjs";
+  LUNA_PROTOCOL_TARGET_FAILURES, lunaProtocolOutputTokens} from "../scripts/lib/luna-protocol-provider.mjs";
 
 const units = [{id: 10, text: "June noticed Lee watching her."}, {id: 11, text: "She smiled."}, {id: 12, text: "The clock chimed."}];
 const secret = "test-key-never-returned";
@@ -14,6 +14,9 @@ const response = (facts, extra) => Response.json({model: LUNA_PROTOCOL_MODEL, st
   ...extra});
 const failure = (status, failureReason) => ({status, failureReason, usage: null});
 const success = (facts, usage = null, returnedModel = LUNA_PROTOCOL_MODEL) => ({status: "ok", facts, usage, returnedModel});
+const targetFailure = (unitId, reason) => ({unitId, reason});
+const rejected = targetFailures => ({...failure("invalid-response", "output-schema"), targetFailures});
+const partial = (facts, targetFailures) => ({...success(facts), status: "partial", targetFailures});
 
 test("submits only typed discovery inputs and accepts complete rows in target order", async () => {
   const proposed = fact(11, {status: "candidate", depiction: "romantic", narrativePhase: "build", fact: "low",
@@ -152,6 +155,8 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /verify one typed narrative transition independently/u);
   assert.match(sent.instructions, /protective only when the target directly establishes an active restriction/u);
   assert.match(sent.instructions, /Ordinary movement stopping/iu);
+  assert.match(sent.instructions, /Set frame to reported if the target enters the account/u);
+  assert.match(sent.instructions, /status uncertain and transition unknown/u);
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
   assert.equal(rows.items.additionalProperties, false);
@@ -172,31 +177,81 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
     const run = provider(async () => response([row]));
     assert.deepEqual(await run(transitionRequest), success([normalizedTransitionRow(row)]));
   }
-  const invalid = [transitionRow("hard-stop", "none"), transitionRow("hard-stop", "protective", {evidenceIds: [10]}),
-    transitionRow("non-romantic-activity-stop", "protective"), transitionRow("non-romantic-activity-stop", "neutralize"),
-    transitionRow("declined-restart", "none"), transitionRow("restart", "low"), transitionRow("restart", "none", {evidenceIds: [10]}),
-    transitionRow("interruption", "ease", {scopeId: 3, evidenceIds: [5, 10], priorAnchor: 5}),
-    transitionRow("reported-entry", "cut", {frame: "current"}), transitionRow("present-return", "cut", {frame: "remembered"}),
-    transitionRow("none", "none"), transitionRow("none", "none", {status: "neutral"}),
-    transitionRow("uncertain-continuity", "neutralize", {...noEvent, status: "uncertain"}),
-    transitionRow("hard-stop", "neutralize", {evidenceIds: [11, 12]}), transitionRow("restart", "none", {action: "contact"})];
-  for (const row of invalid) {
+  const invalid = [
+    [transitionRow("hard-stop", "none"), "transition-fact"],
+    [transitionRow("hard-stop", "protective", {evidenceIds: [10]}), "target-evidence"],
+    [transitionRow("non-romantic-activity-stop", "protective"), "transition-fact"],
+    [transitionRow("non-romantic-activity-stop", "neutralize"), "transition-fact"],
+    [transitionRow("declined-restart", "none"), "transition-fact"],
+    [transitionRow("restart", "low"), "transition-fact"],
+    [transitionRow("restart", "none", {evidenceIds: [10]}), "target-evidence"],
+    [transitionRow("interruption", "ease", {scopeId: 3, evidenceIds: [5, 10], priorAnchor: 5}), "attested-evidence"],
+    [transitionRow("reported-entry", "cut", {frame: "current"}), "transition-frame"],
+    [transitionRow("present-return", "cut", {frame: "remembered"}), "transition-frame"],
+    [transitionRow("none", "none"), "transition-fact"],
+    [transitionRow("none", "none", {status: "neutral"}), "status-effect"],
+    [transitionRow("uncertain-continuity", "neutralize", {...noEvent, status: "uncertain"}), "status-effect"],
+    [transitionRow("hard-stop", "neutralize", {evidenceIds: [11, 12]}), "evidence-id"],
+    [transitionRow("restart", "none", {action: "contact"}), "row-shape"],
+    [transitionRow("restart", "none", {status: "candidate"}), "status-mode"],
+  ];
+  for (const [row, reason] of invalid) {
     const run = provider(async () => response([row]));
-    assert.deepEqual(await run(transitionRequest), failure("invalid-response", "output-schema"));
+    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
   }
 });
 
-test("rejects missing, duplicate, source-bearing, fabricated and noncausal rows", async () => {
+test("accepts only validated discovery rows and diagnoses requested targets without returning prose", async () => {
   const row = fact(11, {status: "candidate", fact: "continue", scopeId: 10, priorAnchor: 10, evidenceIds: [10, 11]});
   const tail = fact(12);
-  const valid = provider(async () => response([row, tail]));
-  assert.equal((await valid(request())).status, "ok");
-  for (const rows of [[row], [row, row], [row, fact(13)], [row, {...tail, quote: units[2].text}],
-    [{...row, evidenceIds: [11, 10]}, tail], [{...row, evidenceIds: [10, 10]}, tail], [{...row, scopeId: 9}, tail],
-    [{...row, priorAnchor: 11}, tail], [{...row, evidenceIds: [11]}, tail], [{...row, status: "uncertain"}, tail],
-    [{...row, fact: "cut", evidenceIds: [10]}, tail], [{...row, fact: "low", evidenceIds: []}, tail]]) {
+  const unknownTarget = fact(123456, {quote: units[2].text});
+  const cases = [
+    [[row, tail], success([row, tail])],
+    [[unknownTarget, tail, row], success([row, tail])],
+    [[row], partial([row], [targetFailure(12, "missing-target")])],
+    [[row, unknownTarget], partial([row], [targetFailure(12, "missing-target")])],
+    [[row, {...tail, quote: units[2].text}], partial([row], [targetFailure(12, "row-shape")])],
+    [[row, {...row, depiction: "romantic"}, tail], partial([tail], [targetFailure(11, "duplicate-target")])],
+    [[row, row], rejected([targetFailure(11, "duplicate-target"), targetFailure(12, "missing-target")])],
+    [[], rejected([targetFailure(11, "missing-target"), targetFailure(12, "missing-target")])],
+  ];
+  for (const [rows, expected] of cases) {
     const run = provider(async () => response(rows));
-    assert.deepEqual(await run(request()), failure("invalid-response", "output-schema"));
+    assert.deepEqual(await run(request()), expected);
+  }
+  for (const [extra, reason] of [[{evidenceIds: [11, 10]}, "evidence-id"], [{evidenceIds: [10, 10]}, "evidence-id"],
+    [{scopeId: 9}, "scope-id"], [{priorAnchor: 11}, "prior-anchor"], [{evidenceIds: [11]}, "prior-anchor"],
+    [{status: "uncertain"}, "status-effect"], [{fact: "cut", evidenceIds: [10]}, "target-evidence"],
+    [{fact: "low", evidenceIds: []}, "target-evidence"], [{depiction: units[0].text}, "row-enum"]]) {
+    const run = provider(async () => response([{...row, ...extra}, tail]));
+    assert.deepEqual(await run(request()), partial([tail], [targetFailure(11, reason)]));
+    assert.ok(LUNA_PROTOCOL_TARGET_FAILURES.includes(reason));
+  }
+});
+
+test("keeps single-target verification atomic when the provider returns extra or duplicate rows", async () => {
+  const verified = fact(11, {status: "verified"});
+  const verifyRequest = {mode: "verify", units: units.slice(0, 2), targetIds: [11]};
+  for (const [rows, reason] of [[[verified, fact(12)], "unexpected-row"], [[verified, verified], "duplicate-target"],
+    [[fact(12)], "missing-target"], [[], "missing-target"]]) {
+    const run = provider(async () => response(rows));
+    assert.deepEqual(await run(verifyRequest), rejected([targetFailure(11, reason)]));
+  }
+});
+
+test("returns no partial rows from refusals, incomplete outputs or malformed envelopes", async () => {
+  const row = fact(11), output = part => [{type: "message", role: "assistant", content: [part]}];
+  const cases = [
+    [response([row], {status: "incomplete", incomplete_details: {reason: "max_output_tokens"}}),
+      failure("incomplete", "output-token-limit")],
+    [response([row], {status: "incomplete", incomplete_details: {reason: "content_filter"}}), failure("refused", "content-filter")],
+    [response([row], {output: output({type: "output_text", text: '{"facts":['})}), failure("invalid-response", "output-schema")],
+    [response([row], {output: output({type: "output_text", text: JSON.stringify({facts: [row], note: units[0].text})})}),
+      failure("invalid-response", "output-schema")],
+  ];
+  for (const [reply, expected] of cases) {
+    const run = provider(async () => reply);
+    assert.deepEqual(await run(request()), expected);
   }
 });
 

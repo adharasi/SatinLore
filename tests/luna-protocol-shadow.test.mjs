@@ -288,3 +288,50 @@ test("refusal closes both model passes across the affected run", async () => {
   assert.equal(run.units[2].status, "provider-refused");
   assert.equal(run.units[2].transitionVerificationStatus, "provider-refused");
 });
+
+test("partial discovery retains valid rows and recovers only the rejected native target", async () => {
+  const calls = [];
+  const provider = async request => {
+    calls.push({mode: request.mode, targets: request.targetIds});
+    const usage = {inputTokens: 100, outputTokens: 20};
+    return request.mode === "discovery" ? {
+      status: "partial", facts: request.targetIds.filter(id => id !== 2).map(neutral),
+      targetFailures: [{unitId: 2, reason: "row-enum"}], usage,
+    } : {status: "ok", facts: [neutral(2)], usage};
+  };
+  const run = await runLunaProtocolShadow({...fixture(), provider, maxVerification: 1});
+  assert.deepEqual(calls, [{mode: "discovery", targets: [0, 1, 2, 3, 4]}, {mode: "verify", targets: [2]}]);
+  assert.equal(run.units[0].discovery.status, "neutral");
+  assert.equal(run.units[2].discovery, undefined);
+  assert.equal(run.units[2].discoveryStatus, "invalid-response");
+  assert.equal(run.units[2].verificationStatus, "neutral");
+  assert.deepEqual(run.summary.attempts[0].rejectedFacts, [{id: 2, reason: "row-enum"}]);
+});
+
+test("a single invalid discovery fact does not discard valid neighboring facts", async () => {
+  const provider = fake((id, mode) => id === 2 && mode === "discovery" ?
+    active(id, mode, {scopeId: 5}) : neutral(id));
+  const run = await runLunaProtocolShadow({...fixture(), provider, maxVerification: 0});
+  assert.equal(run.units.filter(row => row.discovery?.status === "neutral").length, 4);
+  assert.equal(run.units[2].discoveryStatus, "invalid-response");
+  assert.equal(run.summary.attempts[0].status, "partial");
+  assert.deepEqual(run.summary.attempts[0].rejectedFacts, [{id: 2, reason: "scope-id"}]);
+});
+
+test("a transition citation cannot supply a missing exact target citation for a cue", async () => {
+  const provider = fake((id, mode) => {
+    if (mode === "transition") return typedTransition(id, {fact: "none", transition: "onset"});
+    if (mode === "verify") return active(id, mode, {fact: "none", action: "contact",
+      narrativePhase: "onset", evidenceIds: [1]});
+    return neutral(id);
+  });
+  const run = await runLunaProtocolShadow({...fixture(), provider, verificationTargets: [2],
+    verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [2]});
+  const row = run.units[2];
+  assert.equal(row.transitionVerification.transition, "onset");
+  assert.deepEqual(row.transitionEvidenceIds, [2]);
+  assert.deepEqual(row.labelEvidenceIds, [1]);
+  assert.equal(row.cue, false);
+  assert.equal(row.cueGuard, "cue-target-uncited");
+  assert.equal(row.pattern, "Baseline");
+});

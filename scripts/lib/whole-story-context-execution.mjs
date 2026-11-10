@@ -38,12 +38,15 @@ function overlaps(a, b) {
   return false;
 }
 
-function decode(response, targetIds) {
+function decode(response, targetIds, allowPartial) {
   if (response?.status === "refused" || response?.status === "transient") return {status: response.status};
   const annotations = response?.annotations;
-  if (response?.status === "annotated" && Array.isArray(annotations) && annotations.length === targetIds.length) {
-    const ids = new Set(annotations.map(annotation => annotation?.id));
-    if (targetIds.every(id => ids.has(id))) return {status: "annotated", annotations: [...annotations]};
+  if (response?.status === "annotated" && Array.isArray(annotations) && annotations.length &&
+      (allowPartial || annotations.length === targetIds.length)) {
+    const allowed = new Set(targetIds);
+    if (annotations.every(annotation => allowed.delete(annotation?.id))) {
+      return {status: "annotated", annotations: [...annotations]};
+    }
   }
   return {status: "failed"};
 }
@@ -54,9 +57,9 @@ function decode(response, targetIds) {
 // retry unclassified errors, change request bodies, or construct new requests.
 export async function executeWholeStoryContextPlan(plan, {request, signal = new AbortController().signal,
   concurrency = maxConcurrentRequests, maxAttempts = Math.min(plan?.windows?.length, WHOLE_STORY_PLAN_LIMITS.maxRequests),
-  maxRetries = 1, serialWithinRun = false, onProgress = () => {}} = {}) {
+  maxRetries = 1, serialWithinRun = false, allowPartial = false, onProgress = () => {}} = {}) {
   if (!Array.isArray(plan?.windows) || typeof request !== "function" || typeof onProgress !== "function" ||
-      typeof serialWithinRun !== "boolean" ||
+      typeof serialWithinRun !== "boolean" || typeof allowPartial !== "boolean" ||
       !limit(concurrency, 1) || concurrency > maxConcurrentRequests || !limit(maxAttempts, 0) ||
       maxAttempts > MAX_WHOLE_STORY_REQUESTS || !limit(maxRetries, 0) || maxRetries > 1) {
     throw new TypeError("Invalid approved context execution options.");
@@ -134,7 +137,7 @@ export async function executeWholeStoryContextPlan(plan, {request, signal = new 
       Promise.resolve(operation).then(response => {
         if (done) return;
         let result;
-        try { result = decode(response, record.window.targetIds); } catch { result = {status: "failed"}; }
+        try { result = decode(response, record.window.targetIds, allowPartial); } catch { result = {status: "failed"}; }
         settle(record, result);
       }, () => settle(record, {status: "failed"}));
     }

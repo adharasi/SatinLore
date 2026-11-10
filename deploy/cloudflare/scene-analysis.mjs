@@ -21,17 +21,25 @@ const WHOLE_STORY_LUNA_ATTEMPTS = 64;
 const WHOLE_STORY_LUNA_MAX_USD = 1;
 const WHOLE_STORY_LUNA_TIMEOUT_MS = 180_000;
 const NEUTRAL_LUNA_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
-const NEUTRAL_LUNA_PROTOCOL_ATTEMPTS = 52;
+const NEUTRAL_LUNA_PROTOCOL_QUOTA = Object.freeze({
+  lane: "founder-neutral", perRun: 48, perUtcDay: 256, perUtcMonth: 2_000,
+});
 const NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS = 300_000;
+const NEUTRAL_LUNA_PROTOCOL_SHARDS = {
+  a: { fixtureIds: ["first-dance", "old-letter"], transitionLimit: 19 },
+  b: { fixtureIds: ["reading-room", "practice-drill"], transitionLimit: 14 },
+};
 const NEUTRAL_LUNA_PROTOCOL_FORMS = new Map([
-  ["benchmark=luna-protocol-neutral-v2-complete", { arm: "complete", transitionLimit: 15 }],
-  ["benchmark=luna-protocol-neutral-v2-windowed", { arm: "windowed", transitionLimit: 9 }],
+  ["benchmark=luna-protocol-neutral-v2-complete-a", { arm: "complete", shard: "a" }],
+  ["benchmark=luna-protocol-neutral-v2-complete-b", { arm: "complete", shard: "b" }],
+  ["benchmark=luna-protocol-neutral-v2-windowed-a", { arm: "windowed", shard: "a" }],
+  ["benchmark=luna-protocol-neutral-v2-windowed-b", { arm: "windowed", shard: "b" }],
 ]);
 const RESEARCH_SUITE_DAY_LIMITS = {
   [CUE_CONTINUITY_STUDY_SUITE]: CUE_CONTINUITY_STUDY_REQUESTS,
   [DECISIONS_STORY_STUDY_PINS.version]: STORY_STUDY_MAX_TOTAL_REQUESTS,
   [WHOLE_STORY_LUNA_STUDY_SUITE]: WHOLE_STORY_LUNA_ATTEMPTS,
-  [NEUTRAL_LUNA_PROTOCOL_SUITE]: NEUTRAL_LUNA_PROTOCOL_ATTEMPTS,
+  [NEUTRAL_LUNA_PROTOCOL_SUITE]: NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay,
 };
 const MODEL = "gpt-6-luna";
 const MAX_CUES = 16;
@@ -330,9 +338,12 @@ const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf
 <p>Compare whole-story, paragraph and sentence context on four original research fixtures. Running the study sends those fixtures to OpenAI and returns aggregate scores. It has a limit of ${WHOLE_STORY_LUNA_ATTEMPTS} API attempts, a $${WHOLE_STORY_LUNA_MAX_USD} estimated usage budget and a three-minute deadline.</p>
 <form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form>
 <h2>Luna protocol v2 neutral diagnostic</h2>
-<p>Send the same four original fixtures to OpenAI and compare discovery, causal cue checks and a bounded sample of transition checks. The result includes sentence IDs and structured labels. Each run has a five-minute deadline and can use up to ${NEUTRAL_LUNA_PROTOCOL_ATTEMPTS} of the study's daily attempt allowance, subject to the shared usage limits.</p>
-<form method="post"><button name="benchmark" value="luna-protocol-neutral-v2-complete">Run v2 complete-context diagnostic</button>
-<button name="benchmark" value="luna-protocol-neutral-v2-windowed">Run v2 windowed diagnostic</button></form></main></html>`;
+<p>Send the selected original fixtures to OpenAI for discovery, causal cue checks and independent transition checks. The result includes sentence IDs and structured labels. Run both parts of the same diagnostic to cover all 33 sentences.</p>
+<p>Each run has a five-minute deadline and up to ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun} attempts. The founder study permits ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay} attempts per UTC day and ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcMonth} per UTC month, separately from reader analysis.</p>
+<form method="post"><button name="benchmark" value="luna-protocol-neutral-v2-complete-a">Run v2 complete context A (19 sentences)</button>
+<button name="benchmark" value="luna-protocol-neutral-v2-complete-b">Run v2 complete context B (14 sentences)</button>
+<button name="benchmark" value="luna-protocol-neutral-v2-windowed-a">Run v2 windowed A (19 sentences)</button>
+<button name="benchmark" value="luna-protocol-neutral-v2-windowed-b">Run v2 windowed B (14 sentences)</button></form></main></html>`;
 
 export async function handleWholeStoryLunaStudy(request, env, { config, session, reverify, runComparison, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -365,7 +376,7 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   const apiKey = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
   if (!analysisConfigured(apiKey, budget)) return providerUnavailable(session, "benchmark_unavailable");
 
-  const maxAttempts = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_ATTEMPTS : WHOLE_STORY_LUNA_ATTEMPTS;
+  const maxAttempts = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun : WHOLE_STORY_LUNA_ATTEMPTS;
   const suite = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_SUITE : WHOLE_STORY_LUNA_STUDY_SUITE;
   const duration = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS : WHOLE_STORY_LUNA_TIMEOUT_MS;
   const stop = new AbortController();
@@ -448,9 +459,13 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
           const result = await request(payload, options);
           return quotaDenied ? { status: "not-dispatched" } : result;
         };
-        const result = await runLunaProtocolNeutral({ mode: "live", ...neutralStudy, provider, signal, maxAttempts });
+        const { arm, shard } = neutralStudy;
+        const result = await runLunaProtocolNeutral({ mode: "live", arm, ...NEUTRAL_LUNA_PROTOCOL_SHARDS[shard],
+          provider, signal, maxAttempts });
         if (!await authorized()) return expired();
-        return Response.json({ ...result, hostedStudyVersion: suite, externalCalls: dispatched,
+        return Response.json({ ...result, hostedStudyVersion: suite, hostedShard: shard,
+          hostedQuota: NEUTRAL_LUNA_PROTOCOL_QUOTA,
+          externalCalls: dispatched,
           quotaLimited: hostedTermination !== undefined, hostedTermination: hostedTermination ??
             (result.providerStops.all ? "provider-terminal" : Object.keys(result.providerStops).length ? "provider-mode-terminal" : "completed") });
       }
@@ -656,11 +671,17 @@ export class SceneAnalysisBudget {
       const date = new Date(now);
       const dayEnds = (Math.floor(now / DAY) + 1) * DAY;
       const monthEnds = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+      const deploymentWindows = suite === NEUTRAL_LUNA_PROTOCOL_SUITE ? [
+        { key: "founder-neutral-day", expires: dayEnds, limit: NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay },
+        { key: "founder-neutral-month", expires: monthEnds, limit: NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcMonth },
+      ] : [
+        { key: "global-day", expires: dayEnds, limit: 100 },
+        { key: "global-month", expires: monthEnds, limit: 1000 },
+      ];
       const windows = [
         suiteLimit === null ? { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 } :
           { key: `study:${suite}`, expires: dayEnds, limit: suiteLimit },
-        { key: "global-day", expires: dayEnds, limit: 100 },
-        { key: "global-month", expires: monthEnds, limit: 1000 },
+        ...deploymentWindows,
       ];
       const attempts = suite === CUE_CONTINUITY_STUDY_SUITE ? CUE_CONTINUITY_STUDY_REQUESTS : 1;
       const retryAt = this.storage.transactionSync(() => {

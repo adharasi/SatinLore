@@ -4,12 +4,14 @@ import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs"
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
 import {mergeTransitionVerdict, transitionPriority} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
+  LUNA_PROTOCOL_TARGET_FAILURES,
   LUNA_PROTOCOL_TRANSITION_FACTS,
   lunaProtocolOutputTokens} from "./luna-protocol-provider.mjs";
 
 const clearance = "No blocking event recorded";
 const transitionCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
 const closingTransitions = new Set(["beat-end", "declined-restart"]);
+const quietTransitions = new Set(["declined-restart", "interruption", "non-romantic-activity-stop", "span-end"]);
 const editorialFrames = new Set(["current", "remembered", "imagined", "reported", "mixed"]);
 const activePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
 const activeActions = new Set(["anticipation", "contact", "continuation", "change", "release"]);
@@ -161,6 +163,8 @@ function playbackInputs(index, decisions, blocked) {
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
     const fact = result?.effectiveAnnotation ?? result?.annotation;
+    const rawCue = result?.prefixVerified ? result.annotation : null;
+    const ownCueEvidence = rawCue?.status === "verified" && rawCue.frame === "current" && rawCue.evidenceIds.includes(unit.id);
     const effectVerified = result?.prefixVerified || result?.transitionVerification?.status === "verified";
     const evidence = fact?.evidenceIds ?? [];
     const mark = (kind, reason) => ({kind, knownAt: unit.id, evidence, reason});
@@ -195,9 +199,9 @@ function playbackInputs(index, decisions, blocked) {
     if (!protective && !neutralize && !beatEnd && !unit.structuralBoundary) {
       // Context can occupy a position in the trailing window. Only a causal
       // annotation with supporting evidence contributes intensity to it.
-      recent = [...recent.slice(-7), current && evidence.length ? fact.depiction : "unknown"];
+      recent = [...recent.slice(-7), current && ownCueEvidence ? rawCue.depiction : "unknown"];
     }
-    const restart = ["restart", "onset"].includes(transition) && enactedActions.has(fact?.action) && evidence.includes(unit.id);
+    const restart = ["restart", "onset"].includes(transition) && ownCueEvidence && enactedActions.has(rawCue.action);
     const clear = !protective && !neutralize && !beatEnd && (!needsRestart || restart) && current && fact?.status === "verified" &&
       (cut ? evidence.includes(unit.id) : evidence.every(id => id > barrierId));
     const prior = fact?.priorAnchor;
@@ -207,12 +211,17 @@ function playbackInputs(index, decisions, blocked) {
     const scope = linked ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior} : null;
     const ease = clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease") ? mark("ease", "Prefix evidence supports easing.") : null;
-    const low = clear && kind === "low" ?
+    const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
+    const low = clear && ownCueEvidence && !quietBoundary && kind === "low" ?
       {...mark("low", "Prefix evidence establishes an independent low cue."),
         profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone"} : null;
-    const canSignal = clear && evidence.includes(unit.id) && !["continue", "span-end"].includes(kind) &&
-      !["declined-restart", "interruption", "non-romantic-activity-stop"].includes(transition);
-    if (result?.prefixVerified && ["verified", "neutral"].includes(fact.status)) {
+    const canSignal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);
+    if (rawCue?.status === "verified" && activePhases.has(rawCue.narrativePhase)) {
+      if (quietBoundary) result.cueGuard = "cue-boundary-suppressed";
+      else if (rawCue.frame !== "current" || !current) result.cueGuard = "cue-frame-ineligible";
+      else if (!ownCueEvidence) result.cueGuard = "cue-target-uncited";
+    }
+    if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
       result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase));
     }
     let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" :
@@ -298,7 +307,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   async function execute(windows, stage) {
     const attempts = new Map();
     const results = await executeWholeStoryContextPlan({windows}, {signal, maxAttempts: windows.length,
-      maxRetries: 0, serialWithinRun: true,
+      maxRetries: 0, serialWithinRun: true, allowPartial: stage === "discovery",
       request: async window => {
         const mode = stage === "discovery" ? stage : window.id.split(":", 1)[0];
         const started = performance.now();
@@ -357,28 +366,48 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           record.status = "provider-refused";
           return {status: "refused"};
         }
-        if (answer?.status !== "ok") {
+        const expected = new Set(window.targetIds);
+        const rejections = new Map((Array.isArray(answer?.targetFailures) ? answer.targetFailures : [])
+          .filter(row => expected.has(row?.unitId) && LUNA_PROTOCOL_TARGET_FAILURES.includes(row.reason))
+          .map(row => [row.unitId, row.reason]));
+        if (answer?.status !== "ok" && !(mode === "discovery" && answer?.status === "partial")) {
+          if (rejections.size) record.rejectedFacts = [...rejections].map(([id, reason]) => ({id, reason}));
           record.status = ["incomplete", "invalid-response", "transient", "failed", "cancelled", "timed-out",
             "invalid-request"].includes(answer?.status) ? answer.status : "failed";
           return {status: "failed"};
         }
-        const byTarget = new Map(Array.isArray(answer.facts) ? answer.facts.map(fact => [fact?.unitId, fact]) : []);
-        const rejectedFacts = window.targetIds.map(id => ({id, reason: factViolation(byTarget.get(id), submitted, id, mode, attested)}))
-          .filter(row => row.reason !== null);
-        const targetCoverageMismatch = answer.facts?.length !== window.targetIds.length || byTarget.size !== window.targetIds.length;
-        if (targetCoverageMismatch || rejectedFacts.length) {
-          record.status = "invalid-response";
+        const facts = Array.isArray(answer.facts) ? answer.facts : [];
+        const byTarget = new Map();
+        for (const fact of facts) {
+          if (!expected.has(fact?.unitId)) continue;
+          if (byTarget.has(fact.unitId)) rejections.set(fact.unitId, "duplicate-target");
+          byTarget.set(fact.unitId, fact);
+        }
+        const annotations = [];
+        for (const id of window.targetIds) {
+          const fact = byTarget.get(id);
+          const reason = rejections.get(id) ?? (fact ? factViolation(fact, submitted, id, mode, attested) : "missing-target");
+          if (reason) rejections.set(id, reason);
+          else annotations.push({...fact, id});
+        }
+        const targetCoverageMismatch = facts.length !== expected.size || byTarget.size !== expected.size ||
+          [...rejections.values()].some(reason => ["missing-target", "duplicate-target", "unexpected-row"].includes(reason));
+        const partial = targetCoverageMismatch || rejections.size > 0;
+        if (partial) {
           record.failureReason = "rejected-fact-contract";
-          record.rejectedFacts = rejectedFacts;
+          record.rejectedFacts = [...rejections].map(([id, reason]) => ({id, reason}));
           record.targetCoverageMismatch = targetCoverageMismatch;
+        }
+        if (!annotations.length || mode !== "discovery" && partial) {
+          record.status = "invalid-response";
           return {status: "failed"};
         }
-        record.status = "returned";
+        record.status = partial ? "partial" : "returned";
         if (mode !== "discovery" && !signal.aborted) storePrefixResult(mode, window.targetIds[0], byTarget.get(window.targetIds[0]), "returned");
-        return {status: "annotated", annotations: window.targetIds.map(id => ({...byTarget.get(id), id}))};
+        return {status: "annotated", annotations};
       }});
     const byId = new Map(results.windows.map(result => [result.id, result]));
-    return windows.map(window => ({window, result: byId.get(window.id),
+    return windows.map(window => ({window, result: byId.get(window.id), rejectedFacts: attempts.get(window.id)?.rejectedFacts ?? [],
       status: invalidated(window) && attempts.get(window.id)?.status !== "provider-refused" ? "refusal-dependent" :
         ["cancelled", "refusal-dependent"].includes(byId.get(window.id).status) ? byId.get(window.id).status :
           attempts.get(window.id)?.status ?? byId.get(window.id).status}));
@@ -387,13 +416,19 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const priority = [], important = [], routine = [], controls = [], proposals = new Map(), transitionJobs = [];
     const discoveries = await execute(discovery, "discovery");
     for (const {window, result, status} of discoveries) {
-      if (status === "returned") for (const fact of result.annotations) proposals.set(fact.unitId, {fact, runId: window.runId});
+      if (["returned", "partial"].includes(status)) {
+        for (const fact of result.annotations) proposals.set(fact.unitId, {fact, runId: window.runId});
+      }
     }
-    for (const {window, result, status} of discoveries) {
+    for (const {window, result, status, rejectedFacts} of discoveries) {
+      const rejectedById = new Map(rejectedFacts.map(({id, reason}) => [id, reason]));
       for (const id of window.targetIds) {
-        decisions.set(id, {status, window, discoveryStatus: status});
+        const rejected = rejectedById.get(id);
+        const rowStatus = status === "partial" && rejected ? rejected === "missing-target" ? "missing" : "invalid-response" : status;
+        decisions.set(id, {status: rowStatus, window, discoveryStatus: rowStatus});
         if (invalidated(window)) continue;
         if (nativeTargets.has(id)) priority.push(prefixJob(window, id, index, prefixUnits));
+        else if (status === "partial" && rejected) important.push(prefixJob(window, id, index, prefixUnits));
         else if (verifyTransitions && ["incomplete", "invalid-response"].includes(status) &&
             (id === window.targetIds[0] || negativeStride && id % negativeStride === 0)) {
           controls.push(prefixJob(window, id, index, prefixUnits));
@@ -401,7 +436,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         if (verifyTransitions) transitionJobs.push({id, window,
           rank: transitionPriority(index.units[id], proposals.get(id)?.fact, typedTargets.has(id))});
       }
-      if (status !== "returned") continue;
+      if (!["returned", "partial"].includes(status)) continue;
       for (const fact of result.annotations) {
         const previous = proposals.get(fact.unitId - 1);
         const frameChange = editorialFrames.has(fact.frame) && previous?.runId === window.runId &&
@@ -448,7 +483,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   const units = index.units.map((unit, i) => {
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
-      transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue} = decisions.get(unit.id);
+      transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard} = decisions.get(unit.id);
     const {unitId: _target, id: _transportId, ...labels} = annotation ?? {};
     const {unitId: _discoveryTarget, id: _discoveryTransportId, ...provisionalLabels} = discovery ?? {};
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
@@ -459,7 +494,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       discoveryStatus: discoveryStatus ?? status,
       transitionVerification, transitionVerificationStatus: transitionVerificationStatus ?? (verifyTransitions ? "not-requested" : undefined),
       transitionEvidenceIds: transitionVerification?.evidenceIds,
-      transitionFlag, appliedTransition: (effectiveAnnotation ?? annotation)?.transition,
+      transitionFlag, cueGuard, appliedTransition: (effectiveAnnotation ?? annotation)?.transition,
       verificationStatus: verificationStatus ?? (status === "verification-deferred" ? status : undefined)};
   });
   const outcomes = Object.fromEntries(Object.entries(Object.groupBy(telemetry, row => row.status))

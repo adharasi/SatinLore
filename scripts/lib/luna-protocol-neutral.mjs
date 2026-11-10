@@ -1,7 +1,8 @@
 import {createHash} from "node:crypto";
 import {wholeStoryAnnotationFixtures} from "../../tests/whole-story-annotation-fixtures.mjs";
 import {scoreBeatContinuityCorpus} from "./beat-continuity-evaluation.mjs";
-import {LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_MODEL, LUNA_PROTOCOL_TRANSITION_FACTS} from "./luna-protocol-provider.mjs";
+import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_MODEL, LUNA_PROTOCOL_TRANSITION_FACTS}
+  from "./luna-protocol-provider.mjs";
 import {createLunaShadowBudget, runLunaProtocolShadow} from "./luna-protocol-shadow.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "./whole-story-context-planning.mjs";
 
@@ -11,21 +12,30 @@ const stageDimensions = {
   discovery: ["cue", "narrativePhase", "transition"],
   prefix: ["cue", "narrativePhase"],
   transition: ["transition"],
+  applied: ["cue", "transition"],
 };
+const rawStages = ["discovery", "prefix", "transition"];
 const attemptStage = {discovery: "discovery", verify: "prefix", transition: "transition"};
 const observedStatuses = new Set(["candidate", "verified", "neutral"]);
+const typedTransitions = new Set(LUNA_PROTOCOL_ENUMS.transition);
+const phaseLabels = new Set(LUNA_PROTOCOL_ENUMS.narrativePhase);
+const boundaryTransitions = new Set(["interruption", "span-end", "beat-end", "scene-cut", "chapter-end", "hard-stop",
+  "memory-entry", "imagined-entry", "reported-entry", "present-return", "uncertain-continuity", "declined-restart",
+  "non-romantic-activity-stop"]);
 const failureReasons = new Set([...LUNA_PROTOCOL_FAILURE_REASONS, "rejected-fact-contract"]);
-const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "transition-conflict", "protective-transition-conflict"]);
+const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "transition-conflict", "protective-transition-conflict",
+  "cue-boundary-suppressed", "cue-target-uncited", "cue-frame-ineligible"]);
 const dispositions = new Set([...observedStatuses, "uncertain", "abstain", "withheld", "unavailable", "unverified",
   "failed", "missing", "budget-deferred", "provider-unavailable", "complete-arm-ineligible", "provider-refused",
   "refusal-dependent", "incomplete", "invalid-response", "transient", "cancelled", "timed-out", "invalid-request",
-  "verification-deferred", "transition-verification-deferred", "not-requested", "returned"]);
+  "verification-deferred", "transition-verification-deferred", "not-requested", "returned", "partial"]);
 const reportOnlyDispositions = new Set(["transition-verification-deferred", "not-requested", "returned"]);
 const actionForPhase = {build: "anticipation", onset: "contact", sustain: "continuation", rebuild: "contact"};
 const invalidOptions = "Invalid neutral benchmark options.";
 const natural = value => Number.isSafeInteger(value) && value >= 0;
 const disposition = (status, fallback = "unavailable") => dispositions.has(status) ? status : fallback;
 const validIds = (ids, limit) => Array.isArray(ids) && ids.every(id => natural(id) && id < limit) ? [...ids] : null;
+const rosterDigest = works => createHash("sha256").update(JSON.stringify(works.map(({id, sourceSha256}) => ({id, sourceSha256})))).digest("hex");
 
 function prepareFixtures(now) {
   if (createHash("sha256").update(JSON.stringify(wholeStoryAnnotationFixtures)).digest("hex") !== fixtureDigest) {
@@ -77,6 +87,15 @@ function mockProvider({reference, evidence}) {
 }
 
 function observation(row, stage) {
+  if (stage === "applied") {
+    const transitionOrigin = appliedTransitionOrigin(row);
+    const cue = typeof row.cue === "boolean" ? row.cue : undefined;
+    const returned = cue !== undefined || transitionOrigin !== "unobserved";
+    return {result: {id: row.id, unitSha256: row.unitSha256,
+      status: returned ? "verified" : disposition(observedStatuses.has(row.status) ? "unavailable" : row.status),
+      ...(cue === undefined ? {} : {cue}), ...(transitionOrigin === "unobserved" ? {} : {transition: row.appliedTransition})},
+    returned, evidenceIds: row.evidenceIds, transitionOrigin};
+  }
   // A discovery label which did not require prefix review is in the final slot.
   const fact = stage === "transition" ? row.transitionVerification :
     stage === "prefix" ? (row.prefixVerified ? row : undefined) :
@@ -86,15 +105,16 @@ function observation(row, stage) {
     stage === "prefix" ? row.verificationStatus ?? (row.labelKnownAt !== null ? "unverified" : row.status) :
       row.discoveryStatus ?? row.status;
   const status = disposition(fact?.status ?? (observedStatuses.has(fallback) ? "unavailable" : fallback));
+  if (status === "partial") return {result: {id: row.id, unitSha256: row.unitSha256, status: "invalid-response"}, returned: false};
   const result = {id: row.id, unitSha256: row.unitSha256, status};
   const evidenceIds = stage === "transition" ? row.transitionEvidenceIds :
     fact === row ? row.labelEvidenceIds : fact?.evidenceIds;
   if (fact) {
-    if (stage !== "transition") {
+    if (stage !== "transition" && phaseLabels.has(fact.narrativePhase)) {
       result.narrativePhase = fact.narrativePhase;
       if (fact.narrativePhase !== "unknown") result.cue = fact.narrativePhase !== "quiet";
     }
-    if (stage !== "prefix") result.transition = fact.transition;
+    if (stage !== "prefix" && typedTransitions.has(fact.transition)) result.transition = fact.transition;
   }
   return {result, returned: Boolean(fact), evidenceIds};
 }
@@ -102,10 +122,31 @@ function observation(row, stage) {
 function metricRow(score) {
   const phase = score.labels.narrativePhase;
   return {targets: score.rows, observedTargets: score.observedRows, coverage: score.rowCoverage, dispositions: score.status,
-    ...(score.cues ? {exactCues: score.cues.effective} : {}),
+    ...(score.cues ? {exactCues: score.cues.effective, observedCueTargets: score.cues.observedKnownRows} : {}),
     ...(score.typedTransitions ? {exactTypedTransitions: score.typedTransitions.exact,
-      nearbyTypedTransitions: score.typedTransitions.withinOneParagraph} : {}),
+      nearbyTypedTransitions: score.typedTransitions.withinOneParagraph,
+      observedTypedTargets: score.labels.transition.observed} : {}),
     ...(phase ? {phase: {exact: phase.exact, observed: phase.observed}} : {})};
+}
+
+const boundaryValue = transition => boundaryTransitions.has(transition) || transition === "unknown" ? transition : "none";
+const boundaryWork = work => ({...work, units: work.units.map(unit => Object.hasOwn(unit, "transition") ?
+  {...unit, transition: boundaryValue(unit.transition)} : unit)});
+function boundaryScore(reference, works) {
+  const candidates = works.map(({id, sourceSha256, units}) => ({id, sourceSha256, units: units.map(row =>
+    ({id: row.id, unitSha256: row.unitSha256, status: row.status,
+      ...(Object.hasOwn(row, "transition") ? {transition: boundaryValue(row.transition)} : {})}))}));
+  return scoreBeatContinuityCorpus({...reference, works: reference.works.map(boundaryWork)},
+    {dimensions: ["transition"], works: candidates});
+}
+
+function boundaryReport(score, works) {
+  const otherTypedPredictions = works.flatMap(work => work.units)
+    .filter(row => observedStatuses.has(row.status) && typedTransitions.has(row.transition) &&
+      !["none", "unknown"].includes(row.transition) && !boundaryTransitions.has(row.transition));
+  return {exact: score.typedTransitions.exact, nearby: score.typedTransitions.withinOneParagraph,
+    excludedNonBoundaryPredictions: Object.fromEntries(Object.entries(Object.groupBy(otherTypedPredictions, row => row.transition))
+      .map(([type, rows]) => [type, rows.length]))};
 }
 
 function stageReport(reference, runs, stage) {
@@ -113,11 +154,33 @@ function stageReport(reference, runs, stage) {
   const works = runs.map(({id, sourceSha256}, i) => ({id, sourceSha256, units: observations[i].map(({result}) =>
     reportOnlyDispositions.has(result.status) ? {...result, status: "verification-deferred"} : result)}));
   const score = scoreBeatContinuityCorpus(reference, {dimensions: stageDimensions[stage], works});
+  const boundary = stageDimensions[stage].includes("transition") ? boundaryScore(reference, works) : null;
   const coverage = rows => ({returnedTargets: rows.filter(row => row.returned).length,
     dispositions: Object.fromEntries(Object.entries(Object.groupBy(rows, row => row.result.status))
       .map(([status, group]) => [status, group.length]))});
   return {...metricRow(score.summary), ...coverage(observations.flat()),
-    works: score.stories.map(({id, ...metrics}, i) => ({id, ...metricRow(metrics), ...coverage(observations[i])}))};
+    ...(boundary ? {boundary: boundaryReport(boundary.summary, works)} : {}),
+    works: score.stories.map(({id, ...metrics}, i) => ({id, ...metricRow(metrics), ...coverage(observations[i]),
+      ...(boundary ? {boundary: boundaryReport(boundary.stories[i], [works[i]])} : {})}))};
+}
+
+function appliedTransitionOrigin(row) {
+  if (!typedTransitions.has(row.appliedTransition) || row.appliedTransition === "unknown") return "unobserved";
+  if (row.transitionFlag === "protective-transition-conflict" && row.prefixVerified) return "protected-cue-prefix";
+  const dedicated = row.transitionVerification;
+  if (dedicated && observedStatuses.has(dedicated.status) && dedicated.transition === row.appliedTransition) {
+    return row.prefixVerified && row.transition === row.appliedTransition ? "both-passes-agree" : "transition-pass";
+  }
+  return row.prefixVerified && observedStatuses.has(row.status) ? "cue-prefix" : "unobserved";
+}
+
+function appliedChange(expected, raw, applied, nonEvent) {
+  if (applied === undefined) return raw === undefined ? "unobserved" : "application-unobserved";
+  if (raw === undefined) return applied === expected && expected !== nonEvent ? "recovered-by-coverage" : "raw-unobserved";
+  if (raw === applied) return "unchanged";
+  if (applied === expected) return expected === nonEvent ? "removed-false-positive" : "recovered-match";
+  if (raw === expected) return expected === nonEvent ? "added-false-positive" : "lost-match";
+  return "changed-mismatch";
 }
 
 function stageDiagnostic(gold, row, stage, attempt, referenceCueEvidenceIds, size) {
@@ -155,7 +218,7 @@ function stageDiagnostic(gold, row, stage, attempt, referenceCueEvidenceIds, siz
 }
 
 function diagnosticWork(fixture, run) {
-  const stages = new Map(Object.keys(stageDimensions).map(stage => [stage, new Map()]));
+  const stages = new Map(rawStages.map(stage => [stage, new Map()]));
   const size = fixture.reference.units.length;
   for (const attempt of run.summary.attempts) {
     const stage = stages.get(attemptStage[attempt.mode]);
@@ -165,9 +228,17 @@ function diagnosticWork(fixture, run) {
   return {id: run.id, sourceSha256: run.sourceSha256, units: run.units.map((row, i) => {
     const gold = fixture.reference.units[i];
     const cueEvidenceIds = fixture.evidence[gold.id] ?? [];
+    const rawCue = observation(row, "prefix").result;
+    const rawTyped = observation(row, "transition").result;
+    const {result: applied, transitionOrigin} = observation(row, "applied");
     return {id: gold.id, unitSha256: gold.unitSha256, paragraph: gold.paragraph,
       expected: {narrativePhase: gold.narrativePhase, cue: gold.cue, transition: gold.transition, cueEvidenceIds},
-      pipelineFlags: [row.playbackDisposition, row.transitionFlag].filter(flag => pipelineFlags.has(flag)),
+      pipelineFlags: [row.playbackDisposition, row.transitionFlag, row.cueGuard].filter(flag => pipelineFlags.has(flag)),
+      applied: {status: applied.status, cue: applied.cue ?? null, transition: applied.transition ?? null, transitionOrigin,
+        cuePrefixTransition: row.prefixVerified && typedTransitions.has(row.transition) ? row.transition : null,
+        cueChange: appliedChange(gold.cue, observedStatuses.has(rawCue.status) ? rawCue.cue : undefined, applied.cue, false),
+        transitionChange: appliedChange(gold.transition, observedStatuses.has(rawTyped.status) && rawTyped.transition !== "unknown" ?
+          rawTyped.transition : undefined, applied.transition, "none")},
       compiler: {pattern: row.pattern, phase: row.phase, decision: row.trace.decision,
         appliedTransition: row.appliedTransition ?? null, evidenceIds: validIds(row.evidenceIds, size)},
       ...Object.fromEntries([...stages].map(([stage, attempts]) =>
@@ -184,9 +255,11 @@ function attemptReport(runs, stage) {
     typeof model === "string" && /^gpt-6-luna(?:-\d{4}-\d{2}-\d{2})?$/u.test(model)))].sort();
   const failures = Object.fromEntries(Object.entries(Object.groupBy(rows.filter(row => failureReasons.has(row.failureReason)),
     row => row.failureReason)).map(([reason, group]) => [reason, group.length]));
-  return {attempts: rows.length, measuredUsage: usage.length, inputTokens: usage.reduce((sum, value) => sum + value.inputTokens, 0),
+  return {attempts: rows.length, measuredUsage: usage.length, unknownUsage: rows.length - usage.length,
+    inputTokens: usage.reduce((sum, value) => sum + value.inputTokens, 0),
     outputTokens: usage.reduce((sum, value) => sum + value.outputTokens, 0),
-    measuredTimings: timings.length, p50AttemptMs: percentile(0.50), p95AttemptMs: percentile(0.95), returnedModels, failures};
+    measuredTimings: timings.length, durationsMs: timings, p50AttemptMs: percentile(0.50), p95AttemptMs: percentile(0.95),
+    returnedModels, failures};
 }
 
 function transitionAllocation(fixtures, limit) {
@@ -199,15 +272,127 @@ function transitionAllocation(fixtures, limit) {
   return limits;
 }
 
+const invalidShards = "Use two complementary reports from the same neutral benchmark arm.";
+function sumFields(rows, fields) {
+  return Object.fromEntries(fields.map(field => {
+    if (!rows.every(row => natural(row?.[field]))) throw new TypeError(invalidShards);
+    return [field, rows.reduce((sum, row) => sum + row[field], 0)];
+  }));
+}
+
+function mergeCounts(groups) {
+  const totals = new Map();
+  for (const group of groups) {
+    if (!group || typeof group !== "object" || Array.isArray(group)) throw new TypeError(invalidShards);
+    for (const [key, count] of Object.entries(group)) {
+      if (!natural(count)) throw new TypeError(invalidShards);
+      totals.set(key, (totals.get(key) ?? 0) + count);
+    }
+  }
+  return Object.fromEntries(totals);
+}
+
+const ratio = (value, total) => total ? value / total : null;
+function mergeBinary(rows) {
+  const counts = sumFields(rows, ["matched", "missed", "extra"]);
+  return {...counts, precision: ratio(counts.matched, counts.matched + counts.extra),
+    recall: ratio(counts.matched, counts.matched + counts.missed)};
+}
+
+function mergeUsage(rows) {
+  const totals = sumFields(rows, ["attempts", "measuredUsage", "unknownUsage", "inputTokens", "outputTokens", "measuredTimings"]);
+  if (rows.some(row => !Array.isArray(row.durationsMs) || row.durationsMs.length !== row.measuredTimings ||
+      !row.durationsMs.every(natural) || !Array.isArray(row.returnedModels))) throw new TypeError(invalidShards);
+  const durationsMs = rows.flatMap(row => row.durationsMs).sort((a, b) => a - b);
+  const percentile = q => durationsMs[Math.ceil(durationsMs.length * q) - 1] ?? null;
+  return {...totals, durationsMs, p50AttemptMs: percentile(0.50), p95AttemptMs: percentile(0.95),
+    returnedModels: [...new Set(rows.flatMap(row => row.returnedModels))].sort(),
+    failures: mergeCounts(rows.map(row => row.failures))};
+}
+
+/** Reassemble two exact, disjoint fixed-fixture reports without pooling percentages or replaying requests. */
+export function combineNeutralReports(reports) {
+  const pins = prepareFixtures(0).map(({reference}) => reference);
+  const allIds = pins.map(({id}) => id);
+  const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const keys = ["arm", "verificationContext", "measurement", "model", "rubricVersion", "segmentationVersion"];
+  if (!Array.isArray(reports) || reports.length !== 2 || reports.some(report => !report ||
+      report.fixtureVersion !== fixtureVersion || report.fixtureDigest !== fixtureDigest || report.sourceProseIncluded !== false ||
+      keys.some(key => !Object.hasOwn(report, key) || report[key] !== reports[0][key]) ||
+      !Array.isArray(report.fixtureIds) || !report.fixtureIds.length || !Array.isArray(report.diagnostics) ||
+      !equal(report.fixtureIds, report.diagnostics.map(({id}) => id)) ||
+      report.fixtureRosterSha256 !== rosterDigest(report.diagnostics))) throw new TypeError(invalidShards);
+  const workById = new Map(reports.flatMap(report => report.diagnostics).map(work => [work.id, work]));
+  if (reports.flatMap(report => report.fixtureIds).length !== allIds.length || workById.size !== allIds.length ||
+      pins.some(pin => {
+        const work = workById.get(pin.id);
+        return work?.sourceSha256 !== pin.sourceSha256 || !Array.isArray(work.units) || !equal(
+          work.units.map(({id, unitSha256}) => ({id, unitSha256})), pin.units.map(({id, unitSha256}) => ({id, unitSha256})));
+      })) throw new TypeError(invalidShards);
+  const canonical = rows => allIds.map(id => rows.find(row => row.id === id));
+  const diagnostics = canonical([...workById.values()]);
+  const stage = name => {
+    const rows = reports.map(report => report[name]);
+    const dimensions = stageDimensions[name];
+    for (const [i, row] of rows.entries()) {
+      const shardPins = pins.filter(pin => reports[i].fixtureIds.includes(pin.id));
+      const expected = shardPins.flatMap(pin => pin.units);
+      if (!row || !Array.isArray(row.works) || !equal(row.works.map(({id}) => id), reports[i].fixtureIds) ||
+          row.targets !== expected.length || dimensions.includes("cue") &&
+            row.exactCues?.matched + row.exactCues?.missed !== expected.filter(unit => unit.cue).length ||
+          dimensions.includes("transition") &&
+            row.exactTypedTransitions?.matched + row.exactTypedTransitions?.missed !== expected.filter(unit => unit.transition !== "none").length) {
+        throw new TypeError(invalidShards);
+      }
+    }
+    const totals = sumFields(rows, ["targets", "returnedTargets", "observedTargets",
+      ...(dimensions.includes("cue") ? ["observedCueTargets"] : []),
+      ...(dimensions.includes("transition") ? ["observedTypedTargets"] : [])]);
+    return {...totals, coverage: ratio(totals.observedTargets, totals.targets),
+      dispositions: mergeCounts(rows.map(row => row.dispositions)), works: canonical(rows.flatMap(row => row.works)),
+      ...(dimensions.includes("cue") ? {exactCues: mergeBinary(rows.map(row => row.exactCues))} : {}),
+      ...(dimensions.includes("narrativePhase") ? {phase: sumFields(rows.map(row => row.phase), ["exact", "observed"])} : {}),
+      ...(dimensions.includes("transition") ? {
+        exactTypedTransitions: mergeBinary(rows.map(row => row.exactTypedTransitions)),
+        nearbyTypedTransitions: mergeBinary(rows.map(row => row.nearbyTypedTransitions)),
+        boundary: {exact: mergeBinary(rows.map(row => row.boundary?.exact)), nearby: mergeBinary(rows.map(row => row.boundary?.nearby)),
+          excludedNonBoundaryPredictions: mergeCounts(rows.map(row => row.boundary?.excludedNonBoundaryPredictions))},
+      } : {}),
+      ...(name === "applied" ? Object.fromEntries(["transitionOrigins", "cueChanges", "transitionChanges"]
+        .map(key => [key, mergeCounts(rows.map(row => row[key]))])) : {usage: mergeUsage(rows.map(row => row.usage))})};
+  };
+  const [first] = reports;
+  const planning = reports.map(report => report.planning);
+  const budgets = reports.map(report => report.budget);
+  return {...Object.fromEntries([...keys, "fixtureVersion", "fixtureDigest", "sourceProseIncluded", "independentCorpusBenchmark",
+    "prefixPolicy", "cueDefinition", "appliedCueDefinition", "transitionDefinition", "boundaryDefinition"].map(key => [key, first[key]])),
+    fixtureIds: allIds, fixtureRosterSha256: rosterDigest(diagnostics),
+    ...(reports.every(report => natural(report.externalCalls)) ? sumFields(reports, ["externalCalls"]) : {}),
+    planning: {...sumFields(planning, ["referenceTargets", "admittedTargets", "plannedTargets", "plannedDiscoveryWindows",
+      "discoveryAttempts", "prefixAttempts", "transitionTargetLimit", "transitionAttempts"]),
+    works: canonical(planning.flatMap(row => row.works))},
+    budget: {...sumFields(budgets, ["capMicros", "attempts", "attemptedPayloadBytes", "reservedMicros", "chargedMicros", "unsettled"]),
+      reservationBreach: budgets.some(row => row.reservationBreach)},
+    shards: reports.map(report => ({fixtureIds: report.fixtureIds, fixtureRosterSha256: report.fixtureRosterSha256,
+      providerStops: report.providerStops})),
+    ...Object.fromEntries(Object.keys(stageDimensions).map(name => [name, stage(name)])), diagnostics};
+}
+
 export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed", provider, signal, now = Date.now,
-  transitionLimit = 33, maxAttempts = 80, verifyTransitions = true, verificationContext = "attested"} = {}) {
+  transitionLimit = 33, maxAttempts = 80, verifyTransitions = true, verificationContext = "attested", fixtureIds} = {}) {
   if (!["offline", "mock", "live"].includes(mode) || !["windowed", "complete"].includes(arm) ||
       (provider !== undefined && (mode === "offline" || typeof provider !== "function")) ||
       (mode === "live" && !provider) || !natural(transitionLimit) || transitionLimit > 33 ||
       !natural(maxAttempts) || maxAttempts > 80 || typeof verifyTransitions !== "boolean" ||
       !["recent", "attested"].includes(verificationContext)) throw new TypeError(invalidOptions);
-  const fixtures = prepareFixtures(now());
-  const transitionBudgets = transitionAllocation(fixtures, verifyTransitions ? transitionLimit : 0);
+  const pinned = prepareFixtures(now());
+  if (fixtureIds !== undefined && (!Array.isArray(fixtureIds) || !fixtureIds.length ||
+      new Set(fixtureIds).size !== fixtureIds.length || fixtureIds.some(id => !pinned.some(fixture => fixture.id === id)))) {
+    throw new TypeError(invalidOptions);
+  }
+  const fixtures = fixtureIds === undefined ? pinned : pinned.filter(fixture => fixtureIds.includes(fixture.id));
+  const selectedSize = fixtures.reduce((sum, fixture) => sum + fixture.reference.units.length, 0);
+  const transitionBudgets = transitionAllocation(fixtures, verifyTransitions ? Math.min(transitionLimit, selectedSize) : 0);
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 128_000, maxMicros: 150_000});
   const providerStops = {};
   const guardedProvider = provider && (async (request, options) => {
@@ -241,15 +426,25 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
   }));
   const totals = Object.fromEntries(Object.keys(planning[0]).filter(field => field !== "id")
     .map(field => [field, planning.reduce((sum, row) => sum + row[field], 0)]));
-  return {fixtureVersion, fixtureDigest, rubricVersion: runs[0].rubricVersion, segmentationVersion: runs[0].segmentationVersion,
+  const diagnostics = fixtures.map((fixture, i) => diagnosticWork(fixture, runs[i]));
+  const appliedRows = diagnostics.flatMap(work => work.units).map(row => row.applied);
+  const appliedCounts = field => Object.fromEntries(Object.entries(Object.groupBy(appliedRows, row => row[field]))
+    .map(([value, rows]) => [value, rows.length]));
+  return {fixtureVersion, fixtureDigest, fixtureIds: fixtures.map(({id}) => id), fixtureRosterSha256: rosterDigest(diagnostics),
+    rubricVersion: runs[0].rubricVersion, segmentationVersion: runs[0].segmentationVersion,
     arm, verificationContext, measurement: {offline: "offline-planning", mock: provider ? "offline-injected-mock" : "offline-reference-mock",
       live: "live-neutral-provider"}[mode], model: mode === "live" ? LUNA_PROTOCOL_MODEL : null,
     independentCorpusBenchmark: false, sourceProseIncluded: false, ...(mode === "live" ? {} : {externalCalls: 0}),
     prefixPolicy: "Freeze all native cue targets before discovery. The transition-only stage has a separate target allowance.",
     cueDefinition: "An exact fixture unit with a non-quiet reference phase.",
+    appliedCueDefinition: "A direct, verified enacted cue after the merged gate, scored against the broader non-quiet fixture reference.",
     transitionDefinition: "An exact fixture unit and typed event. Nearby matching uses the same event type within one paragraph.",
+    boundaryDefinition: {types: [...boundaryTransitions],
+      excludes: "Onset, restart, accent, ease and recover remain in full typed scores and are excluded from boundary-only scores."},
     planning: {...totals, works: planning}, budget: budget.snapshot(), providerStops,
-    ...Object.fromEntries(Object.keys(stageDimensions).map(stage => [stage,
+    ...Object.fromEntries(rawStages.map(stage => [stage,
       {...stageReport(reference, runs, stage), usage: attemptReport(runs, stage)}])),
-    diagnostics: fixtures.map((fixture, i) => diagnosticWork(fixture, runs[i]))};
+    applied: {...stageReport(reference, runs, "applied"), transitionOrigins: appliedCounts("transitionOrigin"),
+      cueChanges: appliedCounts("cueChange"), transitionChanges: appliedCounts("transitionChange")},
+    diagnostics};
 }
