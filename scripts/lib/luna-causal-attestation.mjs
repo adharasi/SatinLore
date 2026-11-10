@@ -24,8 +24,8 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const framed = applyFrameScope(row?.effectiveAnnotation ?? row?.annotation, run.frame, run.scope);
       const previous = decisions.get(id - 1);
       const rawCue = row?.prefixVerified ? row.annotation : null;
-      const prior = previous?.window?.runId === runId ? previous.effectiveAnnotation ?? previous.annotation : null;
-      const current = applyRepeatedReturn(framed, prior, rawCue, id);
+      const prior = previous?.window?.runId === runId && !blocked.has(id - 1) ? previous.effectiveAnnotation ?? previous.annotation : null;
+      const current = applyRepeatedReturn(framed, run.protectedScopes.has(prior?.scopeId) ? null : prior, rawCue, id);
       const annotation = run.restartBoundary === "declined-restart" && previous?.window?.runId === runId ?
         applyLatchedDecline(current, prior, row?.transitionVerification, id) : current;
       const verified = row?.prefixVerified || row?.transitionVerification?.status === "verified";

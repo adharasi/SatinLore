@@ -337,7 +337,7 @@ test("a repeated frame entry and an interior frame disagreement do not reset the
 });
 
 test("a disputed consecutive return stays in the current frame while the raw typed event stays visible", async () => {
-  for (const confirmed of [false, true]) {
+  for (const {confirmed, blocked} of [{}, {confirmed: true}, {blocked: true}]) {
     const provider = fake((id, mode) => {
       if (mode === "transition") return typedTransition(id, {fact: "cut", transition: "present-return"});
       if (id === 0) return {...neutral(id), frame: "reported"};
@@ -347,12 +347,13 @@ test("a disputed consecutive return stays in the current frame while the raw typ
     });
     const input = fixture("She read the account aloud. She put the letter down. Jo pointed out its date.");
     const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2], verifyTransitions: true,
-      maxTransitionVerification: 1, transitionTargets: [2]});
-    assert.equal(run.units[1].pattern, "Reset");
+      maxTransitionVerification: 1, transitionTargets: [2], blockedIds: blocked ? [1] : []});
+    const keepReturn = confirmed || blocked;
+    assert.equal(run.units[1].pattern, blocked ? "Stop" : "Reset");
     assert.equal(run.units[2].transitionVerification.transition, "present-return");
-    assert.equal(run.units[2].appliedTransition, confirmed ? "present-return" : "none");
-    assert.equal(run.units[2].pattern, confirmed ? "Reset" : "Baseline");
-    assert.equal(run.units[2].playbackDisposition, confirmed ? undefined : "duplicate-frame-return");
+    assert.equal(run.units[2].appliedTransition, keepReturn ? "present-return" : "none");
+    assert.equal(run.units[2].pattern, keepReturn ? "Reset" : "Baseline");
+    assert.equal(run.units[2].playbackDisposition, keepReturn ? undefined : "duplicate-frame-return");
   }
 });
 

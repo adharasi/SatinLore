@@ -193,9 +193,9 @@ function playbackInputs(index, decisions, blocked) {
     const framed = applyFrameScope(proposed, lastFrame, lastScope);
     const previous = decisions.get(unit.id - 1);
     const rawCue = result?.prefixVerified ? result.annotation : null;
-    const priorFact = previous?.window && previous.window.runId === result?.window?.runId ?
+    const priorFact = previous?.window && previous.window.runId === result?.window?.runId && !blocked.has(unit.id - 1) ?
       previous.effectiveAnnotation ?? previous.annotation : null;
-    const returned = applyRepeatedReturn(framed, priorFact, rawCue, unit.id);
+    const returned = applyRepeatedReturn(framed, blockedScopes.has(priorFact?.scopeId) ? null : priorFact, rawCue, unit.id);
     const fact = needsRestart ? applyLatchedDecline(returned, priorFact, result?.transitionVerification, unit.id) : returned;
     if (fact !== proposed) {
       result.appliedTransitionOverride = "none";
