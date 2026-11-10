@@ -150,6 +150,32 @@ Each mismatch now has one primary cause per target, stage and measurement dimens
 
 Use the fixed windowed v8 arm as the live baseline for v9. Freeze separate holdout examples before the next tuning pass, including weak mutual buildup, unilateral requests, a present action after narrative return, stale continuations after a stop, true restarts, explicit stops and nonromantic controls. Keep missing and rejected rows in their denominator. Judge profile timing on the same cursor traces and require physical controls to pass before making device claims. Corpus-wide release scoring still needs current clearance and independently adjudicated references. [Release qualification](nocturne-release-qualification.md)
 
+### Live windowed result
+
+Both v9 shards completed on the same 33 targets as the v8 windowed arm. They used 79 requests at an estimated $0.026847, with all reported usage settled. Independent model calls can vary between runs.
+
+| Measure | v8 windowed | v9 windowed |
+| --- | ---: | ---: |
+| Usable primary cue rows | 33/33 | 33/33 |
+| Usable typed transition rows | 27/33 | 32/33 |
+| Primary buildup matches and extras | 3/4, 1 extra | 4/4, 2 extras |
+| Primary enacted cue matches and extras | 4/5, 0 extras | 4/5, 1 extra |
+| Primary sustained continuation matches and extras | 1/1, 0 extras | 0/1, 0 extras |
+| Applied reader cue matches and extras, legacy reference | 7/10, 1 extra | 8/10, 1 extra |
+| Expected playback gates | 29/33 | 32/33 |
+| Exact typed boundaries and extras | 7/7, 1 extra | 7/7, 0 extras |
+| Applied exact boundaries and extras | 7/7, 1 extra | 7/7, 0 extras |
+
+`first-dance` 2 and 3 were both recognized as buildup in the primary pass. `old-letter` 6 stayed quiet through the recheck, and 7 became enacted onset with Onset rise. Inside the report, both previously redundant resets disappeared. `reading-room` 8 became a verified rebuild, and the offer at 7 stayed quiet despite an extra raw restart prediction. The single typed rejection was a frame mismatch inside `old-letter`. No benign metadata normalization was needed in this live run. The simulator replay of these v9 outputs produced contrast in all seven eligible pace-episode pairs, zero positive-target time at zero, and zero hard-quiet, ceiling, cadence or pause violations across 18 configurations. One fast sentence ended before a new positive command was due. The tested software path remains separate from physical dispatch.
+
+| Remaining discrepancy | Next experiment and required evidence |
+| --- | --- |
+| `first-dance` 1 was promoted as buildup before the reciprocal response. | Distinguish unilateral scene setup from evidenced standalone charged appraisal and mutual response. Freeze paired examples of each. Track buildup precision and recall together so removing early false positives does not erase subtle legitimate cues. |
+| `first-dance` 4 was recognized as buildup and the onset moved to 5, displacing the ongoing action label. | Add a state-local enactment audit that records the first exact action target, prior enacted anchor and continuation separately. Test start followed by sustain, a genuine second start and a one-sentence-late prediction. Score exact start/continuation and phase-to-pattern agreement separately from playback gates. |
+| The typed pass called the accepted offer at `reading-room` 7 a restart. | Score typed onset and restart against a separate enacted-start reference. Use matched offer-only, accepted-offer and renewed-action examples, including cases immediately after a stop. Keep raw typed errors visible when the compiler vetoes them. |
+| A typed event inside the report was rejected for a frame mismatch. | Keep its rejected status and test neutral interior, nested entry and actual return with independent frame references. Track contract validity, semantic frame and applied resets independently. |
+| Four neutral fixtures have limited coverage of writing style and scope. | Seal a cleared independent corpus and adjudicate the unresolved text targets. Compare both arms at matched latency and request limits, replay the actual cursor path, and verify hardware controls separately. |
+
 ## Qualification
 
 Compare exact reviewed compiler output separately from semantic recognition. The shadow study reports usable model coverage, cue and typed-transition precision and recall, profile agreement, continuity links and causal trace violations. Compare current reader and archival provider outputs in separate lanes. For a paid paired run, hold the target roster and recent prefix fixed, use a shared run budget and stop the comparison for a refused run. Report both effective scores on every planned target and accuracy among targets both arms resolved. Compare recovered and lost matches and added false positives. Earlier eligibility evidence and earlier continuity anchors are separate strata. Verify timing and simulator behavior after model qualification.
