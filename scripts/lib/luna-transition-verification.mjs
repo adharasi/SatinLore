@@ -50,6 +50,15 @@ export function continuationScope(annotation, anchorScope) {
     anchorScope : annotation?.scopeId;
 }
 
+export function applyLatchedDecline(annotation, prior, typed, id) {
+  if (annotation?.status !== "verified" || annotation.transition !== "declined-restart" || annotation.fact !== "neutralize" ||
+      typed?.status !== "neutral" || prior?.status !== "verified" || prior.transition !== "declined-restart" ||
+      !prior.evidenceIds.includes(id - 1) || !annotation.evidenceIds.includes(id - 1) || !annotation.evidenceIds.includes(id)) return annotation;
+  // The previous decline continues to latch playback. A disputed replay of it
+  // supplies no additional boundary or evidence of renewed action.
+  return {...annotation, transition: "none", fact: "none", priorAnchor: null};
+}
+
 export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {
   return lastAnchor != null && unit.id - lastAnchor <= 2 && cue?.status === "neutral" &&
     cue.frame === "current" && annotation?.status === "neutral" && noEvent.has(annotation.transition) &&

@@ -372,7 +372,7 @@ const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf
 <form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form>
 <h2>Luna protocol v2 neutral diagnostic</h2>
 <p>Send the selected original fixtures to OpenAI for discovery, causal cue checks and independent transition checks. The result includes sentence IDs and structured labels. Run both parts of the same diagnostic to cover all 33 sentences.</p>
-<p>Luna rubric v11 is active. Fixed comparison shards allow two blinded cue rechecks per fixture. Individual windowed fixtures allow six.</p>
+<p>Luna rubric v11 is active. Timing review v2 is active. Fixed comparison shards allow two blinded cue rechecks per fixture. Individual windowed fixtures allow six.</p>
 <p>Each shard has a five-minute deadline, a $0.15 estimated spend ceiling and a ${NEUTRAL_SHARD_ATTEMPTS}-request Worker transport ceiling. A shared run ID groups shards under one $3 estimated spend cap for 24 hours.</p>
 <form method="post"><label>Shared run ID (optional) <input name="runId" type="text" maxlength="36" pattern="[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}" autocomplete="off" spellcheck="false"></label>
 <button name="benchmark" value="luna-protocol-neutral-v2-complete-a">Run v2 complete context A (19 sentences)</button>
@@ -509,7 +509,7 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
         const usedMicros = result.budget.chargedMicros + result.budget.reservedMicros;
         const settlement = group ? await neutralSpend(budget, { ...group, operation: "settle", usedMicros }, signal).catch(() => null) : null;
         if (!await authorized()) return expired();
-        return Response.json({ ...result, hostedStudyVersion: suite, hostedShard: shard,
+        return Response.json({ ...result, hostedStudyVersion: suite, hostedShard: shard, hostedTimingRevision: 2,
           hostedSpend: { shardCapMicros, capMicros: group ? NEUTRAL_RUN_CAP_MICROS : shardCapMicros,
             ...(group ? { runId, settled: settlement?.status === 200,
               ...(settlement?.status === 200 ? { remainingMicros: settlement.remainingMicros, expiresAt: settlement.expiresAt } : {}) } : {}) },

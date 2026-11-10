@@ -1,4 +1,4 @@
-import {applyFrameScope, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
+import {applyFrameScope, applyLatchedDecline, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
@@ -21,7 +21,10 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
     for (; run.cursor < target; run.cursor++) {
       const id = run.cursor;
       const row = decisions.get(id);
-      const annotation = applyFrameScope(row?.effectiveAnnotation ?? row?.annotation, run.frame, run.scope);
+      const framed = applyFrameScope(row?.effectiveAnnotation ?? row?.annotation, run.frame, run.scope);
+      const previous = decisions.get(id - 1);
+      const annotation = run.restartBoundary === "declined-restart" && previous?.window?.runId === runId ?
+        applyLatchedDecline(framed, previous.effectiveAnnotation ?? previous.annotation, row?.transitionVerification, id) : framed;
       const verified = row?.prefixVerified || row?.transitionVerification?.status === "verified";
       if (blocked.has(id) || row?.window?.runId !== runId || !annotation ||
           !["verified", "neutral", "candidate"].includes(annotation.status) || annotation.frame === "uncertain" ||

@@ -585,14 +585,15 @@ test("an opening buildup is suppressed only by an independent definitive quiet r
 });
 
 test("an adjacent disputed onset can become a linked continuation without moving evidence backward", async () => {
-  for (const [linked, typedAgrees] of [[true, false], [true, true], [false, true]]) {
+  for (const [linked, typedAgrees, changesScope] of [[true, false, false], [true, true, false], [false, true, false], [true, true, true]]) {
     const calls = [];
     const provider = fake((id, mode) => {
       if (mode === "transition") return id === 1 || typedAgrees ? typedTransition(id, {fact: "none", transition: "onset"}) :
         typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
       if (mode === "cue-check") return active(id, "verify", {fact: linked ? "continue" : "none",
         priorAnchor: linked ? 1 : null, evidenceIds: [1, 2], narrativePhase: "sustain", action: "continuation"});
-      if (id > 0) return active(id, mode, {fact: "none", narrativePhase: "onset", action: "contact", transition: "onset"});
+      if (id > 0) return active(id, mode, {fact: "none", narrativePhase: "onset", action: "contact", transition: "onset",
+        ...(id === 2 && changesScope ? {scopeId: id, evidenceIds: [1, id]} : {})});
       return neutral(id);
     }, request => calls.push(request));
     const input = fixture("They agreed to dance. He took her hand. They kept holding hands as they walked.");
@@ -606,6 +607,27 @@ test("an adjacent disputed onset can become a linked continuation without moving
     assert.equal(row.cueRecoveryGuard, linked ? undefined : "recovery-continuation-unlinked");
     assert.equal(row.action, linked ? "continuation" : "contact");
     assert.equal(run.units[1].pattern, "Onset rise");
+  }
+});
+
+test("a disputed repeat of a latched decline does not count as another boundary or reopen the gate", async () => {
+  for (const confirmed of [false, true]) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return confirmed ? typedTransition(id, {transition: "declined-restart", fact: "neutralize"}) :
+        typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
+      if (id < 2) return active(id, mode, {fact: "neutralize", action: "none", transition: "declined-restart",
+        evidenceIds: id === 0 ? [0] : [0, 1]});
+      if (id === 2) return active(id, mode, {narrativePhase: "build"});
+      return active(id, mode, {fact: "none", action: "contact", narrativePhase: "rebuild", transition: "restart"});
+    });
+    const input = fixture("They declined another dance. A new song began. They considered dancing again. They took hands and began to dance.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2, 3], verifyTransitions: true,
+      maxTransitionVerification: 1, transitionTargets: [1]});
+    assert.equal(run.units[0].appliedTransition, "declined-restart");
+    assert.equal(run.units[1].primaryPrefix.transition, "declined-restart");
+    assert.equal(run.units[1].appliedTransition, confirmed ? "declined-restart" : "none");
+    assert.equal(run.units[1].playbackDisposition, confirmed ? undefined : "repeated-decline");
+    assert.deepEqual(run.units.map(row => row.pattern), ["Baseline", "Baseline", "Baseline", "Rebuild rise"]);
   }
 });
 

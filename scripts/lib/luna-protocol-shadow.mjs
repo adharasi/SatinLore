@@ -2,7 +2,7 @@ import {planStory} from "../../app/static/reader/beat-continuity.mjs";
 import {buildWholeStoryIndex, MAX_WHOLE_STORY_REQUESTS, planIndexedWholeStoryContext} from "./whole-story-context-planning.mjs";
 import {executeWholeStoryContextPlan} from "./whole-story-context-execution.mjs";
 import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
-import {applyFrameScope, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
+import {applyFrameScope, applyLatchedDecline, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
@@ -67,7 +67,7 @@ function followsDisputedStart(decisions, blocked, id, runId, primary) {
   const earlier = prior.annotation;
   const typed = prior.transitionVerification;
   const priorScope = earlier?.scopeId ?? typed?.scopeId;
-  return (primary.scopeId == null || priorScope == null || primary.scopeId === priorScope) &&
+  return (primary.scopeId == null || priorScope == null || primary.scopeId === priorScope || primary.evidenceIds.includes(id - 1)) &&
     (prior.prefixVerified && freshEnactedStart(earlier, id - 1) || exactTypedStart(typed, id - 1));
 }
 
@@ -187,10 +187,13 @@ function playbackInputs(index, decisions, blocked) {
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
     const proposed = result?.effectiveAnnotation ?? result?.annotation;
-    const fact = applyFrameScope(proposed, lastFrame, lastScope);
+    const framed = applyFrameScope(proposed, lastFrame, lastScope);
+    const previous = decisions.get(unit.id - 1);
+    const fact = needsRestart && previous?.window?.runId === result?.window?.runId ?
+      applyLatchedDecline(framed, previous?.effectiveAnnotation ?? previous?.annotation, result?.transitionVerification, unit.id) : framed;
     if (fact !== proposed) {
       result.appliedTransitionOverride = "none";
-      result.playbackDisposition = "duplicate-frame-entry";
+      result.playbackDisposition = fact !== framed ? "repeated-decline" : "duplicate-frame-entry";
     }
     const rawCue = result?.prefixVerified ? result.annotation : null;
     const ownCueEvidence = exactCurrentCue(rawCue, unit.id);
@@ -415,8 +418,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           const opening = !causal.restartBoundary && exactCurrentCue(primary, id) && primary.depiction === "romantic" &&
             primary.action === "anticipation" && primary.narrativePhase === "build" && !support.length;
           const prior = decisions.get(id - 1);
-          const duplicatedOnset = typed?.transition === "onset" && primary?.scopeId != null &&
-            prior?.prefixVerified && prior.annotation.scopeId === primary.scopeId && freshEnactedStart(prior.annotation, id - 1);
+          const duplicatedOnset = typed?.transition === "onset" && primary && prior?.prefixVerified &&
+            freshEnactedStart(prior.annotation, id - 1) && (primary.evidenceIds.includes(id - 1) ||
+              primary.scopeId != null && prior.annotation.scopeId === primary.scopeId);
           const adjacent = !causal.restartBoundary && (!exactTypedStart(typed, id) || duplicatedOnset) &&
             followsDisputedStart(decisions, blocked, id, window.runId, primary);
           const romanticContext = primary?.status === "neutral" && primary.frame === "current" &&

@@ -77,7 +77,7 @@ const boundaryTransitions = new Set(["interruption", "span-end", "beat-end", "sc
   "non-romantic-activity-stop"]);
 const failureReasons = new Set([...LUNA_PROTOCOL_FAILURE_REASONS, "rejected-fact-contract"]);
 const targetFailureReasons = new Set(LUNA_PROTOCOL_TARGET_FAILURES);
-const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "continuation-scope-alias", "duplicate-frame-entry",
+const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "continuation-scope-alias", "duplicate-frame-entry", "repeated-decline",
   "transition-conflict", "protective-transition-conflict", "cue-boundary-suppressed", "cue-target-uncited", "cue-frame-ineligible",
   "cue-restart-required", "cue-stale-evidence"]);
 const dispositions = new Set([...observedStatuses, "uncertain", "abstain", "withheld", "unavailable", "unverified",
@@ -253,6 +253,7 @@ function appliedTransitionOrigin(row) {
   if (!typedTransitions.has(row.appliedTransition) || row.appliedTransition === "unknown") return "unobserved";
   if (row.continuityGuard === "elapsed-time-gap") return "compiler-continuity-guard";
   if (row.playbackDisposition === "duplicate-frame-entry") return "compiler-frame-scope";
+  if (row.playbackDisposition === "repeated-decline") return "compiler-closed-state";
   const fromRecheck = row.cueRecovered || row.cueContractRepaired || recoveryCorrections.has(row.cueRecoveryCorrection) || (row.cueRecovery?.status === "verified" &&
     row.cueRecovery.transition === "hard-stop" && row.appliedTransition === "hard-stop" &&
     row.primaryPrefix?.transition !== "hard-stop");

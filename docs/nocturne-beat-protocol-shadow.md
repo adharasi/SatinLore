@@ -194,19 +194,24 @@ The timing report pins five exact enacted starts. `startTiming.typed` scores the
 
 The four windowed fixture submissions used 76 provider calls, and a First Dance replicate used 25 more. All 101 calls settled under one $3 run ID for an estimated $0.037724, leaving $2.962276 available. The old page showed 27 requests remaining before deployment. The v10 page and grouped run used no daily or monthly benchmark request counter. The durable ledger also passed a local 1,000-call-equivalent test under a single run ID.
 
-| Exact measure | v9 windowed | v10 windowed |
-| --- | ---: | ---: |
-| Primary buildup matches and extras | 4/4, 2 extras | 4/4, 0 extras |
-| Accepted enacted starts and extras | 4/5, 1 extra | 5/5, 1 extra |
-| Independent typed starts and extras | 5/5, 1 extra | 4/5, 1 extra |
-| Applied sustained continuation | 0/1 | 0/1 |
-| Applied reader cues and extras | 8/10, 1 extra | 8/10, 0 extras |
-| Playback gates | 32/33 | 33/33 |
-| Exact typed boundaries and extras | 7/7, 0 extras | 7/7, 0 extras |
+| Exact measure | v9 windowed | v10 windowed | v11 windowed |
+| --- | ---: | ---: | ---: |
+| Primary buildup matches and extras | 4/4, 2 extras | 4/4, 0 extras | 3/4, 0 extras |
+| Accepted enacted starts and extras | 4/5, 1 extra | 5/5, 1 extra | 5/5, 0 extras |
+| Independent typed starts and extras | 5/5, 1 extra | 4/5, 1 extra | 5/5, 0 extras |
+| Applied sustained continuation | 0/1 | 0/1 | 1/1 |
+| Applied reader cues and extras | 8/10, 1 extra | 8/10, 0 extras | 8/10, 0 extras |
+| Playback gates | 32/33 | 33/33 | 33/33 |
+| Exact typed boundaries and extras | 7/7, 0 extras | 7/7, 0 extras | 7/7, 0 extras |
+| Applied boundaries and extras | 7/7, 0 extras | 7/7, 0 extras | 7/7, 1 extra |
 
 The primary v10 run fixed the early setup and placed the first onset correctly. At the next sentence, discovery identified continuation while both causal passes called a second onset. The replicate identified continuation there but named its scope with the already verified onset ID, so the compiler dropped the link. The independent typed pass rejected one true restart in each of the two affected fixtures because Luna put the earlier context in the anchor field.
 
 The v11 follow-up reviews consecutive onsets in the same verified scope even when both passes agree. A linked continuation can replace the second onset after an independent review. It also recognizes the exact prior anchor as an alias for the already verified scope. Unrelated scope mismatches, withheld anchors and earlier barriers remain ineligible. The typed adapter accepts a redundant earlier anchor only when the cited ID is in the submitted prefix and the verified start cites its own target. It keeps the cited history in the evidence list and records the normalization. These three corrections are tested independently of the live model.
+
+The v11 primary run used 78 calls and its First Dance replicate used 25. Across v10 and v11, all 204 live calls settled under the same run ID for an estimated $0.076076. On the v11 primary run, an independent recheck corrected `first-dance` 5 to continuation and its prior-anchor alias preserved playback. All 33 typed rows were usable. The v11 projection passed seven of seven simulator contrast episodes with zero positive-target zero time and no hard-quiet, ceiling, cadence or pause violations across 18 conditions. One 420 WPM sentence ended before the next positive command was due.
+
+The v11 repeat gave the duplicate onset a different scope number while citing the verified previous start. Timing review v2 accepts that citation for scheduling another blinded check. The prior citation alone supplies no playback evidence. At `reading-room` 7 the causal pass also replayed the preceding decline while the independent pass said no event. Timing review v2 keeps the existing latch and suppresses the disputed repeat as an extra applied boundary. It retains a separately confirmed second decline. Independent calls can produce different raw labels, so keep repeated timing cases and the cleared corpus in qualification.
 
 ## Qualification
 
