@@ -31,6 +31,9 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
   assert.equal(report.applied.exactTypedTransitions.missed, 7);
   assert.equal(report.applied.exactCues.missed, 10);
   assert.equal(report.applied.observedCueTargets, 0);
+  assert.equal(report.reader.exactCues.missed, 10);
+  assert.equal(report.reader.observedCueTargets, 0);
+  assert.equal(report.cueRecovery.attemptedTargets, 0);
   assert.equal(report.prefix.exactTypedTransitions, undefined);
   assert.equal(report.transition.exactCues, undefined);
   assert.equal(report.diagnostics.flatMap(work => work.units).length, 33);
@@ -121,7 +124,7 @@ test("applied scores retain stage origins, gated cue changes, and the boundary-o
   assert.equal(report.applied.transitionOrigins["transition-pass"], 8);
   assert.deepEqual(report.diagnostics[0].units[0].applied, {status: "verified", cue: false,
     transition: "reported-entry", transitionOrigin: "transition-pass", cuePrefixTransition: "none",
-    cueChange: "removed-false-positive", transitionChange: "unchanged"});
+    readerCue: false, cueChange: "removed-false-positive", transitionChange: "unchanged"});
   assert.ok(report.diagnostics[0].units[0].pipelineFlags.includes("cue-frame-ineligible"));
   assert.equal(report.transition.usage.inputTokens, 363);
 });
@@ -145,11 +148,71 @@ test("complementary fixture shards combine exact scores and usage in canonical o
   assert.deepEqual(combined.transition.boundary, whole.transition.boundary);
   assert.deepEqual(combined.applied.exactCues, whole.applied.exactCues);
   assert.deepEqual(combined.applied.exactTypedTransitions, whole.applied.exactTypedTransitions);
+  assert.deepEqual(combined.reader.exactCues, whole.reader.exactCues);
+  assert.equal(combined.cueRecovery.targets, 33);
+  assert.equal(combined.cueRecovery.usage.attempts, 0);
   assert.throws(() => combineNeutralReports([left, left]), /complementary reports/u);
   assert.throws(() => combineNeutralReports([left, {...right, rubricVersion: "other"}]), /complementary reports/u);
   assert.throws(() => combineNeutralReports([left, {...right, transition: undefined}]), /complementary reports/u);
   await assert.rejects(() => runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "first-dance"]}),
     /Invalid neutral benchmark options/u);
+});
+
+test("targeted cue checks preserve primary scores and separate direct and reader effects", async () => {
+  const provider = async ({mode, targetIds}) => ({status: "ok", facts: targetIds.map(unitId => {
+    const proposed = mode === "discovery" && [2, 3, 4, 5].includes(unitId);
+    const recovered = mode === "cue-check";
+    const known = mode === "verify" && unitId === 4;
+    const active = proposed || recovered || known;
+    const uncertain = mode === "verify" && unitId === 3;
+    const typed = mode === "transition";
+    const low = active && unitId === 2;
+    return {unitId, status: proposed ? "candidate" : active ? "verified" : uncertain ? "uncertain" : "neutral",
+      depiction: active ? "romantic" : typed || uncertain ? "unknown" : "neutral",
+      frame: uncertain ? "uncertain" : "current",
+      narrativePhase: active ? low ? "build" : "onset" : typed || uncertain ? "unknown" : "quiet",
+      transition: "none",
+      action: active ? low ? "anticipation" : "contact" : typed || uncertain ? "unknown" : "none",
+      fact: low ? "low" : "none", scopeId: null, priorAnchor: null, evidenceIds: active ? [unitId] : []};
+  }), usage: {inputTokens: 4, outputTokens: 2}});
+  const report = await runLunaProtocolNeutral({mode: "mock", provider, now, arm: "complete",
+    fixtureIds: ["first-dance"], maxCueChecks: 2});
+  const units = report.diagnostics[0].units;
+  assert.equal(report.planning.cueCheckTargetLimit, 2);
+  assert.equal(report.planning.cueCheckAttempts, 2);
+  assert.equal(report.prefix.exactCues.matched, 1);
+  assert.equal(report.applied.exactCues.matched, 2);
+  assert.equal(report.reader.exactCues.matched, 3);
+  assert.equal(report.cueRecovery.selectedTargets, 4);
+  assert.equal(report.cueRecovery.attemptedTargets, 2);
+  assert.equal(report.cueRecovery.returnedTargets, 2);
+  assert.equal(report.cueRecovery.recoveredReferenceCues, 2);
+  assert.equal(report.cueRecovery.recoveredReferenceNonCues, 0);
+  assert.equal(report.cueRecovery.directCuesAfterRecovery, 1);
+  assert.equal(report.cueRecovery.readerCuesAfterRecovery, 2);
+  assert.equal(report.cueRecovery.usage.inputTokens, 8);
+  assert.equal(units[2].prefix.status, "neutral");
+  assert.equal(units[2].prefix.cue, false);
+  assert.equal(units[2].cueRecovery.action, "anticipation");
+  assert.deepEqual(units[2].cueRecovery.citedIds, [2]);
+  assert.equal(units[2].applied.cue, false);
+  assert.equal(units[2].applied.readerCue, true);
+  assert.equal(units[3].prefix.status, "uncertain");
+  assert.equal(units[3].cueRecovery.recovered, true);
+  assert.equal(units[3].applied.cue, true);
+  assert.equal(units[4].cueRecovery.status, "not-needed");
+  assert.equal(units[4].cueRecovery.submittedIds, null);
+  assert.equal(units[5].cueRecovery.status, "budget-deferred");
+
+  const options = {mode: "mock", provider, now, arm: "complete", maxCueChecks: 2, maxAttempts: 48};
+  const left = await runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "old-letter"], transitionLimit: 19});
+  const right = await runLunaProtocolNeutral({...options, fixtureIds: ["reading-room", "practice-drill"], transitionLimit: 14});
+  const combined = combineNeutralReports([left, right]);
+  assert.equal(combined.cueRecovery.attemptedTargets, 8);
+  assert.equal(combined.cueRecovery.usage.attempts, 8);
+  assert.equal(combined.cueRecovery.usage.inputTokens, 32);
+  assert.equal(combined.cueRecovery.recoveredTargets, 8);
+  assert.equal(combined.reader.targets, 33);
 });
 
 test("a capped transition stage retains the planned denominator and marks deferred rows", async () => {

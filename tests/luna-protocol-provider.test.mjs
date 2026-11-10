@@ -78,6 +78,55 @@ test("verification accepts only an independent single-target prefix and ignores 
   }
 });
 
+const cueCheck = {mode: "cue-check", units: units.slice(0, 2), targetIds: [11]};
+const enactedRestart = fact(11, {status: "verified", depiction: "romantic", narrativePhase: "rebuild", action: "contact",
+  transition: "restart", fact: "low", scopeId: 10, evidenceIds: [10, 11]});
+
+test("checks one target with the full cue schema and no prior judgment", async () => {
+  let sent;
+  const run = provider(async (_url, {body}) => {
+    sent = JSON.parse(body);
+    return response([enactedRestart]);
+  });
+  const cueUnits = [{id: 10, text: "June and Lee stepped apart."}, {id: 11, text: "June drew Lee close again and took his hand."}];
+  const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
+  assert.deepEqual(result, success([enactedRestart]));
+  assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
+  assert.match(sent.instructions, /nocturne-luna-protocol-v6/u);
+  assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
+  assert.match(sent.instructions, /Every verified row must cite the target/u);
+  assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
+  assert.match(sent.instructions, /Mere politeness, small talk, shared logistics/u);
+  assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
+  const rows = sent.text.format.schema.properties.facts;
+  assert.equal(rows.maxItems, 1);
+  assert.deepEqual(rows.items.required.toSorted(), Object.keys(enactedRestart).toSorted());
+  assert.deepEqual(rows.items.properties.status.enum, ["verified", "neutral", "uncertain", "abstain"]);
+  assert.deepEqual(await run({...cueCheck, units}), failure("invalid-request", "request-shape"));
+  assert.deepEqual(await run({...cueCheck, targetIds: [10, 11]}), failure("invalid-request", "request-shape"));
+});
+
+test("requires present target evidence for activation and preserves no-cue and stop verdicts", async () => {
+  const noCue = fact(11, {depiction: "explicit", frame: "reported"});
+  const uncertain = fact(11, {status: "uncertain", frame: "uncertain", action: "unknown", narrativePhase: "unknown", transition: "unknown"});
+  const stop = fact(11, {status: "verified", transition: "hard-stop", fact: "neutralize", evidenceIds: [11], action: "release"});
+  for (const row of [noCue, uncertain, stop, {...stop, fact: "protective"}, {...stop, transition: "declined-restart"}]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(cueCheck), success([row]));
+  }
+  for (const [row, reason] of [[{...enactedRestart, evidenceIds: [10]}, "target-evidence"],
+    [{...enactedRestart, evidenceIds: [11, 12]}, "evidence-id"], [{...enactedRestart, status: "candidate"}, "status-mode"],
+    [{...enactedRestart, action: "anticipation"}, "cue-action"], [{...enactedRestart, frame: "reported"}, "cue-action"],
+    [{...noCue, narrativePhase: "build"}, "status-effect"], [{...uncertain, action: "contact"}, "status-effect"],
+    [{...stop, narrativePhase: "build"}, "transition-fact"], [{...stop, fact: "low"}, "transition-fact"],
+    [{...stop, transition: "non-romantic-activity-stop", fact: "protective"}, "transition-fact"]]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(cueCheck), rejected([targetFailure(11, reason)]));
+  }
+  const refused = provider(async () => response([enactedRestart], {status: "incomplete", incomplete_details: {reason: "content_filter"}}));
+  assert.deepEqual(await refused(cueCheck), failure("refused", "content-filter"));
+});
+
 const earlierAnchor = {unitId: 5, scopeId: 3, frame: "current", action: "contact", narrativePhase: "onset"};
 const withAttested = {mode: "verify", units: units.slice(0, 2), targetIds: [11], attested: [earlierAnchor]};
 const linked = fact(11, {status: "verified", narrativePhase: "sustain", action: "continuation", fact: "continue",

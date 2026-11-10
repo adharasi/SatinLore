@@ -12,6 +12,8 @@ const clearance = "No blocking event recorded";
 const transitionCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
 const closingTransitions = new Set(["beat-end", "declined-restart"]);
 const quietTransitions = new Set(["declined-restart", "interruption", "non-romantic-activity-stop", "span-end"]);
+const recoveryBarriers = new Set([...quietTransitions, ...transitionCuts, "hard-stop", "beat-end", "uncertain-continuity"]);
+const prefixOrder = {verify: 0, transition: 1, "cue-check": 2};
 const editorialFrames = new Set(["current", "remembered", "imagined", "reported", "mixed"]);
 const activePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
 const activeActions = new Set(["anticipation", "contact", "continuation", "change", "release"]);
@@ -28,6 +30,12 @@ const inputFor = window => JSON.parse(window.body);
 const anchorLinks = new Set(["continue", "ease", "span-end", "beat-end"]);
 export const MAX_SHADOW_MICROS = 3_000_000;
 export const MAX_SHADOW_VERIFICATIONS = 384;
+
+function currentCueAt(fact, id, status) {
+  return fact?.status === status && fact.frame === "current" && activePhases.has(fact.narrativePhase) &&
+    fact.evidenceIds.includes(id) && fact.evidenceIds.every(evidence => evidence <= id) &&
+    !recoveryBarriers.has(fact.transition) && !["cut", "protective", "neutralize", "beat-end", "span-end"].includes(fact.fact);
+}
 
 function factViolation(fact, ids, target, mode, attested) {
   const verify = mode !== "discovery";
@@ -223,6 +231,8 @@ function playbackInputs(index, decisions, blocked) {
     }
     if (rawCue && ["verified", "neutral"].includes(rawCue.status)) {
       result.cue = Boolean(canSignal && enactedActions.has(fact.action) && activePhases.has(fact.narrativePhase));
+      result.readerCue = result.cue || Boolean(ownCueEvidence && !quietBoundary && activePhases.has(rawCue.narrativePhase) &&
+        (canSignal && rawCue.action === "anticipation" || linked && rawCue.action === "continuation"));
     }
     let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" :
       cut && !low && !canSignal ? "Reset" : canSignal ? profileFor(fact, recent, last) : "Baseline";
@@ -251,11 +261,12 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   signal = new AbortController().signal, startId = 0, blockedIds = [], arm = "windowed",
   limits = {}, maxVerification = 96, prefixUnits = 24, negativeStride = 20, now = Date.now,
   verificationTargets = [], verificationContext = "attested", verifyTransitions = false,
-  maxTransitionVerification = 32, transitionTargets = []} = {}) {
+  maxTransitionVerification = 32, transitionTargets = [], maxCueChecks = 0} = {}) {
   if (typeof id !== "string" || !/^[a-z0-9-]{1,48}$/iu.test(id) || typeof now !== "function" ||
       !["windowed", "complete"].includes(arm) || !["recent", "attested"].includes(verificationContext) ||
       !int(maxVerification) || maxVerification > MAX_SHADOW_VERIFICATIONS || !Array.isArray(verificationTargets) ||
       typeof verifyTransitions !== "boolean" || !int(maxTransitionVerification) || maxTransitionVerification > MAX_SHADOW_VERIFICATIONS ||
+      !int(maxCueChecks) || maxCueChecks > 8 ||
       !Array.isArray(transitionTargets) || (!verifyTransitions && transitionTargets.length > 0) ||
       !int(prefixUnits) || prefixUnits < 1 || prefixUnits > 32 || !int(negativeStride) || !Array.isArray(blockedIds)) {
     throw new TypeError("Invalid shadow study options.");
@@ -287,14 +298,24 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (!discovery.length) for (const id of approved) decisions.set(id, {status: "complete-arm-ineligible"});
   }
   const telemetry = [];
+  let cueChecksStarted = 0;
   const refusedRuns = new Set();
   const invalidated = window => refusedRuns.has(window.runId);
   const attest = createCausalAttestationLedger(decisions, blocked, LUNA_PROTOCOL_LIMITS.maxAttested);
   function storePrefixResult(mode, id, verdict, status) {
     const before = decisions.get(id);
-    const row = mode === "transition" ? {...before, transitionVerification: verdict,
-      transitionVerificationStatus: verdict?.status ?? status} : {...before, status: verdict?.status ?? status,
-      annotation: verdict, prefixVerified: Boolean(verdict), verificationStatus: verdict?.status ?? status};
+    let row;
+    if (mode === "transition") {
+      row = {...before, transitionVerification: verdict, transitionVerificationStatus: verdict?.status ?? status};
+    } else if (mode === "cue-check") {
+      const recovered = currentCueAt(verdict, id, "verified");
+      const protective = verdict?.status === "verified" && (verdict.fact === "protective" || verdict.transition === "hard-stop");
+      row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status, cueRecovered: recovered};
+      if (recovered || protective) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
+    } else {
+      row = {...before, status: verdict?.status ?? status, annotation: verdict, primaryPrefix: verdict,
+        prefixVerified: Boolean(verdict), verificationStatus: verdict?.status ?? status};
+    }
     if (mode === "verify" && verdict && before.discovery &&
         ["fact", "transition", "narrativePhase", "frame", "depiction", "action"].some(field => verdict[field] !== before.discovery[field])) {
       row.playbackDisposition = "prefix-disagreement";
@@ -329,11 +350,21 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           record.status = "refusal-dependent";
           return {status: "failed"};
         }
+        if (mode === "cue-check") {
+          const row = decisions.get(window.targetIds[0]);
+          if (!["neutral", "uncertain"].includes(row.primaryPrefix?.status) ||
+              recoveryBarriers.has(row.transitionVerification?.transition) || blocked.has(window.targetIds[0])) {
+            record.status = "not-needed";
+            return {status: "failed"};
+          }
+          if (cueChecksStarted >= maxCueChecks) return {status: "failed"};
+        }
         const attested = mode !== "discovery" && verificationContext === "attested" ?
           attest({runId: window.runId, firstId: payload.units[0].id, target: window.targetIds[0]}) : [];
         const request = {mode, units: payload.units, targetIds: window.targetIds, ...(attested.length ? {attested} : {})};
         const settle = budget.reserve(JSON.stringify(request), window.targetIds.length);
         if (!settle) return {status: "failed"};
+        if (mode === "cue-check") cueChecksStarted++;
         record.attempted = true;
         record.contextUnits = payload.units.length - window.targetIds.length;
         if (mode !== "discovery") record.attestedIds = attested.map(({unitId}) => unitId);
@@ -455,13 +486,19 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       }
     }
     const verification = pickVerification(priority, important, routine, controls, maxVerification);
+    if (maxCueChecks) {
+      for (const window of verification.slice()) {
+        const id = window.targetIds[0];
+        if (currentCueAt(proposals.get(id)?.fact, id, "candidate")) verification.push(prefixJob(window, id, index, prefixUnits, "cue-check"));
+      }
+    }
     for (const {id, window} of transitionJobs.sort((a, b) => b.rank - a.rank || a.id - b.id).slice(0, maxTransitionVerification)) {
       verification.push(prefixJob(window, id, index, prefixUnits, "transition"));
     }
     // Both model passes see only their own prefix and earlier attestations.
     // Finish both checks at a unit before exposing a merged earlier fact.
-    verification.sort((a, b) => a.targetIds[0] - b.targetIds[0] || Number(a.id.startsWith("transition:")) -
-      Number(b.id.startsWith("transition:")));
+    verification.sort((a, b) => a.targetIds[0] - b.targetIds[0] || prefixOrder[a.id.split(":", 1)[0]] -
+      prefixOrder[b.id.split(":", 1)[0]]);
     for (let start = 0; start < verification.length; start += MAX_WHOLE_STORY_REQUESTS) {
       for (const {window, result, status} of await execute(verification.slice(start, start + MAX_WHOLE_STORY_REQUESTS), "prefix")) {
         storePrefixResult(window.id.split(":", 1)[0], window.targetIds[0],
@@ -483,7 +520,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   const units = index.units.map((unit, i) => {
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
-      transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard} = decisions.get(unit.id);
+      transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue,
+      primaryPrefix, cueRecovery, cueRecoveryStatus, cueRecovered} = decisions.get(unit.id);
     const {unitId: _target, id: _transportId, ...labels} = annotation ?? {};
     const {unitId: _discoveryTarget, id: _discoveryTransportId, ...provisionalLabels} = discovery ?? {};
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
@@ -494,7 +532,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       discoveryStatus: discoveryStatus ?? status,
       transitionVerification, transitionVerificationStatus: transitionVerificationStatus ?? (verifyTransitions ? "not-requested" : undefined),
       transitionEvidenceIds: transitionVerification?.evidenceIds,
-      transitionFlag, cueGuard, appliedTransition: (effectiveAnnotation ?? annotation)?.transition,
+      transitionFlag, cueGuard, readerCue, primaryPrefix, cueRecovery, cueRecoveryStatus, cueRecovered,
+      appliedTransition: (effectiveAnnotation ?? annotation)?.transition,
       verificationStatus: verificationStatus ?? (status === "verification-deferred" ? status : undefined)};
   });
   const outcomes = Object.fromEntries(Object.entries(Object.groupBy(telemetry, row => row.status))

@@ -13,12 +13,14 @@ const stageDimensions = {
   prefix: ["cue", "narrativePhase"],
   transition: ["transition"],
   applied: ["cue", "transition"],
+  reader: ["cue"],
 };
 const rawStages = ["discovery", "prefix", "transition"];
-const attemptStage = {discovery: "discovery", verify: "prefix", transition: "transition"};
+const attemptStage = {discovery: "discovery", verify: "prefix", transition: "transition", "cue-check": "cueRecovery"};
 const observedStatuses = new Set(["candidate", "verified", "neutral"]);
 const typedTransitions = new Set(LUNA_PROTOCOL_ENUMS.transition);
 const phaseLabels = new Set(LUNA_PROTOCOL_ENUMS.narrativePhase);
+const actionLabels = new Set(LUNA_PROTOCOL_ENUMS.action);
 const boundaryTransitions = new Set(["interruption", "span-end", "beat-end", "scene-cut", "chapter-end", "hard-stop",
   "memory-entry", "imagined-entry", "reported-entry", "present-return", "uncertain-continuity", "declined-restart",
   "non-romantic-activity-stop"]);
@@ -28,7 +30,7 @@ const pipelineFlags = new Set(["prefix-disagreement", "unattested-scope", "trans
 const dispositions = new Set([...observedStatuses, "uncertain", "abstain", "withheld", "unavailable", "unverified",
   "failed", "missing", "budget-deferred", "provider-unavailable", "complete-arm-ineligible", "provider-refused",
   "refusal-dependent", "incomplete", "invalid-response", "transient", "cancelled", "timed-out", "invalid-request",
-  "verification-deferred", "transition-verification-deferred", "not-requested", "returned", "partial"]);
+  "verification-deferred", "transition-verification-deferred", "not-requested", "not-needed", "returned", "partial"]);
 const reportOnlyDispositions = new Set(["transition-verification-deferred", "not-requested", "returned"]);
 const actionForPhase = {build: "anticipation", onset: "contact", sustain: "continuation", rebuild: "contact"};
 const invalidOptions = "Invalid neutral benchmark options.";
@@ -36,6 +38,7 @@ const natural = value => Number.isSafeInteger(value) && value >= 0;
 const disposition = (status, fallback = "unavailable") => dispositions.has(status) ? status : fallback;
 const validIds = (ids, limit) => Array.isArray(ids) && ids.every(id => natural(id) && id < limit) ? [...ids] : null;
 const rosterDigest = works => createHash("sha256").update(JSON.stringify(works.map(({id, sourceSha256}) => ({id, sourceSha256})))).digest("hex");
+const primaryPrefix = row => row.primaryPrefix ?? (!row.cueRecovered && row.prefixVerified ? row : undefined);
 
 function prepareFixtures(now) {
   if (createHash("sha256").update(JSON.stringify(wholeStoryAnnotationFixtures)).digest("hex") !== fixtureDigest) {
@@ -78,7 +81,7 @@ function mockProvider({reference, evidence}) {
         return {unitId, status: "abstain", depiction: "unknown", frame: "uncertain", narrativePhase: "unknown",
           transition: "none", action: "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: []};
       }
-      return {unitId, status: reviewed ? mode === "verify" ? "verified" : "candidate" : "neutral",
+      return {unitId, status: reviewed ? mode === "discovery" ? "candidate" : "verified" : "neutral",
         depiction: cue ? "romantic" : "neutral", frame: "current", narrativePhase, transition,
         action: actionForPhase[narrativePhase] ?? "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds};
     });
@@ -87,9 +90,10 @@ function mockProvider({reference, evidence}) {
 }
 
 function observation(row, stage) {
-  if (stage === "applied") {
-    const transitionOrigin = appliedTransitionOrigin(row);
-    const cue = typeof row.cue === "boolean" ? row.cue : undefined;
+  if (stage === "applied" || stage === "reader") {
+    const transitionOrigin = stage === "applied" ? appliedTransitionOrigin(row) : "unobserved";
+    const value = stage === "reader" ? row.readerCue : row.cue;
+    const cue = typeof value === "boolean" ? value : undefined;
     const returned = cue !== undefined || transitionOrigin !== "unobserved";
     return {result: {id: row.id, unitSha256: row.unitSha256,
       status: returned ? "verified" : disposition(observedStatuses.has(row.status) ? "unavailable" : row.status),
@@ -97,13 +101,17 @@ function observation(row, stage) {
     returned, evidenceIds: row.evidenceIds, transitionOrigin};
   }
   // A discovery label which did not require prefix review is in the final slot.
-  const fact = stage === "transition" ? row.transitionVerification :
-    stage === "prefix" ? (row.prefixVerified ? row : undefined) :
-    row.discovery ?? (row.verificationStatus === undefined && row.labelKnownAt !== null ? row : undefined);
-  const fallback = stage === "transition" ? row.transitionVerificationStatus ??
-    (observedStatuses.has(row.status) ? "transition-verification-deferred" : row.status) :
-    stage === "prefix" ? row.verificationStatus ?? (row.labelKnownAt !== null ? "unverified" : row.status) :
-      row.discoveryStatus ?? row.status;
+  const fact = {
+    discovery: row.discovery ?? (row.verificationStatus === undefined && row.labelKnownAt !== null ? row : undefined),
+    prefix: primaryPrefix(row), transition: row.transitionVerification, cueRecovery: row.cueRecovery,
+  }[stage];
+  const fallback = {
+    discovery: row.discoveryStatus ?? row.status,
+    prefix: row.verificationStatus ?? (row.labelKnownAt !== null ? "unverified" : row.status),
+    transition: row.transitionVerificationStatus ??
+      (observedStatuses.has(row.status) ? "transition-verification-deferred" : row.status),
+    cueRecovery: row.cueRecoveryStatus ?? "not-requested",
+  }[stage];
   const status = disposition(fact?.status ?? (observedStatuses.has(fallback) ? "unavailable" : fallback));
   if (status === "partial") return {result: {id: row.id, unitSha256: row.unitSha256, status: "invalid-response"}, returned: false};
   const result = {id: row.id, unitSha256: row.unitSha256, status};
@@ -114,7 +122,7 @@ function observation(row, stage) {
       result.narrativePhase = fact.narrativePhase;
       if (fact.narrativePhase !== "unknown") result.cue = fact.narrativePhase !== "quiet";
     }
-    if (stage !== "prefix" && typedTransitions.has(fact.transition)) result.transition = fact.transition;
+    if (stage !== "prefix" && stage !== "cueRecovery" && typedTransitions.has(fact.transition)) result.transition = fact.transition;
   }
   return {result, returned: Boolean(fact), evidenceIds};
 }
@@ -166,12 +174,21 @@ function stageReport(reference, runs, stage) {
 
 function appliedTransitionOrigin(row) {
   if (!typedTransitions.has(row.appliedTransition) || row.appliedTransition === "unknown") return "unobserved";
-  if (row.transitionFlag === "protective-transition-conflict" && row.prefixVerified) return "protected-cue-prefix";
+  const fromRecheck = row.cueRecovered || (row.cueRecovery?.status === "verified" &&
+    row.cueRecovery.transition === "hard-stop" && row.appliedTransition === "hard-stop" &&
+    primaryPrefix(row)?.transition !== "hard-stop");
+  if (row.transitionFlag === "protective-transition-conflict" && row.prefixVerified) {
+    return fromRecheck ? "protected-cue-check" : "protected-cue-prefix";
+  }
   const dedicated = row.transitionVerification;
   if (dedicated && observedStatuses.has(dedicated.status) && dedicated.transition === row.appliedTransition) {
-    return row.prefixVerified && row.transition === row.appliedTransition ? "both-passes-agree" : "transition-pass";
+    if (row.prefixVerified && row.transition === row.appliedTransition) {
+      return fromRecheck ? "transition-and-cue-check-agree" : "both-passes-agree";
+    }
+    return "transition-pass";
   }
-  return row.prefixVerified && observedStatuses.has(row.status) ? "cue-prefix" : "unobserved";
+  if (!row.prefixVerified || !observedStatuses.has(row.status)) return "unobserved";
+  return fromRecheck ? "cue-check" : "cue-prefix";
 }
 
 function appliedChange(expected, raw, applied, nonEvent) {
@@ -185,22 +202,24 @@ function appliedChange(expected, raw, applied, nonEvent) {
 
 function stageDiagnostic(gold, row, stage, attempt, referenceCueEvidenceIds, size) {
   const {result, returned, evidenceIds} = observation(row, stage);
-  const contextIds = attempt ? validIds(attempt.contextIds, size) : null;
-  const targetIds = attempt ? validIds(attempt.targetIds, size) : null;
-  const attestedIds = attempt ? validIds(attempt.attestedIds ?? [], size) : null;
+  const scoresCue = stage !== "transition";
+  const scoresTransition = stage === "discovery" || stage === "transition";
+  const contextIds = attempt?.attempted ? validIds(attempt.contextIds, size) : null;
+  const targetIds = attempt?.attempted ? validIds(attempt.targetIds, size) : null;
+  const attestedIds = attempt?.attempted ? validIds(attempt.attestedIds ?? [], size) : null;
   const submittedIds = contextIds === null || targetIds === null ? null : [...new Set([...contextIds, ...targetIds])];
-  const missingReferenceCueEvidenceIds = stage === "transition" || submittedIds === null ? null :
+  const missingReferenceCueEvidenceIds = !scoresCue || submittedIds === null ? null :
     referenceCueEvidenceIds.filter(id => !submittedIds.includes(id));
   const citedIds = returned ? validIds(evidenceIds, size) : null;
   const observed = observedStatuses.has(result.status);
   const reasons = [];
   if (!observed) reasons.push(`disposition:${result.status}`);
   if (missingReferenceCueEvidenceIds?.length) reasons.push("reference-cue-evidence-outside-raw-window");
-  if (observed && stage !== "transition") {
+  if (observed && scoresCue) {
     if (result.cue !== gold.cue) reasons.push(result.cue === undefined ? "cue-unresolved" : gold.cue ? "cue-missed" : "extra-cue");
     if (result.narrativePhase !== gold.narrativePhase) reasons.push("phase-mismatch");
   }
-  if (observed && stage !== "prefix") {
+  if (observed && scoresTransition) {
     if (result.transition !== gold.transition) reasons.push(result.transition === "unknown" ? "transition-unresolved" :
       gold.transition === "none" ? "extra-transition" : result.transition === "none" ? "transition-missed" : "transition-type-mismatch");
     if (result.transition && !["none", "unknown"].includes(result.transition) && !citedIds?.includes(gold.id)) {
@@ -213,16 +232,19 @@ function stageDiagnostic(gold, row, stage, attempt, referenceCueEvidenceIds, siz
     contractRejection: attempt?.rejectedFacts?.find(row => row.id === gold.id)?.reason ?? null,
     targetCoverageMismatch: attempt?.targetCoverageMismatch ?? false,
     citedIds, missingReferenceCueEvidenceIds, reasons,
-    ...(stage !== "transition" ? {narrativePhase: result.narrativePhase ?? null, cue: result.cue ?? null} : {}),
-    ...(stage !== "prefix" ? {transition: result.transition ?? null} : {})};
+    ...(scoresCue ? {narrativePhase: result.narrativePhase ?? null, cue: result.cue ?? null} : {}),
+    ...(scoresTransition ? {transition: result.transition ?? null} : {}),
+    ...(stage === "cueRecovery" ? {selected: Boolean(attempt) || row.cueRecoveryStatus !== undefined,
+      recovered: row.cueRecovered === true,
+      action: actionLabels.has(row.cueRecovery?.action) ? row.cueRecovery.action : null} : {})};
 }
 
 function diagnosticWork(fixture, run) {
-  const stages = new Map(rawStages.map(stage => [stage, new Map()]));
+  const stages = new Map([...rawStages, "cueRecovery"].map(stage => [stage, new Map()]));
   const size = fixture.reference.units.length;
   for (const attempt of run.summary.attempts) {
     const stage = stages.get(attemptStage[attempt.mode]);
-    if (!stage || !attempt.attempted) continue;
+    if (!stage || !attempt.attempted && attemptStage[attempt.mode] !== "cueRecovery") continue;
     for (const id of validIds(attempt.targetIds, size) ?? []) stage.set(id, attempt);
   }
   return {id: run.id, sourceSha256: run.sourceSha256, units: run.units.map((row, i) => {
@@ -231,11 +253,14 @@ function diagnosticWork(fixture, run) {
     const rawCue = observation(row, "prefix").result;
     const rawTyped = observation(row, "transition").result;
     const {result: applied, transitionOrigin} = observation(row, "applied");
+    const {result: reader} = observation(row, "reader");
+    const prefixTransition = primaryPrefix(row)?.transition;
     return {id: gold.id, unitSha256: gold.unitSha256, paragraph: gold.paragraph,
       expected: {narrativePhase: gold.narrativePhase, cue: gold.cue, transition: gold.transition, cueEvidenceIds},
       pipelineFlags: [row.playbackDisposition, row.transitionFlag, row.cueGuard].filter(flag => pipelineFlags.has(flag)),
       applied: {status: applied.status, cue: applied.cue ?? null, transition: applied.transition ?? null, transitionOrigin,
-        cuePrefixTransition: row.prefixVerified && typedTransitions.has(row.transition) ? row.transition : null,
+        cuePrefixTransition: typedTransitions.has(prefixTransition) ? prefixTransition : null,
+        readerCue: reader.cue ?? null,
         cueChange: appliedChange(gold.cue, observedStatuses.has(rawCue.status) ? rawCue.cue : undefined, applied.cue, false),
         transitionChange: appliedChange(gold.transition, observedStatuses.has(rawTyped.status) && rawTyped.transition !== "unknown" ?
           rawTyped.transition : undefined, applied.transition, "none")},
@@ -260,6 +285,24 @@ function attemptReport(runs, stage) {
     outputTokens: usage.reduce((sum, value) => sum + value.outputTokens, 0),
     measuredTimings: timings.length, durationsMs: timings, p50AttemptMs: percentile(0.50), p95AttemptMs: percentile(0.95),
     returnedModels, failures};
+}
+
+function cueRecoveryReport(diagnostics, usage) {
+  const summarize = units => ({
+    targets: units.length,
+    selectedTargets: units.filter(row => row.cueRecovery.selected).length,
+    attemptedTargets: units.filter(row => row.cueRecovery.dispatched).length,
+    returnedTargets: units.filter(row => row.cueRecovery.returned).length,
+    recoveredTargets: units.filter(row => row.cueRecovery.recovered).length,
+    recoveredReferenceCues: units.filter(row => row.cueRecovery.recovered && row.expected.cue).length,
+    recoveredReferenceNonCues: units.filter(row => row.cueRecovery.recovered && !row.expected.cue).length,
+    directCuesAfterRecovery: units.filter(row => row.cueRecovery.recovered && row.applied.cue === true).length,
+    readerCuesAfterRecovery: units.filter(row => row.cueRecovery.recovered && row.applied.readerCue === true).length,
+    dispositions: Object.fromEntries(Object.entries(Object.groupBy(units, row => row.cueRecovery.status))
+      .map(([status, rows]) => [status, rows.length])),
+  });
+  return {...summarize(diagnostics.flatMap(work => work.units)), usage,
+    works: diagnostics.map(({id, units}) => ({id, ...summarize(units)}))};
 }
 
 function transitionAllocation(fixtures, limit) {
@@ -331,6 +374,9 @@ export function combineNeutralReports(reports) {
       })) throw new TypeError(invalidShards);
   const canonical = rows => allIds.map(id => rows.find(row => row.id === id));
   const diagnostics = canonical([...workById.values()]);
+  const recoveryReports = reports.map(report => report.cueRecovery);
+  const hasRecovery = reports.every(report => report.reader && report.cueRecovery);
+  if (!hasRecovery && reports.some(report => report.reader || report.cueRecovery)) throw new TypeError(invalidShards);
   const stage = name => {
     const rows = reports.map(report => report[name]);
     const dimensions = stageDimensions[name];
@@ -359,31 +405,39 @@ export function combineNeutralReports(reports) {
           excludedNonBoundaryPredictions: mergeCounts(rows.map(row => row.boundary?.excludedNonBoundaryPredictions))},
       } : {}),
       ...(name === "applied" ? Object.fromEntries(["transitionOrigins", "cueChanges", "transitionChanges"]
-        .map(key => [key, mergeCounts(rows.map(row => row[key]))])) : {usage: mergeUsage(rows.map(row => row.usage))})};
+        .map(key => [key, mergeCounts(rows.map(row => row[key]))])) : {}),
+      ...(rawStages.includes(name) ? {usage: mergeUsage(rows.map(row => row.usage))} : {})};
   };
   const [first] = reports;
   const planning = reports.map(report => report.planning);
   const budgets = reports.map(report => report.budget);
   return {...Object.fromEntries([...keys, "fixtureVersion", "fixtureDigest", "sourceProseIncluded", "independentCorpusBenchmark",
-    "prefixPolicy", "cueDefinition", "appliedCueDefinition", "transitionDefinition", "boundaryDefinition"].map(key => [key, first[key]])),
+    "prefixPolicy", "cueDefinition", "appliedCueDefinition", "transitionDefinition", "boundaryDefinition",
+    ...(hasRecovery ? ["readerCueDefinition"] : [])].map(key => [key, first[key]])),
     fixtureIds: allIds, fixtureRosterSha256: rosterDigest(diagnostics),
     ...(reports.every(report => natural(report.externalCalls)) ? sumFields(reports, ["externalCalls"]) : {}),
     planning: {...sumFields(planning, ["referenceTargets", "admittedTargets", "plannedTargets", "plannedDiscoveryWindows",
-      "discoveryAttempts", "prefixAttempts", "transitionTargetLimit", "transitionAttempts"]),
+      "discoveryAttempts", "prefixAttempts", "transitionTargetLimit", "transitionAttempts",
+      ...(hasRecovery ? ["cueCheckTargetLimit", "cueCheckAttempts"] : [])]),
     works: canonical(planning.flatMap(row => row.works))},
     budget: {...sumFields(budgets, ["capMicros", "attempts", "attemptedPayloadBytes", "reservedMicros", "chargedMicros", "unsettled"]),
       reservationBreach: budgets.some(row => row.reservationBreach)},
     shards: reports.map(report => ({fixtureIds: report.fixtureIds, fixtureRosterSha256: report.fixtureRosterSha256,
       providerStops: report.providerStops})),
-    ...Object.fromEntries(Object.keys(stageDimensions).map(name => [name, stage(name)])), diagnostics};
+    ...Object.fromEntries(Object.keys(stageDimensions).filter(name => name !== "reader" || hasRecovery)
+      .map(name => [name, stage(name)])),
+    ...(hasRecovery ? {cueRecovery: cueRecoveryReport(diagnostics, mergeUsage(recoveryReports.map(row => row.usage)))} : {}),
+    diagnostics};
 }
 
 export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed", provider, signal, now = Date.now,
-  transitionLimit = 33, maxAttempts = 80, verifyTransitions = true, verificationContext = "attested", fixtureIds} = {}) {
+  transitionLimit = 33, maxAttempts = 80, verifyTransitions = true, verificationContext = "attested", fixtureIds,
+  maxCueChecks = 0} = {}) {
   if (!["offline", "mock", "live"].includes(mode) || !["windowed", "complete"].includes(arm) ||
       (provider !== undefined && (mode === "offline" || typeof provider !== "function")) ||
       (mode === "live" && !provider) || !natural(transitionLimit) || transitionLimit > 33 ||
       !natural(maxAttempts) || maxAttempts > 80 || typeof verifyTransitions !== "boolean" ||
+      !natural(maxCueChecks) || maxCueChecks > 2 ||
       !["recent", "attested"].includes(verificationContext)) throw new TypeError(invalidOptions);
   const pinned = prepareFixtures(now());
   if (fixtureIds !== undefined && (!Array.isArray(fixtureIds) || !fixtureIds.length ||
@@ -412,7 +466,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
     runs.push(await runLunaProtocolShadow({id, text, sourceSha256: reference.sourceSha256, grant, budget, signal, now, arm,
       provider: mode === "mock" ? guardedProvider ?? mockProvider(fixture) : guardedProvider,
       limits: {maxTargetsPerWindow: 4, maxOverlapUnits: 2}, verificationTargets: reference.units.map(({id}) => id),
-      verifyTransitions, maxTransitionVerification: transitionBudgets[index], verificationContext}));
+      verifyTransitions, maxTransitionVerification: transitionBudgets[index], verificationContext, maxCueChecks}));
   }
   const reference = {cohort: fixtures.map(({id}) => id), works: fixtures.map(({reference}) => reference)};
   const planning = runs.map(({id, summary}, index) => ({
@@ -423,6 +477,8 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
     prefixAttempts: summary.attempts.filter(row => row.mode === "verify" && row.attempted).length,
     transitionTargetLimit: transitionBudgets[index],
     transitionAttempts: summary.attempts.filter(row => row.mode === "transition" && row.attempted).length,
+    cueCheckTargetLimit: maxCueChecks,
+    cueCheckAttempts: summary.attempts.filter(row => row.mode === "cue-check" && row.attempted).length,
   }));
   const totals = Object.fromEntries(Object.keys(planning[0]).filter(field => field !== "id")
     .map(field => [field, planning.reduce((sum, row) => sum + row[field], 0)]));
@@ -438,6 +494,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
     prefixPolicy: "Freeze all native cue targets before discovery. The transition-only stage has a separate target allowance.",
     cueDefinition: "An exact fixture unit with a non-quiet reference phase.",
     appliedCueDefinition: "A direct, verified enacted cue after the merged gate, scored against the broader non-quiet fixture reference.",
+    readerCueDefinition: "A supported direct cue, independent low cue, or scoped continuation after the merged gate, scored against the same fixture reference.",
     transitionDefinition: "An exact fixture unit and typed event. Nearby matching uses the same event type within one paragraph.",
     boundaryDefinition: {types: [...boundaryTransitions],
       excludes: "Onset, restart, accent, ease and recover remain in full typed scores and are excluded from boundary-only scores."},
@@ -446,5 +503,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
       {...stageReport(reference, runs, stage), usage: attemptReport(runs, stage)}])),
     applied: {...stageReport(reference, runs, "applied"), transitionOrigins: appliedCounts("transitionOrigin"),
       cueChanges: appliedCounts("cueChange"), transitionChanges: appliedCounts("transitionChange")},
+    reader: stageReport(reference, runs, "reader"),
+    cueRecovery: cueRecoveryReport(diagnostics, attemptReport(runs, "cueRecovery")),
     diagnostics};
 }

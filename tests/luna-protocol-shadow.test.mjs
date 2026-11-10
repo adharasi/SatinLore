@@ -335,3 +335,34 @@ test("a transition citation cannot supply a missing exact target citation for a 
   assert.equal(row.cueGuard, "cue-target-uncited");
   assert.equal(row.pattern, "Baseline");
 });
+
+test("a blinded cue check can recover a causal disagreement and preserves the primary verdict", async () => {
+  const calls = [];
+  const provider = fake((id, mode) => id === 2 && ["discovery", "cue-check"].includes(mode) ?
+    active(id, mode === "cue-check" ? "verify" : mode, {fact: "none", action: "contact", narrativePhase: "onset"}) :
+    neutral(id), request => calls.push(request));
+  const run = await runLunaProtocolShadow({...fixture(), provider, verificationTargets: [2], maxCueChecks: 1});
+  assert.deepEqual(calls.map(x => x.mode), ["discovery", "verify", "cue-check"]);
+  assert.deepEqual(calls[1].units, calls[2].units);
+  assert.deepEqual(Object.keys(calls[2]).sort(), ["mode", "targetIds", "units"]);
+  assert.equal(run.units[2].primaryPrefix.status, "neutral");
+  assert.equal(run.units[2].cueRecovery.status, "verified");
+  assert.equal(run.units[2].cueRecovered, true);
+  assert.equal(run.units[2].cue, true);
+  assert.equal(run.units[2].readerCue, true);
+});
+
+test("a cue recheck cannot override a separately verified stop or depend on future discovery evidence", async () => {
+  const calls = [];
+  const provider = fake((id, mode) => {
+    if (mode === "transition") return typedTransition(id);
+    if (mode === "discovery" && [1, 2].includes(id)) return active(id, mode,
+      {fact: "none", action: "contact", narrativePhase: "onset", evidenceIds: id === 1 ? [1, 4] : [2]});
+    return neutral(id);
+  }, request => calls.push(request));
+  const run = await runLunaProtocolShadow({...fixture(), provider, verificationTargets: [1, 2], verifyTransitions: true,
+    maxTransitionVerification: 1, transitionTargets: [2], maxCueChecks: 2});
+  assert.equal(calls.some(x => x.mode === "cue-check"), false);
+  assert.equal(run.units[2].pattern, "Stop");
+  assert.equal(run.units[2].cueRecoveryStatus, "not-needed");
+});
