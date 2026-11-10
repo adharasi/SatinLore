@@ -585,15 +585,20 @@ test("an opening buildup is suppressed only by an independent definitive quiet r
 });
 
 test("an adjacent disputed onset can become a linked continuation without moving evidence backward", async () => {
-  for (const [linked, typedAgrees, changesScope] of [[true, false, false], [true, true, false], [false, true, false], [true, true, true]]) {
+  for (const [linked, typedAgrees, changesScope, citesPrior, confirmsStart] of [
+    [true, false, false, false, false], [true, true, false, false, false], [false, true, false, false, false],
+    [true, true, true, true, false], [true, true, true, false, false], [false, true, true, false, true],
+  ]) {
     const calls = [];
     const provider = fake((id, mode) => {
       if (mode === "transition") return id === 1 || typedAgrees ? typedTransition(id, {fact: "none", transition: "onset"}) :
         typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
+      if (mode === "cue-check" && confirmsStart) return active(id, "verify", {fact: "none", narrativePhase: "onset",
+        action: "change", transition: "onset", scopeId: id});
       if (mode === "cue-check") return active(id, "verify", {fact: linked ? "continue" : "none",
         priorAnchor: linked ? 1 : null, evidenceIds: [1, 2], narrativePhase: "sustain", action: "continuation"});
       if (id > 0) return active(id, mode, {fact: "none", narrativePhase: "onset", action: "contact", transition: "onset",
-        ...(id === 2 && changesScope ? {scopeId: id, evidenceIds: [1, id]} : {})});
+        ...(id === 2 && changesScope ? {scopeId: id, evidenceIds: citesPrior ? [1, id] : [id]} : {})});
       return neutral(id);
     }, request => calls.push(request));
     const input = fixture("They agreed to dance. He took her hand. They kept holding hands as they walked.");
@@ -604,7 +609,7 @@ test("an adjacent disputed onset can become a linked continuation without moving
     assert.equal(row.primaryPrefix.transition, "onset");
     assert.equal(row.cueRecoveryReason, "adjacent-start");
     assert.equal(row.cueRecoveryCorrection, linked ? "linked-continuation" : undefined);
-    assert.equal(row.cueRecoveryGuard, linked ? undefined : "recovery-continuation-unlinked");
+    assert.equal(row.cueRecoveryGuard, linked || confirmsStart ? undefined : "recovery-continuation-unlinked");
     assert.equal(row.action, linked ? "continuation" : "contact");
     assert.equal(run.units[1].pattern, "Onset rise");
   }

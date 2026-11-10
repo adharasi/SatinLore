@@ -61,14 +61,17 @@ function exactTypedStart(fact, id) {
     fact.evidenceIds.includes(id);
 }
 
-function followsDisputedStart(decisions, blocked, id, runId, primary) {
+function followsDisputedStart(decisions, blocked, id, runId, primary, typed) {
   const prior = decisions.get(id - 1);
   if (!freshEnactedStart(primary, id) || blocked.has(id - 1) || prior?.window?.runId !== runId) return false;
   const earlier = prior.annotation;
-  const typed = prior.transitionVerification;
-  const priorScope = earlier?.scopeId ?? typed?.scopeId;
+  const earlierTyped = prior.transitionVerification;
+  const earlierVerified = prior.prefixVerified && freshEnactedStart(earlier, id - 1);
+  if (exactTypedStart(typed, id)) return typed.transition === "onset" && earlierVerified;
+  if (earlierVerified) return true;
+  const priorScope = earlier?.scopeId ?? earlierTyped?.scopeId;
   return (primary.scopeId == null || priorScope == null || primary.scopeId === priorScope || primary.evidenceIds.includes(id - 1)) &&
-    (prior.prefixVerified && freshEnactedStart(earlier, id - 1) || exactTypedStart(typed, id - 1));
+    exactTypedStart(earlierTyped, id - 1);
 }
 
 function factViolation(fact, ids, target, mode, attested) {
@@ -417,12 +420,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           const support = recentRomanticContext(decisions, blocked, id, window.runId);
           const opening = !causal.restartBoundary && exactCurrentCue(primary, id) && primary.depiction === "romantic" &&
             primary.action === "anticipation" && primary.narrativePhase === "build" && !support.length;
-          const prior = decisions.get(id - 1);
-          const duplicatedOnset = typed?.transition === "onset" && primary && prior?.prefixVerified &&
-            freshEnactedStart(prior.annotation, id - 1) && (primary.evidenceIds.includes(id - 1) ||
-              primary.scopeId != null && prior.annotation.scopeId === primary.scopeId);
-          const adjacent = !causal.restartBoundary && (!exactTypedStart(typed, id) || duplicatedOnset) &&
-            followsDisputedStart(decisions, blocked, id, window.runId, primary);
+          const adjacent = !causal.restartBoundary && followsDisputedStart(decisions, blocked, id, window.runId, primary, typed);
           const romanticContext = primary?.status === "neutral" && primary.frame === "current" &&
             romanticDepictions.has(primary.depiction) && support.length > 0;
           const disagreement = unresolved && currentCueAt(row.discovery, id, "candidate");
