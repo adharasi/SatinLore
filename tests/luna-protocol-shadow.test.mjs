@@ -977,6 +977,46 @@ test("deferred context can support an exact low cue but cannot carry playback or
   }
 });
 
+test("verified buildup with cited romantic context uses a gradual profile while keeping cue metadata separate", async () => {
+  const input = fixture("The door opened. They exchanged a warm smile. She looked forward to the dance.");
+  for (const [contextScope, evidenceIds, pattern] of [[null, [1, 2], "Gradual build"], [1, [1, 2], "Undertone"],
+    [null, [2], "Undertone"]]) {
+    const provider = fake((id, mode) => {
+      if (id === 1) return {...neutral(id), depiction: "romantic", scopeId: contextScope, evidenceIds: [id]};
+      if (id === 2) return active(id, mode, {narrativePhase: "build", depiction: "neutral", evidenceIds});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, maxVerification: 1, verificationTargets: [2]});
+    assert.equal(run.units[1].pattern, "Baseline");
+    assert.equal(run.units[2].pattern, pattern);
+    assert.equal(run.units[2].phase, "build");
+    assert.equal(run.units[2].cue, false);
+    assert.deepEqual(run.units[2].trace.evidence, evidenceIds);
+  }
+});
+
+test("exact sustained contact can use a separately verified onset without promoting ordinary continuation", async () => {
+  const input = fixture("The doors opened. They took hands. They held hands closely. The music played on.");
+  for (const [priorPhase, action, pattern] of [["onset", "contact", "Sustain wave"], ["onset", "continuation", "Undertone"],
+    ["build", "contact", "Undertone"]]) {
+    const provider = fake((id, mode) => {
+      if (id === 1) {
+        const scopeId = mode === "discovery" ? 1 : 0;
+        return priorPhase === "onset" ? active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset", scopeId}) :
+          active(id, mode, {narrativePhase: "build", scopeId});
+      }
+      if (id === 2) return active(id, mode, {fact: "continue", action, narrativePhase: "sustain", priorAnchor: 1, evidenceIds: [1, 2]});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, maxVerification: 2, verificationTargets: [2, 3], maxSupportingVerification: 1});
+    assert.deepEqual(run.summary.supportingVerification, [{id: 1, status: "returned"}]);
+    assert.deepEqual(run.units.slice(1).map(row => row.pattern), ["Baseline", pattern, pattern]);
+    assert.equal(run.units[2].phase, "sustain");
+    assert.equal(run.units[2].cue, false);
+    assert.deepEqual(run.units[2].trace.evidence, [1, 2]);
+  }
+});
+
 test("an independently verified local release can taper an isolated sample without inventing prior carry", async () => {
   for (const [fact, event, typedFact] of [["ease", "interruption", "none"], ["span-end", "interruption", "none"],
     ["beat-end", "beat-end", "beat-end"], ["none", "interruption", "none"]]) {

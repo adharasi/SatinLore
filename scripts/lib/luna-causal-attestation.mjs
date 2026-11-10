@@ -72,7 +72,8 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       run.restartBoundary = null;
     }
     run.anchors = run.anchors.filter(({unitId}) => target - unitId <= MAX_ANCHOR_DISTANCE);
-    return {anchors: run.anchors.filter(({unitId}) => unitId < firstId).slice(-maxAttested), restartBoundary: run.restartBoundary,
+    return {anchors: run.anchors.filter(({unitId}) => unitId < firstId).slice(-maxAttested),
+      localAnchors: run.anchors.filter(({unitId}) => unitId >= firstId), restartBoundary: run.restartBoundary,
       protectedScopes: run.protectedScopes};
   };
 }

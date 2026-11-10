@@ -157,7 +157,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
     result = await runLunaProtocolShadow({id: clip.storyId, text, sourceSha256: clip.sourceSha256, grant, provider, budget,
       signal: execution, limits: CLIP_LIMITS, prefixUnits: MAX_UNITS, maxVerification: targets.length,
       verificationTargets: targets, verifyTransitions: true, maxTransitionVerification: targets.length,
-      transitionTargets: targets, maxCueChecks, maxSupportingVerification});
+      transitionTargets: targets, maxCueChecks, maxSupportingVerification, verifyContinuityBoundary: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

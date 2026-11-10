@@ -189,6 +189,8 @@ The sixth local revision broadens tests for unrealised actions, reported movemen
 
 A separate 25-section Loom and Nocturne evaluation measures exact phase, movement cues, actual simulator activation and timing changes at a shared ceiling. Two false activations exposed by the new cases were fixed. The revised English scorer matched 24/25 phases and simulator activation decisions, and the French cue remains unsupported. The Nocturne mock uses the real cue and label contract. Live Luna output and physical qualification are tracked separately. [Model evaluation and replay commands](reader-model-evaluation.md)
 
+The v16 Nocturne diagnostic adds a bounded independent check for disputed scene cuts and refines profile selection for verified buildup and sustained contact. Identical-label replay matched 90/148 profiles, up from 87/148 with the previous guarded compiler. Expected active intent stayed at 19/59 with no false activations. The paired live results, natural-story holdout and physical qualification are separate milestones. [Continuity and waveform verification](nocturne-beat-protocol-shadow.md#v16-focused-continuity-and-waveform-verification)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

@@ -242,7 +242,7 @@ export function scoreLunaSample(reference, candidate, {loom, includeDiscrepancie
   return {measurement: "unweighted-frozen-sample-diagnostic", sourceProseIncluded: false,
     candidateProvenance: {measurement: candidate.measurement === "live-corpus-luna" ? "live-corpus-luna" : null,
       model: candidate.model === LUNA_PROTOCOL_MODEL ? candidate.model : null,
-      rubricVersion: ["nocturne-luna-protocol-v13", "nocturne-luna-protocol-v14", LUNA_PROTOCOL_RUBRIC_VERSION]
+      rubricVersion: ["nocturne-luna-protocol-v13", "nocturne-luna-protocol-v14", "nocturne-luna-protocol-v15", LUNA_PROTOCOL_RUBRIC_VERSION]
         .includes(candidate.rubricVersion) ? candidate.rubricVersion : null},
     summary: Object.fromEntries(panels.map(([panel]) => [panel, Object.fromEntries(definitions.map(([name, lane]) =>
       [name, metrics(totals.get(panel).get(name), lane)]))])),

@@ -44,6 +44,34 @@ export function verifiedContextCut(annotation, id) {
     (annotation.fact === "cut" || explicitCuts.has(annotation.transition));
 }
 
+export function continuityDispute(primary, typed, discovery, id, localAnchors) {
+  const exactCut = fact => verifiedContextCut(fact, id) && fact.fact === "cut" && explicitCuts.has(fact.transition);
+  const cut = exactCut(primary) && typed?.status === "neutral" ? primary :
+    exactCut(typed) && primary?.status === "neutral" ? typed : null;
+  const anchors = localAnchors.filter(anchor => anchor.frame === "current" && enacted.has(anchor.action));
+  if (cut) return {cut, anchors: cut.transition === "scene-cut" && primary.frame === "current" && typed.frame === "current" ? anchors : []};
+  if (anchors.length && primary?.status === "neutral" && primary.frame === "current" &&
+      typed?.status === "neutral" && typed.frame === "current" && discovery?.status === "candidate" &&
+      discovery.frame === "current" && discovery.transition === "uncertain-continuity" &&
+      discovery.evidenceIds.includes(id) && discovery.evidenceIds.every(evidence => evidence <= id)) return {anchors};
+  return null;
+}
+
+export function resolveContinuityDispute(dispute, verdict, id) {
+  if (!dispute || verdict?.status !== "verified" || !verdict.evidenceIds.includes(id)) return undefined;
+  if (verdict.transition === "hard-stop" || verdict.transition === "declined-restart") return "continuity-stop";
+  const {cut, anchors} = dispute;
+  if (cut && verdict.fact === "cut" && verdict.transition === cut.transition && verdict.frame === cut.frame &&
+      verdict.action === "none" && verdict.narrativePhase === "quiet" && verdict.evidenceIds.some(evidence => evidence < id) &&
+      (verdict.transition !== "scene-cut" || verdict.scopeId === id)) return "continuity-cut";
+  if (verdict.frame === "current" && verdict.fact === "continue" && verdict.action === "continuation" &&
+      verdict.narrativePhase === "sustain" && verdict.transition === "none" &&
+      anchors.some(anchor => anchor.unitId === verdict.priorAnchor && anchor.scopeId === verdict.scopeId)) {
+    return "continuity-linked";
+  }
+  return undefined;
+}
+
 export function isDeferredCurrentContext(row) {
   const proposed = row?.discovery;
   return row?.status === "verification-deferred" && proposed?.status === "candidate" && proposed.frame === "current" &&
@@ -97,7 +125,8 @@ export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {
 export function mergeTransitionVerdict(cue, verdict, discovery, prior) {
   if (!verdict || !["verified", "neutral"].includes(verdict.status)) return {annotation: cue};
   const protectiveCue = cue?.fact === "protective" || cue?.transition === "hard-stop";
-  const conflict = cue && !noEvent.has(cue.transition) && cue.transition !== verdict.transition;
+  const conflict = cue && (cue.transition !== verdict.transition && !noEvent.has(cue.transition) ||
+    cue.status === "neutral" && verifiedContextCut(verdict, verdict.unitId));
   if (protectiveCue && (conflict || verdict.transition !== "hard-stop")) {
     return {annotation: cue, flag: "protective-transition-conflict"};
   }

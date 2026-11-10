@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v15/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v16/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -133,6 +133,7 @@ test("focuses independent cue rechecks without transmitting a prior judgment or 
     ["enactment", /use fact continue, cite both units and name the earlier enacted unit as priorAnchor/u],
     ["restart-gate", /offering a hand and accepting the offer do not establish hand-holding/u],
     ["frame", /A sentence describing an event inside an established account remains in that account/u],
+    ["continuity-boundary", /Verify the first supported boundary or an exact same-scope link/u],
   ]) {
     assert.deepEqual(await run({...cueCheck, focus, previous: {action: "contact"}}), success([neutral]));
     assert.match(sent.instructions, instruction);
@@ -140,10 +141,10 @@ test("focuses independent cue rechecks without transmitting a prior judgment or 
     assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
   }
   for (const invalid of [{...cueCheck, focus: units[0].text}, {...cueCheck, focus: null}, {...cueCheck, focus: "toString"},
-    {...cueCheck, mode: "verify", focus: "enactment"}]) {
+    {...cueCheck, mode: "verify", focus: "continuity-boundary"}]) {
     assert.deepEqual(await run(invalid), failure("invalid-request", "request-shape"));
   }
-  assert.equal(attempts, 4);
+  assert.equal(attempts, 5);
 });
 
 test("requires present target evidence for activation and preserves no-cue and stop verdicts", async () => {
@@ -185,6 +186,23 @@ test("verification can cite an earlier attestation with direct evidence at the t
   assert.match(sent.instructions, /independently verified earlier in this cleared run/u);
   assert.match(sent.instructions, /Do not infer present action, a new rise, eligibility/u);
   assert.deepEqual(Object.keys(JSON.parse(sent.input).attested[0]).toSorted(), Object.keys(earlierAnchor).toSorted());
+});
+
+test("the continuity recheck requires a cited link and keeps separately supported local action", async () => {
+  const supplied = {...withAttested, mode: "cue-check", focus: "continuity-boundary"};
+  const localAction = fact(11, {status: "verified", narrativePhase: "recover", action: "contact", evidenceIds: [11]});
+  for (const row of [linked, localAction]) {
+    const run = provider(async (_url, {body}) => {
+      const {instructions} = JSON.parse(body);
+      assert.match(instructions, /Cite the target and earlier link evidence when verifying continuity/u);
+      assert.match(instructions, /If continuity is unresolved, omit the link and keep any independently supported target action/u);
+      assert.match(instructions, /A stop or restriction takes priority over carry or renewed action/u);
+      return response([row]);
+    });
+    assert.deepEqual(await run(supplied), success([row]));
+  }
+  const ungrounded = provider(async () => response([{...linked, evidenceIds: [11]}]));
+  assert.deepEqual(await ungrounded(supplied), rejected([targetFailure(11, "attested-evidence")]));
 });
 
 test("rejects invalid attestation metadata before dispatch", async () => {
@@ -239,9 +257,10 @@ test("the spend reserve covers the largest actual rubric, attestation and schema
     observed.push(Buffer.byteLength(request.instructions) + Buffer.byteLength(JSON.stringify(request.text.format)));
     return new Response(null, {status: 500});
   });
-  const focused = [undefined, "buildup", "enactment", "restart-gate", "frame"].map(focus => ({...withAttested, mode: "cue-check", focus}));
+  const focused = [undefined, "buildup", "enactment", "restart-gate", "frame", "continuity-boundary"]
+    .map(focus => ({...withAttested, mode: "cue-check", focus}));
   for (const supplied of [request(), withAttested, transitionRequest, ...focused]) await run(supplied);
-  assert.equal(observed.length, 8);
+  assert.equal(observed.length, 9);
   assert.equal(lunaProtocolInputOverhead, Math.max(...observed) + 512);
 });
 
@@ -274,8 +293,10 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /prefer a supported scene or frame boundary over the smaller event/u);
   assert.match(sent.instructions, /An imagined scenario starts when its events are first presented/u);
   assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
+  assert.match(sent.instructions, /A task or stimulus within the imagined, remembered or reported episode leaves that frame in place/u);
   assert.match(sent.instructions, /Movement inside the noncurrent frame and a later reference after the return supply no additional return/u);
   assert.match(sent.instructions, /Use beat-end when the target establishes that the interaction itself concludes/u);
+  assert.match(sent.instructions, /Choose one event and its matching fact/u);
   assert.match(sent.instructions, /use status uncertain or abstain with transition unknown/u);
   assert.match(sent.instructions, /reported or remembered action does not establish a prior current start/u);
   assert.match(sent.instructions, /If the target ends before participation begins, it has no restart/u);
@@ -288,6 +309,12 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.equal(rows.items.properties.fact.enum.includes("low"), false);
   assert.deepEqual(await run({...transitionRequest, units}), failure("invalid-request", "request-shape"));
   assert.deepEqual(await run({...transitionRequest, targetIds: [10, 11]}), failure("invalid-request", "request-shape"));
+});
+
+test("rejects conflicting typed events without guessing the intended boundary", async () => {
+  const conflicting = transitionRow("beat-end", "ease", {scopeId: 10, priorAnchor: 10, evidenceIds: [10, 11]});
+  const run = provider(async () => response([conflicting]));
+  assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, "transition-fact")]));
 });
 
 test("keeps hard stops, interruptions, declined restarts and ordinary stops distinct", async () => {
@@ -523,6 +550,7 @@ test("independent current contribution keeps ongoing and winding-down cues with 
       fact: factType, evidenceIds: [10, 11]});
     const run = provider(async (_url, {body}) => {
       const {instructions} = JSON.parse(body);
+      assert.match(instructions, /A new touch or a visible modification of the same interaction can be direct even while the beat continues/u);
       assert.match(instructions, /Use continuation when the target depicts only the same ongoing action/u);
       assert.match(instructions, /If an easing or recovery target also depicts a distinct newly enacted contact or change/u);
       assert.match(instructions, /A supported stop or restriction still takes priority/u);
@@ -536,6 +564,10 @@ test("independent current contribution keeps ongoing and winding-down cues with 
   const reportedStop = fact(11, {status: "verified", frame: "reported", transition: "non-romantic-activity-stop", evidenceIds: [11]});
   const noncurrent = provider(async () => response([reportedStop]));
   assert.deepEqual(await noncurrent(supplied), rejected([targetFailure(11, "transition-frame")]));
+  const reportedDecline = fact(11, {status: "verified", frame: "reported", depiction: "romantic", narrativePhase: "ease",
+    action: "release", fact: "ease", evidenceIds: [10, 11]});
+  const crossedFrame = provider(async () => response([reportedDecline]));
+  assert.deepEqual(await crossedFrame(supplied), rejected([targetFailure(11, "fact-frame")]));
 });
 
 test("bounds source and request tokens before transport", async () => {
