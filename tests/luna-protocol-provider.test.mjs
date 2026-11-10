@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createLunaProtocolProvider, LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_MODEL,
-  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolOutputTokens}
+  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolInputOverhead, lunaProtocolOutputTokens}
   from "../scripts/lib/luna-protocol-provider.mjs";
 
 const units = [{id: 10, text: "June noticed Lee watching her."}, {id: 11, text: "She smiled."}, {id: 12, text: "The clock chimed."}];
@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v9/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v10/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -105,6 +105,9 @@ test("checks one target with the full cue schema and no prior judgment", async (
   assert.match(sent.instructions, /isolated opening request to which nobody responds at the target stays quiet/u);
   assert.match(sent.instructions, /present physical reach to begin the accepted interaction/u);
   assert.match(sent.instructions, /Use restart for the first renewed enacted action after a current stop, decline or break/u);
+  assert.match(sent.instructions, /A later reciprocal response never supplies buildup to the earlier opening/u);
+  assert.match(sent.instructions, /A specific private perception or bodily reaction grounded in attraction can be buildup without a reply/u);
+  assert.match(sent.instructions, /Mark that unit onset or restart even if the next unit describes the action more fully/u);
   assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
@@ -112,6 +115,32 @@ test("checks one target with the full cue schema and no prior judgment", async (
   assert.deepEqual(rows.items.properties.status.enum, ["verified", "neutral", "uncertain", "abstain"]);
   assert.deepEqual(await run({...cueCheck, units}), failure("invalid-request", "request-shape"));
   assert.deepEqual(await run({...cueCheck, targetIds: [10, 11]}), failure("invalid-request", "request-shape"));
+});
+
+test("focuses independent cue rechecks without transmitting a prior judgment or changing the row schema", async () => {
+  let sent;
+  let attempts = 0;
+  const neutral = fact(11);
+  const run = provider(async (_url, {body}) => {
+    attempts++;
+    sent = JSON.parse(body);
+    return response([neutral]);
+  });
+  for (const [focus, instruction] of [
+    ["buildup", /A general statement of excitement before the other person responds is quiet setup/u],
+    ["enactment", /use fact continue, cite both units and name the earlier enacted unit as priorAnchor/u],
+    ["frame", /A sentence describing an event inside an established account remains in that account/u],
+  ]) {
+    assert.deepEqual(await run({...cueCheck, focus, previous: {action: "contact"}}), success([neutral]));
+    assert.match(sent.instructions, instruction);
+    assert.deepEqual(JSON.parse(sent.input), {units: cueCheck.units, targetIds: cueCheck.targetIds});
+    assert.equal(sent.text.format.name, "nocturne_luna_cue_check_v1");
+  }
+  for (const invalid of [{...cueCheck, focus: units[0].text}, {...cueCheck, focus: null}, {...cueCheck, focus: "toString"},
+    {...cueCheck, mode: "verify", focus: "enactment"}]) {
+    assert.deepEqual(await run(invalid), failure("invalid-request", "request-shape"));
+  }
+  assert.equal(attempts, 3);
 });
 
 test("requires present target evidence for activation and preserves no-cue and stop verdicts", async () => {
@@ -200,6 +229,19 @@ const transitionRow = (transition, fact, extra) => ({unitId: 11, frame: "current
   scopeId: null, evidenceIds: [11], priorAnchor: null, status: "verified", ...extra});
 const normalizedTransitionRow = row => ({...row, depiction: "unknown", narrativePhase: "unknown", action: "unknown"});
 
+test("the spend reserve covers the largest actual rubric, attestation and schema overhead", async () => {
+  const observed = [];
+  const run = provider(async (_url, {body}) => {
+    const request = JSON.parse(body);
+    observed.push(Buffer.byteLength(request.instructions) + Buffer.byteLength(JSON.stringify(request.text.format)));
+    return new Response(null, {status: 500});
+  });
+  const focused = [undefined, "buildup", "enactment", "frame"].map(focus => ({...withAttested, mode: "cue-check", focus}));
+  for (const supplied of [request(), withAttested, transitionRequest, ...focused]) await run(supplied);
+  assert.equal(observed.length, 7);
+  assert.equal(lunaProtocolInputOverhead, Math.max(...observed) + 512);
+});
+
 test("sends an independent transition rubric with one compact typed row and no cue proposal", async () => {
   const eased = transitionRow("interruption", "ease", {scopeId: 3, evidenceIds: [5, 11], priorAnchor: 5});
   let sent;
@@ -223,6 +265,8 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
   assert.match(sent.instructions, /use status uncertain or abstain with transition unknown/u);
   assert.match(sent.instructions, /reported or remembered action does not establish a prior current start/u);
+  assert.match(sent.instructions, /If the target ends before participation begins, it has no restart/u);
+  assert.match(sent.instructions, /Interior sentences in the same account have no entry, return, or live-interaction transition/u);
   const rows = sent.text.format.schema.properties.facts;
   assert.equal(rows.maxItems, 1);
   assert.equal(rows.items.additionalProperties, false);
@@ -380,12 +424,15 @@ test("keeps local cue, continuity, frame and neutral decisions independently gro
     [{...build, fact: "low", action: "continuation"}, "fact-action"], [{...build, fact: "ease"}, "fact-phase"],
     [{...build, priorAnchor: 10}, "prior-anchor"], [{...build, transition: "restart"}, "transition-action"],
     [{...onset, action: "continuation"}, "phase-action"],
+    [{...onset, evidenceIds: [10]}, "target-evidence"],
+    [{...onset, frame: "reported"}, "transition-frame"],
+    [{...onset, transition: "restart", narrativePhase: "rebuild", evidenceIds: [10]}, "target-evidence"],
     [{...onset, action: "continuation", narrativePhase: "rebuild", transition: "restart"}, "transition-action"],
     [{...onset, fact: "continue", scopeId: 10, priorAnchor: 10}, "transition-fact"],
     [{...build, status: "uncertain"}, "status-effect"], [{...neutral, narrativePhase: "unknown"}, "status-effect"],
     [{...ordinaryStop, status: "neutral"}, "status-effect"], [{...reportEntry, status: "neutral"}, "status-effect"],
     [{...ordinaryStop, evidenceIds: [10]}, "target-evidence"], [{...continuityGap, evidenceIds: [10]}, "target-evidence"],
-    [{...reportEntry, fact: "span-end"}, "transition-fact"],
+    [{...reportEntry, fact: "span-end"}, "transition-fact"], [{...reportEntry, frame: "current"}, "transition-frame"],
     [{...reportEntry, evidenceIds: [10]}, "target-evidence"], [{...neutral, scopeId: 9}, "scope-id"],
   ]) {
     const run = provider(async () => response([row]));

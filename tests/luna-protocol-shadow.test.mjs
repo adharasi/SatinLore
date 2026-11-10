@@ -214,7 +214,8 @@ test("shared spend cap rejects a second unknown reservation and freezes after a 
   const settle = budget.reserve("{}", 1);
   assert.equal(typeof settle, "function");
   assert.equal(budget.reserve("{}", 1), null);
-  settle({inputTokens: 8000, outputTokens: 2000});
+  assert.equal(budget.snapshot().spendLimited, true);
+  settle({inputTokens: 30_000, outputTokens: 2_000});
   assert.equal(budget.snapshot().reservationBreach, true);
   assert.equal(budget.reserve("{}", 1), null);
 });
@@ -524,7 +525,9 @@ test("quiet romantic context gets a blinded check and weak recovery needs prior 
     assert.equal(run.units[1].primaryPrefix.status, "neutral");
     assert.equal(run.units[1].cueRecoveryGuard, pattern === "Baseline" ? "recovery-buildup-unlinked" : undefined);
     assert.equal(run.units[1].pattern, pattern);
-    assert.deepEqual(Object.keys(calls.find(call => call.mode === "cue-check")).sort(), ["mode", "targetIds", "units"]);
+    const check = calls.find(call => call.mode === "cue-check");
+    assert.deepEqual(Object.keys(check).sort(), reason === "romantic-context" ? ["focus", "mode", "targetIds", "units"] : ["mode", "targetIds", "units"]);
+    assert.equal(check.focus, reason === "romantic-context" ? "buildup" : undefined);
   }
 });
 
@@ -560,6 +563,50 @@ test("a typed start can ask the cue pass to reconsider anticipation without supp
   assert.equal(run.units[1].cueRecoveryReason, "typed-start");
   assert.equal(run.units[1].cueRecovery.action, "contact");
   assert.equal(run.units[1].pattern, "Onset rise");
+});
+
+test("an opening buildup is suppressed only by an independent definitive quiet result", async () => {
+  for (const checkStatus of ["neutral", "uncertain", "verified"]) {
+    const calls = [];
+    const provider = fake((id, mode) => {
+      if (mode === "cue-check" && checkStatus !== "verified") return {...neutral(id), status: checkStatus, depiction: "romantic"};
+      if (id === 0) return active(id, mode === "cue-check" ? "verify" : mode, {narrativePhase: "build"});
+      return neutral(id);
+    }, request => calls.push(request));
+    const run = await runLunaProtocolShadow({...fixture("They looked forward to the dance. The doors opened."), provider,
+      verificationTargets: [0, 1], maxCueChecks: 1});
+    const row = run.units[0];
+    assert.equal(calls.find(call => call.mode === "cue-check").focus, "buildup");
+    assert.equal(row.primaryPrefix.narrativePhase, "build");
+    assert.equal(row.cueRecoveryReason, "opening-buildup");
+    assert.equal(row.cueRecoveryCorrection, checkStatus === "neutral" ? "quiet-opening" : undefined);
+    assert.equal(row.pattern, checkStatus === "neutral" ? "Baseline" : "Undertone");
+  }
+});
+
+test("an adjacent disputed onset can become a linked continuation without moving evidence backward", async () => {
+  for (const linked of [true, false]) {
+    const calls = [];
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return id === 1 ? typedTransition(id, {fact: "none", transition: "onset"}) :
+        typedTransition(id, {status: "neutral", fact: "none", transition: "none", evidenceIds: []});
+      if (mode === "cue-check") return active(id, "verify", {fact: linked ? "continue" : "none",
+        priorAnchor: linked ? 1 : null, evidenceIds: [1, 2], narrativePhase: "sustain", action: "continuation"});
+      if (id > 0) return active(id, mode, {fact: "none", narrativePhase: "onset", action: "contact", transition: "onset"});
+      return neutral(id);
+    }, request => calls.push(request));
+    const input = fixture("They agreed to dance. He took her hand. They kept holding hands as they walked.");
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2], verifyTransitions: true,
+      maxTransitionVerification: 2, transitionTargets: [1, 2], maxCueChecks: 1});
+    const row = run.units[2];
+    assert.equal(calls.find(call => call.mode === "cue-check").focus, "enactment");
+    assert.equal(row.primaryPrefix.transition, "onset");
+    assert.equal(row.cueRecoveryReason, "adjacent-start");
+    assert.equal(row.cueRecoveryCorrection, linked ? "linked-continuation" : undefined);
+    assert.equal(row.cueRecoveryGuard, linked ? undefined : "recovery-continuation-unlinked");
+    assert.equal(row.action, linked ? "continuation" : "contact");
+    assert.equal(run.units[1].pattern, "Onset rise");
+  }
 });
 
 test("one blinded check can replace an invalid semantic tuple without making it a primary success", async () => {

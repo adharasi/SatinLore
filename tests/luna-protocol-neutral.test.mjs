@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
 import test from "node:test";
 import {fileURLToPath} from "node:url";
-import {combineNeutralReports, getNeutralProtocolReference, replayNeutralDiscrepancies, runLunaProtocolNeutral, scoreNeutralPlaybackGate}
+import {combineNeutralReports, getNeutralProtocolReference, replayNeutralDiscrepancies, replayNeutralStartTiming,
+  runLunaProtocolNeutral, scoreNeutralPlaybackGate}
   from "../scripts/lib/luna-protocol-neutral.mjs";
 import {wholeStoryAnnotationFixtures} from "./whole-story-annotation-fixtures.mjs";
 
@@ -43,6 +44,8 @@ test("default CLI plans the 33 neutral targets without a provider even if a key 
   assert.equal(report.behavior.prefix.continuation.missed, 1);
   assert.equal(report.behavior.prefix.directEnacted.observedTargets, 0);
   assert.equal(report.behavior.playbackGate.byExpected["hard-stop"].missed, 1);
+  assert.equal(report.startTiming.typed.transition.missed, 5);
+  assert.equal(report.startTiming.typed.transition.observedTargets, 0);
   assert.equal(report.cueRecovery.attemptedTargets, 0);
   assert.equal(report.prefix.exactTypedTransitions, undefined);
   assert.equal(report.transition.exactCues, undefined);
@@ -202,6 +205,7 @@ test("complementary fixture shards combine exact scores and usage in canonical o
   assert.deepEqual(combined.reader.exactCues, whole.reader.exactCues);
   assert.deepEqual(combined.reader.cueChanges, whole.reader.cueChanges);
   assert.deepEqual(combined.behavior, whole.behavior);
+  assert.deepEqual(combined.startTiming, whole.startTiming);
   assert.equal(combined.behaviorReferenceDigest, whole.behaviorReferenceDigest);
   assert.equal(combined.cueRecovery.targets, 33);
   assert.equal(combined.cueRecovery.usage.attempts, 0);
@@ -217,6 +221,107 @@ test("complementary fixture shards combine exact scores and usage in canonical o
   assert.equal(combineNeutralReports([legacy(left), legacy(right)]).behavior, undefined);
   await assert.rejects(() => runLunaProtocolNeutral({...options, fixtureIds: ["first-dance", "first-dance"]}),
     /Invalid neutral benchmark options/u);
+});
+
+test("exact start timing keeps a shifted typed event and displaced continuation visible independently", async () => {
+  const original = await runLunaProtocolNeutral({mode: "mock", arm: "complete", now});
+  const report = JSON.parse(JSON.stringify(original));
+  const [dance, letter, room] = report.diagnostics.map(work => work.units);
+  const reference = getNeutralProtocolReference();
+  assert.equal(report.startReferenceDigest, reference.startReferenceDigest);
+  assert.notEqual(report.startReferenceDigest, report.behaviorReferenceDigest);
+  assert.equal(dance[4].expected.enactedStart, "onset");
+  assert.equal(dance[5].expected.enactedStart, "none");
+  assert.equal(room[8].expected.enactedStart, "restart");
+  assert.equal(original.startTiming.enactedPhase.prefix.matched, 5);
+  assert.equal(original.startTiming.typed.transition.matched, 0);
+  assert.equal(original.transition.boundary.exact.matched, 7);
+
+  Object.assign(dance[4].prefix.labels, {action: "anticipation", narrativePhase: "build"});
+  Object.assign(dance[4].behavior.prefix, {narrativeBuildup: true, directEnacted: false});
+  Object.assign(dance[5].prefix.labels, {action: "contact", narrativePhase: "onset", transition: "onset"});
+  Object.assign(dance[5].behavior.prefix, {directEnacted: true, continuation: false});
+  for (const [target, transition] of [[dance[5], "onset"], [dance[10], "restart"], [letter[7], "restart"],
+    [room[1], "onset"], [room[7], "restart"]]) Object.assign(target.transition, {status: "verified", transition});
+
+  const timing = replayNeutralStartTiming(report);
+  const {matched, missed, extra, byType} = timing.typed.transition;
+  assert.deepEqual({matched, missed, extra}, {matched: 2, missed: 3, extra: 3});
+  assert.equal(byType.onset.referencePositives, 3);
+  assert.equal(byType.restart.referencePositives, 2);
+  assert.equal(timing.enactedPhase.prefix.matched, 4);
+  assert.equal(timing.enactedPhase.prefix.extra, 1);
+  assert.ok(timing.adjacentShifts.some(shift => shift.work === "first-dance" && shift.lane === "enactedPhase" &&
+    shift.stage === "prefix" && shift.expectedUnit === 4 && shift.predictedUnit === 5 && shift.continuationDisplaced));
+  assert.ok(timing.adjacentShifts.some(shift => shift.work === "reading-room" && shift.lane === "typed" &&
+    shift.stage === "transition" && shift.expectedUnit === 8 && shift.predictedUnit === 7 && shift.direction === "early"));
+  assert.equal(timing.typed.applied.extra, 0);
+  const at = (work, unit, stage, dimension) => replayNeutralDiscrepancies(report).cases
+    .find(row => row.work === work && row.unit === unit && row.stage === stage && row.dimension === dimension);
+  assert.equal(at("first-dance", 5, "prefix", "continuation").cause, "adjacent-start-displaced-continuation");
+  assert.equal(at("first-dance", 5, "prefix", "continuation").relatedUnit, 4);
+  assert.equal(at("first-dance", 4, "prefix", "enactedPhaseStart").cause, "adjacent-shifted-start");
+  assert.equal(at("old-letter", 7, "transition", "typedStart").cause, "wrong-start-type");
+  assert.equal(at("reading-room", 7, "transition", "typedStart").cause, "adjacent-shifted-start");
+  Object.assign(room[8].transition, {status: "timed-out", returned: false, transition: null});
+  assert.equal(at("reading-room", 7, "transition", "typedStart").cause, "anticipation-tagged-as-start");
+  assert.equal(at("reading-room", 8, "transition", "typedStart").cause, "unavailable");
+
+  const {startReferenceVersion, startReferenceDigest, startTiming, ...legacy} = original;
+  assert.deepEqual(replayNeutralStartTiming(legacy), startTiming);
+  assert.throws(() => replayNeutralStartTiming({...report, startReferenceDigest: "wrong"}), /source-free pinned/u);
+});
+
+test("four disjoint fixture shards combine and bounded spend can prevent provider dispatch", async () => {
+  const {works} = getNeutralProtocolReference();
+  const shards = await Promise.all(works.map(({id}) => runLunaProtocolNeutral({mode: "mock", arm: "complete", now,
+    fixtureIds: [id], maxCueChecks: 6})));
+  const combined = combineNeutralReports(shards.toReversed());
+  assert.equal(combined.planning.referenceTargets, 33);
+  assert.equal(combined.shards.length, 4);
+  assert.deepEqual(combined.fixtureIds, works.map(({id}) => id));
+  assert.equal(combined.startTiming.enactedPhase.prefix.matched, 5);
+  assert.throws(() => combineNeutralReports([...shards.slice(0, 3), shards[0]]), /complementary reports/u);
+  let calls = 0;
+  const capped = await runLunaProtocolNeutral({mode: "mock", now, maxMicros: 0, provider: async () => { calls++; }});
+  assert.equal(capped.budget.capMicros, 0);
+  assert.equal(capped.budget.attempts, 0);
+  assert.equal(calls, 0);
+  await assert.rejects(() => runLunaProtocolNeutral({maxCueChecks: 7}), /Invalid neutral benchmark options/u);
+});
+
+test("quiet-opening and linked-continuation corrections change accepted scores without rewriting the primary pass", async () => {
+  const provider = async ({mode, targetIds}) => ({status: "ok", facts: targetIds.map(unitId => {
+    const typed = mode === "transition";
+    const opening = unitId === 1 && mode === "verify";
+    const linked = unitId === 5 && mode === "cue-check";
+    const start = (unitId === 4 || unitId === 5) && ["discovery", "verify"].includes(mode);
+    const typedStart = typed && unitId === 4;
+    const active = opening || linked || start || typedStart;
+    return {unitId, status: active ? mode === "discovery" ? "candidate" : "verified" : "neutral",
+      depiction: typed ? "unknown" : active ? "romantic" : "neutral", frame: "current",
+      narrativePhase: typed ? "unknown" : opening ? "build" : start ? "onset" : linked ? "sustain" : "quiet",
+      transition: start || typedStart ? "onset" : "none",
+      action: typed ? "unknown" : opening ? "anticipation" : linked ? "continuation" : start ? "contact" : "none",
+      fact: opening ? "low" : linked ? "continue" : "none", scopeId: start || linked ? 0 : null,
+      priorAnchor: linked ? 4 : null, evidenceIds: linked ? [4, 5] : active ? [unitId] : []};
+  }), usage: {inputTokens: 10, outputTokens: 2}});
+  const report = await runLunaProtocolNeutral({mode: "mock", arm: "complete", fixtureIds: ["first-dance"], provider, now, maxCueChecks: 6});
+  const [, opening, , , , continuation] = report.diagnostics[0].units;
+  assert.equal(opening.cueRecovery.correction, "quiet-opening");
+  assert.equal(opening.behavior.prefix.narrativeBuildup, true);
+  assert.equal(opening.behavior.accepted.narrativeBuildup, false);
+  assert.equal(continuation.cueRecovery.correction, "linked-continuation");
+  assert.equal(continuation.behavior.prefix.directEnacted, true);
+  assert.equal(continuation.behavior.accepted.directEnacted, false);
+  assert.equal(continuation.behavior.accepted.continuation, true);
+  assert.deepEqual(report.cueRecovery.corrections, {"quiet-opening": 1, "linked-continuation": 1});
+  assert.equal(report.cueRecovery.recoveredTargets, 0);
+  for (const lane of [report.startTiming.typed, report.startTiming.enactedPhase]) {
+    assert.equal(lane.prefix.extra, 1);
+    assert.equal(lane.accepted.extra, 0);
+    assert.equal(lane.accepted.matched, 1);
+  }
 });
 
 test("targeted cue checks preserve primary scores and separate direct and reader effects", async () => {
@@ -245,7 +350,7 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(report.applied.exactCues.matched, 2);
   assert.equal(report.reader.exactCues.matched, 3);
   assert.equal(report.cueRecovery.scheduledTargets, 11);
-  assert.equal(report.cueRecovery.selectedTargets, 3);
+  assert.equal(report.cueRecovery.selectedTargets, 4);
   assert.equal(report.cueRecovery.attemptedTargets, 2);
   assert.equal(report.cueRecovery.returnedTargets, 2);
   assert.equal(report.cueRecovery.recoveredReferenceCues, 2);
@@ -254,6 +359,7 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(report.cueRecovery.readerCuesAfterRecovery, 2);
   assert.equal(report.cueRecovery.usage.inputTokens, 8);
   assert.equal(report.cueRecovery.selectionReasons["discovery-disagreement"], 3);
+  assert.equal(report.cueRecovery.selectionReasons["adjacent-start"], 1);
   assert.equal(units[2].prefix.status, "neutral");
   assert.equal(units[2].prefix.cue, false);
   assert.equal(units[2].cueRecovery.action, "anticipation");
@@ -267,8 +373,8 @@ test("targeted cue checks preserve primary scores and separate direct and reader
   assert.equal(units[3].applied.cue, true);
   assert.equal(units[3].applied.readerCueChange, "recovered-by-coverage");
   assert.deepEqual(report.prefix.targetDiagnostics.works[0].unobservedSubmittedTargetIds, [3]);
-  assert.equal(units[4].cueRecovery.status, "not-needed");
-  assert.equal(units[4].cueRecovery.selected, false);
+  assert.equal(units[4].cueRecovery.status, "budget-deferred");
+  assert.equal(units[4].cueRecovery.selected, true);
   assert.equal(units[4].cueRecovery.submittedIds, null);
   assert.equal(units[5].cueRecovery.status, "budget-deferred");
   assert.equal(units[5].cueRecovery.selected, true);

@@ -14,7 +14,7 @@ import { initializeCorpusBudget, handleCorpusBudget, corpusBudgetExpiry, pruneCo
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
-const NEUTRAL_QUOTA_URL = "https://scene-analysis.internal/founder-neutral-quota";
+const NEUTRAL_SPEND_URL = "https://scene-analysis.internal/founder-neutral-spend";
 export const DECISIONS_STORY_STUDY_PATH = "/api/scene-analysis/decisions-story-study";
 export const WHOLE_STORY_LUNA_STUDY_PATH = "/api/scene-analysis/whole-story-luna-study";
 const WHOLE_STORY_LUNA_STUDY_SUITE = "nocturne-whole-story-luna-v1";
@@ -22,26 +22,34 @@ const WHOLE_STORY_LUNA_ATTEMPTS = 64;
 const WHOLE_STORY_LUNA_MAX_USD = 1;
 const WHOLE_STORY_LUNA_TIMEOUT_MS = 180_000;
 const NEUTRAL_LUNA_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
-const NEUTRAL_LUNA_PROTOCOL_QUOTA = Object.freeze({
-  lane: "founder-neutral", perRun: 48, perUtcDay: 512, perUtcMonth: 4_096,
-});
+const NEUTRAL_SHARD_ATTEMPTS = 48;
+const NEUTRAL_SHARD_CAP_MICROS = 150_000;
+const NEUTRAL_RUN_CAP_MICROS = 3_000_000;
+const NEUTRAL_RUN_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const NEUTRAL_RUN_RETENTION_MS = 7 * NEUTRAL_RUN_LIFETIME_MS;
+const studyId = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS = 300_000;
 const NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS = 2;
 const NEUTRAL_LUNA_PROTOCOL_SHARDS = {
   a: { fixtureIds: ["first-dance", "old-letter"], transitionLimit: 19 },
   b: { fixtureIds: ["reading-room", "practice-drill"], transitionLimit: 14 },
+  "first-dance": { fixtureIds: ["first-dance"], transitionLimit: 11 },
+  "old-letter": { fixtureIds: ["old-letter"], transitionLimit: 8 },
+  "reading-room": { fixtureIds: ["reading-room"], transitionLimit: 9 },
+  "practice-drill": { fixtureIds: ["practice-drill"], transitionLimit: 5 },
 };
 const NEUTRAL_LUNA_PROTOCOL_FORMS = new Map([
   ["benchmark=luna-protocol-neutral-v2-complete-a", { arm: "complete", shard: "a", discoveryWindows: 2 }],
   ["benchmark=luna-protocol-neutral-v2-complete-b", { arm: "complete", shard: "b", discoveryWindows: 2 }],
   ["benchmark=luna-protocol-neutral-v2-windowed-a", { arm: "windowed", shard: "a", discoveryWindows: 5 }],
   ["benchmark=luna-protocol-neutral-v2-windowed-b", { arm: "windowed", shard: "b", discoveryWindows: 5 }],
+  ...[["first-dance", 3], ["old-letter", 2], ["reading-room", 3], ["practice-drill", 2]].map(([shard, discoveryWindows]) =>
+    [`benchmark=luna-protocol-neutral-v10-windowed-${shard}`, { arm: "windowed", shard, discoveryWindows, maxCueChecks: 6 }]),
 ]);
 const RESEARCH_SUITE_DAY_LIMITS = {
   [CUE_CONTINUITY_STUDY_SUITE]: CUE_CONTINUITY_STUDY_REQUESTS,
   [DECISIONS_STORY_STUDY_PINS.version]: STORY_STUDY_MAX_TOTAL_REQUESTS,
   [WHOLE_STORY_LUNA_STUDY_SUITE]: WHOLE_STORY_LUNA_ATTEMPTS,
-  [NEUTRAL_LUNA_PROTOCOL_SUITE]: NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay,
 };
 const MODEL = "gpt-6-luna";
 const MAX_CUES = 16;
@@ -295,30 +303,37 @@ function budgetStub(namespace) {
   return namespace.get(namespace.idFromName("scene-analysis:v1"));
 }
 
-async function reserveBudget(namespace, config, session, suite, signal) {
+async function budgetReader(config, session) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`satinlore:scene-budget:v1:${config.issuer}:${session.subject}`));
-  const reader = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function reserveBudget(namespace, config, session, suite, signal) {
+  const reader = await budgetReader(config, session);
   return budgetStub(namespace).fetch(new Request(BUDGET_URL, {
     method: "POST", signal, headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader, ...(suite ? { suite } : {}) }),
   }));
 }
 
-async function readNeutralQuota(namespace, signal) {
+async function neutralSpend(namespace, payload, signal) {
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(3000)]);
-  const response = await budgetStub(namespace).fetch(new Request(NEUTRAL_QUOTA_URL, { signal: deadline }));
-  if (response.status !== 200) return null;
-  const quota = await readBoundedJson(response, 512, deadline);
-  const { perUtcDay, perUtcMonth } = NEUTRAL_LUNA_PROTOCOL_QUOTA;
-  const bounds = { remainingToday: perUtcDay, remainingThisMonth: perUtcMonth,
-    dayRetryAfterSeconds: DAY / 1000, monthRetryAfterSeconds: 31 * DAY / 1000 };
-  if (!exactObject(quota, Object.keys(bounds)) || Object.entries(bounds).some(([key, max]) =>
-    !Number.isSafeInteger(quota[key]) || quota[key] < (key.endsWith("Seconds") ? 1 : 0) || quota[key] > max)) return null;
-  return quota;
+  const response = await budgetStub(namespace).fetch(new Request(NEUTRAL_SPEND_URL, {
+    method: "POST", signal: deadline, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }));
+  if (response.status !== 200) return { status: response.status };
+  const spend = await readBoundedJson(response, 512, deadline);
+  if (!exactObject(spend, ["shardCapMicros", "remainingMicros", "expiresAt"]) ||
+      !Number.isSafeInteger(spend.shardCapMicros) || spend.shardCapMicros < 1 || spend.shardCapMicros > NEUTRAL_SHARD_CAP_MICROS ||
+      !Number.isSafeInteger(spend.remainingMicros) || spend.remainingMicros < 0 || spend.remainingMicros > NEUTRAL_RUN_CAP_MICROS ||
+      !Number.isSafeInteger(spend.expiresAt)) return { status: 503 };
+  return { status: 200, ...spend };
 }
 
+const providerKeyConfigured = key => typeof key === "string" && /^sk-[A-Za-z0-9_-]{12,512}$/.test(key) && !key.startsWith("sk-admin-");
+
 function analysisConfigured(key, budget) {
-  return typeof key === "string" && /^sk-[A-Za-z0-9_-]{12,512}$/.test(key) && !key.startsWith("sk-admin-") &&
+  return providerKeyConfigured(key) &&
     typeof budget?.idFromName === "function" && typeof budget.get === "function";
 }
 
@@ -351,19 +366,23 @@ const STORY_STUDY_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><
 <button name="mode" value="cue-continuity">Compare cue continuity on calibration</button>
 <p>Each dedicated transition test uses one API request for the selected split. The cue continuity comparison uses two requests on the first approved calibration batch, with one comparison allowed per UTC day.</p></form></main></html>`;
 
-const wholeStoryLunaForm = quota => `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne whole-story Luna study</title>
+const WHOLE_STORY_LUNA_FORM = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Nocturne whole-story Luna study</title>
 <main><h1>Nocturne whole-story Luna study</h1>
 <p>Compare whole-story, paragraph and sentence context on four original research fixtures. Running the study sends those fixtures to OpenAI and returns aggregate scores. It has a limit of ${WHOLE_STORY_LUNA_ATTEMPTS} API attempts, a $${WHOLE_STORY_LUNA_MAX_USD} estimated usage budget and a three-minute deadline.</p>
 <form method="post"><button name="benchmark" value="whole-story-luna-v1">Run whole-story study</button></form>
 <h2>Luna protocol v2 neutral diagnostic</h2>
 <p>Send the selected original fixtures to OpenAI for discovery, causal cue checks and independent transition checks. The result includes sentence IDs and structured labels. Run both parts of the same diagnostic to cover all 33 sentences.</p>
-<p>Luna rubric v9 is active. Up to ${NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS} blinded cue rechecks per fixture investigate buildup, disputed starts and invalid cue contracts.</p>
-<p>Each run has a five-minute deadline and up to ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun} attempts. The founder study permits ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcDay} attempts per UTC day and ${NEUTRAL_LUNA_PROTOCOL_QUOTA.perUtcMonth} per UTC month, separately from reader analysis.</p>
-<p>${quota ? `Founder neutral headroom is ${quota.remainingToday} attempts today and ${quota.remainingThisMonth} this UTC month.` : "Founder neutral headroom is unavailable."} The study checks room for the full shard before dispatch.</p>
-<form method="post"><button name="benchmark" value="luna-protocol-neutral-v2-complete-a">Run v2 complete context A (19 sentences)</button>
+<p>Luna rubric v10 is active. Fixed comparison shards allow two blinded cue rechecks per fixture. Individual windowed fixtures allow six.</p>
+<p>Each shard has a five-minute deadline, a $0.15 estimated spend ceiling and a ${NEUTRAL_SHARD_ATTEMPTS}-request Worker transport ceiling. A shared run ID groups shards under one $3 estimated spend cap for 24 hours.</p>
+<form method="post"><label>Shared run ID (optional) <input name="runId" type="text" maxlength="36" pattern="[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}" autocomplete="off" spellcheck="false"></label>
+<button name="benchmark" value="luna-protocol-neutral-v2-complete-a">Run v2 complete context A (19 sentences)</button>
 <button name="benchmark" value="luna-protocol-neutral-v2-complete-b">Run v2 complete context B (14 sentences)</button>
 <button name="benchmark" value="luna-protocol-neutral-v2-windowed-a">Run v2 windowed A (19 sentences)</button>
-<button name="benchmark" value="luna-protocol-neutral-v2-windowed-b">Run v2 windowed B (14 sentences)</button></form></main></html>`;
+<button name="benchmark" value="luna-protocol-neutral-v2-windowed-b">Run v2 windowed B (14 sentences)</button>
+<button name="benchmark" value="luna-protocol-neutral-v10-windowed-first-dance">Run v10 windowed First Dance</button>
+<button name="benchmark" value="luna-protocol-neutral-v10-windowed-old-letter">Run v10 windowed Old Letter</button>
+<button name="benchmark" value="luna-protocol-neutral-v10-windowed-reading-room">Run v10 windowed Reading Room</button>
+<button name="benchmark" value="luna-protocol-neutral-v10-windowed-practice-drill">Run v10 windowed Practice Drill</button></form></main></html>`;
 
 export async function handleWholeStoryLunaStudy(request, env, { config, session, reverify, runComparison, analysisFetcher = fetch }) {
   if (!session.isFounder) return failure("invalid_session", 403, "Founder access required.");
@@ -379,44 +398,47 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
   const expired = () => failure("invalid_session", 403, "Your app session has ended.");
   const sessionEnded = () => request.signal.aborted || Date.now() >= session.expiresAt;
   if (sessionEnded()) return expired();
-  if (read) {
-    const quota = request.method === "GET" ? await readNeutralQuota(env.SCENE_ANALYSIS_BUDGET, request.signal).catch(() => null) : null;
-    return sessionEnded() ? expired() : new Response(wholeStoryLunaForm(quota), { headers: { "Content-Type": "text/html; charset=utf-8" } });
-  }
+  if (read) return new Response(WHOLE_STORY_LUNA_FORM, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 
   const startedAt = Date.now();
-  let neutralStudy;
+  let neutralStudy, runId;
   try {
     const bodyDeadline = AbortSignal.timeout(Math.max(0, Math.min(4000, session.expiresAt - startedAt)));
-    const body = await readBoundedText(request, 64, AbortSignal.any([request.signal, bodyDeadline]),
+    const body = await readBoundedText(request, 128, AbortSignal.any([request.signal, bodyDeadline]),
       "application/x-www-form-urlencoded");
-    neutralStudy = NEUTRAL_LUNA_PROTOCOL_FORMS.get(body);
-    if (!neutralStudy && body !== "benchmark=whole-story-luna-v1") throw new TypeError("Invalid study form.");
+    if (body !== "benchmark=whole-story-luna-v1") {
+      const fields = new URLSearchParams(body);
+      neutralStudy = NEUTRAL_LUNA_PROTOCOL_FORMS.get(`benchmark=${fields.get("benchmark")}`);
+      runId = fields.get("runId") || null;
+      if (!neutralStudy || fields.getAll("benchmark").length !== 1 || fields.getAll("runId").length > 1 ||
+          [...fields.keys()].some(key => key !== "benchmark" && key !== "runId") || runId && !studyId(runId)) {
+        throw new TypeError("Invalid study form.");
+      }
+    }
   } catch (error) {
     if (sessionEnded()) return expired();
     return failure("invalid_request", error instanceof RangeError ? 413 : 400, "Use the study button.");
   }
   const apiKey = env.OPENAI_API_KEY, budget = env.SCENE_ANALYSIS_BUDGET;
-  if (!analysisConfigured(apiKey, budget)) return providerUnavailable(session, "benchmark_unavailable");
+  if (neutralStudy && !runId ? !providerKeyConfigured(apiKey) : !analysisConfigured(apiKey, budget)) {
+    return providerUnavailable(session, "benchmark_unavailable");
+  }
 
   const neutralShard = neutralStudy && NEUTRAL_LUNA_PROTOCOL_SHARDS[neutralStudy.shard];
-  const maxAttempts = neutralStudy ? Math.min(NEUTRAL_LUNA_PROTOCOL_QUOTA.perRun,
-    neutralStudy.discoveryWindows + 2 * neutralShard.transitionLimit + NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS * neutralShard.fixtureIds.length) :
+  const maxCueChecks = neutralStudy?.maxCueChecks ?? NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS;
+  const maxAttempts = neutralStudy ? Math.min(NEUTRAL_SHARD_ATTEMPTS,
+    neutralStudy.discoveryWindows + 2 * neutralShard.transitionLimit + maxCueChecks * neutralShard.fixtureIds.length) :
     WHOLE_STORY_LUNA_ATTEMPTS;
   const suite = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_SUITE : WHOLE_STORY_LUNA_STUDY_SUITE;
   const duration = neutralStudy ? NEUTRAL_LUNA_PROTOCOL_TIMEOUT_MS : WHOLE_STORY_LUNA_TIMEOUT_MS;
   const stop = new AbortController();
   const timeout = AbortSignal.timeout(Math.max(0, Math.min(startedAt + duration, session.expiresAt) - Date.now()));
   const signal = AbortSignal.any([request.signal, timeout, stop.signal]);
-  let attempts = 0, dispatched = 0, blocked, abort, hostedTermination, hostedQuotaCutoff;
+  let attempts = 0, dispatched = 0, blocked, abort, transportLimited = false;
   const deny = response => {
     blocked ??= response;
     stop.abort();
     throw new Error("Study blocked.");
-  };
-  const limitQuota = (reason, response) => {
-    if (!neutralStudy || dispatched === 0) deny(response);
-    hostedTermination ??= reason;
   };
   const authorized = async () => {
     signal.throwIfAborted();
@@ -425,12 +447,7 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
     return renewed?.isFounder === true && renewed.subject === session.subject &&
       Date.now() < renewed.expiresAt && !sessionEnded();
   };
-  const fetchImpl = async (target, options, onQuota = () => {}) => {
-    const checkQuota = () => {
-      if (!hostedTermination) return;
-      onQuota();
-      throw new Error("Study quota reached.");
-    };
+  const fetchImpl = async (target, options) => {
     const attemptSignal = options?.signal ? AbortSignal.any([signal, options.signal]) : signal;
     attemptSignal.throwIfAborted();
     if (target !== API_URL || options?.method !== "POST" || typeof options.body !== "string" ||
@@ -439,32 +456,24 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
     }
     if (!await authorized()) deny(expired());
     attemptSignal.throwIfAborted();
-    checkQuota();
     if (attempts >= maxAttempts) {
-      limitQuota("attempt-cap", failure("rate_limited", 429, "This study reached its attempt limit."));
-      checkQuota();
+      if (!neutralStudy || dispatched === 0) deny(failure("rate_limited", 429, "This study reached its transport limit."));
+      transportLimited = true;
+      throw new Error("Study transport limit reached.");
     }
     attempts++;
-    let permission;
-    try { permission = await reserveBudget(budget, config, session, suite, attemptSignal); }
-    catch {
-      attemptSignal.throwIfAborted();
-      deny(providerUnavailable(session, "budget_unavailable"));
-    }
-    if (permission.status === 429) {
-      if (neutralStudy) {
-        const window = permission.headers.get("X-Scene-Quota-Window");
-        const retry = permission.headers.get("Retry-After");
-        hostedQuotaCutoff = { window: ["day", "month"].includes(window) ? window : null,
-          retryAfterSeconds: retry && /^\d{1,7}$/.test(retry) ? Number(retry) : null };
+    if (!neutralStudy) {
+      let permission;
+      try { permission = await reserveBudget(budget, config, session, suite, attemptSignal); }
+      catch {
+        attemptSignal.throwIfAborted();
+        deny(providerUnavailable(session, "budget_unavailable"));
       }
-      limitQuota("durable-quota", budgetLimited(permission));
-      checkQuota();
+      if (permission.status === 429) deny(budgetLimited(permission));
+      if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
     }
-    if (permission.status !== 204) deny(providerUnavailable(session, "budget_unavailable"));
     if (sessionEnded()) deny(expired());
     attemptSignal.throwIfAborted();
-    checkQuota();
     dispatched++;
     return analysisFetcher(API_URL, {
       method: "POST", signal: attemptSignal, redirect: "manual",
@@ -480,39 +489,34 @@ export async function handleWholeStoryLunaStudy(request, env, { config, session,
     });
     const run = async () => {
       if (neutralStudy) {
-        const quota = await readNeutralQuota(budget, signal).catch(() => null);
-        signal.throwIfAborted();
-        if (!quota) return providerUnavailable(session, "budget_unavailable");
-        const { remainingToday, remainingThisMonth, dayRetryAfterSeconds, monthRetryAfterSeconds } = quota;
-        if (remainingToday < maxAttempts || remainingThisMonth < maxAttempts) {
-          const monthLimited = remainingThisMonth < maxAttempts;
-          const retryAfterSeconds = monthLimited ? monthRetryAfterSeconds : dayRetryAfterSeconds;
-          return Response.json({ code: "rate_limited", error: "The founder quota has insufficient room for the full shard.",
-            requiredAttempts: maxAttempts, remainingToday, remainingThisMonth, window: monthLimited ? "month" : "day", retryAfterSeconds },
-          { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } });
+        const group = runId ? { reader: await budgetReader(config, session), runId, shardId: crypto.randomUUID() } : null;
+        let shardCapMicros = NEUTRAL_SHARD_CAP_MICROS;
+        if (group) {
+          const reservation = await neutralSpend(budget, { ...group, operation: "reserve" }, signal).catch(() => null);
+          signal.throwIfAborted();
+          if (reservation?.status === 429) return failure("spend_cap", 429, "This benchmark run reached its estimated spend cap.");
+          if (reservation?.status === 409) return failure("run_conflict", 409, "Use a new shared run ID.");
+          if (reservation?.status !== 200) return providerUnavailable(session, "budget_unavailable");
+          shardCapMicros = reservation.shardCapMicros;
         }
         const [{ runLunaProtocolNeutral }, { createLunaProtocolProvider }] = await Promise.all([
           import("../../scripts/lib/luna-protocol-neutral.mjs"), import("../../scripts/lib/luna-protocol-provider.mjs"),
         ]);
-        const provider = async (payload, options) => {
-          if (hostedTermination) return { status: "not-dispatched" };
-          let quotaDenied = false;
-          const request = createLunaProtocolProvider({ apiKey, fetchImpl: (target, requestOptions) =>
-            fetchImpl(target, requestOptions, () => { quotaDenied = true; }) });
-          const result = await request(payload, options);
-          return quotaDenied ? { status: "not-dispatched" } : result;
-        };
+        const provider = createLunaProtocolProvider({ apiKey, fetchImpl });
         const { arm, shard } = neutralStudy;
         const result = await runLunaProtocolNeutral({ mode: "live", arm, ...neutralShard,
-          provider, signal, maxAttempts, maxCueChecks: NEUTRAL_LUNA_PROTOCOL_CUE_CHECKS });
+          provider, signal, maxAttempts, maxCueChecks, maxMicros: shardCapMicros });
+        const usedMicros = result.budget.chargedMicros + result.budget.reservedMicros;
+        const settlement = group ? await neutralSpend(budget, { ...group, operation: "settle", usedMicros }, signal).catch(() => null) : null;
         if (!await authorized()) return expired();
         return Response.json({ ...result, hostedStudyVersion: suite, hostedShard: shard,
-          hostedQuota: NEUTRAL_LUNA_PROTOCOL_QUOTA,
-          hostedQuotaPreflight: { requiredAttempts: maxAttempts, remainingToday, remainingThisMonth },
-          ...(hostedQuotaCutoff ? { hostedQuotaCutoff } : {}),
+          hostedSpend: { shardCapMicros, capMicros: group ? NEUTRAL_RUN_CAP_MICROS : shardCapMicros,
+            ...(group ? { runId, settled: settlement?.status === 200,
+              ...(settlement?.status === 200 ? { remainingMicros: settlement.remainingMicros, expiresAt: settlement.expiresAt } : {}) } : {}) },
+          hostedTransport: { maxProviderCalls: maxAttempts },
           externalCalls: dispatched,
-          quotaLimited: hostedTermination !== undefined, hostedTermination: hostedTermination ??
-            (result.providerStops.all ? "provider-terminal" : Object.keys(result.providerStops).length ? "provider-mode-terminal" : "completed") });
+          hostedTermination: transportLimited ? "transport-cap" : result.budget.spendLimited ? "spend-cap" :
+            result.providerStops.all ? "provider-terminal" : Object.keys(result.providerStops).length ? "provider-mode-terminal" : "completed" });
       }
       const result = await runComparison({ apiKey, fetchImpl, signal, maxUsd: WHOLE_STORY_LUNA_MAX_USD, maxAttempts });
       if (!await authorized()) return expired();
@@ -690,45 +694,79 @@ function utcQuotaEnds(now) {
   return { dayEnds: (Math.floor(now / DAY) + 1) * DAY, monthEnds: Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) };
 }
 
-function neutralQuotaWindows({ dayEnds, monthEnds }) {
-  const { perUtcDay, perUtcMonth } = NEUTRAL_LUNA_PROTOCOL_QUOTA;
-  return [
-    { key: `study:${NEUTRAL_LUNA_PROTOCOL_SUITE}`, expires: dayEnds, limit: perUtcDay },
-    { key: "founder-neutral-day", expires: dayEnds, limit: perUtcDay },
-    { key: "founder-neutral-month", expires: monthEnds, limit: perUtcMonth },
-  ];
+function pruneNeutralSpend(sql, now) {
+  sql.exec("DELETE FROM neutral_spend_shard WHERE run_id IN (SELECT id FROM neutral_spend_run WHERE retain_until<=?)", now);
+  sql.exec("DELETE FROM neutral_spend_run WHERE retain_until<=?", now);
 }
 
-/** Deployment-wide spending gate. Stores only expiring counts for UTC windows. */
+/** Stores expiring reader allowances and per-run research spend holds. */
 export class SceneAnalysisBudget {
   constructor(ctx) {
     this.storage = ctx.storage;
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS quota (key TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, count INTEGER NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS neutral_spend_run (id TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL, retain_until INTEGER NOT NULL, allocated_micros INTEGER NOT NULL DEFAULT 0, breached INTEGER NOT NULL DEFAULT 0)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS neutral_spend_shard (run_id TEXT NOT NULL, id TEXT NOT NULL, reserve_micros INTEGER NOT NULL, used_micros INTEGER, PRIMARY KEY (run_id,id))");
     initializeCorpusBudget(this.sql);
   }
 
   async scheduleExpiry() {
     const quotaNext = this.sql.exec("SELECT MIN(expires_at) AS next FROM quota").one().next;
     const corpusNext = corpusBudgetExpiry(this.sql);
-    const next = [quotaNext, corpusNext].filter(Number.isSafeInteger).sort((a,b)=>a-b)[0];
+    const neutralNext = this.sql.exec("SELECT MIN(retain_until) AS next FROM neutral_spend_run").one().next;
+    const next = [quotaNext, corpusNext, neutralNext].filter(Number.isSafeInteger).sort((a,b)=>a-b)[0];
     if (Number.isSafeInteger(next)) await this.storage.setAlarm(next);
+  }
+
+  async handleNeutralSpend(request) {
+    const value = await readBoundedJson(request, 512, AbortSignal.timeout(3000));
+    const { operation, reader, runId, shardId, usedMicros } = value ?? {};
+    const fields = ["operation", "reader", "runId", "shardId"];
+    if (operation === "settle") fields.push("usedMicros");
+    if (!exactObject(value, fields) || !["reserve", "settle"].includes(operation) ||
+        typeof reader !== "string" || !/^[a-f0-9]{64}$/.test(reader) || !studyId(runId) || !studyId(shardId) ||
+        operation === "settle" && (!Number.isSafeInteger(usedMicros) || usedMicros < 0)) {
+      return new Response(null, { status: 400 });
+    }
+    const now = Date.now();
+    const result = this.storage.transactionSync(() => {
+      pruneNeutralSpend(this.sql, now);
+      let run = this.sql.exec("SELECT * FROM neutral_spend_run WHERE id=?", runId).toArray()[0];
+      if (run && run.owner !== reader || !run && operation === "settle") return new Response(null, { status: 409 });
+      if (!run) {
+        run = { expires_at: now + NEUTRAL_RUN_LIFETIME_MS, allocated_micros: 0, breached: 0 };
+        this.sql.exec("INSERT INTO neutral_spend_run (id,owner,expires_at,retain_until) VALUES (?,?,?,?)",
+          runId, reader, run.expires_at, now + NEUTRAL_RUN_RETENTION_MS);
+      }
+      const reply = shardCapMicros => Response.json({ shardCapMicros, expiresAt: run.expires_at,
+        remainingMicros: run.breached ? 0 : Math.max(0, NEUTRAL_RUN_CAP_MICROS - run.allocated_micros) });
+      const shard = this.sql.exec("SELECT * FROM neutral_spend_shard WHERE run_id=? AND id=?", runId, shardId).toArray()[0];
+      let reserveMicros = shard?.reserve_micros;
+      if (operation === "reserve") {
+        if (shard || run.expires_at <= now) return new Response(null, { status: 409 });
+        reserveMicros = Math.min(NEUTRAL_SHARD_CAP_MICROS, NEUTRAL_RUN_CAP_MICROS - run.allocated_micros);
+        if (run.breached || reserveMicros <= 0) return new Response(null, { status: 429 });
+        this.sql.exec("INSERT INTO neutral_spend_shard (run_id,id,reserve_micros) VALUES (?,?,?)", runId, shardId, reserveMicros);
+        run.allocated_micros += reserveMicros;
+      } else {
+        if (!shard || shard.used_micros !== null && shard.used_micros !== usedMicros) return new Response(null, { status: 409 });
+        if (shard.used_micros !== null) return reply(shard.reserve_micros);
+        this.sql.exec("UPDATE neutral_spend_shard SET used_micros=? WHERE run_id=? AND id=?", usedMicros, runId, shardId);
+        if (usedMicros > shard.reserve_micros) run.breached = 1;
+        run.allocated_micros = Math.min(NEUTRAL_RUN_CAP_MICROS, run.allocated_micros - shard.reserve_micros + usedMicros);
+      }
+      this.sql.exec("UPDATE neutral_spend_run SET allocated_micros=?,breached=? WHERE id=?", run.allocated_micros, run.breached, runId);
+      return reply(reserveMicros);
+    });
+    await this.scheduleExpiry();
+    return result;
   }
 
   async fetch(request) {
     const corpusResponse = await handleCorpusBudget(request, this);
     if (corpusResponse) return corpusResponse;
     try {
-      if (request.url === NEUTRAL_QUOTA_URL && request.method === "GET") {
-        const now = Date.now();
-        const ends = utcQuotaEnds(now);
-        const [suite, day, month] = neutralQuotaWindows(ends).map(({ key, limit }) => {
-          const count = this.sql.exec("SELECT count FROM quota WHERE key=? AND expires_at>?", key, now).toArray()[0]?.count ?? 0;
-          return Math.max(0, limit - count);
-        });
-        return Response.json({ remainingToday: Math.min(suite, day), remainingThisMonth: month,
-          dayRetryAfterSeconds: Math.ceil((ends.dayEnds - now) / 1000), monthRetryAfterSeconds: Math.ceil((ends.monthEnds - now) / 1000) });
-      }
+      if (request.url === NEUTRAL_SPEND_URL && request.method === "POST") return await this.handleNeutralSpend(request);
       if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
       const suite = exactObject(value, ["reader", "suite"]) ? value.suite : null;
@@ -738,7 +776,7 @@ export class SceneAnalysisBudget {
       }
       const now = Date.now();
       const { dayEnds, monthEnds } = utcQuotaEnds(now);
-      const windows = suite === NEUTRAL_LUNA_PROTOCOL_SUITE ? neutralQuotaWindows({ dayEnds, monthEnds }) : [
+      const windows = [
         suiteLimit === null ? { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 } :
           { key: `study:${suite}`, expires: dayEnds, limit: suiteLimit },
         { key: "global-day", expires: dayEnds, limit: 100 },
@@ -758,9 +796,6 @@ export class SceneAnalysisBudget {
       if (!limited.length) return new Response(null, { status: 204 });
       const retryAt = Math.max(...limited.map(window => window.expires));
       const headers = { "Retry-After": String(Math.ceil((retryAt - now) / 1000)) };
-      if (suite === NEUTRAL_LUNA_PROTOCOL_SUITE) {
-        headers["X-Scene-Quota-Window"] = limited.some(({ key }) => key === "founder-neutral-month") ? "month" : "day";
-      }
       return new Response(null, { status: 429, headers });
     } catch { return new Response(null, { status: 503 }); }
   }
@@ -768,6 +803,7 @@ export class SceneAnalysisBudget {
   async alarm() {
     this.sql.exec("DELETE FROM quota WHERE expires_at<=?", Date.now());
     pruneCorpusBudget(this.sql, Date.now());
+    pruneNeutralSpend(this.sql, Date.now());
     await this.scheduleExpiry();
   }
 }

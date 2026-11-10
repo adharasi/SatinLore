@@ -4,7 +4,7 @@ import {scoreBeatContinuityCorpus} from "./beat-continuity-evaluation.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_MODEL, LUNA_PROTOCOL_TARGET_FAILURES,
   LUNA_PROTOCOL_TARGET_NORMALIZATIONS, LUNA_PROTOCOL_TRANSITION_FACTS}
   from "./luna-protocol-provider.mjs";
-import {createLunaShadowBudget, runLunaProtocolShadow} from "./luna-protocol-shadow.mjs";
+import {createLunaShadowBudget, MAX_SHADOW_MICROS, runLunaProtocolShadow} from "./luna-protocol-shadow.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "./whole-story-context-planning.mjs";
 
 const fixtureVersion = "neutral-stories-v1";
@@ -12,6 +12,12 @@ const fixtureDigest = "40cd3c8f193ba7fb44b75234a1917b577ec5d742bceb532ea634cd064
 const referenceScope = "Four pinned development fixtures for smoke checks. Release qualification requires an independent, frozen corpus.";
 const behaviorReferenceVersion = "neutral-behavior-v1";
 const behaviorReferenceDigest = "8fb2b416829e9cbc542bf03738b4da3563cdc668256a15b04f13b459c07b71f9";
+const startReferenceVersion = "neutral-enacted-start-v1";
+const startReferenceDigest = "4bd4277b4858a052cdb73c25b7cc9f9e67d975ee3dcacb6554ce7adc22d704cf";
+const startReference = {"first-dance": {4: "onset", 10: "restart"}, "old-letter": {7: "onset"},
+  "reading-room": {1: "onset", 8: "restart"}, "practice-drill": {}};
+const startTypes = ["onset", "restart"];
+const typedStartStages = ["discovery", "prefix", "transition", "accepted", "applied"];
 const cueKinds = ["narrativeBuildup", "directEnacted", "continuation"];
 const behaviorReference = {
   "first-dance": {
@@ -36,15 +42,17 @@ const activeProfiles = new Set(["Undertone", "Gradual build", "Deepening build",
   "Deep sustain", "Crest approach", "Crest", "Taper", "Recovery", "Hold"]);
 const activeCuePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
 const behaviorStages = ["discovery", "prefix", "accepted", "applied"];
-const discrepancyVersion = "neutral-discrepancies-v1";
+const discrepancyVersion = "neutral-discrepancies-v2";
 const semanticContractFailures = new Set(["status-effect", "target-evidence", "transition-fact", "transition-frame", "cue-action",
   "phase-action", "transition-action", "fact-phase", "fact-action", "fact-frame", "scope-id", "prior-anchor", "attested-evidence"]);
 const structuralResponseFailures = new Set(["output-schema", "response-envelope", "response-body"]);
 const guardCauses = {"cue-restart-required": "refractory-gate", "unattested-scope": "scope-unattested",
   "cue-stale-evidence": "stale-evidence", "cue-boundary-suppressed": "boundary-gate",
   "cue-frame-ineligible": "wrong-frame", "cue-target-uncited": "target-uncited"};
-const recoveryReasons = new Set(["restart-state", "typed-start", "romantic-context", "discovery-disagreement", "contract-repair"]);
-const recoveryGuards = new Set(["recovery-start-unproved", "recovery-buildup-unlinked"]);
+const recoveryReasons = new Set(["restart-state", "typed-start", "romantic-context", "discovery-disagreement", "contract-repair",
+  "opening-buildup", "adjacent-start"]);
+const recoveryGuards = new Set(["recovery-start-unproved", "recovery-buildup-unlinked", "recovery-continuation-unlinked"]);
+const recoveryCorrections = new Set(["quiet-opening", "linked-continuation"]);
 const normalizationReasons = new Set(LUNA_PROTOCOL_TARGET_NORMALIZATIONS);
 const cueActions = {narrativeBuildup: ["anticipation"], directEnacted: ["contact", "change"], continuation: ["continuation"]};
 const unknownCueKinds = Object.freeze(Object.fromEntries(cueKinds.map(kind => [kind, null])));
@@ -82,6 +90,7 @@ const natural = value => Number.isSafeInteger(value) && value >= 0;
 const disposition = (status, fallback = "unavailable") => dispositions.has(status) ? status : fallback;
 const validIds = (ids, limit) => Array.isArray(ids) && ids.every(id => natural(id) && id < limit) ? [...ids] : null;
 const rosterDigest = works => createHash("sha256").update(JSON.stringify(works.map(({id, sourceSha256}) => ({id, sourceSha256})))).digest("hex");
+const expectedStart = (work, id) => startReference[work][id] ?? "none";
 
 function prepareFixtures(now) {
   if (createHash("sha256").update(JSON.stringify(wholeStoryAnnotationFixtures)).digest("hex") !== fixtureDigest) {
@@ -89,6 +98,9 @@ function prepareFixtures(now) {
   }
   if (createHash("sha256").update(JSON.stringify([fixtureDigest, behaviorReference])).digest("hex") !== behaviorReferenceDigest) {
     throw new Error("The built-in neutral behavior reference has changed.");
+  }
+  if (createHash("sha256").update(JSON.stringify([fixtureDigest, startReference])).digest("hex") !== startReferenceDigest) {
+    throw new Error("The built-in neutral enacted start reference has changed.");
   }
   return wholeStoryAnnotationFixtures.map(({id, paragraphs, phases, events, evidence}) => {
     const text = paragraphs.join("\n\n");
@@ -108,6 +120,7 @@ function prepareFixtures(now) {
       return {id: unitId, paragraph, unitSha256: digest, narrativePhase, transition, cue: narrativePhase !== "quiet",
         frame: "uncertain", depiction: "unknown", structural: false, legacyCue: narrativePhase !== "quiet",
         legacyCueKnown: true, hardAction: transition === "hard-stop", protectedReference: false,
+        enactedStart: expectedStart(id, unitId),
         behavior: {...Object.fromEntries(cueKinds.map(kind => [kind, behavior[kind].includes(unitId)])),
           playbackGate: behavior.playbackGate[unitId]}};
     })};
@@ -116,7 +129,7 @@ function prepareFixtures(now) {
 }
 
 export function getNeutralProtocolReference() {
-  return {fixtureVersion, fixtureDigest, behaviorReferenceVersion, behaviorReferenceDigest,
+  return {fixtureVersion, fixtureDigest, behaviorReferenceVersion, behaviorReferenceDigest, startReferenceVersion, startReferenceDigest,
     works: prepareFixtures(0).map(({reference}) => reference)};
 }
 
@@ -239,7 +252,7 @@ function appliedTransitionOrigin(row) {
   if (!typedTransitions.has(row.appliedTransition) || row.appliedTransition === "unknown") return "unobserved";
   if (row.continuityGuard === "elapsed-time-gap") return "compiler-continuity-guard";
   if (row.playbackDisposition === "duplicate-frame-entry") return "compiler-frame-scope";
-  const fromRecheck = row.cueRecovered || row.cueContractRepaired || (row.cueRecovery?.status === "verified" &&
+  const fromRecheck = row.cueRecovered || row.cueContractRepaired || recoveryCorrections.has(row.cueRecoveryCorrection) || (row.cueRecovery?.status === "verified" &&
     row.cueRecovery.transition === "hard-stop" && row.appliedTransition === "hard-stop" &&
     row.primaryPrefix?.transition !== "hard-stop");
   if (row.transitionFlag === "protective-transition-conflict" && row.prefixVerified) {
@@ -325,6 +338,7 @@ function stageDiagnostic(gold, row, stage, attempt, referenceCueEvidenceIds, siz
       primaryFailure: targetFailureReasons.has(row.primaryFailure) || failureReasons.has(row.primaryFailure) ? row.primaryFailure : null,
       selectionReason: recoveryReasons.has(row.cueRecoveryReason) ? row.cueRecoveryReason : null,
       applicationGuard: recoveryGuards.has(row.cueRecoveryGuard) ? row.cueRecoveryGuard : null,
+      correction: recoveryCorrections.has(row.cueRecoveryCorrection) ? row.cueRecoveryCorrection : null,
       action: actionLabels.has(row.cueRecovery?.action) ? row.cueRecovery.action : null} : {})};
 }
 
@@ -385,7 +399,7 @@ function diagnosticWork(fixture, run) {
     const primaryCue = observedStatuses.has(rawCue.status) ? rawCue.cue : undefined;
     return {id: gold.id, unitSha256: gold.unitSha256, paragraph: gold.paragraph,
       expected: {narrativePhase: gold.narrativePhase, cue: gold.cue, transition: gold.transition, cueEvidenceIds,
-        behavior: gold.behavior},
+        behavior: gold.behavior, enactedStart: gold.enactedStart},
       behavior: behaviorDiagnostic(row, gold.behavior),
       pipelineFlags: [row.playbackDisposition, row.transitionFlag, row.cueGuard].filter(flag => pipelineFlags.has(flag)),
       applied: {status: applied.status, cue: applied.cue ?? null, transition: applied.transition ?? null, transitionOrigin,
@@ -422,12 +436,91 @@ function receiptCause(pass) {
 }
 
 const guardCause = row => guardCauses[Object.keys(guardCauses).find(flag => row.pipelineFlags?.includes(flag))];
-const recoveryApplied = row => row.cueRecovery?.recovered || row.cueRecovery?.contractRepaired ||
+const recoveryApplied = row => row.cueRecovery?.recovered || row.cueRecovery?.contractRepaired || recoveryCorrections.has(row.cueRecovery?.correction) ||
   (row.cueRecovery?.status === "verified" && row.cueRecovery.labels?.transition === "hard-stop" &&
     ["cue-check", "protected-cue-check", "transition-and-cue-check-agree"].includes(row.applied?.transitionOrigin));
 const cueSource = (row, stage) => stage === "discovery" || stage === "prefix" ? row[stage] :
   recoveryApplied(row) ? row.cueRecovery : row.prefix;
 const hasCueKind = labels => cueKinds.some(kind => labels?.[kind] === true);
+const observedStart = label => !typedTransitions.has(label) || label === "unknown" ? null :
+  startTypes.includes(label) ? label : "none";
+
+function typedStartOf(row, stage) {
+  const pass = stage === "transition" || stage === "applied" ? row[stage] : cueSource(row, stage);
+  return observedStatuses.has(pass?.status) ? observedStart(pass.transition ?? pass.labels?.transition) : null;
+}
+
+function enactedPhaseStartOf(row, stage) {
+  const enacted = row.behavior?.[stage]?.directEnacted;
+  if (typeof enacted !== "boolean") return null;
+  const phase = stage === "applied" ? row.compiler?.phase : cueSource(row, stage)?.labels?.narrativePhase;
+  if (enacted && !phaseLabels.has(phase)) return null;
+  return enacted && phase === "onset" ? "onset" : enacted && phase === "rebuild" ? "restart" : "none";
+}
+
+const startLanes = {typed: {stages: typedStartStages, predict: typedStartOf},
+  enactedPhase: {stages: behaviorStages, predict: enactedPhaseStartOf}};
+
+function adjacentStartShifts(diagnostics) {
+  const shifts = [];
+  for (const {id: work, units} of diagnostics) {
+    for (const [lane, {stages, predict}] of Object.entries(startLanes)) {
+      for (const stage of stages) {
+        const missed = new Set(units.filter(row => {
+          const expected = expectedStart(work, row.id), actual = predict(row, stage);
+          return expected !== "none" && actual !== null && actual !== expected;
+        }).map(row => row.id));
+        for (const row of units) {
+          const type = predict(row, stage);
+          if (!startTypes.includes(type) || type === expectedStart(work, row.id)) continue;
+          const expectedUnit = [row.id - 1, row.id + 1].find(id => missed.has(id) && expectedStart(work, id) === type);
+          if (expectedUnit === undefined) continue;
+          missed.delete(expectedUnit);
+          const onContinuationTarget = behaviorReference[work].continuation.includes(row.id);
+          const continuation = row.behavior?.[stage]?.continuation;
+          shifts.push({work, lane, stage, type, expectedUnit, predictedUnit: row.id,
+            direction: row.id < expectedUnit ? "early" : "late", onContinuationTarget,
+            continuationDisplaced: onContinuationTarget && typeof continuation !== "boolean" ? null :
+              onContinuationTarget && !continuation});
+        }
+      }
+    }
+  }
+  return shifts;
+}
+
+function startTimingReport(diagnostics, adjacentShifts) {
+  const summarize = works => Object.fromEntries(Object.entries(startLanes).map(([lane, {stages, predict}]) =>
+    [lane, Object.fromEntries(stages.map(stage => {
+      const rows = works.flatMap(({id, units}) => units.map(row => ({expected: expectedStart(id, row.id), actual: predict(row, stage)})));
+      const measure = types => {
+        const referencePositives = rows.filter(row => types.includes(row.expected)).length;
+        const matched = rows.filter(row => types.includes(row.expected) && row.actual === row.expected).length;
+        const extra = rows.filter(row => types.includes(row.actual) && row.actual !== row.expected).length;
+        return {referencePositives, matched, missed: referencePositives - matched, extra,
+          precision: ratio(matched, matched + extra), recall: ratio(matched, referencePositives)};
+      };
+      return [stage, {targets: rows.length, observedTargets: rows.filter(row => row.actual !== null).length,
+        ...measure(startTypes), byType: Object.fromEntries(startTypes.map(type => [type, measure([type])]))}];
+    }))]));
+  return {...summarize(diagnostics), adjacentShifts,
+    definition: "Typed starts use explicit onset and restart enum values. Enacted phase starts require a fresh action and matching phase. Adjacent shifts are diagnostic pairs and retain both exact errors.",
+    works: diagnostics.map(work => ({id: work.id, ...summarize([work])}))};
+}
+
+function startDiscrepancyCause(row, stage, expected, actual) {
+  if (stage === "applied" && typedStartOf(row, "transition") === expected) return guardCause(row) ?? "transition-merge";
+  if (actual !== null && actual !== "none" && expected === "none") {
+    return row.expected.behavior?.narrativeBuildup ? "anticipation-tagged-as-start" : "model-false-positive";
+  }
+  const fromTransition = stage === "transition" || stage === "applied" &&
+    ["transition-pass", "both-passes-agree", "transition-and-cue-check-agree", "unobserved"].includes(row.applied?.transitionOrigin);
+  const pass = fromTransition ? row.transition : cueSource(row, stage);
+  const receipt = receiptCause(pass);
+  if (receipt) return receipt;
+  if (actual === "none") return pass.status === "neutral" ? "model-neutral" : "typed-start-omitted";
+  return actual === null ? "model-unresolved" : "wrong-start-type";
+}
 
 function cueDiscrepancyCause(row, stage, kind, expected) {
   const pass = cueSource(row, stage);
@@ -487,22 +580,27 @@ function playbackDiscrepancyCause(row, expected, actual) {
   return actual === "reset" ? "scope-reset" : "compiler-gate";
 }
 
-function discrepancyReport(diagnostics) {
+function discrepancyReport(diagnostics, shifts = adjacentStartShifts(diagnostics)) {
   const cases = [];
   for (const {id: work, units} of diagnostics) {
     for (const row of units) {
-      const add = (stage, dimension, expected, actual, cause, negative = false) => {
+      const add = (stage, dimension, expected, actual, cause, negative = false, relatedUnit) => {
         if (expected === actual || expected === negative && actual === null) return;
         cases.push({work, unit: row.id, stage, dimension, expected, actual,
           outcome: actual === null ? "unobserved" : expected === negative ? "extra" : actual === negative ? "missed" : "mismatch",
-          cause: cause()});
+          cause: cause(), ...(relatedUnit === undefined ? {} : {relatedUnit})});
       };
       if (row.expected.behavior && row.behavior) {
         for (const stage of behaviorStages) {
           for (const kind of cueKinds) {
             const expected = row.expected.behavior[kind] === true && (stage !== "applied" || row.expected.behavior.playbackGate === "active");
             const actual = typeof row.behavior[stage]?.[kind] === "boolean" ? row.behavior[stage][kind] : null;
-            add(stage, kind, expected, actual, () => cueDiscrepancyCause(row, stage, kind, expected));
+            const shift = shifts.find(shift => shift.work === work && shift.lane === "enactedPhase" && shift.stage === stage &&
+              (kind === "directEnacted" && [shift.expectedUnit, shift.predictedUnit].includes(row.id) ||
+              kind === "continuation" && shift.continuationDisplaced && shift.predictedUnit === row.id));
+            add(stage, kind, expected, actual, () => !shift ? cueDiscrepancyCause(row, stage, kind, expected) :
+              kind === "continuation" ? "adjacent-start-displaced-continuation" : "adjacent-shifted-start", false,
+            shift && (shift.expectedUnit === row.id ? shift.predictedUnit : shift.expectedUnit));
           }
         }
         const gate = scoreNeutralPlaybackGate(row.expected.behavior.playbackGate, row.compiler?.pattern);
@@ -521,6 +619,28 @@ function discrepancyReport(diagnostics) {
         if (expected !== null) add(stage, "typedBoundary", expected, actual,
           () => boundaryDiscrepancyCause(row, stage, expected, actual), "none");
       }
+      const start = expectedStart(work, row.id);
+      for (const stage of typedStartStages) {
+        const actual = typedStartOf(row, stage);
+        const shift = shifts.find(shift => shift.work === work && shift.lane === "typed" && shift.stage === stage &&
+          [shift.expectedUnit, shift.predictedUnit].includes(row.id));
+        add(stage, "typedStart", start, actual, () => shift ? "adjacent-shifted-start" :
+          startDiscrepancyCause(row, stage, start, actual), "none",
+        shift && (shift.expectedUnit === row.id ? shift.predictedUnit : shift.expectedUnit));
+      }
+      if (row.expected.behavior && row.behavior) {
+        for (const stage of behaviorStages) {
+          const actual = enactedPhaseStartOf(row, stage);
+          const shift = shifts.find(shift => shift.work === work && shift.lane === "enactedPhase" && shift.stage === stage &&
+            [shift.expectedUnit, shift.predictedUnit].includes(row.id));
+          add(stage, "enactedPhaseStart", start, actual, () => {
+            if (shift) return "adjacent-shifted-start";
+            if (start === "none" && row.expected.behavior.continuation) return "continuation-tagged-as-start";
+            if (start !== "none" && row.behavior[stage]?.directEnacted === true) return "wrong-start-phase";
+            return cueDiscrepancyCause(row, stage, "directEnacted", start !== "none");
+          }, "none", shift && (shift.expectedUnit === row.id ? shift.predictedUnit : shift.expectedUnit));
+        }
+      }
     }
   }
   return {version: discrepancyVersion, count: cases.length, byCause: countValues(cases, row => row.cause),
@@ -531,12 +651,23 @@ function discrepancyReport(diagnostics) {
 
 /** Attribute mismatches using only closed labels, receipts and numeric IDs in a pinned report. */
 export function replayNeutralDiscrepancies(report) {
+  return discrepancyReport(neutralReplayRows(report));
+}
+
+export function replayNeutralStartTiming(report) {
+  const diagnostics = neutralReplayRows(report);
+  return startTimingReport(diagnostics, adjacentStartShifts(diagnostics));
+}
+
+function neutralReplayRows(report) {
   if (report?.fixtureDigest !== fixtureDigest || report.sourceProseIncluded !== false || !Array.isArray(report.diagnostics) ||
+      (report.startReferenceVersion !== undefined && report.startReferenceVersion !== startReferenceVersion) ||
+      (report.startReferenceDigest !== undefined && report.startReferenceDigest !== startReferenceDigest) ||
       report.diagnostics.some(work => !Object.hasOwn(behaviorReference, work?.id) || !Array.isArray(work.units) ||
         work.units.some(row => !natural(row?.id) || row.id >= behaviorReference[work.id].playbackGate.length || !row.expected))) {
     throw new TypeError("Use a source-free pinned neutral report.");
   }
-  return discrepancyReport(report.diagnostics);
+  return report.diagnostics;
 }
 
 function behaviorReport(diagnostics) {
@@ -632,6 +763,7 @@ function cueRecoveryReport(diagnostics, usage) {
     readerCuesAfterRecovery: units.filter(row => row.cueRecovery.recovered && row.applied.readerCue === true).length,
     selectionReasons: countValues(units.filter(row => recoveryReasons.has(row.cueRecovery.selectionReason)), row => row.cueRecovery.selectionReason),
     applicationGuards: countValues(units.filter(row => recoveryGuards.has(row.cueRecovery.applicationGuard)), row => row.cueRecovery.applicationGuard),
+    corrections: countValues(units.filter(row => recoveryCorrections.has(row.cueRecovery.correction)), row => row.cueRecovery.correction),
     dispositions: Object.fromEntries(Object.entries(Object.groupBy(units, row => row.cueRecovery.status))
       .map(([status, rows]) => [status, rows.length])),
   });
@@ -651,7 +783,7 @@ function transitionAllocation(fixtures, limit) {
   return limits;
 }
 
-const invalidShards = "Use two complementary reports from the same neutral benchmark arm.";
+const invalidShards = "Use two to four complementary reports from the same neutral benchmark arm.";
 function sumFields(rows, fields) {
   return Object.fromEntries(fields.map(field => {
     if (!rows.every(row => natural(row?.[field]))) throw new TypeError(invalidShards);
@@ -689,13 +821,13 @@ function mergeUsage(rows) {
     failures: mergeCounts(rows.map(row => row.failures))};
 }
 
-/** Reassemble two exact, disjoint fixed-fixture reports without pooling percentages or replaying requests. */
+/** Reassemble exact, disjoint fixed-fixture reports without pooling percentages or replaying requests. */
 export function combineNeutralReports(reports) {
   const {works: pins} = getNeutralProtocolReference();
   const allIds = pins.map(({id}) => id);
   const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
   const keys = ["arm", "verificationContext", "measurement", "model", "rubricVersion", "segmentationVersion"];
-  if (!Array.isArray(reports) || reports.length !== 2 || reports.some(report => !report ||
+  if (!Array.isArray(reports) || reports.length < 2 || reports.length > allIds.length || reports.some(report => !report ||
       report.fixtureVersion !== fixtureVersion || report.fixtureDigest !== fixtureDigest || report.sourceProseIncluded !== false ||
       keys.some(key => !Object.hasOwn(report, key) || report[key] !== reports[0][key]) ||
       !Array.isArray(report.fixtureIds) || !report.fixtureIds.length || !Array.isArray(report.diagnostics) ||
@@ -710,6 +842,10 @@ export function combineNeutralReports(reports) {
       })) throw new TypeError(invalidShards);
   const canonical = rows => allIds.map(id => rows.find(row => row.id === id));
   const diagnostics = canonical([...workById.values()]);
+  const hasStartReference = reports.some(report => report.startReferenceVersion || report.startReferenceDigest || report.startTiming);
+  if (hasStartReference && reports.some(report => report.startReferenceVersion !== startReferenceVersion ||
+      report.startReferenceDigest !== startReferenceDigest || report.diagnostics.some(work =>
+        work.units.some(row => row.expected?.enactedStart !== expectedStart(work.id, row.id))))) throw new TypeError(invalidShards);
   const hasBehavior = reports.every(report => report.behaviorReferenceVersion === behaviorReferenceVersion &&
     report.behaviorReferenceDigest === behaviorReferenceDigest);
   if (!hasBehavior && reports.some(report => report.behavior || report.behaviorReferenceVersion || report.behaviorReferenceDigest) ||
@@ -758,6 +894,7 @@ export function combineNeutralReports(reports) {
   const [first] = reports;
   const planning = reports.map(report => report.planning);
   const budgets = reports.map(report => report.budget);
+  const shifts = adjacentStartShifts(diagnostics);
   return {...Object.fromEntries([...keys, "fixtureVersion", "fixtureDigest", "sourceProseIncluded", "independentCorpusBenchmark",
     "prefixPolicy", "cueDefinition", "appliedCueDefinition", "transitionDefinition", "boundaryDefinition",
     ...(hasRecovery ? ["readerCueDefinition"] : [])].map(key => [key, first[key]])),
@@ -768,25 +905,27 @@ export function combineNeutralReports(reports) {
       ...(hasRecovery ? ["cueCheckTargetLimit", "cueCheckAttempts"] : [])]),
     works: canonical(planning.flatMap(row => row.works))},
     budget: {...sumFields(budgets, ["capMicros", "attempts", "attemptedPayloadBytes", "reservedMicros", "chargedMicros", "unsettled"]),
-      reservationBreach: budgets.some(row => row.reservationBreach)},
+      reservationBreach: budgets.some(row => row.reservationBreach),
+      ...(budgets.some(row => Object.hasOwn(row, "spendLimited")) ? {spendLimited: budgets.some(row => row.spendLimited)} : {})},
     shards: reports.map(report => ({fixtureIds: report.fixtureIds, fixtureRosterSha256: report.fixtureRosterSha256,
       providerStops: report.providerStops})),
     ...Object.fromEntries(Object.keys(stageDimensions).filter(name => name !== "reader" || hasRecovery)
       .map(name => [name, stage(name)])),
     ...(hasRecovery ? {cueRecovery: cueRecoveryReport(diagnostics, mergeUsage(recoveryReports.map(row => row.usage)))} : {}),
     ...(hasBehavior ? {behaviorReferenceVersion, behaviorReferenceDigest, behavior: behaviorReport(diagnostics)} : {}),
-    discrepancies: discrepancyReport(diagnostics),
+    startReferenceVersion, startReferenceDigest, startTiming: startTimingReport(diagnostics, shifts),
+    discrepancies: discrepancyReport(diagnostics, shifts),
     diagnostics};
 }
 
 export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed", provider, signal, now = Date.now,
   transitionLimit = 33, maxAttempts = 80, verifyTransitions = true, verificationContext = "attested", fixtureIds,
-  maxCueChecks = 0} = {}) {
+  maxCueChecks = 0, maxMicros = 150_000} = {}) {
   if (!["offline", "mock", "live"].includes(mode) || !["windowed", "complete"].includes(arm) ||
       (provider !== undefined && (mode === "offline" || typeof provider !== "function")) ||
       (mode === "live" && !provider) || !natural(transitionLimit) || transitionLimit > 33 ||
       !natural(maxAttempts) || maxAttempts > 80 || typeof verifyTransitions !== "boolean" ||
-      !natural(maxCueChecks) || maxCueChecks > 2 ||
+      !natural(maxCueChecks) || maxCueChecks > 6 || !natural(maxMicros) || maxMicros > MAX_SHADOW_MICROS ||
       !["recent", "attested"].includes(verificationContext)) throw new TypeError(invalidOptions);
   const pinned = prepareFixtures(now());
   if (fixtureIds !== undefined && (!Array.isArray(fixtureIds) || !fixtureIds.length ||
@@ -796,7 +935,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
   const fixtures = fixtureIds === undefined ? pinned : pinned.filter(fixture => fixtureIds.includes(fixture.id));
   const selectedSize = fixtures.reduce((sum, fixture) => sum + fixture.reference.units.length, 0);
   const transitionBudgets = transitionAllocation(fixtures, verifyTransitions ? Math.min(transitionLimit, selectedSize) : 0);
-  const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 128_000, maxMicros: 150_000});
+  const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 128_000, maxMicros});
   const providerStops = {};
   const guardedProvider = provider && (async (request, options) => {
     const stopped = providerStops.all ?? providerStops[request.mode];
@@ -832,6 +971,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
   const totals = Object.fromEntries(Object.keys(planning[0]).filter(field => field !== "id")
     .map(field => [field, planning.reduce((sum, row) => sum + row[field], 0)]));
   const diagnostics = fixtures.map((fixture, i) => diagnosticWork(fixture, runs[i]));
+  const shifts = adjacentStartShifts(diagnostics);
   const appliedRows = diagnostics.flatMap(work => work.units).map(row => row.applied);
   const appliedCounts = field => Object.fromEntries(Object.entries(Object.groupBy(appliedRows, row => row[field]))
     .map(([value, rows]) => [value, rows.length]));
@@ -857,6 +997,7 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
     reader: {...stageReport(reference, runs, "reader"), cueChanges: readerCueChanges(diagnostics)},
     cueRecovery: cueRecoveryReport(diagnostics, attemptReport(runs, "cueRecovery")),
     behaviorReferenceVersion, behaviorReferenceDigest, behavior: behaviorReport(diagnostics),
-    discrepancies: discrepancyReport(diagnostics),
+    startReferenceVersion, startReferenceDigest, startTiming: startTimingReport(diagnostics, shifts),
+    discrepancies: discrepancyReport(diagnostics, shifts),
     diagnostics};
 }

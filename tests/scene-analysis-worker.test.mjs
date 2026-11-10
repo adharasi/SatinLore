@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -20,8 +20,7 @@ const WHOLE_STORY_STUDY = "/api/scene-analysis/whole-story-luna-study";
 const WHOLE_STORY_SUITE = "nocturne-whole-story-luna-v1";
 const NEUTRAL_PROTOCOL_SUITE = "nocturne-luna-protocol-neutral-v2";
 const NEUTRAL_PROTOCOL_FORM = "benchmark=luna-protocol-neutral-v2-complete-a";
-const FULL_NEUTRAL_HEADROOM = { remainingToday: 512, remainingThisMonth: 4096,
-  dayRetryAfterSeconds: 66, monthRetryAfterSeconds: 3600 };
+const NEUTRAL_RUN_ID = "4a841e21-77e2-44de-bd67-0e10b443487d";
 const CUES = [
   { id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented" },
   { id: 9, phase: "sustain", rhythm: "steady", previous: "build", next: "sustain", movementCount: 1, shape: "sustained" },
@@ -42,26 +41,28 @@ function request(jwt, { host = ORIGIN, origin = host, path = "/api/scene-analysi
 function upstream(labels = LABELS) {
   return Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels }) }] }] });
 }
-function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204, quotaWindow,
-  quotaHeadroom = FULL_NEUTRAL_HEADROOM,
+function fixture({ keyResolver = localKeys, provider = () => upstream(), quotaStatus = 204,
+  spend = ({ operation, usedMicros }) => Response.json({ shardCapMicros: 150_000, expiresAt: Date.now() + 86_400_000,
+    remainingMicros: 3_000_000 - (operation === "reserve" ? 150_000 : usedMicros) }),
   wholeStoryLunaComparison } = {}) {
-  const calls = [], reservations = [], headroomChecks = [];
+  const calls = [], reservations = [], spendRequests = [];
   const worker = createPrivateAppWorker({ keyResolver, wholeStoryLunaComparison, analysisFetcher: async (url, options) => {
     calls.push({ url, options });
     return provider(url, options);
   } });
   const env = { ...CONFIG, OPENAI_API_KEY: KEY, SCENE_ANALYSIS_BUDGET: {
     idFromName: value => value, get: name => ({ async fetch(request) {
-      if (request.url === "https://scene-analysis.internal/founder-neutral-quota" && request.method === "GET") {
-        headroomChecks.push(name);
-        return Response.json(quotaHeadroom);
+      if (request.url === "https://scene-analysis.internal/founder-neutral-spend" && request.method === "POST") {
+        const body = await request.json();
+        spendRequests.push({ name, body });
+        return spend(body);
       }
       reservations.push({ name, url: request.url, method: request.method, body: await request.json() });
       const status = typeof quotaStatus === "function" ? quotaStatus(reservations.length) : quotaStatus;
-      return new Response(null, { status, headers: { "Retry-After": "66", ...(quotaWindow ? { "X-Scene-Quota-Window": quotaWindow } : {}) } });
+      return new Response(null, { status, headers: { "Retry-After": "66" } });
     } }),
   } };
-  return { worker, env, calls, reservations, headroomChecks };
+  return { worker, env, calls, reservations, spendRequests };
 }
 
 function benchmarkRequest(jwt, options = {}) {
@@ -95,7 +96,11 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "benchmark=luna-protocol-neutral-v2-complete" }), env)).status, 400);
   assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM + "&text=x" }), env)).status, 400);
   assert.equal((await f.worker.fetch(wholeStoryRequest(tester, { body: NEUTRAL_PROTOCOL_FORM }), env)).status, 403);
-  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "x".repeat(65) }), env)).status, 413);
+  assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: "x".repeat(129) }), env)).status, 413);
+  for (const field of ["runId=invalid", `runId=${NEUTRAL_RUN_ID}&runId=`, `runId=${NEUTRAL_RUN_ID}&cap=10`,
+    "benchmark=luna-protocol-neutral-v2-windowed-b"]) {
+    assert.equal((await f.worker.fetch(wholeStoryRequest(founder, { body: `${NEUTRAL_PROTOCOL_FORM}&${field}` }), env)).status, 400);
+  }
   const upload = new FormData();
   upload.set("payload", new File(["unapproved"], "upload.txt"));
   assert.equal((await f.worker.fetch(new Request(ORIGIN + WHOLE_STORY_STUDY, { method: "POST",
@@ -106,14 +111,15 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   const html = await page.text();
   assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
-  assert.match(html, /Luna rubric v9 is active/);
-  assert.match(html, /Founder neutral headroom is 512 attempts today and 4096 this UTC month/);
+  assert.match(html, /Luna rubric v10 is active/);
+  assert.match(html, /\$3 estimated spend cap for 24 hours/);
+  assert.match(html, /Shared run ID \(optional\)/);
   for (const arm of ["complete", "windowed"]) for (const shard of ["a", "b"]) {
     assert.ok(html.includes(`value="luna-protocol-neutral-v2-${arm}-${shard}"`));
   }
-  assert.doesNotMatch(html, /multipart|<input|<textarea/);
+  assert.doesNotMatch(html, /multipart|<textarea/);
   assert.equal(await (await f.worker.fetch(wholeStoryRequest(founder, { ...get, method: "HEAD" }), env)).text(), "");
-  assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
+  assert.deepEqual(f.spendRequests, []);
   assert.deepEqual(f.reservations, []);
   assert.deepEqual(f.calls, []);
 });
@@ -151,11 +157,9 @@ test("the four fixed neutral protocol forms cover both cohorts within the reques
     assert.equal(result.measurement, "live-neutral-provider");
     assert.equal(result.hostedStudyVersion, NEUTRAL_PROTOCOL_SUITE);
     assert.equal(result.hostedShard, shard);
-    assert.deepEqual(result.hostedQuota, { lane: "founder-neutral", perRun: 48, perUtcDay: 512, perUtcMonth: 4096 });
-    assert.deepEqual(result.hostedQuotaPreflight, { requiredAttempts: discovery + 2 * targets + 4,
-      remainingToday: 512, remainingThisMonth: 4096 });
-    assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
-    assert.equal(result.quotaLimited, false);
+    assert.deepEqual(result.hostedSpend, { capMicros: 150_000, shardCapMicros: 150_000 });
+    assert.deepEqual(result.hostedTransport, { maxProviderCalls: discovery + 2 * targets + 4 });
+    assert.deepEqual(f.spendRequests, []);
     assert.equal(result.hostedTermination, "completed");
     assert.equal(result.arm, arm);
     assert.equal(result.sourceProseIncluded, false);
@@ -166,10 +170,9 @@ test("the four fixed neutral protocol forms cover both cohorts within the reques
     assert.equal(result.transition.targets, targets);
     assert.equal(result.transition.returnedTargets, targets);
     assert.equal(result.externalCalls, discovery + 2 * targets);
-    assert.ok(result.externalCalls <= result.hostedQuota.perRun);
+    assert.ok(result.externalCalls <= result.hostedTransport.maxProviderCalls);
     assert.equal(result.externalCalls, f.calls.length);
-    assert.equal(result.externalCalls, f.reservations.length);
-    assert.ok(f.reservations.every(({ body }) => body.suite === NEUTRAL_PROTOCOL_SUITE));
+    assert.equal(f.reservations.length, 0);
     assert.ok(f.calls.every(({ url, options }) => url === studyProvider && options.redirect === "manual" &&
       options.headers.Authorization === `Bearer ${KEY}`));
     const ids = shard === "a" ? ["first-dance", "old-letter"] : ["reading-room", "practice-drill"];
@@ -192,76 +195,71 @@ test("the four fixed neutral protocol forms cover both cohorts within the reques
   assert.notEqual(rosterHashes.get("a"), rosterHashes.get("b"));
 });
 
-test("the fixed neutral protocol uses its founder quota suite and rejects spending when denied", async () => {
-  const f = fixture({ quotaStatus: 429,
-    wholeStoryLunaComparison: () => assert.fail("The v2 form must select the new study.") });
-  const response = await f.worker.fetch(wholeStoryRequest(await token(), { body: NEUTRAL_PROTOCOL_FORM }),
-    enableWholeStory(f.env));
-  assert.equal(response.status, 429);
-  assert.equal(response.headers.get("Retry-After"), "66");
-  assert.deepEqual(f.calls, []);
-  assert.equal(f.reservations.length, 1);
-  assert.equal(f.reservations[0].body.suite, NEUTRAL_PROTOCOL_SUITE);
+test("standalone neutral shards can run even when shared reader quota is exhausted or unavailable", async () => {
+  const founder = await token();
+  for (const budget of [true, false]) {
+    const f = fixture({ quotaStatus: 429, provider: neutralProtocolUpstream });
+    const response = await f.worker.fetch(wholeStoryRequest(founder, { body: `${NEUTRAL_PROTOCOL_FORM}&runId=` }),
+      enableWholeStory({ ...f.env, ...(budget ? {} : { SCENE_ANALYSIS_BUDGET: undefined }) }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).externalCalls, 40);
+    assert.deepEqual(f.reservations, []);
+    assert.deepEqual(f.spendRequests, []);
+  }
 });
 
-test("neutral protocol preflight rejects inadequate headroom for the whole shard without dispatch or reservation", async () => {
+test("grouped windowed forms share a spend ledger and settle only known or reserved usage", async () => {
   const founder = await token();
-  for (const [remainingToday, remainingThisMonth, window, retryAfterSeconds] of [[43, 4096, "day", 66], [43, 43, "month", 3600]]) {
-    const f = fixture({ quotaHeadroom: { ...FULL_NEUTRAL_HEADROOM, remainingToday, remainingThisMonth } });
-    const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }), enableWholeStory(f.env));
-    assert.equal(response.status, 429);
-    assert.equal(response.headers.get("Retry-After"), String(retryAfterSeconds));
-    const { error, ...details } = await response.json();
-    assert.match(error, /insufficient room for the full shard/);
-    assert.deepEqual(details, { code: "rate_limited", requiredAttempts: 44, remainingToday, remainingThisMonth, window, retryAfterSeconds });
-    assert.deepEqual(f.calls, []);
-    assert.deepEqual(f.reservations, []);
-    assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
+  const f = fixture({ provider: neutralProtocolUpstream, quotaStatus: 429 });
+  for (const [shard, discovery, units] of [["first-dance", 3, 11], ["old-letter", 2, 8], ["reading-room", 3, 9], ["practice-drill", 2, 5]]) {
+    const body = `runId=${NEUTRAL_RUN_ID}&benchmark=luna-protocol-neutral-v10-windowed-${shard}`;
+    const response = await f.worker.fetch(wholeStoryRequest(founder, { body }), enableWholeStory(f.env));
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    const { hostedSpend, hostedTransport, externalCalls } = result;
+    assert.deepEqual(result.fixtureIds, [shard]);
+    assert.equal(result.planning.cueCheckTargetLimit, 6);
+    assert.equal(result.planning.discoveryAttempts, discovery);
+    assert.equal(result.prefix.returnedTargets, units);
+    assert.equal(result.transition.returnedTargets, units);
+    assert.equal(externalCalls, discovery + 2 * units);
+    assert.equal(hostedTransport.maxProviderCalls, discovery + 2 * units + 6);
+    assert.equal(hostedSpend.capMicros, 3_000_000);
+    assert.equal(hostedSpend.shardCapMicros, 150_000);
+    assert.equal(hostedSpend.settled, true);
+    assert.equal(hostedSpend.runId, NEUTRAL_RUN_ID);
+    assert.equal(hostedSpend.remainingMicros, 3_000_000 - result.budget.chargedMicros);
+    const [{ name, body: reserved }, { body: settled }] = f.spendRequests.slice(-2);
+    assert.equal(name, "scene-analysis:v1");
+    assert.match(reserved.reader, /^[a-f0-9]{64}$/);
+    assert.equal(reserved.runId, NEUTRAL_RUN_ID);
+    assert.equal(reserved.operation, "reserve");
+    assert.deepEqual(settled, { ...reserved, operation: "settle", usedMicros: result.budget.chargedMicros });
   }
-  const f = fixture({ quotaHeadroom: { ...FULL_NEUTRAL_HEADROOM, remainingToday: "44" } });
-  const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }), enableWholeStory(f.env));
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).code, "budget_unavailable");
-  assert.deepEqual(f.calls, []);
+  assert.equal(new Set(f.spendRequests.map(({ body }) => body.shardId)).size, 4);
   assert.deepEqual(f.reservations, []);
 });
 
-test("neutral protocol quota cutoff keeps completed rows and accounts only for forwarded requests", async () => {
+test("grouped neutral dispatch fails closed on depleted or unavailable spend and respects a partial shard hold", async () => {
   const founder = await token();
-  let oneCallCharge;
-  for (const accepted of [1, 2]) {
-    const f = fixture({ provider: neutralProtocolUpstream, quotaStatus: count => count <= accepted ? 204 : 429,
-      quotaWindow: accepted === 1 ? "day" : "month" });
-    const response = await f.worker.fetch(wholeStoryRequest(founder, { body: NEUTRAL_PROTOCOL_FORM }),
-      enableWholeStory(f.env));
-    assert.equal(response.status, 200);
-    const result = await response.json();
-    assert.equal(result.quotaLimited, true);
-    assert.equal(result.hostedTermination, "durable-quota");
-    assert.deepEqual(result.hostedQuotaCutoff, { window: accepted === 1 ? "day" : "month", retryAfterSeconds: 66 });
-    assert.deepEqual(f.headroomChecks, ["scene-analysis:v1"]);
-    assert.equal(result.externalCalls, accepted);
-    assert.equal(f.calls.length, accepted);
-    assert.equal(f.reservations.length, accepted + 1);
-    assert.equal(result.diagnostics.flatMap(work => work.units).length, 19);
-    assert.equal(result.discovery.returnedTargets, 11);
-    assert.equal(result.prefix.returnedTargets, accepted - 1);
-    assert.equal(result.prefix.dispositions["budget-deferred"], 20 - accepted);
-    const stages = [result.discovery, result.prefix, result.transition];
-    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.attempts, 0), accepted);
-    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.measuredUsage, 0), accepted);
-    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.inputTokens, 0), 20 * accepted);
-    assert.equal(stages.reduce((sum, stage) => sum + stage.usage.outputTokens, 0), 5 * accepted);
-    assert.equal(result.budget.reservedMicros, 0);
-    assert.equal(result.budget.unsettled, 0);
-    assert.ok(result.budget.chargedMicros > 0);
-    oneCallCharge ??= result.budget.chargedMicros;
-    assert.equal(result.budget.chargedMicros, oneCallCharge * accepted);
-    const stopped = result.diagnostics[0].units[accepted - 1].prefix;
-    assert.equal(stopped.dispatched, false);
-    assert.equal(stopped.status, "budget-deferred");
-    assert.equal(stopped.submittedIds, null);
+  const body = `${NEUTRAL_PROTOCOL_FORM}&runId=${NEUTRAL_RUN_ID}`;
+  for (const [status, code] of [[429, "spend_cap"], [409, "run_conflict"], [503, "budget_unavailable"]]) {
+    const f = fixture({ spend: () => new Response(null, { status }) });
+    const response = await f.worker.fetch(wholeStoryRequest(founder, { body }), enableWholeStory(f.env));
+    assert.equal(response.status, status);
+    assert.equal((await response.json()).code, code);
+    assert.deepEqual(f.calls, []);
   }
+  const f = fixture({ provider: neutralProtocolUpstream, spend: ({ operation }) => Response.json({
+    shardCapMicros: 1, remainingMicros: operation === "reserve" ? 0 : 1, expiresAt: Date.now() + 86_400_000 }) });
+  const response = await f.worker.fetch(wholeStoryRequest(founder, { body }), enableWholeStory(f.env));
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.externalCalls, 0);
+  assert.equal(result.hostedSpend.shardCapMicros, 1);
+  assert.equal(result.hostedSpend.remainingMicros, 1);
+  assert.equal(result.budget.attempts, 0);
+  assert.equal(f.spendRequests[1].body.usedMicros, 0);
 });
 
 test("whole-story study rechecks founder and reserves every exact provider attempt before returning aggregates", async () => {
@@ -840,11 +838,10 @@ async function studyBudget(t) {
     { type: "ESModule", path: root + "scene-budget-test-worker.mjs", contents: `
       import { SceneAnalysisBudget as Budget } from "./${source}";
       export class SceneAnalysisBudget extends Budget {
-        fetch(request) {
-          if (new URL(request.url).pathname !== "/seed-neutral-month") return super.fetch(request);
-          const now = new Date();
-          const nextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
-          this.sql.exec("INSERT INTO quota(key,expires_at,count) VALUES(?,?,?)", "founder-neutral-month", nextMonth, 4095);
+        async fetch(request) {
+          if (new URL(request.url).pathname !== "/expire-neutral-run") return super.fetch(request);
+          const { runId } = await request.json();
+          this.sql.exec("UPDATE neutral_spend_run SET expires_at=? WHERE id=?", Date.now() - 1, runId);
           return new Response(null, { status: 204 });
         }
       }
@@ -860,8 +857,13 @@ async function studyBudget(t) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader: id.toString(16).padStart(64, "0"), ...(suite ? { suite } : {}) }),
   });
-  return { reserve, seedNeutralMonth: () => mf.dispatchFetch("https://app.satinlore.com/seed-neutral-month", { method: "POST" }),
-    neutralHeadroom: async () => (await mf.dispatchFetch("https://app.satinlore.com/founder-neutral-quota")).json() };
+  const post = (path, body) => mf.dispatchFetch(`https://app.satinlore.com/${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const spend = (runId, shardId, operation, usedMicros, reader = "a".repeat(64)) => post("founder-neutral-spend", {
+    runId, shardId, operation, reader, ...(usedMicros === undefined ? {} : { usedMicros }),
+  });
+  return { reserve, spend, expireRun: runId => post("expire-neutral-run", { runId }) };
 }
 
 test("the SQLite budget admits concurrent work up to per-reader and deployment limits", { timeout: 30000 }, async t => {
@@ -886,35 +888,63 @@ test("the SQLite budget admits concurrent work up to per-reader and deployment l
   assert.match((await reserve(100)).headers.get("Retry-After"), /^\d+$/);
 });
 
-test("founder neutral and ordinary daily quotas are independently enforced", { timeout: 30000 }, async t => {
-  const { reserve, neutralHeadroom } = await studyBudget(t);
-  const ordinary = await Promise.all(Array.from({ length: 99 }, (_, index) => reserve(index + 1)));
+test("one estimated-spend run permits at least 1,000 call equivalents without using reader allowance", { timeout: 30000 }, async t => {
+  const { reserve, spend } = await studyBudget(t);
+  const ordinary = await Promise.all(Array.from({ length: 100 }, (_, index) => reserve(index + 1)));
   assert.ok(ordinary.every(response => response.status === 204));
-  for (const read of [await neutralHeadroom(), await neutralHeadroom()]) {
-    assert.equal(read.remainingToday, 512);
-    assert.equal(read.remainingThisMonth, 4096);
-    assert.ok(read.dayRetryAfterSeconds > 0 && read.monthRetryAfterSeconds >= read.dayRetryAfterSeconds);
+  const run = randomUUID();
+  let equivalents = 0;
+  for (let batch = 0; batch < 25; batch++) {
+    const shard = randomUUID();
+    const held = await spend(run, shard, "reserve");
+    assert.equal(held.status, 200);
+    assert.equal((await held.json()).shardCapMicros, 150_000);
+    const receipt = await spend(run, shard, "settle", 40 * 500);
+    assert.equal(receipt.status, 200);
+    assert.equal((await receipt.json()).remainingMicros, 3_000_000 - (batch + 1) * 20_000);
+    equivalents += 40;
   }
-  const neutral = await Promise.all(Array.from({ length: 514 }, (_, index) => reserve(index + 1, NEUTRAL_PROTOCOL_SUITE)));
-  assert.equal(neutral.filter(response => response.status === 204).length, 512);
-  assert.equal(neutral.filter(response => response.status === 429).length, 2);
-  assert.equal(neutral.find(response => response.status === 429).headers.get("X-Scene-Quota-Window"), "day");
-  const remaining = await neutralHeadroom();
-  assert.equal(remaining.remainingToday, 0);
-  assert.equal(remaining.remainingThisMonth, 4096 - 512);
-  assert.equal((await reserve(100, WHOLE_STORY_SUITE)).status, 204);
+  assert.equal(equivalents, 1000);
   assert.equal((await reserve(101)).status, 429);
+  assert.equal((await reserve(101, NEUTRAL_PROTOCOL_SUITE)).status, 400);
 });
 
-test("concurrent founder neutral reservations respect the monthly cap without affecting ordinary quota", { timeout: 30000 }, async t => {
-  const { reserve, seedNeutralMonth, neutralHeadroom } = await studyBudget(t);
-  assert.equal((await seedNeutralMonth()).status, 204);
-  assert.equal((await neutralHeadroom()).remainingThisMonth, 1);
-  const responses = await Promise.all([reserve(1, NEUTRAL_PROTOCOL_SUITE), reserve(2, NEUTRAL_PROTOCOL_SUITE)]);
-  assert.deepEqual(responses.map(response => response.status).sort(), [204, 429]);
-  assert.match(responses.find(response => response.status === 429).headers.get("Retry-After"), /^\d+$/);
-  assert.equal(responses.find(response => response.status === 429).headers.get("X-Scene-Quota-Window"), "month");
-  assert.equal((await neutralHeadroom()).remainingThisMonth, 0);
+test("grouped spend reserves atomically, releases measured savings once and holds unsettled work", { timeout: 30000 }, async t => {
+  const { reserve, spend } = await studyBudget(t);
+  const run = randomUUID(), shards = Array.from({ length: 21 }, () => randomUUID());
+  const responses = await Promise.all(shards.map(shard => spend(run, shard, "reserve")));
+  assert.equal(responses.filter(response => response.status === 200).length, 20);
+  assert.equal(responses.filter(response => response.status === 429).length, 1);
+  const accepted = shards[responses.findIndex(response => response.status === 200)];
+  assert.equal((await spend(run, accepted, "reserve")).status, 409);
+  assert.equal((await spend(run, accepted, "settle", 50_000, "b".repeat(64))).status, 409);
+  for (let repetition = 0; repetition < 2; repetition++) {
+    const receipt = await spend(run, accepted, "settle", 50_000);
+    assert.equal(receipt.status, 200);
+    assert.equal((await receipt.json()).remainingMicros, 100_000);
+  }
+  assert.equal((await spend(run, accepted, "settle", 0)).status, 409);
+  const partial = await spend(run, randomUUID(), "reserve");
+  assert.equal(partial.status, 200);
+  const { shardCapMicros, remainingMicros } = await partial.json();
+  assert.equal(shardCapMicros, 100_000);
+  assert.equal(remainingMicros, 0);
+  assert.equal((await spend(run, randomUUID(), "reserve")).status, 429);
   assert.equal((await reserve(1, WHOLE_STORY_SUITE)).status, 204);
   assert.equal((await reserve(1)).status, 204);
+});
+
+test("expired run IDs reject new dispatch, and a reported spend overrun closes the run", { timeout: 30000 }, async t => {
+  const { spend, expireRun } = await studyBudget(t);
+  const run = randomUUID(), shard = randomUUID();
+  assert.equal((await spend(run, shard, "reserve")).status, 200);
+  assert.equal((await expireRun(run)).status, 204);
+  assert.equal((await spend(run, randomUUID(), "reserve")).status, 409);
+  assert.equal((await spend(run, shard, "settle", 3)).status, 200);
+  const breach = randomUUID(), old = randomUUID();
+  assert.equal((await spend(breach, old, "reserve")).status, 200);
+  const receipt = await spend(breach, old, "settle", 150_001);
+  assert.equal(receipt.status, 200);
+  assert.equal((await receipt.json()).remainingMicros, 0);
+  assert.equal((await spend(breach, randomUUID(), "reserve")).status, 429);
 });

@@ -3,7 +3,7 @@ import {parseArgs} from "node:util";
 import {combineNeutralReports} from "./lib/luna-protocol-neutral.mjs";
 
 const incompatible = "Use complementary complete and windowed reports with the same fixture pins, rubric and measurement.";
-const usage = "Use --complete path twice and --windowed path twice.";
+const usage = "Use --complete path and --windowed path two to four times each.";
 const observedCue = value => typeof value === "boolean" ? value : undefined;
 
 function exact(rows, arm, negative) {
@@ -55,7 +55,7 @@ export function compareNeutralArms(completeReports, windowedReports) {
 
 async function main() {
   const {values} = parseArgs({options: {complete: {type: "string", multiple: true}, windowed: {type: "string", multiple: true}}});
-  if (values.complete?.length !== 2 || values.windowed?.length !== 2) throw new Error(usage);
+  if (![values.complete, values.windowed].every(paths => paths?.length >= 2 && paths.length <= 4)) throw new Error(usage);
   const read = paths => Promise.all(paths.map(async path => JSON.parse(await readFile(path, "utf8"))));
   const [complete, windowed] = await Promise.all([read(values.complete), read(values.windowed)]);
   console.log(JSON.stringify(compareNeutralArms(complete, windowed), null, 2));

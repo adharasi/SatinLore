@@ -5,7 +5,7 @@ import {createCausalAttestationLedger} from "./luna-causal-attestation.mjs";
 import {applyFrameScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, mergeTransitionVerdict, transitionPriority,
   verifiedContextCut} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
-  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolOutputTokens,
+  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
   lunaProtocolTransitionViolation} from "./luna-protocol-provider.mjs";
 
 const clearance = "No blocking event recorded";
@@ -31,6 +31,9 @@ const reviewable = fact => fact.fact !== "none" || !["none", "unknown"].includes
 const inputFor = window => JSON.parse(window.body);
 const anchorLinks = new Set(["continue", "ease", "span-end", "beat-end"]);
 const repairableCueContracts = new Set(["status-effect", "phase-action", "transition-fact", "transition-action", "fact-phase", "fact-action"]);
+const cueCheckFocus = {"opening-buildup": "buildup", "romantic-context": "buildup", "adjacent-start": "enactment",
+  "restart-state": "enactment", "typed-start": "enactment"};
+const startTransitions = new Set(["onset", "restart"]);
 export const MAX_SHADOW_MICROS = 3_000_000;
 export const MAX_SHADOW_VERIFICATIONS = 384;
 
@@ -51,6 +54,21 @@ function recentRomanticContext(decisions, blocked, target, runId) {
     if (["verified", "neutral"].includes(cue.status) && romanticDepictions.has(cue.depiction)) support.push(id);
   }
   return support;
+}
+
+function exactTypedStart(fact, id) {
+  return fact?.status === "verified" && fact.frame === "current" && startTransitions.has(fact.transition) &&
+    fact.evidenceIds.includes(id);
+}
+
+function followsDisputedStart(decisions, blocked, id, runId, primary) {
+  const prior = decisions.get(id - 1);
+  if (!freshEnactedStart(primary, id) || blocked.has(id - 1) || prior?.window?.runId !== runId) return false;
+  const earlier = prior.annotation;
+  const typed = prior.transitionVerification;
+  const priorScope = earlier?.scopeId ?? typed?.scopeId;
+  return (primary.scopeId == null || priorScope == null || primary.scopeId === priorScope) &&
+    (prior.prefixVerified && freshEnactedStart(earlier, id - 1) || exactTypedStart(typed, id - 1));
 }
 
 function factViolation(fact, ids, target, mode, attested) {
@@ -83,16 +101,19 @@ export function createLunaShadowBudget({maxAttempts = 96, maxSourceBytes = 500_0
     throw new RangeError("Invalid shadow budget.");
   }
   let attempts = 0, sourceBytes = 0, reservedMicros = 0, chargedMicros = 0, unsettled = 0;
-  let breached = false;
+  let breached = false, spendLimited = false;
   const price = (input, output) => Math.ceil((input * (input > 272_000 ? 0.25 : 0.125) +
     output * (input > 272_000 ? 0.75 : 0.50)) * 1.10);
   return {
     reserve(body, targets) {
       // Bound the short-context input by UTF-8 bytes plus a fixed prompt/schema allowance.
       const bytes = Buffer.byteLength(body);
-      const reserve = price(bytes + 8192, lunaProtocolOutputTokens(targets));
-      if (breached || attempts >= maxAttempts || sourceBytes + bytes > maxSourceBytes ||
-          chargedMicros + reservedMicros + reserve > maxMicros) return null;
+      const reserve = price(bytes + lunaProtocolInputOverhead, lunaProtocolOutputTokens(targets));
+      if (breached || chargedMicros + reservedMicros + reserve > maxMicros) {
+        spendLimited = true;
+        return null;
+      }
+      if (attempts >= maxAttempts || sourceBytes + bytes > maxSourceBytes) return null;
       attempts++;
       sourceBytes += bytes;
       reservedMicros += reserve;
@@ -109,7 +130,7 @@ export function createLunaShadowBudget({maxAttempts = 96, maxSourceBytes = 500_0
       };
     },
     snapshot: () => ({capMicros: maxMicros, attempts, attemptedPayloadBytes: sourceBytes, reservedMicros, chargedMicros,
-      unsettled, reservationBreach: breached}),
+      unsettled, reservationBreach: breached, spendLimited}),
   };
 }
 
@@ -321,18 +342,25 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       row = {...before, transitionVerification: verdict, transitionVerificationStatus: verdict?.status ?? status};
     } else if (mode === "cue-check") {
       const candidate = currentCueAt(verdict, id, "verified");
+      const opening = cueCheckReason === "opening-buildup";
+      const adjacent = cueCheckReason === "adjacent-start";
       const needsStart = ["restart-state", "typed-start"].includes(cueCheckReason);
       const support = recentRomanticContext(decisions, blocked, id, before.window?.runId);
-      const recoveryGuard = candidate && needsStart && !freshEnactedStart(verdict, id) ? "recovery-start-unproved" :
+      const linked = candidate && verdict.fact === "continue" && verdict.action === "continuation" &&
+        verdict.narrativePhase === "sustain" && verdict.priorAnchor === id - 1;
+      const correction = opening && verdict?.status === "neutral" && ["current", "neutral"].includes(verdict.frame) ? "quiet-opening" :
+        adjacent && linked ? "linked-continuation" : undefined;
+      const recoveryGuard = candidate && adjacent && !linked ? "recovery-continuation-unlinked" :
+        candidate && needsStart && !freshEnactedStart(verdict, id) ? "recovery-start-unproved" :
         candidate && verdict.action === "anticipation" && verdict.depiction === "romantic" &&
-        !verdict.evidenceIds.some(evidence => support.includes(evidence)) ? "recovery-buildup-unlinked" : undefined;
-      const recovered = candidate && !recoveryGuard;
+        !opening && !verdict.evidenceIds.some(evidence => support.includes(evidence)) ? "recovery-buildup-unlinked" : undefined;
+      const recovered = candidate && !opening && !adjacent && !recoveryGuard;
       const protective = verdict?.status === "verified" && (verdict.fact === "protective" || verdict.transition === "hard-stop");
       const repaired = repairableCueContracts.has(before.primaryFailure) && verdict?.status === "neutral";
       row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status, cueRecovered: recovered,
-        cueRecoveryReason: cueCheckReason, cueRecoveryGuard: recoveryGuard,
+        cueRecoveryReason: cueCheckReason, cueRecoveryGuard: recoveryGuard, cueRecoveryCorrection: correction,
         cueContractRepaired: repaired || repairableCueContracts.has(before.primaryFailure) && (recovered || protective)};
-      if (recovered || protective || repaired) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
+      if (recovered || protective || repaired || correction) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
     } else {
       row = {...before, status: verdict?.status ?? status, annotation: verdict, primaryPrefix: verdict,
         prefixVerified: Boolean(verdict), verificationStatus: verdict?.status ?? status, primaryFailure: reason};
@@ -382,11 +410,16 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
             exactCurrentCue(primary, id) && primary.action === "continuation";
           const typedStart = !causal.restartBoundary && typed?.status === "verified" && typed.transition === "onset" &&
             exactCurrentCue(primary, id) && primary.action === "anticipation" && primary.narrativePhase === "build";
+          const support = recentRomanticContext(decisions, blocked, id, window.runId);
+          const opening = !causal.restartBoundary && exactCurrentCue(primary, id) && primary.depiction === "romantic" &&
+            primary.action === "anticipation" && primary.narrativePhase === "build" && !support.length;
+          const adjacent = !causal.restartBoundary && !exactTypedStart(typed, id) &&
+            followsDisputedStart(decisions, blocked, id, window.runId, primary);
           const romanticContext = primary?.status === "neutral" && primary.frame === "current" &&
-            romanticDepictions.has(primary.depiction) && recentRomanticContext(decisions, blocked, id, window.runId).length > 0;
+            romanticDepictions.has(primary.depiction) && support.length > 0;
           const disagreement = unresolved && currentCueAt(row.discovery, id, "candidate");
           record.cueCheckReason = restartState ? "restart-state" : typedStart ? "typed-start" :
-            romanticContext ? "romantic-context" : disagreement ? "discovery-disagreement" :
+            adjacent ? "adjacent-start" : opening ? "opening-buildup" : romanticContext ? "romantic-context" : disagreement ? "discovery-disagreement" :
             repairableCueContracts.has(row.primaryFailure) ? "contract-repair" : undefined;
           if (!record.cueCheckReason || recoveryBarriers.has(typed?.transition) || blocked.has(id) ||
               ["blocked", "protective"].includes(causal.restartBoundary) || causal.protectedScopes.has(primary?.scopeId)) {
@@ -397,7 +430,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           if (cueChecksStarted >= maxCueChecks) return {status: "failed"};
         }
         const attested = causal && verificationContext === "attested" ? causal.anchors : [];
-        const request = {mode, units: payload.units, targetIds: window.targetIds, ...(attested.length ? {attested} : {})};
+        const focus = cueCheckFocus[record.cueCheckReason];
+        const request = {mode, units: payload.units, targetIds: window.targetIds, ...(attested.length ? {attested} : {}),
+          ...(focus ? {focus} : {})};
         const settle = budget.reserve(JSON.stringify(request), window.targetIds.length);
         if (!settle) return {status: "failed"};
         if (mode === "cue-check") cueChecksStarted++;
@@ -567,7 +602,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
       transitionVerificationStatus, transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue,
       primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered, cueContractRepaired,
-      cueRecoveryReason, cueRecoveryGuard, continuityGuard, appliedTransitionOverride} = decisions.get(unit.id);
+      cueRecoveryReason, cueRecoveryGuard, cueRecoveryCorrection, continuityGuard, appliedTransitionOverride} = decisions.get(unit.id);
     const {unitId: _target, id: _transportId, ...labels} = annotation ?? {};
     const {unitId: _discoveryTarget, id: _discoveryTransportId, ...provisionalLabels} = discovery ?? {};
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
@@ -579,7 +614,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       transitionVerification, transitionVerificationStatus: transitionVerificationStatus ?? (verifyTransitions ? "not-requested" : undefined),
       transitionEvidenceIds: transitionVerification?.evidenceIds,
       transitionFlag, cueGuard, readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
-      cueContractRepaired, cueRecoveryReason, cueRecoveryGuard, continuityGuard,
+      cueContractRepaired, cueRecoveryReason, cueRecoveryGuard, cueRecoveryCorrection, continuityGuard,
       appliedTransition: continuityGuard ? "uncertain-continuity" : appliedTransitionOverride ?? (effectiveAnnotation ?? annotation)?.transition,
       verificationStatus: verificationStatus ?? (status === "verification-deferred" ? status : undefined)};
   });
