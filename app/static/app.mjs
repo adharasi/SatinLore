@@ -135,7 +135,7 @@ function recordCalibrationEvent(event) {
 }
 function syncManualZeros(story) {
   if (!story || story !== currentStory()) return;
-  controller.setManualZeros(story.model.paragraphs.flatMap((p,index) => !p.analysed || p.override === 0 &&
+  controller.setManualZeros(story.model.paragraphs.flatMap((p,index) => !p.analysed || p.capacityReview || p.override === 0 &&
     (!story.controlled || story.explicitCorrections.has(index)) ? [index] : []));
 }
 function readerProfiles(story) {

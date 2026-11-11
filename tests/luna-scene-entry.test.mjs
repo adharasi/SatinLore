@@ -145,30 +145,36 @@ const settingEntry = {...firstEntry, reason: "material-setting"};
 const localNone = (unitId, frame) => ({unitId, localAction: {status: "none", frame, action: "none", phase: "quiet",
   contrast: frame === "current" ? "neutral" : "noncurrent", targetId: null, contextId: null}});
 
-function researchRun({enabled = true, boundary = settingCut, entry = settingEntry, entryResult, focus = neutral,
-  doublePositive = false, blockedIds = [], approved = [0, 1, 2, 3], observed = [], budget} = {}) {
+function researchRun({enabled = true, sameEpisode = false, boundary = settingCut, entry = settingEntry, entryResult, focus = neutral,
+  doublePositive = false, doublePositiveNext = false, discoveryCitesTarget = false,
+  blockedIds = [], approved = [0, 1, 2, 3], observed = [], budget} = {}) {
   const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
     purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
     spans: index.units.filter(({id}) => approved.includes(id)).map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
   const provider = Object.assign(async request => {
     observed.push(request);
     const [id] = request.targetIds;
-    if (request.mode === "scene-entry") return id === 1 && entryResult ? entryResult : result(id, id === 1 ? entry : enteredEarlier);
+    if (request.mode === "scene-entry") return id === 1 && entryResult ? entryResult :
+      result(id, id === 1 || doublePositiveNext ? entry : enteredEarlier);
     if (request.mode === "local-action") return {status: "ok", usage, facts: [localNone(id, doublePositive ? "noncurrent" : "current")]};
     if (request.mode === "cue-check") return {status: "ok", usage, facts: [focus(id)]};
     if (request.mode === "transition") {
-      const later = {...typedCut, previousId: 0, entryId: 2};
+      const later = {...(doublePositiveNext ? settingCut : typedCut), previousId: 0, entryId: 2};
       const local = id === 1 && !doublePositive ? {...neutral(id), status: "verified", transition: "non-romantic-activity-stop",
         evidenceIds: [id]} : neutral(id);
       return {status: "ok", usage, facts: [typed(local, id === 1 ? boundary : later)]};
     }
-    return {status: "ok", usage, facts: request.targetIds.map(id => request.mode === "verify" && id === 1 && doublePositive ?
-      {...neutral(id), status: "verified", fact: "cut", transition: "scene-cut", evidenceIds: [0, 1]} : neutral(id))};
+    return {status: "ok", usage, facts: request.targetIds.map(id => {
+      if (request.mode === "verify" && (id === 1 && doublePositive || id === 2 && doublePositiveNext)) {
+        return {...neutral(id), status: "verified", fact: "cut", transition: "scene-cut", evidenceIds: [0, id]};
+      }
+      return request.mode === "discovery" && discoveryCitesTarget ? {...neutral(id), evidenceIds: [id]} : neutral(id);
+    })};
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "setting-entry-study", text, grant, now: () => 1, provider, budget, blockedIds,
     verificationTargets: [1, 2], transitionTargets: [1, 2], verifyTransitions: true, verifyContinuityBoundary: true,
     maxCueChecks: 2, maxSupportingVerification: 1, sceneEntryVerificationTargets: [1, 2], localActionVerificationTargets: [1, 2],
-    sceneEntryArbitration: enabled});
+    sceneEntryArbitration: enabled, sameEpisodeArbitration: sameEpisode});
 }
 
 test("opt-in arbitration restores only a corroborated exact setting cut before later causal controls", async () => {
@@ -220,4 +226,57 @@ test("a strict viewpoint conflict stays diagnostic when both legacy setting vote
   const control = await researchRun({doublePositive: true, entry: noEntry, boundary: typedCut});
   assert.equal(control.units[1].appliedTransition, "scene-cut");
   assert.equal(control.units[1].sceneEntryArbitration, undefined);
+});
+
+test("independent same-episode proof vetoes a double-positive cut before later causal controls", async () => {
+  const observed = [];
+  const linked = id => ({...neutral(id), evidenceIds: [0, id]});
+  const options = {doublePositive: true, entry: noEntry, discoveryCitesTarget: true, focus: linked};
+  const before = await researchRun(options);
+  const after = await researchRun({...options, sameEpisode: true, observed});
+  const first = observed.findIndex(row => row.mode === "scene-entry" && row.targetIds[0] === 1);
+  const check = observed.findIndex(row => row.mode === "cue-check" && row.targetIds[0] === 1);
+  const next = observed.findIndex(row => row.mode === "verify" && row.targetIds[0] === 2);
+  assert.ok(first >= 0 && first < check && check < next);
+  assert.deepEqual(observed[check], {mode: "cue-check", units: sourceUnits.slice(0, 2), targetIds: [1], focus: "episode-boundary"});
+  assert.equal(after.units[0].sceneId, before.units[0].sceneId);
+  assert.equal(after.units[0].appliedTransition, before.units[0].appliedTransition);
+  assert.equal(before.units[1].appliedTransition, "scene-cut");
+  assert.equal(after.units[1].appliedTransition, "none");
+  assert.equal(after.units[1].sceneId, after.units[0].sceneId);
+  assert.equal(after.units[1].pattern, "Baseline");
+  assert.equal(after.units[1].cue, false);
+  assert.equal(after.units[1].sceneEntryArbitration, "same-episode-veto");
+  assert.equal(after.units[1].primaryPrefix.transition, "scene-cut");
+  assert.equal(after.units[1].transitionVerification.sceneBoundary.status, "cut");
+  assert.equal(after.units[1].cueRecoveryCorrection, "same-episode-veto");
+  assert.equal(before.units[2].transitionFlag, "scene-boundary-stale");
+  assert.notEqual(after.units[2].transitionFlag, "scene-boundary-stale");
+  const capped = [];
+  const two = await researchRun({...options, sameEpisode: true, doublePositiveNext: true, observed: capped});
+  assert.equal(two.units[1].sceneEntryArbitration, "same-episode-veto");
+  assert.equal(two.units[2].appliedTransition, "scene-cut");
+  assert.equal(capped.filter(row => row.focus === "episode-boundary").length, 1);
+});
+
+test("same-episode arbitration preserves genuine cuts, missing corroboration and protective effects", async () => {
+  const base = {doublePositive: true, sameEpisode: true};
+  const linked = id => ({...neutral(id), evidenceIds: [0, id]});
+  for (const options of [{entry: settingEntry, focus: linked}, {entry: uncertain, focus: linked},
+    {entry: enteredEarlier, focus: linked}, {entry: noEntry, focus: neutral},
+    {entry: noEntry, focus: id => ({...neutral(id), evidenceIds: [id]})},
+    {entry: noEntry, focus: id => ({...neutral(id), status: "uncertain"})}]) {
+    const run = await researchRun({...base, ...options});
+    assert.equal(run.units[1].appliedTransition, "scene-cut");
+    assert.notEqual(run.units[1].sceneEntryArbitration, "same-episode-veto");
+  }
+  const observed = [];
+  const blocked = await researchRun({...base, entry: noEntry, focus: linked, blockedIds: [0], observed});
+  assert.notEqual(blocked.units[1].sceneEntryArbitration, "same-episode-veto");
+  assert.equal(observed.some(row => row.focus === "episode-boundary"), false);
+  const protective = await researchRun({...base, entry: noEntry, focus: id => ({...neutral(id), status: "verified",
+    transition: "hard-stop", fact: "protective", evidenceIds: [id]})});
+  assert.equal(protective.units[1].appliedTransition, "hard-stop");
+  assert.equal(protective.units[1].pattern, "Stop");
+  assert.equal(protective.units[1].cue, false);
 });

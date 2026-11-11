@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES,
-  requestNocturneContext, validateNocturneContext} from "../app/static/reader/nocturne.mjs";
+  nocturneContextVisitBoundaries, nocturneContextVisitAllowance, requestNocturneContext, validateNocturneContext} from "../app/static/reader/nocturne.mjs";
 import {ReaderModel} from "../app/static/reader/model.mjs";
 import {normalizeSceneProfiles} from "../app/static/reader/calibration.mjs";
 import {workspace} from "./helpers/workspace.mjs";
@@ -174,6 +174,20 @@ test("dialogue-heavy coverage reaches later sections in five bounded requests", 
   assert.equal(requests.length, 5);
   assert.ok(bytes <= NOCTURNE_CONTEXT_SESSION_BYTES);
   assert.deepEqual(requests.at(-1).paragraphs.slice(-1).map(p => p.id), [306]);
+});
+
+test("long context visits release allowance by eligible bytes from the chosen reading position", () => {
+  const paragraphs = Array.from({length: 30}, () => paragraph("x".repeat(3000)));
+  assert.deepEqual(nocturneContextVisitBoundaries(paragraphs), [10, 20]);
+  assert.deepEqual(nocturneContextVisitBoundaries(paragraphs, 5), [14, 22]);
+  assert.deepEqual(nocturneContextVisitBoundaries(paragraphs, 10), []);
+  const spent = {boundaries: [10, 20], requests: 2, bytesAttempted: 18000};
+  assert.deepEqual(nocturneContextVisitAllowance(9, spent), {requests: 2, bytes: 2000});
+  assert.deepEqual(nocturneContextVisitAllowance(10, spent), {requests: 6, bytes: 22000});
+  assert.deepEqual(nocturneContextVisitAllowance(21, spent), {requests: 10, bytes: 42000});
+  paragraphs[0].cloudExcluded = true;
+  paragraphs[1].override = 0;
+  assert.deepEqual(nocturneContextVisitBoundaries(paragraphs), [12, 21]);
 });
 
 test("context byte allowance counts failed requests and survives a consent toggle", async t => {

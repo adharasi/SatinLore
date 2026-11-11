@@ -8,6 +8,7 @@ const shapes = ["unspecified", "accented", "sustained", "alternating"];
 const endpoint = "/api/scene-analysis";
 export const NOCTURNE_CONTEXT_SESSION_REQUESTS = 12;
 export const NOCTURNE_CONTEXT_SESSION_BYTES = 60_000;
+const CONTEXT_VISIT_BANDS = 3;
 const PREFETCH_BYTES = 600;
 const OVERLAP_BYTES = 480;
 const encoder = new TextEncoder();
@@ -30,6 +31,31 @@ function contextEntry(paragraphs, id) {
 
 function canFitEntry(entry, sourceLimit) {
   return entry.sourceBytes <= Math.min(sourceLimit, MAX_PARAGRAPH_BYTES) && emptyBodyBytes + entry.bodyBytes <= MAX_CONTEXT_BODY_BYTES;
+}
+
+// Reserve later review for long reads. Split by reviewable bytes from the
+// starting section so short stories and short remainders keep their full allowance.
+export function nocturneContextVisitBoundaries(paragraphs, position = 0) {
+  const offsets = [];
+  let bytes = 0;
+  const start = Number.isInteger(position) ? Math.max(0, Math.min(position, paragraphs.length - 1)) : 0;
+  for (let id = start; id < paragraphs.length; id++) {
+    offsets.push(bytes);
+    const entry = contextEntry(paragraphs, id);
+    if (entry && canFitEntry(entry, MAX_CONTEXT_BYTES)) bytes += entry.sourceBytes;
+  }
+  if (bytes <= NOCTURNE_CONTEXT_SESSION_BYTES) return [];
+  return Array.from({length: CONTEXT_VISIT_BANDS - 1}, (_, index) =>
+    start + offsets.findIndex(offset => offset >= bytes * (index + 1) / CONTEXT_VISIT_BANDS));
+}
+
+export function nocturneContextVisitAllowance(position, {boundaries = [], requests = 0, bytesAttempted = 0} = {}) {
+  const bands = boundaries.length + 1;
+  const released = boundaries.filter(boundary => position >= boundary).length + 1;
+  return {
+    requests: Math.max(0, NOCTURNE_CONTEXT_SESSION_REQUESTS * released / bands - requests),
+    bytes: Math.max(0, NOCTURNE_CONTEXT_SESSION_BYTES * released / bands - bytesAttempted),
+  };
 }
 
 function nextContextStart(paragraphs, position, attempted, sourceLimit, lookahead) {

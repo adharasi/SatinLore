@@ -47,7 +47,7 @@ const localReasons = new Set(["no-keyword-match", "boundary-or-rest", "uncertain
   "contact-context-match", "affectionate-action-match", "movement-ended", "scene-grouping-rule", "uncertain-contact-wording"]);
 const planningExclusions = new Set(["session-source-byte-limit", "boundary-suppressed", "application-suppressed", "safety-filtered",
   "not-admitted", "not-planned", "budget-deferred", "window-source-byte-limit", "window-request-limit", "paragraph-byte-limit",
-  "session-request-limit", "planner-window-or-body-limit"]);
+  "session-request-limit", "session-progress-allocation", "planner-window-or-body-limit"]);
 const pipelineFields = ["admitted", "planned", "submitted", "returned", "validated", "evidenceValid", "applied"];
 const sha = value => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 const integer = value => Number.isSafeInteger(value) && value >= 0;

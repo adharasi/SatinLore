@@ -42,6 +42,32 @@ function sceneRows(...paragraphs) {
   });
 }
 
+test("current alcohol and impairment evidence carries a bounded review into nearby paragraphs", () => {
+  const cue = "A tender kiss.";
+  const result = groupScenes(sceneRows(cue, "There was wine on the table.", "She lifted her drink, still intoxicated.",
+    ...Array(7).fill(cue)));
+  assert.equal(result[0].level, 1, "Later evidence cannot reach an earlier paragraph.");
+  assert.ok(result.slice(2, 9).every(row => row.capacityReview && row.quiet && row.cloudExcluded && row.level === 0));
+  assert.equal(result[9].level, 1, "The lexical review does not hold the rest of an unbroken story.");
+
+  for (const end of ["***", "The next morning, rain filled the courtyard."]) {
+    const cut = groupScenes(sceneRows("He was drunk from the wine.", cue, end, cue));
+    assert.equal(cut[1].capacityReview, true);
+    assert.equal(cut[3].level, 1, "A supported new scene clears prior review evidence.");
+  }
+});
+
+test("drinks alone, quotations, negation and metaphor leave nearby matches unchanged", () => {
+  const cue = "A tender kiss.";
+  for (const passage of ["She set her drink by the wine glass.", "She said, “The character was drunk on wine.”",
+    "He was not too drunk to carry the wine.", "She was intoxicated with delight at the wine tasting.",
+    "He was intoxicated by the music at the wine tasting.", "She imagined being drunk from the wine."]) {
+    const result = groupScenes(sceneRows("The wine was on the table.", passage, cue));
+    assert.equal(result[1].capacityReview, undefined);
+    assert.equal(result[2].level, 1);
+  }
+});
+
 test("one brief contextual paragraph eases down without breaking the matching scene", () => {
   const rows = sceneRows("A tender and romantic kiss expressed affection.",
     "Rain brushed against the window.", "A gentle, tender romantic embrace expressed affection.");

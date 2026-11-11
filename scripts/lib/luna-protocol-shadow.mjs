@@ -38,7 +38,7 @@ const anchorLinks = new Set(["continue", "ease", "span-end", "beat-end"]);
 const repairableCueContracts = new Set(["status-effect", "phase-action", "transition-fact", "transition-action", "fact-phase", "fact-action"]);
 const cueCheckFocus = {"opening-buildup": "buildup", "romantic-context": "buildup", "adjacent-start": "enactment",
   "restart-state": "restart-gate", "typed-start": "enactment", "continuity-boundary": "continuity-boundary",
-  "primary-anchor-repair": "anchor-repair"};
+  "primary-anchor-repair": "anchor-repair", "same-episode-boundary": "episode-boundary"};
 const startTransitions = new Set(["onset", "restart"]);
 const diagnosticLanes = {
   "scene-boundary": {verdictKey: "boundaryVerification", statusKey: "boundaryVerificationStatus", factKey: "sceneBoundary"},
@@ -74,9 +74,29 @@ function exactTypedStart(fact, id) {
     fact.evidenceIds.includes(id);
 }
 
-const strictQuietNegative = fact => fact?.status === "neutral" && fact.frame === "current" &&
+const quietNegative = fact => fact?.status === "neutral" && fact.frame === "current" &&
   fact.narrativePhase === "quiet" && fact.action === "none" && fact.transition === "none" && fact.fact === "none" &&
-  fact.scopeId === null && fact.priorAnchor === null && fact.evidenceIds.length === 0;
+  fact.scopeId === null && fact.priorAnchor === null;
+const strictQuietNegative = fact => quietNegative(fact) && fact.evidenceIds.length === 0;
+
+const sameEpisodeReasons = new Set(["viewpoint-only", "same-episode", "ordinary-interruption", "routine-movement", "elapsed-continuation"]);
+
+function sameEpisodeCutCandidate(row, id) {
+  const {primaryPrefix: primary, transitionVerification: typed, discovery} = row;
+  const cut = typed?.sceneBoundary;
+  return row.effectiveAnnotation?.transition === "scene-cut" && row.transitionFlag !== "scene-boundary-stale" &&
+    quietNegative(discovery) && discovery.evidenceIds.every(evidence => evidence === id) &&
+    primary?.status === "verified" && primary.frame === "current" && primary.narrativePhase === "quiet" &&
+    primary.action === "none" && primary.transition === "scene-cut" && primary.fact === "cut" && primary.priorAnchor === null &&
+    typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.fact === "none" &&
+    typed.scopeId === null && typed.priorAnchor === null && typed.evidenceIds.length === 0 &&
+    cut?.status === "cut" && ["setting-shift", "objective-shift"].includes(cut.reason) && cut.entryId === id &&
+    cut.previousId >= row.previousSceneBoundaryId && primary.evidenceIds.includes(cut.previousId) && primary.evidenceIds.includes(id);
+}
+
+function sameEpisodeNoCut(entry) {
+  return entry?.status === "none" && sameEpisodeReasons.has(entry.reason);
+}
 
 function disputedSettingEntry(row, id) {
   const typed = row.transitionVerification;
@@ -92,17 +112,9 @@ function disputedSettingEntry(row, id) {
 }
 
 function hasViewpointConflict(row, id) {
-  const primary = row.primaryPrefix;
-  const typed = row.transitionVerification;
-  const cut = typed?.sceneBoundary;
   const entry = row.sceneEntryVerification?.sceneEntry;
   const action = row.localActionVerification?.localAction;
-  return row.effectiveAnnotation?.transition === "scene-cut" && strictQuietNegative(row.discovery) &&
-    primary?.status === "verified" && primary.frame === "current" && primary.narrativePhase === "quiet" &&
-    primary.action === "none" && primary.transition === "scene-cut" && primary.fact === "cut" &&
-    primary.evidenceIds.length === 2 && primary.evidenceIds[0] === cut?.previousId && primary.evidenceIds[1] === id &&
-    typed.status === "neutral" && typed.frame === "current" && typed.transition === "none" &&
-    cut.status === "cut" && cut.reason === "setting-shift" && cut.entryId === id &&
+  return sameEpisodeCutCandidate(row, id) && row.transitionVerification.sceneBoundary.reason === "setting-shift" &&
     entry?.status === "none" && entry.reason === "viewpoint-only" && action?.status === "none" && action.frame === "noncurrent";
 }
 
@@ -303,6 +315,23 @@ function corroboratesSceneEntry(row, cue, typed, id) {
     (typed.scopeId === null || typed.scopeId === id) && typed.evidenceIds.length === 1;
 }
 
+function corroboratesLinkedAccentCue(row, cue, typed, id, prior) {
+  const local = localDirectAction(row, id);
+  const proposal = row.discovery;
+  // The linked beat still governs playback. Report exact local contact or
+  // change only when independent observations identify this same accent.
+  return cue === row.primaryPrefix && cue.action === "continuation" && cue.narrativePhase === "sustain" &&
+    cue.transition === "none" && cue.evidenceIds.length === 2 && cue.evidenceIds[0] === prior &&
+    row.cueRecovery?.status !== "neutral" && local?.phase === "sustain" && local.contextId === prior &&
+    proposal?.status === "candidate" && proposal.frame === "current" && proposal.scopeId === cue.scopeId &&
+    proposal.action === local.action && proposal.narrativePhase === "sustain" && proposal.transition === "accent" &&
+    proposal.fact === "none" && proposal.priorAnchor === null && proposal.evidenceIds.length === 2 &&
+    proposal.evidenceIds[0] === prior && proposal.evidenceIds[1] === id &&
+    typed?.status === "verified" && typed.frame === "current" && typed.transition === "accent" && typed.fact === "none" &&
+    typed.scopeId === null && typed.priorAnchor === null && typed.evidenceIds.length === 2 &&
+    typed.evidenceIds[0] === prior && typed.evidenceIds[1] === id && typed.sceneBoundary?.status === "none";
+}
+
 function corroboratesRecoveryCue(row, cue, typed, id) {
   const local = localDirectAction(row, id);
   return local?.phase === "recover" && local.action === cue?.action && cue === row.primaryPrefix && row.cueRecovery?.status !== "neutral" &&
@@ -328,14 +357,22 @@ function corroboratesAdjacentBuild(row, cue, typed, prior, id) {
 
 function corroboratesSustain(row, cue, typed, anchor, id, prior) {
   const local = row.localActionVerification?.localAction;
+  const scope = cue.scopeId;
+  const evidence = cue.evidenceIds;
+  const exactLink = evidence.length === 2 && evidence[0] === prior && evidence[1] === id;
+  // A third ID can attest the same scope root already cited by the opening.
+  const rootedLink = scope < prior && anchor?.evidenceIds.includes(scope) && evidence.length === 3 &&
+    evidence[0] === scope && evidence[1] === prior && evidence[2] === id;
+  const noTypedEffect = typed?.frame === "current" && typed.sceneBoundary?.status === "none" &&
+    (typed.status === "neutral" && typed.transition === "none" ||
+      typed.status === "uncertain" && typed.transition === "unknown" && typed.fact === "none" &&
+      typed.scopeId === null && typed.priorAnchor === null && typed.evidenceIds.length === 0);
   return cue === row.primaryPrefix && row.cueRecovery?.status !== "neutral" &&
-    cue.scopeId != null && cue.scopeId === anchor?.scopeId && freshEnactedStart(anchor, prior) &&
-    cue.evidenceIds.length === 2 && cue.evidenceIds[0] === prior && cue.evidenceIds[1] === id &&
+    scope != null && scope === anchor?.scopeId && freshEnactedStart(anchor, prior) && (exactLink || rootedLink) &&
     ["contact", "continuation"].includes(cue.action) && cue.narrativePhase === "sustain" && cue.transition === "none" &&
     romanticDepictions.has(cue.depiction) && local?.status === "verified" && local.frame === "current" &&
     local.action === "continuation" && local.phase === "sustain" && local.contrast === "same-action" &&
-    local.targetId === id && local.contextId === prior &&
-    typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.sceneBoundary?.status === "none";
+    local.targetId === id && local.contextId === prior && noTypedEffect;
 }
 
 function playbackInputs(index, decisions, blocked, supportingIds) {
@@ -599,6 +636,11 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
         linked && observedCue && rawCue.action === "change");
       result.readerCue = result.cue || Boolean(observedCue &&
         (canSignal && rawCue.action === "anticipation" || linked && rawCue.action === "continuation"));
+      if (result.readerCue && !result.cue && observedCue && exactLink && !cut && !restartBoundary &&
+          transition === "accent" && prior === unit.id - 1 && lastAnchor === prior &&
+          corroboratesLinkedAccentCue(result, rawCue, typed, unit.id, prior)) {
+        result.localActionApplication = "linked-accent-cue";
+      }
     }
     const signalProfile = signal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
     let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" :
@@ -646,7 +688,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   limits = {}, maxVerification = 96, prefixUnits = 24, negativeStride = 20, now = Date.now,
   verificationTargets = [], verificationContext = "attested", verifyTransitions = false,
   maxTransitionVerification = 32, transitionTargets = [], maxCueChecks = 0, maxSupportingVerification = 0, maxPrimaryAnchorRepairs = 0,
-  verifyContinuityBoundary = false, releaseUnusedRestartReservation = false, sceneEntryArbitration = false,
+  verifyContinuityBoundary = false, releaseUnusedRestartReservation = false, sceneEntryArbitration = false, sameEpisodeArbitration = false,
   requireSceneBoundary = verifyTransitions && provider?.sceneBoundaryProtocol === true,
   boundaryVerificationTargets = [], localActionVerificationTargets = [], sceneEntryVerificationTargets = []} = {}) {
   if (typeof id !== "string" || !/^[a-z0-9-]{1,48}$/iu.test(id) || typeof now !== "function" ||
@@ -657,6 +699,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       !int(maxCueChecks) || maxCueChecks > 8 || !int(maxPrimaryAnchorRepairs) || maxPrimaryAnchorRepairs > 1 ||
       typeof verifyContinuityBoundary !== "boolean" || typeof releaseUnusedRestartReservation !== "boolean" ||
       typeof requireSceneBoundary !== "boolean" || typeof sceneEntryArbitration !== "boolean" ||
+      typeof sameEpisodeArbitration !== "boolean" || sameEpisodeArbitration && !sceneEntryArbitration ||
       !Array.isArray(transitionTargets) || (!verifyTransitions && transitionTargets.length > 0) || !Array.isArray(boundaryVerificationTargets) ||
       !Array.isArray(localActionVerificationTargets) || localActionVerificationTargets.length > MAX_LOCAL_ACTION_DIAGNOSTIC_TARGETS ||
       !Array.isArray(sceneEntryVerificationTargets) || sceneEntryVerificationTargets.length > MAX_SCENE_ENTRY_DIAGNOSTIC_TARGETS ||
@@ -702,7 +745,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (!discovery.length) for (const id of approved) decisions.set(id, {status: "complete-arm-ineligible"});
   }
   const telemetry = [], supportingIds = new Set(), pendingPinned = new Map();
-  let cueChecksStarted = 0, primaryAnchorRepairsStarted = 0;
+  let cueChecksStarted = 0, primaryAnchorRepairsStarted = 0, sameEpisodeCheckStarted = false;
   let lastPotentialRestartClosure = -1, singleVerificationRun = false;
   const refusedRuns = new Set();
   const refusedDiagnosticRuns = new Map(Object.keys(diagnosticLanes).map(mode => [mode, new Set()]));
@@ -710,6 +753,21 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   const attest = createCausalAttestationLedger(decisions, blocked, LUNA_PROTOCOL_LIMITS.maxAttested, index.units);
   function storePrefixResult(mode, id, verdict, status, reason, cueCheckReason) {
     const before = decisions.get(id);
+    if (mode === "cue-check" && cueCheckReason === "same-episode-boundary") {
+      const previousId = before.transitionVerification.sceneBoundary.previousId;
+      const veto = quietNegative(verdict) && verdict.evidenceIds.length === 2 &&
+        verdict.evidenceIds[0] === previousId && verdict.evidenceIds[1] === id;
+      const stop = verdict?.status === "verified" && ["hard-stop", "declined-restart"].includes(verdict.transition) &&
+        verdict.evidenceIds.includes(id);
+      const row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status,
+        cueRecoveryReason: cueCheckReason, cueRecoveryCorrection: veto ? "same-episode-veto" : undefined,
+        cueRecoveryGuard: veto || stop ? undefined : "same-episode-unconfirmed"};
+      if (veto) Object.assign(row, {effectiveAnnotation: verdict, sceneEntryArbitration: "same-episode-veto",
+        transitionFlag: "scene-boundary-same-episode"});
+      if (stop) Object.assign(row, {annotation: verdict, effectiveAnnotation: verdict, transitionFlag: "protective-transition-conflict"});
+      decisions.set(id, row);
+      return;
+    }
     const continuity = mode === "cue-check" && cueCheckReason === "continuity-boundary";
     const continuityCorrection = continuity ? resolveContinuityDispute(before.continuityDispute, verdict, id) : undefined;
     const oldScopeVeto = continuityCorrection === "continuity-old-scope-veto";
@@ -781,7 +839,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   }
   function deferPrefixRequest(record, id, deferralReason) {
     record.deferralReason = deferralReason;
-    if (["continuity-boundary", "primary-anchor-repair"].includes(record.cueCheckReason)) {
+    if (["continuity-boundary", "primary-anchor-repair", "same-episode-boundary"].includes(record.cueCheckReason)) {
       storePrefixResult("cue-check", id, undefined, record.status, undefined, record.cueCheckReason);
     }
     return {status: "failed"};
@@ -840,8 +898,10 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
             !causal.restartBoundary && row.discovery?.status === "neutral" && row.discovery.frame === "current" &&
             typed?.status === "neutral" && ["current", "neutral"].includes(typed.frame) && typed.transition === "none" &&
             (!typed.sceneBoundary || typed.sceneBoundary.status === "none");
+          const episodeDispute = sameEpisodeArbitration && !sameEpisodeCheckStarted && !causal.restartBoundary &&
+            sameEpisodeNoCut(row.sceneEntryVerification?.sceneEntry) && sameEpisodeCutCandidate(row, id);
           record.cueCheckReason = restartState ? "restart-state" : typedStart ? "typed-start" :
-            dispute ? "continuity-boundary" : adjacent ? "adjacent-start" : opening ? "opening-buildup" :
+            episodeDispute ? "same-episode-boundary" : dispute ? "continuity-boundary" : adjacent ? "adjacent-start" : opening ? "opening-buildup" :
             romanticContext ? "romantic-context" : disagreement ? "discovery-disagreement" :
             anchorRepair ? "primary-anchor-repair" : repairableCueContracts.has(row.primaryFailure) ? "contract-repair" : undefined;
           const boundaryCheck = record.cueCheckReason === "continuity-boundary";
@@ -868,12 +928,13 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
             }
           }
         }
-        const attested = causal && verificationContext === "attested" ? causal.anchors : [];
+        const episodeCheck = record.cueCheckReason === "same-episode-boundary";
+        const attested = !episodeCheck && causal && verificationContext === "attested" ? causal.anchors : [];
         const focus = cueCheckFocus[record.cueCheckReason];
         const request = {mode, units: payload.units, targetIds: window.targetIds, ...(attested.length ? {attested} : {}),
           ...(focus ? {focus} : {})};
         const body = JSON.stringify(request);
-        const optional = earlyDiagnostic ||
+        const optional = episodeCheck || earlyDiagnostic ||
           mode !== "discovery" && !diagnosticRefusals && maxSupportingVerification > 0 && !pendingPinned.has(window.id);
         const retained = {attempts: pendingPinned.size, sourceBytes: 0, reservedMicros: 0};
         if (optional) for (const quote of pendingPinned.values()) {
@@ -884,6 +945,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           budget.reserve(body, window.targetIds.length);
         if (!settle) return deferPrefixRequest(record, id, "request-budget");
         pendingPinned.delete(window.id);
+        if (episodeCheck) sameEpisodeCheckStarted = true;
         if (record.cueCheckReason === "primary-anchor-repair") primaryAnchorRepairsStarted++;
         else if (mode === "cue-check") cueChecksStarted++;
         record.attempted = true;
@@ -1085,10 +1147,32 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (sceneEntryArbitration && singleVerificationRun && diagnosticJobs["scene-entry"].length) {
       const entryJobs = new Map(diagnosticJobs["scene-entry"].map(job => [job.targetIds[0], job]));
       for (const [id, jobs] of Map.groupBy(verification, job => job.targetIds[0])) {
-        await applyPrefixJobs(jobs);
-        const row = decisions.get(id);
         const entryJob = entryJobs.get(id);
-        if (!entryJob || !disputedSettingEntry(row, id) || invalidated(entryJob)) continue;
+        const check = sameEpisodeArbitration && entryJob && cueChecksStarted < maxCueChecks && !sameEpisodeCheckStarted &&
+          jobs.find(job => job.id.startsWith("cue-check:"));
+        if (check) {
+          await applyPrefixJobs(jobs.filter(job => job !== check));
+          const row = decisions.get(id);
+          if (sameEpisodeCutCandidate(row, id) && !invalidated(entryJob)) {
+            const {previousId} = row.transitionVerification.sceneBoundary;
+            const firstId = inputFor(entryJob).units[0].id;
+            const causal = attest({runId: entryJob.runId, firstId, target: id});
+            const path = index.units.slice(previousId, id + 1);
+            const open = path.every(unit => {
+              const prior = decisions.get(unit.id);
+              const fact = prior.effectiveAnnotation ?? prior.annotation;
+              return !blocked.has(unit.id) && !unit.structuralBoundary && prior.window?.runId === entryJob.runId &&
+                (unit.id === id || !recoveryBarriers.has(fact?.transition) && !recoveryBlockingFacts.has(fact?.fact));
+            });
+            if (previousId >= firstId && open && !causal.restartBoundary && !causal.protectedScopes.has(row.primaryPrefix.scopeId)) {
+              await applyDiagnosticJobs("scene-entry", [entryJob], true);
+              entryJobs.delete(id);
+            }
+          }
+          await applyPrefixJobs([check]);
+        } else await applyPrefixJobs(jobs);
+        const row = decisions.get(id);
+        if (!entryJobs.has(id) || !disputedSettingEntry(row, id) || invalidated(entryJob)) continue;
         const previousId = row.transitionVerification.sceneBoundary.previousId;
         const path = index.units.slice(previousId, id + 1);
         if (path.some(unit => blocked.has(unit.id) || unit.structuralBoundary || decisions.get(unit.id)?.window?.runId !== entryJob.runId)) continue;
@@ -1148,14 +1232,15 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     // Correct the waveform of an exact sustain without renewing carry past it.
     const sustainProfile = localActionApplication === "sustain-profile" && trace.beat !== null && trace.knownAt === unit.id &&
       ["Onset rise", "Undertone"].includes(profile.pattern);
-    const appliedLocalAction = recoveryCue || sustainProfile || localActionApplication === "scene-entry-onset" ?
+    const linkedAccentCue = localActionApplication === "linked-accent-cue";
+    const appliedLocalAction = recoveryCue || linkedAccentCue || sustainProfile || localActionApplication === "scene-entry-onset" ?
       localActionApplication : undefined;
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
       pattern: sustainProfile ? "Sustain wave" : profile.pattern, phase: profile.phase_used, beatId: trace.beat, sceneId: trace.scene,
       ...(profile.verifiedRelease ? {verifiedRelease: true} : {}),
       knownAt: trace.knownAt, evidenceIds: trace.evidence, labelKnownAt: annotation ? unit.id : null,
       labelEvidenceIds: annotation?.evidenceIds ?? [], trace, playbackDisposition, prefixVerified: Boolean(prefixVerified),
-      cue: recoveryCue || cue,
+      cue: recoveryCue || linkedAccentCue || cue,
       discovery: discovery ? provisionalLabels : undefined,
       discoveryStatus: discoveryStatus ?? status,
       transitionVerification, transitionVerificationStatus: transitionVerificationStatus ?? (verifyTransitions ? "not-requested" : undefined),

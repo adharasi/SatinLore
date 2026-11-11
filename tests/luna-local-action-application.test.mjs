@@ -127,3 +127,32 @@ test("sustain waveform requires the same attested action and an uninterrupted sc
     assert.equal(units[2].localActionApplication, undefined);
   }
 });
+
+test("a rooted sustain can refine an active waveform with effect-free typed uncertainty", async () => {
+  const prior = {...onset(1), scopeId: 0, evidenceIds: [0, 1]};
+  const primary = {...sustainedContact, priorAnchor: 1, evidenceIds: [0, 1, 2]};
+  const transition = typed({...neutral(2), status: "uncertain", transition: "unknown"});
+  const local = {...sameAction, contextId: 1};
+  const options = {primary, prior, discovery: neutral(2), transition};
+  const {units: control} = await run({...options, local: null});
+  const {units: actual} = await run({...options, local});
+  assert.equal(control[2].pattern, "Onset rise");
+  assert.equal(actual[2].pattern, "Sustain wave");
+  assert.equal(actual[2].localActionApplication, "sustain-profile");
+  assert.equal(actual[2].transitionVerificationStatus, "uncertain");
+  for (const key of ["phase", "appliedTransition", "cue", "readerCue", "beatId", "knownAt", "trace"]) {
+    assert.deepEqual(actual[2][key], control[2][key]);
+  }
+  assert.deepEqual(actual[3], control[3]);
+
+  for (const changes of [
+    {prior: {...prior, evidenceIds: [1]}},
+    {transition: typed(transition, {status: "uncertain", reason: "unclear", previousId: null, entryId: null})},
+    {transition: typed({...stop, unitId: 2, evidenceIds: [2]})},
+    {blockedIds: [2]},
+  ]) {
+    const {units} = await run({...options, local, ...changes});
+    assert.equal(units[2].localActionApplication, undefined);
+    assert.notEqual(units[2].pattern, "Sustain wave");
+  }
+});

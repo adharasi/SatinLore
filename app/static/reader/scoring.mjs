@@ -152,6 +152,13 @@ const REST_BOUNDARY = /\b(?:fell asleep|went to sleep|(?:settled|lay) down to re
 const TIME_BOUNDARY = /\b(?:(?:the )?(?:next|following) (?:day|morning|afternoon|evening|night|week|month|year)|(?:hours?|days?|weeks?|months?|years?) later|later that (?:evening|night))\b/u;
 const SENSITIVE_CUE = /\b(?:non[ -]?consent(?:ual)?|coerc(?:e|ed|es|ing|ion)|forced|unwanted|under[ -]?age|child(?:ren)?|(?:1[0-7]|[1-9])[ -]years?[ -]olds?|incest|bestiality|rape|assault(?:ed)?)\b/u;
 const SENSITIVE_AGE = /(?<![\p{L}\p{N}-])(?<!twenty |thirty |forty |fifty |sixty |seventy |eighty |ninety )(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)[ -]years?[ -]olds?\b/u;
+const ALCOHOL_CONTEXT = /\b(?:alcohol|wine|beer|champagne|whisk(?:ey|y)|vodka|cider|liquor|brandy)\b/u;
+const DRINK_REFERENCE = /\b(?:my|your|his|her|their|our|the|a) drinks?\b/u;
+const INTOXICATION = /\b(?:intoxicated|drunk|tipsy)\b(?!\s+(?:on|by)\b)/u;
+const FIGURATIVE_INTOXICATION = /^(?:intoxicated|drunk|tipsy) with (?:the )?(?:delight|excitement|desire|joy|love|passion|hope|power)\b/u;
+const NEGATED_INTOXICATION = /\b(?:not|never|wasn't|weren't|isn't|aren't)\s+(?:(?:actually|really|very|too)\s+)?$/u;
+const CAPACITY_BOUNDARY = /^(?:(?:on|by) )?(?:the )?(?:(?:next|following) (?:day|morning|week|month|year)|(?:days?|weeks?|months?|years?) later)\b/u;
+const CAPACITY_REVIEW_LOOKAHEAD = 6;
 const SOFT_PACE = /\b(?:slow(?:ly)?|unhurried|gentl(?:e|y)|gradual(?:ly)?|softly)\b/u;
 const VARIABLE_PACE = /\b(?:quick(?:ly)?|sudden(?:ly)?|urgent(?:ly)?|abrupt(?:ly)?|rapid(?:ly)?)\b/u;
 const MOVEMENT_CUES = [
@@ -369,7 +376,29 @@ function linkedRelationship(previous, next) {
     next.affectionTargets.some(target => previous.gestureTargets.has(target)));
 }
 
-function sceneCandidate(paragraph, incomingDevice) {
+function capacityReviewAt(narrated, structural, state, index) {
+  if (structural || CAPACITY_BOUNDARY.test(narrated)) {
+    state.alcoholAt = state.reviewThrough = -Infinity;
+  }
+  // A drink alone, a quotation or an intoxication metaphor is insufficient.
+  const clauses = narrated.split(CLAUSE_BREAK).filter((_, part) => part % 2 === 0)
+    .flatMap(clause => clause.split(QUOTE_GAP))
+    .filter(clause => !SPECULATION.test(clause) && !REPORTED_SPEECH.test(clause) &&
+      !NON_ACTUAL.test(clause) && !DETACHED_PAST.test(clause));
+  for (const clause of clauses) {
+    const alcohol = ALCOHOL_CONTEXT.test(clause);
+    const impairment = INTOXICATION.exec(clause);
+    if (impairment && !NEGATED_INTOXICATION.test(clause.slice(0, impairment.index)) &&
+        !FIGURATIVE_INTOXICATION.test(clause.slice(impairment.index)) &&
+        (alcohol || index - state.alcoholAt <= 2 && DRINK_REFERENCE.test(clause))) {
+      state.reviewThrough = index + CAPACITY_REVIEW_LOOKAHEAD;
+    }
+    if (alcohol) state.alcoholAt = index;
+  }
+  return index <= state.reviewThrough;
+}
+
+function sceneCandidate(paragraph, incomingDevice, capacity, index) {
   if (!paragraph || typeof paragraph.text !== "string" || !Number.isInteger(paragraph.band) ||
       paragraph.band < 0 || paragraph.band >= SUGGESTION_LEVELS.length || SUGGESTION_LEVELS[paragraph.band] !== paragraph.suggestedLevel || typeof paragraph.reason !== "string") {
     throw new TypeError("Use analysed paragraph results for scene suggestions.");
@@ -377,7 +406,9 @@ function sceneCandidate(paragraph, incomingDevice) {
   const value = normalized(paragraph.text);
   const narrated = narration(paragraph.text);
   const evidence = clauseEvidence(narrated);
-  const rest = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim()) || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
+  const structural = SCENE_SEPARATOR.test(value.split("\n", 1)[0].trim());
+  const rest = structural || REST_BOUNDARY.test(narrated) || TIME_BOUNDARY.test(narrated);
+  const capacityReview = capacityReviewAt(narrated, structural, capacity, index);
   const stopped = EXPLICIT_STOP.test(value);
   const sensitive = SENSITIVE_CUE.test(value) || SENSITIVE_AGE.test(value);
   const motion = sceneMovements(evidence.actual, incomingDevice && !/^["'“‘]/u.test(value));
@@ -387,8 +418,8 @@ function sceneCandidate(paragraph, incomingDevice) {
   const quotedContact = quotes.some(quote => hasContactCue(quote) || CONTACT_CONTINUES.test(quote));
   const uncertain = !evidence.active.length && !evidence.holdsContact && (evidence.uncertain ||
     !describedMovements.length && (motion.unresolved || evidence.nonPresentMotion || quotedMotion) || quotedContact);
-  const quiet = rest || stopped || uncertain || sensitive || ended;
-  const cloudExcluded = sensitive || uncertain || motion.unresolved || evidence.cloudExcluded || quotedMotion || quotedContact;
+  const quiet = rest || stopped || uncertain || sensitive || ended || capacityReview;
+  const cloudExcluded = capacityReview || sensitive || uncertain || motion.unresolved || evidence.cloudExcluded || quotedMotion || quotedContact;
   const band = quiet ? 0 : paragraph.band;
   const actual = evidence.actual.map(({clause}) => clause).join(" ");
   const movementHints = quiet ? [] : describedMovements;
@@ -404,7 +435,8 @@ function sceneCandidate(paragraph, incomingDevice) {
   const repositionsHold = !quiet && !cloudExcluded && paragraph.override == null && REPOSITIONED_CONTACT.test(actual);
   const relationship = band === 0 && !quiet && !cloudExcluded && paragraph.override == null ?
     relationshipEvidence(value, narrated, evidence.actual, quotes, short) : null;
-  const advisory = sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
+  const advisory = capacityReview ? "Possible impairment nearby. Playback and contextual review stay off for this passage." :
+    sensitive ? "Sensitive wording may need a closer look. This local suggestion stays at zero." :
     uncertain ? "The wording is ambiguous or speculative. This suggestion stays at zero." : null;
   return {
     anchor: band > 0 && paragraph.override !== 0,
@@ -431,9 +463,11 @@ function sceneCandidate(paragraph, incomingDevice) {
     slow: SOFT_PACE.test(pace),
     result: {band, level: SUGGESTION_LEVELS[band], reason: rest || stopped ? "Rest or scene boundary; left at zero." :
       ended ? "The described movement stopped; left at zero." :
+      capacityReview ? "Nearby impairment; left at zero for review." :
       sensitive ? "Sensitive wording; left at zero for review." :
         uncertain ? "Context is uncertain or speculative; left at zero." : paragraph.reason,
       sceneId: null, phase: "quiet", rhythm: "steady", quiet, advisory, shape: "unspecified", cloudExcluded,
+      ...(capacityReview ? {capacityReview: true} : {}),
       movements: band > 0 ? movementHints : [],
       endedMovements: orderedMovements(motion.endedMovements)},
     shape,
@@ -450,9 +484,10 @@ function applyBeat(result, {phase, band, rhythm, reason, movements}) {
 export function groupScenes(paragraphs) {
   if (!Array.isArray(paragraphs)) throw new TypeError("Use an array of analysed paragraphs.");
   const candidates = [];
-  for (const paragraph of paragraphs) {
+  const capacity = {alcoholAt: -Infinity, reviewThrough: -Infinity};
+  for (const [index, paragraph] of paragraphs.entries()) {
     const previous = candidates.at(-1);
-    candidates.push(sceneCandidate(paragraph, previous?.anchor && previous.deviceReference));
+    candidates.push(sceneCandidate(paragraph, previous?.anchor && previous.deviceReference, capacity, index));
   }
   for (const [index, candidate] of candidates.entries()) {
     const signal = candidate.relationship;

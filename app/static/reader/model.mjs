@@ -4,7 +4,7 @@ import {LEGACY_NOCTURNE_CONTEXT_VERSION, MIN_CONTEXT_CONFIDENCE, NOCTURNE_CONTEX
 
 let sequence = 0;
 export const MAX_PARAGRAPHS = 2000;
-export const ANALYSIS_VERSION = "scene-rules-v6.3";
+export const ANALYSIS_VERSION = "scene-rules-v6.4";
 const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 const validScore = score => score && Number.isInteger(score.band) && score.band >= 0 &&
   score.band < SUGGESTION_LEVELS.length && score.level === SUGGESTION_LEVELS[score.band] &&
@@ -21,8 +21,9 @@ function applySceneSuggestions(paragraphs) {
   const scenes = groupScenes(paragraphs.map(paragraph => ({...paragraph, override: null})));
   if (scenes.length !== paragraphs.length || !scenes.every(validScore)) throw new Error("Invalid scene analysis.");
   for (let index = 0; index < scenes.length; index++) {
-    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape, currentCue} = scenes[index];
-    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape, currentCue: currentCue === true});
+    const {band, level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape, currentCue, capacityReview} = scenes[index];
+    Object.assign(paragraphs[index], {band, suggestedLevel: level, reason, rhythm, quiet, sceneId, phase, advisory, movements, endedMovements, cloudExcluded, shape,
+      currentCue: currentCue === true, capacityReview: capacityReview === true});
   }
 }
 
@@ -85,6 +86,7 @@ export class ReaderModel {
       paragraph.movements = [];
       paragraph.endedMovements = [];
       paragraph.cloudExcluded = false;
+      paragraph.capacityReview = false;
       paragraph.shape = "unspecified";
       paragraph.currentCue = false;
     }
@@ -226,6 +228,6 @@ export class ReaderModel {
 
   effectiveLevels(options = {}) {
     if (!this.analysisReady) return this.paragraphs.map(() => 0);
-    return this.paragraphs.map((paragraph, index) => paragraph.override ?? this.suggestedLevel(index, options));
+    return this.paragraphs.map((paragraph, index) => paragraph.capacityReview ? 0 : paragraph.override ?? this.suggestedLevel(index, options));
   }
 }

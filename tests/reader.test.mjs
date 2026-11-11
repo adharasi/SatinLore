@@ -1,6 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {ReaderModel, MAX_PARAGRAPHS} from "../app/static/reader/model.mjs";
+import {ReadingFeel} from "../app/static/reader/calibration.mjs";
+import {nocturneContextCandidates, requestNocturneContext} from "../app/static/reader/nocturne.mjs";
+
+test("capacity review prevents provider input and automatic output despite an override or continuous floor", async () => {
+  const model = new ReaderModel();
+  const paragraphs = model.load("The table held wine.\n\nHe was drunk from the wine.\n\nA tender kiss.\n\n***\n\nA tender kiss.");
+  model.setOverride(2, 5);
+  assert.equal(paragraphs[2].override, 5, "Keep the reader's saved correction.");
+  assert.equal(model.effectiveLevels({nocturne: true})[2], 0);
+  assert.equal(model.effectiveProfiles({nocturne: true})[2].quiet, true);
+  assert.equal(model.effectiveLevels({nocturne: true})[4], 1);
+  const feel = new ReadingFeel();
+  feel.configure({mode: "continuous", quietEdging: true, minimum: 2, background: 2, maximum: 5});
+  feel.hold(5);
+  assert.equal(feel.desired({base: model.effectiveLevels()[2], scene: model.effectiveProfiles()[2], ceiling: 5}), 0);
+
+  const candidates = nocturneContextCandidates(paragraphs, 1);
+  assert.deepEqual(candidates.newIds, [4]);
+  const result = await requestNocturneContext(candidates.paragraphs, {consent: true, request: async (_, init) => {
+    assert.deepEqual(JSON.parse(init.body).paragraphs.map(row => row.id), [4]);
+    return Response.json({code: "fixture-complete"}, {status: 400});
+  }});
+  assert.equal(result.code, "fixture-complete");
+});
 
 test("loaded paragraphs have stable local identities even when text repeats", () => {
   const model = new ReaderModel();

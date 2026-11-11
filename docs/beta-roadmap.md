@@ -211,6 +211,8 @@ V22 adds a bounded founder recheck for a rejected primary anchor, releases stale
 
 V23 evaluates corroborated setting cuts in founder shadow. The 41-work evaluation separates full local compiler and recognition passes from live results on exact previously approved clips. Edition pins and frozen anchors remain in the denominators when an excerpt is unavailable. [V23 evaluation](nocturne-beat-protocol-shadow.md#v23-corroborated-setting-cuts-and-the-41-work-evaluation)
 
+V24 separates independently checked same-episode boundaries, verified cue designation, sustain waveform selection and context opportunity. Keep fixed-response compiler deltas separate from live target comparisons and from the equal-budget 41-work reader-planning audit. [V24 evaluation](nocturne-beat-protocol-shadow.md#v24-same-episode-checks-cue-designation-and-context-opportunity)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

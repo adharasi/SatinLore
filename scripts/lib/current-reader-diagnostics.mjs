@@ -4,6 +4,7 @@ import {ReaderModel, ANALYSIS_VERSION} from "../../app/static/reader/model.mjs";
 import {scoreParagraph} from "../../app/static/reader/scoring.mjs";
 import {buildSceneUnits} from "../../app/static/reader/scene-map.mjs";
 import {nocturneCandidates, nocturneContextCandidates, nocturneContextNeedsReview,
+  nocturneContextVisitBoundaries, nocturneContextVisitAllowance,
   NOCTURNE_CONTEXT_SESSION_BYTES, NOCTURNE_CONTEXT_SESSION_REQUESTS} from "../../app/static/reader/nocturne.mjs";
 import {MAX_CONTEXT_BYTES, MAX_PARAGRAPH_BYTES} from "../../app/static/reader/nocturne-context-contract.mjs";
 
@@ -44,24 +45,25 @@ function projectedLabel(positive, phase) {
     phase: phases[phase] ?? "unknown", transition: "unknown", evidenceIds: []};
 }
 
-function contextReplay(paragraphs, {requests = NOCTURNE_CONTEXT_SESSION_REQUESTS,
-    sourceBytes = NOCTURNE_CONTEXT_SESSION_BYTES} = {}) {
+export function traceNocturneContextVisit(paragraphs, {start = 0, positions, capped = true, progressive = false} = {}) {
   const attempted = new Set(), windows = [];
-  let usedBytes = 0;
+  const state = {boundaries: capped && progressive ? nocturneContextVisitBoundaries(paragraphs, start) : [], requests: 0, bytesAttempted: 0};
   function visit(position, manual = false) {
-    const remaining = sourceBytes - usedBytes;
-    if (windows.length >= requests || remaining <= 0 ||
-        !manual && !nocturneContextNeedsReview(paragraphs, position, {attempted, maxBytes: remaining})) return;
-    const window = nocturneContextCandidates(paragraphs, position, {attempted, maxBytes: remaining});
+    const {requests, bytes} = capped ? nocturneContextVisitAllowance(position, state) : {requests: Infinity, bytes: Infinity};
+    if (requests <= 0 || bytes <= 0 ||
+        !manual && !nocturneContextNeedsReview(paragraphs, position, {attempted, maxBytes: bytes})) return;
+    const window = nocturneContextCandidates(paragraphs, position, {attempted, maxBytes: bytes});
     if (!window.paragraphs.length) return;
-    windows.push({paragraphIds: window.paragraphs.map(row => row.id), newIds: [...window.newIds],
+    windows.push({position, paragraphIds: window.paragraphs.map(row => row.id), newIds: [...window.newIds],
       sourceBytes: window.sourceBytes, excluded: window.excluded, limited: window.limited});
-    usedBytes += window.sourceBytes;
+    state.requests++;
+    state.bytesAttempted += window.sourceBytes;
     for (const id of window.newIds) attempted.add(id);
   }
-  visit(0, true);
-  for (let position = 0; position < paragraphs.length; position++) visit(position);
-  return {attempted, windows, sourceBytes: usedBytes};
+  visit(start, true);
+  if (positions) for (const position of positions) visit(position);
+  else for (let position = start; position < paragraphs.length; position++) visit(position);
+  return {attempted, windows, sourceBytes: state.bytesAttempted, boundaries: state.boundaries};
 }
 
 function planningExclusion(paragraph, index, capped, uncapped) {
@@ -69,6 +71,7 @@ function planningExclusion(paragraph, index, capped, uncapped) {
   if (paragraph.quiet || paragraph.cloudExcluded) return suppression(paragraph) ?? "application-suppressed";
   if (bytes(paragraph.text) > MAX_PARAGRAPH_BYTES) return "paragraph-byte-limit";
   if (uncapped.attempted.has(index)) {
+    if (index < capped.boundaries.at(-1)) return "session-progress-allocation";
     if (capped.windows.length >= NOCTURNE_CONTEXT_SESSION_REQUESTS) return "session-request-limit";
     return "session-source-byte-limit";
   }
@@ -127,8 +130,8 @@ export function traceCurrentReaderCorpus(pack, paragraphPack,
     }
     const levels = model.effectiveLevels();
     const rawScores = raw.map(scoreParagraph);
-    const capped = contextReplay(paragraphs);
-    const uncapped = contextReplay(paragraphs, {requests: Infinity, sourceBytes: Infinity});
+    const capped = traceNocturneContextVisit(paragraphs);
+    const uncapped = traceNocturneContextVisit(paragraphs, {capped: false});
     const cues = nocturneCandidates(paragraphs), cueIds = new Set(cues.cues.map(row => row.id));
     const requestIdsByParagraph = new Map();
     for (const [index, window] of capped.windows.entries()) {
@@ -163,7 +166,7 @@ export function traceCurrentReaderCorpus(pack, paragraphPack,
       const selected = capped.attempted.has(unit.paragraph);
       const exclusion = planningExclusion(paragraph, unit.paragraph, capped, uncapped);
       if (exclusion) exclusions.push(exclusion);
-      const budgetDeferred = ["session-request-limit", "session-source-byte-limit"].includes(exclusion);
+      const budgetDeferred = ["session-request-limit", "session-source-byte-limit", "session-progress-allocation"].includes(exclusion);
       contextWork.units.push({...common, status: selected ? "not-submitted" : budgetDeferred ? "budget-deferred" : "not-planned",
         proposed: null, applied: null, requestIds: requestIdsByParagraph.get(unit.paragraph) ?? [],
         pipeline: {admitted: !paragraph.quiet && !paragraph.cloudExcluded, planned: selected, submitted: false, returned: false,
@@ -186,6 +189,7 @@ export function traceCurrentReaderCorpus(pack, paragraphPack,
       quietParagraphs: paragraphs.filter(row => row.quiet).length,
       cloudExcludedParagraphs: paragraphs.filter(row => row.cloudExcluded).length,
       contextPlanning: {requests: capped.windows.length, sourceBytes: capped.sourceBytes,
+        progressionBoundaries: capped.boundaries,
         selectedParagraphs: capped.attempted.size, selectedTargets: contextWork.units.filter(row => row.pipeline.planned).length,
         uncappedRequests: uncapped.windows.length, uncappedSelectedParagraphs: uncapped.attempted.size,
         excludedTargetReasons: count(exclusions)}, cuePlanning: {selectedParagraphs: cueIds.size, limitedParagraphs: cues.limited,
