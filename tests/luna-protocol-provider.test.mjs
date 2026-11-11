@@ -19,6 +19,44 @@ const targetFailure = (unitId, reason) => ({unitId, reason});
 const rejected = targetFailures => ({...failure("invalid-response", "output-schema"), targetFailures});
 const partial = (facts, targetFailures) => ({...success(facts), status: "partial", targetFailures});
 
+test("scene-only verification sends a blind causal prefix and validates evidence roles", async () => {
+  const supplied = {mode: "scene-boundary", units, targetIds: [12]};
+  const sceneBoundary = {status: "cut", reason: "setting-shift", previousId: 10, changeId: 11,
+    entryId: 12, contrast: "material-change"};
+  const row = {unitId: 12, sceneBoundary};
+  let calls = 0;
+  const run = provider(async (_url, {body}) => {
+    calls++;
+    const sent = JSON.parse(body);
+    assert.deepEqual(JSON.parse(sent.input), {units, targetIds: [12]});
+    assert.equal(sent.text.format.name, "nocturne_luna_scene_boundary_v1");
+    const schema = sent.text.format.schema.properties.facts.items;
+    assert.deepEqual(schema.required, ["unitId", "sceneBoundary"]);
+    assert.equal(schema.properties.sceneBoundary.additionalProperties, false);
+    assert.match(sent.instructions, /time, setting, and the governing objective/u);
+    assert.match(sent.instructions, /A decorative heading alone supplies no cut/u);
+    return response([row]);
+  });
+  assert.deepEqual(await run({...supplied, priorVerdict: fact(12), candidates: [fact(12)]}), success([row]));
+  assert.deepEqual(await run({...supplied, targetIds: [11]}), failure("invalid-request", "request-shape"));
+  assert.deepEqual(await run({...supplied, attested: [{unitId: 9, scopeId: 9, frame: "current", action: "contact", narrativePhase: "onset"}]}),
+    failure("invalid-request", "request-shape"));
+  assert.equal(calls, 1);
+
+  for (const extra of [{previousId: 9}, {changeId: 10}, {changeId: 13}, {entryId: 11}, {previousId: null}]) {
+    const invalid = provider(async () => response([{...row, sceneBoundary: {...sceneBoundary, ...extra}}]));
+    assert.deepEqual(await invalid(supplied), rejected([targetFailure(12, "scene-boundary-evidence")]));
+  }
+  for (const [status, reason, contrast] of [["none", "none", "viewpoint-marker"], ["uncertain", "unclear", "insufficient-prefix"]]) {
+    const verdict = {...row, sceneBoundary: {status, reason, contrast, previousId: null, changeId: null, entryId: null}};
+    assert.deepEqual(await provider(async () => response([verdict]))(supplied), success([verdict]));
+    const incompatible = provider(async () => response([{...verdict, sceneBoundary: {...verdict.sceneBoundary, contrast: "material-change"}}]));
+    assert.deepEqual(await incompatible(supplied), rejected([targetFailure(12, "scene-boundary-shape")]));
+  }
+  assert.deepEqual(await provider(async () => response([{...row, transition: "onset"}]))(supplied),
+    rejected([targetFailure(12, "scene-boundary-shape")]));
+});
+
 test("submits only typed discovery inputs and accepts complete rows in target order", async () => {
   const proposed = fact(11, {status: "candidate", depiction: "romantic", narrativePhase: "build", fact: "low",
     action: "anticipation", scopeId: 10, evidenceIds: [10, 11]});

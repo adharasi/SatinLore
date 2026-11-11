@@ -132,9 +132,12 @@ const studyAttempt = (fetchImpl, options = {}) => fetchImpl(studyProvider, { met
 
 function neutralProtocolUpstream(_url, options) {
   const body = JSON.parse(options.body);
-  const { targetIds } = JSON.parse(body.input);
+  const { targetIds, units } = JSON.parse(body.input);
   const transitionOnly = body.text.format.name === "nocturne_luna_transition_v2";
-  const facts = targetIds.map(unitId => ({ unitId, status: "neutral", frame: "current", transition: "none",
+  const boundaryOnly = body.text.format.name === "nocturne_luna_scene_boundary_v1";
+  const facts = targetIds.map(unitId => boundaryOnly ? {unitId, sceneBoundary: {status: "cut", reason: "setting-shift",
+    previousId: units[0].id, entryId: unitId, changeId: unitId, contrast: "material-change"}} :
+    ({ unitId, status: "neutral", frame: "current", transition: "none",
     fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
     ...(transitionOnly ? {sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null}} :
       { depiction: "neutral", narrativePhase: "quiet", action: "none" }),
@@ -922,16 +925,23 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   const result = JSON.parse(serialized);
   assert.equal(result.status, "completed");
   assert.equal(result.clipDigest, clipDigest);
-  assert.equal(result.externalCalls, 3);
+  assert.equal(result.externalCalls, 4);
   assert.equal(result.hostedSpend.capMicros, 3_000_000);
   assert.equal(result.hostedSpend.settled, true);
   assert.ok(result.hostedSpend.remainingMicros < 3_000_000);
   assert.deepEqual(result.units.map(row => [row.id, row.unitSha256]), clip.units.map(row => [row.id, row.digest]));
-  assert.deepEqual(result.summary.attempts.filter(row => row.attempted).map(row => row.targetIds), [[32, 33], [33], [33]]);
+  assert.deepEqual(result.summary.attempts.filter(row => row.attempted).map(row => row.targetIds), [[32, 33], [33], [33], [33]]);
   assert.equal(result.units[1].primaryPrefix.unitId, 33);
   assert.equal(result.units[1].transitionVerification.unitId, 33);
   assert.deepEqual(result.units[1].transitionVerification.sceneBoundary,
     {status: "none", reason: "none", previousId: null, entryId: null});
+  assert.equal(result.units[1].boundaryVerification.unitId, 33);
+  assert.deepEqual(result.units[1].boundaryVerification.sceneBoundary,
+    {status: "cut", reason: "setting-shift", previousId: 32, entryId: 33, changeId: 33, contrast: "material-change"});
+  assert.equal(result.units[1].appliedTransition, "none");
+  const isolated = f.calls.map(({options}) => JSON.parse(options.body))
+    .find(call => call.text.format.name === "nocturne_luna_scene_boundary_v1");
+  assert.deepEqual(Object.keys(JSON.parse(isolated.input)).sort(), ["targetIds", "units"]);
   assert.ok(f.calls.every(({url, options}) => url === studyProvider && options.redirect === "manual" && options.headers.Authorization === `Bearer ${KEY}`));
   const sent = f.calls.flatMap(({options}) => JSON.parse(JSON.parse(options.body).input).units.map(row => row.text));
   assert.ok(sent.every(text => clip.units.some(unit => unit.text === text)));
@@ -940,7 +950,7 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   const duplicate = await post("shard", {runId, clip});
   assert.equal(duplicate.status, 409);
   assert.equal((await duplicate.json()).code, "shard_already_started");
-  assert.equal(f.calls.length, 3);
+  assert.equal(f.calls.length, 4);
 });
 
 test("a Luna corpus refusal halts the approved run without replaying another clip", {timeout: 30000}, async t => {

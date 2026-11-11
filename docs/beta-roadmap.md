@@ -195,6 +195,8 @@ V17 separates scene entry from the local event and requires cited evidence for b
 
 The v17 paid comparison improves exact profiles to 91/148 and reduces expected active intent to 20/59. The compiler follow-up removes three extra cuts on the same paid facts and improves exact profiles to 93/148 and applied events to 120/148. The independent natural holdout remains a release dependency. [V17 live comparison and replay](nocturne-beat-protocol-shadow.md#v17-independent-scene-boundary-and-local-event)
 
+V18 adds a blinded scene-only arm to the founder comparison and a local taper for corroborated brief beat endings. Track both raw cut votes and their evidence roles on identical causal excerpts. Test wider context where a reference anchor falls outside the approved clip, and verify above-background output at multiple reading speeds. [V18 comparison and release gates](nocturne-beat-protocol-shadow.md#v18-scene-only-comparison-and-local-taper)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

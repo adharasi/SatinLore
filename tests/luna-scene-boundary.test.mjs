@@ -19,8 +19,12 @@ const cut = {status: "cut", reason: "time-jump", previousId: 1, entryId: 2};
 const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown", narrativePhase: "unknown",
   action: "unknown", sceneBoundary});
 
-async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, focusAnswer, prefixUnits = 24} = {}) {
-  const provider = Object.assign(async ({mode, targetIds}) => {
+async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, focusAnswer, prefixUnits = 24,
+  boundaryVerificationTargets, boundaryAnswer, observed = []} = {}) {
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const {mode, targetIds} = request;
+    if (mode === "scene-boundary") return boundaryAnswer(targetIds[0]);
     if (mode === "transition" && targetIds[0] === 2 && boundary === null) return {status: "invalid-response"};
     return {status: "ok", usage: {inputTokens: 120, outputTokens: 40}, facts: targetIds.map(id => {
       const local = id === 1 ? onset(id) : id === 2 ? cue(id) : neutral(id);
@@ -32,7 +36,7 @@ async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoun
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "scene-boundary", text, grant, now: () => 1, provider, prefixUnits,
     verificationTargets: [1, 2, 3], transitionTargets: [1, 2, 3], verifyTransitions: true, negativeStride: 0,
-    verifyContinuityBoundary: Boolean(focusAnswer), maxCueChecks: Number(Boolean(focusAnswer))});
+    verifyContinuityBoundary: Boolean(focusAnswer), maxCueChecks: Number(Boolean(focusAnswer)), boundaryVerificationTargets});
 }
 
 test("does not apply a primary target-only cut without independent proof", async () => {
@@ -120,4 +124,45 @@ test("local hard stops and frame transitions take precedence over the material c
   assert.equal(units[2].appliedTransition, "hard-stop");
   assert.equal(units[2].pattern, "Stop");
   assert.equal(units[2].beatId, null);
+});
+
+test("the blind boundary arm preserves the control and measures the same pinned prefix", async () => {
+  const observed = [], baselineRequests = [];
+  const cue = id => ({...onset(id), scopeId: 1});
+  const boundary = typed({...onset(2), transition: "accent", scopeId: 1});
+  const baseline = await study({cue, boundary, observed: baselineRequests});
+  const independent = {...cut, changeId: 2, contrast: "material-change"};
+  const studyRun = await study({cue, boundary, observed, boundaryVerificationTargets: [2],
+    boundaryAnswer: id => ({status: "ok", facts: [{unitId: id, sceneBoundary: independent}], usage: {inputTokens: 1, outputTokens: 1}})});
+  const sent = observed.at(-1);
+  const matched = baselineRequests.find(request => request.mode === "transition" && request.targetIds[0] === 2);
+  assert.deepEqual(observed.slice(0, -1), baselineRequests);
+  assert.deepEqual(sent, {mode: "scene-boundary", units: matched.units, targetIds: matched.targetIds});
+  const {boundaryVerification, boundaryVerificationStatus, ...control} = studyRun.units[2];
+  assert.deepEqual({...control, boundaryVerification: undefined, boundaryVerificationStatus: undefined}, baseline.units[2]);
+  assert.deepEqual(boundaryVerification, {unitId: 2, id: 2, sceneBoundary: independent});
+  assert.equal(boundaryVerificationStatus, "cut");
+  assert.equal(studyRun.units[2].appliedTransition, "accent");
+  const attempt = studyRun.summary.attempts.find(row => row.mode === "scene-boundary");
+  assert.deepEqual({targetIds: attempt.targetIds, contextIds: attempt.contextIds, attestedIds: attempt.attestedIds, status: attempt.status},
+    {targetIds: [2], contextIds: [0, 1], attestedIds: [], status: "returned"});
+});
+
+test("scene-only refusal and invalid evidence stay in the diagnostic lane", async () => {
+  const stop = typed({...primaryCut(2), transition: "hard-stop", fact: "protective"});
+  const {units, summary} = await study({boundary: stop, boundaryVerificationTargets: [2, 3],
+    boundaryAnswer: () => ({status: "refused", usage: {inputTokens: 1, outputTokens: 1}})});
+  assert.equal(units[2].appliedTransition, "hard-stop");
+  assert.equal(units[2].pattern, "Stop");
+  assert.equal(units[2].boundaryVerificationStatus, "provider-refused");
+  assert.equal(units[3].boundaryVerificationStatus, "refusal-dependent");
+  assert.equal(summary.attempts.filter(row => row.mode === "scene-boundary" && row.attempted).length, 1);
+
+  const badProof = await study({prefixUnits: 2, boundaryVerificationTargets: [2],
+    boundaryAnswer: id => ({status: "ok", facts: [{unitId: id,
+      sceneBoundary: {...cut, previousId: 0, changeId: 2, contrast: "material-change"}}]})});
+  assert.equal(badProof.units[2].boundaryVerificationStatus, "invalid-response");
+  assert.deepEqual(badProof.summary.attempts.find(row => row.mode === "scene-boundary").rejectedFacts,
+    [{id: 2, reason: "scene-boundary-evidence"}]);
+  await assert.rejects(study({boundaryVerificationTargets: [0]}), /pinned transition target/u);
 });

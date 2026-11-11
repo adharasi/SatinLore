@@ -1134,6 +1134,47 @@ test("an independently verified local release can taper an isolated sample witho
   }
 });
 
+test("a quiet verified beat end tapers only a recent accepted start in the same scope", async () => {
+  const cases = [
+    {expected: "Taper"},
+    {closingScope: 1, expected: "Baseline"},
+    {typedEarlier: false, expected: "Baseline"},
+    {blockedIds: [1], expected: "Baseline"},
+    {blockedIds: [3], expected: "Stop"},
+    {longGap: true, expected: "Baseline"},
+  ];
+  for (const {expected, closingScope = 0, typedEarlier = true, blockedIds = [], longGap = false} of cases) {
+    const connector = longGap ?
+      "They kept pace while the room slowly filled with guests who had come from the nearby houses to watch the musicians play before the last street lamps were turned on that evening outside the hall." :
+      "The musicians reached the final bars.";
+    const input = fixture(`They took hands for the dance. The lights changed. ${connector} They finished the dance. The room went quiet.`);
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {transition: "beat-end", fact: "beat-end",
+        priorAnchor: typedEarlier ? 2 : null, evidenceIds: typedEarlier ? [2, id] : [id]});
+      if (id === 0) return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset"});
+      if (id === 2 && mode === "discovery") return active(id, mode, {fact: "continue", action: "continuation",
+        narrativePhase: "sustain", priorAnchor: 0, evidenceIds: [0, id]});
+      if (id === 3) return active(id, mode, {fact: "beat-end", action: "none", narrativePhase: "quiet",
+        transition: "beat-end", scopeId: closingScope, priorAnchor: 0, evidenceIds: [0, id]});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 3], maxVerification: 2,
+      verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [3], blockedIds});
+    const [target, after] = run.units.slice(3);
+    assert.equal(target.pattern, expected, JSON.stringify({closingScope, typedEarlier, blockedIds, longGap}));
+    assert.equal(target.cue, false);
+    assert.equal(target.readerCue, false);
+    assert.equal(target.appliedTransition, "beat-end");
+    assert.equal(after.pattern, "Baseline");
+    assert.equal(after.beatId, null);
+    if (expected === "Taper") {
+      assert.equal(target.trace.decision, "End beat");
+      assert.equal(target.knownAt, 3);
+      assert.deepEqual(target.trace.evidence, [0, 2, 3]);
+    }
+  }
+});
+
 test("exact recovery contact after a verified ordinary beat end stays local to the scored target", async () => {
   const input = fixture("They took hands. They finished the dance. The musicians packed up. She pressed his hand in thanks. The lights dimmed.");
   const cases = [
