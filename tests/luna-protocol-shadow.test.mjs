@@ -1134,16 +1134,18 @@ test("an independently verified local release can taper an isolated sample witho
   }
 });
 
-test("a quiet verified beat end tapers only a recent accepted start in the same scope", async () => {
+test("a verified beat end with no new action tapers only a recent accepted start in the same scope", async () => {
   const cases = [
     {expected: "Taper"},
+    {closingPhase: "ease", expected: "Taper"},
+    {closingPhase: "ease", openingAction: "anticipation", expected: "Baseline"},
     {closingScope: 1, expected: "Baseline"},
     {typedEarlier: false, expected: "Baseline"},
     {blockedIds: [1], expected: "Baseline"},
     {blockedIds: [3], expected: "Stop"},
     {longGap: true, expected: "Baseline"},
   ];
-  for (const {expected, closingScope = 0, typedEarlier = true, blockedIds = [], longGap = false} of cases) {
+  for (const {expected, closingScope = 0, closingPhase = "quiet", openingAction = "contact", typedEarlier = true, blockedIds = [], longGap = false} of cases) {
     const connector = longGap ?
       "They kept pace while the room slowly filled with guests who had come from the nearby houses to watch the musicians play before the last street lamps were turned on that evening outside the hall." :
       "The musicians reached the final bars.";
@@ -1151,17 +1153,19 @@ test("a quiet verified beat end tapers only a recent accepted start in the same 
     const provider = fake((id, mode) => {
       if (mode === "transition") return typedTransition(id, {transition: "beat-end", fact: "beat-end",
         priorAnchor: typedEarlier ? 2 : null, evidenceIds: typedEarlier ? [2, id] : [id]});
-      if (id === 0) return active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset"});
+      if (id === 0) return openingAction === "contact" ?
+        active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset"}) :
+        active(id, mode, {narrativePhase: "build"});
       if (id === 2 && mode === "discovery") return active(id, mode, {fact: "continue", action: "continuation",
         narrativePhase: "sustain", priorAnchor: 0, evidenceIds: [0, id]});
-      if (id === 3) return active(id, mode, {fact: "beat-end", action: "none", narrativePhase: "quiet",
+      if (id === 3) return active(id, mode, {fact: "beat-end", action: "none", narrativePhase: closingPhase,
         transition: "beat-end", scopeId: closingScope, priorAnchor: 0, evidenceIds: [0, id]});
       return neutral(id);
     });
     const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 3], maxVerification: 2,
       verifyTransitions: true, maxTransitionVerification: 1, transitionTargets: [3], blockedIds});
     const [target, after] = run.units.slice(3);
-    assert.equal(target.pattern, expected, JSON.stringify({closingScope, typedEarlier, blockedIds, longGap}));
+    assert.equal(target.pattern, expected, JSON.stringify({closingScope, closingPhase, openingAction, typedEarlier, blockedIds, longGap}));
     assert.equal(target.cue, false);
     assert.equal(target.readerCue, false);
     assert.equal(target.appliedTransition, "beat-end");

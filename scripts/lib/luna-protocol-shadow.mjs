@@ -356,9 +356,9 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       (["ease", "span-end", "beat-end"].includes(kind) || transition === "interruption" && rawCue.fact === "span-end");
     const endingAnchor = rawCue?.priorAnchor;
     const recentOpening = endingAnchor != null && unit.id - endingAnchor <= 3 ? decisions.get(endingAnchor) : null;
-    // An ordinary ending can taper a recent enacted beat even when the ending itself is quiet.
+    // An ordinary ending can taper a recent enacted beat even when it adds no release action.
     const closeWithTaper = !auxiliary && canEase && transition === "beat-end" && kind === "beat-end" &&
-      rawCue.action === "none" && rawCue.narrativePhase === "quiet" && rawCue.transition === "beat-end" &&
+      rawCue.action === "none" && ["quiet", "ease"].includes(rawCue.narrativePhase) && rawCue.transition === "beat-end" &&
       rawCue.fact === "beat-end" && rawCue.scopeId != null && size <= 16 &&
       recentOpening?.readerCue && recentOpening.window?.runId === result.window?.runId &&
       freshEnactedStart(recentOpening.annotation, endingAnchor) && recentOpening.annotation.scopeId === rawCue.scopeId &&

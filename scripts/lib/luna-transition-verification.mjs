@@ -60,8 +60,20 @@ export function verifiedSceneEntry(annotation, typed, id) {
 }
 
 export function startsAtSceneEntry(cue, typed, id) {
-  return freshEnactedStart(cue, id) && (cue.scopeId === id || cue.evidenceIds.length === 1 &&
-    typed?.status === "verified" && [...cueStarts, "accent"].includes(typed.transition) && typed.evidenceIds.includes(id));
+  if (!freshEnactedStart(cue, id)) return false;
+  if (cue.scopeId === id || cue.evidenceIds.length === 1 && typed?.status === "verified" &&
+      [...cueStarts, "accent"].includes(typed.transition) && typed.evidenceIds.includes(id)) return true;
+
+  // The combined cue can cite the old scope and the previous scene while the typed
+  // onset independently establishes a fresh action from the entry alone.
+  const scene = typed?.sceneBoundary;
+  const previous = scene?.previousId;
+  const localOnset = exactCurrentCue(typed, id) && typed.transition === "onset" && typed.fact === "none" &&
+    typed.priorAnchor === null && (typed.scopeId === null || typed.scopeId === id) && typed.evidenceIds.length === 1;
+  return localOnset && scene?.status === "cut" && scene.entryId === id && Number.isSafeInteger(previous) &&
+    previous >= 0 && previous < id && cue.transition === "scene-cut" && cue.fact === "cut" &&
+    cue.narrativePhase === "onset" && cue.priorAnchor === null && (cue.scopeId === null || cue.scopeId <= previous) &&
+    cue.evidenceIds.includes(previous) && cue.evidenceIds.every(evidence => evidence === id || evidence === previous || evidence === cue.scopeId);
 }
 
 export function continuityDispute(primary, typed, discovery, id, localAnchors) {

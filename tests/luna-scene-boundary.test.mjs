@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
-import {projectTypedTransition} from "../scripts/lib/luna-transition-verification.mjs";
+import {projectTypedTransition, startsAtSceneEntry} from "../scripts/lib/luna-transition-verification.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "../scripts/lib/whole-story-context-planning.mjs";
 
 const text = "June waited near the window. Lee took her hand. The next evening, they started their first dance together. The band took a break.";
@@ -20,15 +20,18 @@ const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown
   action: "unknown", sceneBoundary});
 
 async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, focusAnswer, prefixUnits = 24,
-  boundaryVerificationTargets, boundaryAnswer, observed = []} = {}) {
+  boundaryVerificationTargets, boundaryAnswer, priorCue = onset(1), priorTyped = typed(priorCue), observed = []} = {}) {
   const provider = Object.assign(async request => {
     observed.push(request);
     const {mode, targetIds} = request;
     if (mode === "scene-boundary") return boundaryAnswer(targetIds[0]);
     if (mode === "transition" && targetIds[0] === 2 && boundary === null) return {status: "invalid-response"};
     return {status: "ok", usage: {inputTokens: 120, outputTokens: 40}, facts: targetIds.map(id => {
-      const local = id === 1 ? onset(id) : id === 2 ? cue(id) : neutral(id);
-      if (mode === "transition") return id === 2 ? boundary : id === 3 && nextBoundary ? typed(local, nextBoundary) : typed(local);
+      const local = id === 1 ? priorCue : id === 2 ? cue(id) : neutral(id);
+      if (mode === "transition") {
+        if (id === 1) return priorTyped;
+        return id === 2 ? boundary : id === 3 && nextBoundary ? typed(local, nextBoundary) : typed(local);
+      }
       if (mode === "cue-check" && id === 2 && focusAnswer) return focusAnswer;
       if (mode === "discovery" && local.status === "verified") return {...local, status: "candidate"};
       return local;
@@ -66,6 +69,51 @@ test("a material cut can coexist with a local accent and preserve a new independ
   assert.equal(row.sceneId, "scene-boundary:scene:2");
   assert.equal(row.beatId, "scene-boundary:beat:2");
   assert.equal(row.pattern, "Onset rise");
+});
+
+test("an exact local onset after a cut does not borrow evidence from the old scene", async () => {
+  const combined = id => ({...onset(id), transition: "scene-cut", fact: "cut", scopeId: 0, evidenceIds: [0, 1, id]});
+  const boundary = typed({...onset(2), scopeId: null}, cut);
+  const {units} = await study({cue: combined, boundary});
+  const entry = units[2];
+  assert.equal(entry.appliedTransition, "scene-cut");
+  assert.equal(entry.pattern, "Onset rise");
+  assert.equal(entry.cue, true);
+  assert.equal(entry.sceneId, "scene-boundary:scene:2");
+  assert.equal(entry.beatId, "scene-boundary:beat:2");
+  assert.equal(entry.knownAt, 2);
+  assert.deepEqual(entry.primaryPrefix.evidenceIds, [0, 1, 2]);
+  assert.deepEqual(entry.transitionVerification.evidenceIds, [2]);
+
+  for (const [transition, fact] of [["hard-stop", "protective"], ["hard-stop", "neutralize"], ["declined-restart", "neutralize"]]) {
+    const stop = {...neutral(1), status: "verified", transition, fact, evidenceIds: [1]};
+    const stopped = await study({cue: combined, boundary, priorCue: stop, priorTyped: typed(stop)});
+    assert.equal(stopped.units[2].appliedTransition, "scene-cut");
+    assert.equal(stopped.units[2].pattern, "Reset");
+    assert.equal(stopped.units[2].cue, false);
+    assert.equal(stopped.units[2].beatId, null);
+  }
+
+  const earlierCut = {...cut, previousId: 0, entryId: 1};
+  const stale = await study({cue: id => ({...combined(id), evidenceIds: [0, id]}),
+    boundary: {...boundary, sceneBoundary: {...cut, previousId: 0}}, priorCue: neutral(1), priorTyped: typed(neutral(1), earlierCut)});
+  assert.equal(stale.units[2].transitionFlag, "scene-boundary-stale");
+  assert.notEqual(stale.units[2].appliedTransition, "scene-cut");
+  assert.equal(stale.units[2].sceneId, stale.units[1].sceneId);
+});
+
+test("a cut's old citations do not qualify a local start without matching evidence roles", () => {
+  const boundary = typed({...onset(4), scopeId: null}, {...cut, previousId: 3, entryId: 4});
+  const combined = {...onset(4), transition: "scene-cut", fact: "cut", scopeId: 1, evidenceIds: [1, 3, 4]};
+  assert.equal(startsAtSceneEntry(combined, boundary, 4), true);
+  for (const change of [{action: "continuation"}, {transition: "onset", fact: "none"}, {evidenceIds: [1, 2, 3, 4]},
+    {evidenceIds: [1, 4]}, {priorAnchor: 1}]) {
+    assert.equal(startsAtSceneEntry({...combined, ...change}, boundary, 4), false);
+  }
+  for (const change of [{transition: "accent"}, {frame: "reported"}, {scopeId: 1}, {evidenceIds: [3, 4]},
+    {sceneBoundary: noBoundary}, {sceneBoundary: {...boundary.sceneBoundary, entryId: 3}}]) {
+    assert.equal(startsAtSceneEntry(combined, {...boundary, ...change}, 4), false);
+  }
 });
 
 test("a cut with no fresh onset isolates the scene and discards an old continuation", async () => {

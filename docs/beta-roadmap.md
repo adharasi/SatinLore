@@ -197,6 +197,8 @@ The v17 paid comparison improves exact profiles to 91/148 and reduces expected a
 
 V18 adds a blinded scene-only arm to the founder comparison and a local taper for corroborated brief beat endings. Track both raw cut votes and their evidence roles on identical causal excerpts. Test wider context where a reference anchor falls outside the approved clip, and verify above-background output at multiple reading speeds. [V18 comparison and release gates](nocturne-beat-protocol-shadow.md#v18-scene-only-comparison-and-local-taper)
 
+Paid v18 improves exact applied transitions to 121/148 and falls to 15/59 expected active profiles. The follow-up restores two active profiles on the same facts and improves exact profiles to 91/148. The standalone boundary arm found the same four cuts as the typed control and added extra claims and uncertainty. Context completion, active profile recall and low-cap calibration are the next qualification priorities. [V18 evidence and follow-up](nocturne-beat-protocol-shadow.md#v18-scene-only-comparison-and-local-taper)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
