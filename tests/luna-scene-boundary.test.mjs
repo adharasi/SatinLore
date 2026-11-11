@@ -19,7 +19,7 @@ const cut = {status: "cut", reason: "time-jump", previousId: 1, entryId: 2};
 const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown", narrativePhase: "unknown",
   action: "unknown", sceneBoundary});
 
-async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, focusAnswer, prefixUnits = 24,
+async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, nextTyped, focusAnswer, prefixUnits = 24,
   boundaryVerificationTargets, boundaryAnswer, localActionVerificationTargets, localActionAnswer, transitionAnswer, budget,
   priorCue = onset(1), priorTyped = typed(priorCue), observed = []} = {}) {
   const provider = Object.assign(async request => {
@@ -33,7 +33,7 @@ async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoun
       const local = id === 1 ? priorCue : id === 2 ? cue(id) : neutral(id);
       if (mode === "transition") {
         if (id === 1) return priorTyped;
-        return id === 2 ? boundary : id === 3 && nextBoundary ? typed(local, nextBoundary) : typed(local);
+        return id === 2 ? boundary : id === 3 ? nextTyped ?? typed(local, nextBoundary) : typed(local);
       }
       if (mode === "cue-check" && id === 2 && focusAnswer) return focusAnswer;
       if (mode === "discovery" && local.status === "verified") return {...local, status: "candidate"};
@@ -210,6 +210,24 @@ test("two independent no-event judgments can withhold a disputed material cut wi
   assert.equal(units[2].appliedTransition, "reported-entry");
 });
 
+test("a budget-deferred cut check cannot establish a reset or discard a separate typed event", async () => {
+  const nextCut = {...cut, previousId: 2, entryId: 3};
+  const local = {...neutral(3), status: "verified", transition: "interruption", evidenceIds: [3]};
+  for (const nextTyped of [typed(neutral(3), nextCut), typed(local, nextCut)]) {
+    const {units, summary} = await study({focusAnswer: neutral(2), nextTyped});
+    const deferred = summary.attempts.find(attempt => attempt.mode === "cue-check" && attempt.targetIds.includes(3));
+    assert.equal(deferred.status, "budget-deferred");
+    assert.equal(deferred.cueCheckReason, "continuity-boundary");
+    assert.equal(deferred.deferralReason, "cue-check-limit");
+    assert.deepEqual(units[3].transitionVerification.sceneBoundary, nextCut);
+    assert.equal(units[3].transitionFlag, "scene-boundary-check-deferred");
+    assert.equal(units[3].cueRecoveryGuard, "continuity-budget-deferred");
+    assert.equal(units[3].appliedTransition, nextTyped.transition);
+    assert.equal(units[3].sceneId, units[2].sceneId);
+    assert.notEqual(units[3].pattern, "Reset");
+  }
+});
+
 test("a disputed objective shift cannot restart the scene when the check retains the old scope", async () => {
   const oldScope = {...primaryCut(2), evidenceIds: [1, 2], scopeId: 1};
   const objective = {...cut, reason: "objective-shift"};
@@ -284,7 +302,7 @@ const localAction = {status: "verified", frame: "current", action: "contact", ph
   targetId: 2, contextId: 1};
 const localActionAnswer = unitId => ({status: "ok", usage: {inputTokens: 1, outputTokens: 1}, facts: [{unitId, localAction}]});
 
-test("local action is blinded, after controls, and cannot change playback", async () => {
+test("the blinded local-action check runs after controls and uncorroborated evidence leaves playback unchanged", async () => {
   const observed = [], baselineRequests = [];
   const baseline = await study({observed: baselineRequests});
   const measured = await study({observed, localActionVerificationTargets: [2], localActionAnswer});
@@ -308,6 +326,21 @@ test("local action is blinded, after controls, and cannot change playback", asyn
   assert.equal(exhausted.summary.attempts.find(row => row.mode === "local-action").attempted, undefined);
   await assert.rejects(study({localActionVerificationTargets: [0]}), /pinned transition target/u);
   await assert.rejects(study({localActionVerificationTargets: [2, 2]}), /unique pinned transition target/u);
+});
+
+test("a normalized no-action response records telemetry and preserves playback", async () => {
+  const baseline = await study();
+  const normalized = {status: "none", frame: "current", action: "none", phase: "quiet", contrast: "neutral",
+    targetId: null, contextId: null};
+  const measured = await study({localActionVerificationTargets: [2],
+    localActionAnswer: unitId => ({status: "ok", facts: [{unitId, localAction: normalized}],
+      targetNormalizations: [{unitId, reason: "canonical-local-no-action"}]})});
+  const {localActionVerification, localActionVerificationStatus, ...control} = measured.units[2];
+  assert.deepEqual(control, baseline.units[2]);
+  assert.deepEqual(localActionVerification.localAction, normalized);
+  assert.equal(localActionVerificationStatus, "none");
+  assert.deepEqual(measured.summary.attempts.find(row => row.mode === "local-action").normalizedFacts,
+    [{id: 2, reason: "canonical-local-no-action"}]);
 });
 
 test("local action rejects invalid evidence and isolates refusal from hard stops", async () => {

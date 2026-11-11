@@ -203,6 +203,8 @@ V19 compares blinded local action against the primary and typed passes on unchan
 
 V20 applies corroborated current action during Recovery and at a material scene entry, rejects unsupported cut claims, and closes exhausted release tails on long unlinked units. On the same 37 archived judgments, the integrated candidate raises exact profiles from 14 to 16, active intent from 11/26 to 14/26 and exact events from 25 to 26, and removes both extra cuts while preserving all three correct cuts. [V20 decision rules and validation](nocturne-beat-protocol-shadow.md#v20-boundary-arbitration-and-exact-local-action)
 
+The V20 live comparison finds 12/26 active profiles and 26/37 exact applied events. Correct cuts fall to 2/5 and the fresh run produces one extra cut. The follow-up removes that extra on the same responses and lifts exact events to 27/37. Earlier-state recognition, first-entry adjudication, the independent natural holdout and physical qualification remain open. [V20 live evidence and follow-up](nocturne-beat-protocol-shadow.md#v20-live-evidence)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

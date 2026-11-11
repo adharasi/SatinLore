@@ -613,13 +613,17 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const continuity = mode === "cue-check" && cueCheckReason === "continuity-boundary";
     const continuityCorrection = continuity ? resolveContinuityDispute(before.continuityDispute, verdict, id) : undefined;
     const oldScopeVeto = continuityCorrection === "continuity-old-scope-veto";
+    const disputedCut = before.continuityDispute?.cut;
+    const cutCheckDeferred = continuity && status === "budget-deferred" && disputedCut?.transition === "scene-cut" &&
+      disputedCut.sceneBoundary?.status === "cut";
     let row;
     if (mode === "transition") {
       row = {...before, transitionVerification: verdict, transitionVerificationStatus: verdict?.status ?? status};
     } else if (continuity) {
       row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status,
         cueRecoveryReason: cueCheckReason, cueRecoveryCorrection: continuityCorrection,
-        cueRecoveryGuard: verdict && !continuityCorrection ? "continuity-unresolved" : undefined};
+        cueRecoveryGuard: cutCheckDeferred ? "continuity-budget-deferred" :
+          verdict && !continuityCorrection ? "continuity-unresolved" : undefined};
       if (continuityCorrection && !oldScopeVeto) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
     } else if (mode === "cue-check") {
       const candidate = currentCueAt(verdict, id, "verified");
@@ -657,14 +661,21 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       previous.effectiveAnnotation ?? previous.annotation : null;
     const typed = row.transitionVerification;
     const staleBoundary = typed?.sceneBoundary?.status === "cut" && typed.sceneBoundary.previousId < row.previousSceneBoundaryId;
-    const applicableTyped = staleBoundary ? {...typed, sceneBoundary: undefined} : typed;
+    const applicableTyped = staleBoundary || cutCheckDeferred ? {...typed, sceneBoundary: undefined} : typed;
     const legacyContinuityCorrection = continuityCorrection && !(continuityCorrection === "continuity-cut" && applicableTyped?.sceneBoundary);
     const merged = legacyContinuityCorrection ? {annotation: row.annotation,
       flag: oldScopeVeto ? "scene-boundary-old-scope" : "transition-conflict"} :
       mergeTransitionVerdict(row.annotation, applicableTyped, row.discovery, prior, requireSceneBoundary);
     row.effectiveAnnotation = merged.annotation;
-    row.transitionFlag = staleBoundary ? "scene-boundary-stale" : merged.flag;
+    row.transitionFlag = staleBoundary ? "scene-boundary-stale" : cutCheckDeferred ? "scene-boundary-check-deferred" : merged.flag;
     decisions.set(id, row);
+  }
+  function deferPrefixRequest(record, id, deferralReason) {
+    record.deferralReason = deferralReason;
+    if (record.cueCheckReason === "continuity-boundary") {
+      storePrefixResult("cue-check", id, undefined, record.status, undefined, record.cueCheckReason);
+    }
+    return {status: "failed"};
   }
   async function execute(windows, stage) {
     const attempts = new Map();
@@ -728,10 +739,11 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
             record.status = "not-needed";
             return {status: "failed"};
           }
-          if (cueChecksStarted >= maxCueChecks || restartCheckReserved && !restartState && cueChecksStarted + 1 >= maxCueChecks) {
-            return {status: "failed"};
-          }
           if (boundaryCheck) row.continuityDispute = dispute;
+          if (cueChecksStarted >= maxCueChecks) return deferPrefixRequest(record, id, "cue-check-limit");
+          if (restartCheckReserved && !restartState && cueChecksStarted + 1 >= maxCueChecks) {
+            return deferPrefixRequest(record, id, "restart-check-reserved");
+          }
         }
         const attested = causal && verificationContext === "attested" ? causal.anchors : [];
         const focus = cueCheckFocus[record.cueCheckReason];
@@ -746,7 +758,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         }
         const settle = optional ? budget.reserveSupporting?.(body, window.targetIds.length, retained) :
           budget.reserve(body, window.targetIds.length);
-        if (!settle) return {status: "failed"};
+        if (!settle) return deferPrefixRequest(record, id, "request-budget");
         pendingPinned.delete(window.id);
         if (mode === "cue-check") cueChecksStarted++;
         record.attempted = true;
@@ -763,7 +775,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           record.attempted = false;
           if (LUNA_PROTOCOL_FAILURE_REASONS.includes(answer.failureReason)) record.failureReason = answer.failureReason;
           settle({inputTokens: 0, outputTokens: 0});
-          return {status: "failed"};
+          return deferPrefixRequest(record, id, "transport-not-dispatched");
         }
         record.elapsedMs = Math.round(performance.now() - started);
         settle(answer?.usage);

@@ -41,10 +41,13 @@ export const LUNA_PROTOCOL_TARGET_FAILURES = Object.freeze([
   "local-action-shape", "local-action-evidence",
 ]);
 const canonicalNoEvent = "canonical-no-event";
+const canonicalLocalNoAction = "canonical-local-no-action";
 const startContextAnchor = "start-context-anchor";
 const transitionContextAnchor = "transition-context-anchor";
 const protectiveSceneBoundary = "protective-scene-boundary-unresolved";
-export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([canonicalNoEvent, startContextAnchor, transitionContextAnchor, protectiveSceneBoundary]);
+export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([
+  canonicalNoEvent, canonicalLocalNoAction, startContextAnchor, transitionContextAnchor, protectiveSceneBoundary,
+]);
 
 const url = "https://api.openai.com/v1/responses";
 const safetyCodes = new Set(["content_filter", "content_policy_violation", "safety_violation"]);
@@ -483,7 +486,16 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
     else if (row === null) reason = "duplicate-target";
     else if (mode !== "discovery" && value.facts.length !== 1) reason = "unexpected-row";
     else if (mode === "scene-boundary") reason = lunaProtocolBoundaryOnlyViolation(row, unitId, raw);
-    else if (mode === "local-action") reason = lunaProtocolLocalActionViolation(row, unitId, raw);
+    else if (mode === "local-action") {
+      reason = lunaProtocolLocalActionViolation(row, unitId, raw);
+      // A no-action verdict can echo its own coordinate without supplying action evidence.
+      if (reason === "local-action-evidence" && row.localAction.status === "none" &&
+          row.localAction.targetId === unitId && row.localAction.contextId === null && raw(unitId)) {
+        row = {...row, localAction: {...row.localAction, targetId: null}};
+        reason = null;
+        normalization = canonicalLocalNoAction;
+      }
+    }
     else reason = rowShapeViolation(row, validation);
     if (!reason && !diagnostic) {
       if (mode === "transition") {

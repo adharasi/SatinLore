@@ -87,6 +87,30 @@ test("local action check sends only the blind prefix and separates local action 
   }
 });
 
+test("a no-action verdict may discard only an exact redundant target citation", async () => {
+  const supplied = {mode: "local-action", units, targetIds: [12]};
+  const localAction = {status: "none", frame: "current", action: "none", phase: "quiet", contrast: "neutral",
+    targetId: 12, contextId: null};
+  const run = extra => provider(async () => response([{unitId: 12, localAction: {...localAction, ...extra}}]))(supplied);
+  const reason = "canonical-local-no-action";
+  assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));
+  for (const extra of [{}, {frame: "noncurrent", contrast: "noncurrent"}]) {
+    const normalized = {unitId: 12, localAction: {...localAction, ...extra, targetId: null}};
+    assert.deepEqual(await run(extra), {...success([normalized]), targetNormalizations: [{unitId: 12, reason}]});
+  }
+  assert.deepEqual(await run({targetId: null}), success([{unitId: 12, localAction: {...localAction, targetId: null}}]));
+  for (const [extra, targetEvidence, contextEvidence] of [
+    [{targetId: 11}, "earlier-prefix", "missing"],
+    [{targetId: 13}, "after-target", "missing"],
+    [{targetId: "12"}, "invalid-id", "missing"],
+    [{contextId: 11}, "exact-target", "earlier-prefix"],
+  ]) {
+    assert.deepEqual(await run(extra), rejected([{...targetFailure(12, "local-action-evidence"),
+      detail: {status: "none", action: "none", targetEvidence, contextEvidence}}]));
+  }
+  assert.deepEqual(await run({action: "contact"}), rejected([targetFailure(12, "local-action-shape")]));
+});
+
 test("scene-only verification sends a blind causal prefix and validates evidence roles", async () => {
   const supplied = {mode: "scene-boundary", units, targetIds: [12]};
   const sceneBoundary = {status: "cut", reason: "setting-shift", previousId: 10, changeId: 11,
