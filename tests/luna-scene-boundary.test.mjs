@@ -19,18 +19,20 @@ const cut = {status: "cut", reason: "time-jump", previousId: 1, entryId: 2};
 const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown", narrativePhase: "unknown",
   action: "unknown", sceneBoundary});
 
-async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, prefixUnits = 24} = {}) {
+async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, focusAnswer, prefixUnits = 24} = {}) {
   const provider = Object.assign(async ({mode, targetIds}) => {
     if (mode === "transition" && targetIds[0] === 2 && boundary === null) return {status: "invalid-response"};
     return {status: "ok", usage: {inputTokens: 120, outputTokens: 40}, facts: targetIds.map(id => {
       const local = id === 1 ? onset(id) : id === 2 ? cue(id) : neutral(id);
       if (mode === "transition") return id === 2 ? boundary : id === 3 && nextBoundary ? typed(local, nextBoundary) : typed(local);
+      if (mode === "cue-check" && id === 2 && focusAnswer) return focusAnswer;
       if (mode === "discovery" && local.status === "verified") return {...local, status: "candidate"};
       return local;
     })};
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "scene-boundary", text, grant, now: () => 1, provider, prefixUnits,
-    verificationTargets: [1, 2, 3], transitionTargets: [1, 2, 3], verifyTransitions: true, negativeStride: 0});
+    verificationTargets: [1, 2, 3], transitionTargets: [1, 2, 3], verifyTransitions: true, negativeStride: 0,
+    verifyContinuityBoundary: Boolean(focusAnswer), maxCueChecks: Number(Boolean(focusAnswer))});
 }
 
 test("does not apply a primary target-only cut without independent proof", async () => {
@@ -86,6 +88,27 @@ test("a repeated cut cannot reuse evidence from before the last verified entry",
     assert.equal(row.sceneId, `scene-boundary:scene:${previousId + 1}`);
     assert.deepEqual(row.transitionEvidenceIds, [previousId, 3]);
   }
+});
+
+test("two independent no-event judgments can withhold a disputed material cut without affecting a confirmed cut", async () => {
+  const neutralCheck = await study({focusAnswer: neutral(2)});
+  assert.equal(neutralCheck.units[2].cueRecoveryCorrection, "continuity-cut-veto");
+  assert.equal(neutralCheck.units[2].appliedTransition, "none");
+  assert.equal(neutralCheck.units[2].transitionVerification.sceneBoundary.status, "cut");
+  assert.equal(neutralCheck.units[2].cue, false);
+  assert.notEqual(neutralCheck.units[2].pattern, "Reset");
+
+  const uncertain = {...neutral(2), status: "uncertain", transition: "unknown"};
+  const confirmed = {...primaryCut(2), evidenceIds: [1, 2], scopeId: 2};
+  for (const focusAnswer of [uncertain, confirmed]) {
+    const {units} = await study({focusAnswer});
+    assert.equal(units[2].appliedTransition, "scene-cut");
+    assert.equal(units[2].pattern, "Reset");
+  }
+
+  const frameEntry = typed({...primaryCut(2), transition: "reported-entry", frame: "reported"}, cut);
+  const {units} = await study({boundary: frameEntry, focusAnswer: neutral(2)});
+  assert.equal(units[2].appliedTransition, "reported-entry");
 });
 
 test("local hard stops and frame transitions take precedence over the material cut", async () => {

@@ -193,6 +193,8 @@ The v16 Nocturne diagnostic adds a bounded independent check for disputed scene 
 
 V17 separates scene entry from the local event and requires cited evidence for both sides of a material cut in the approved prefix. Consecutive verified buildup can deepen the waveform within an evidenced scope. Replay of the 148 paid v16 facts improves exact profiles from 90 to 91, with 24/59 expected active decisions and zero false activations. The fixed paired benchmark and an independently adjudicated natural holdout measure recognition separately. [Independent scene boundary and local event](nocturne-beat-protocol-shadow.md#v17-independent-scene-boundary-and-local-event)
 
+The v17 paid comparison improves exact profiles to 91/148 and reduces expected active intent to 20/59. The compiler follow-up removes three extra cuts on the same paid facts and improves exact profiles to 93/148 and applied events to 120/148. The independent natural holdout remains a release dependency. [V17 live comparison and replay](nocturne-beat-protocol-shadow.md#v17-independent-scene-boundary-and-local-event)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

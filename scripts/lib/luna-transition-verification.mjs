@@ -80,6 +80,9 @@ export function continuityDispute(primary, typed, discovery, id, localAnchors) {
 }
 
 export function resolveContinuityDispute(dispute, verdict, id) {
+  if (dispute?.cut?.transition === "scene-cut" && dispute.cut.sceneBoundary?.status === "cut" &&
+      verdict?.status === "neutral" && verdict.transition === "none" &&
+      ["current", "neutral"].includes(verdict.frame)) return "continuity-cut-veto";
   if (!dispute || verdict?.status !== "verified" || !verdict.evidenceIds.includes(id)) return undefined;
   if (verdict.transition === "hard-stop" || verdict.transition === "declined-restart") return "continuity-stop";
   const {cut, anchors} = dispute;
