@@ -263,7 +263,23 @@ test("local action rejects invalid evidence and isolates refusal from hard stops
     localActionAnswer: unitId => ({status: "ok", facts: [{unitId, localAction: {...localAction, contextId: 0}}]})});
   assert.equal(invalid.units[2].localActionVerificationStatus, "invalid-response");
   assert.deepEqual(invalid.summary.attempts.find(row => row.mode === "local-action").rejectedFacts,
-    [{id: 2, reason: "local-action-evidence"}]);
+    [{id: 2, reason: "local-action-evidence", detail: {status: "verified", action: "contact",
+      targetEvidence: "exact-target", contextEvidence: "outside-prefix"}}]);
+});
+
+test("local action rejection preserves enum-only provider evidence details", async () => {
+  const detail = {status: "verified", action: "continuation", targetEvidence: "exact-target", contextEvidence: "missing"};
+  for (const [submitted, expected] of [[detail, detail], [{...detail, comment: text}, undefined],
+    [{...detail, targetEvidence: text}, undefined], [{...detail, contextEvidence: 45}, undefined]]) {
+    const {units, summary} = await study({localActionVerificationTargets: [2], localActionAnswer: unitId => ({
+      status: "invalid-response", targetFailures: [{unitId, reason: "local-action-evidence", detail: submitted}],
+    })});
+    const attempt = summary.attempts.find(row => row.mode === "local-action");
+    assert.deepEqual(attempt.rejectedFacts, [{id: 2, reason: "local-action-evidence", ...(expected ? {detail: expected} : {})}]);
+    assert.equal(JSON.stringify(attempt).includes(text), false);
+    assert.equal(units[2].localActionVerificationStatus, "invalid-response");
+    assert.equal(units[2].appliedTransition, "scene-cut");
+  }
 });
 
 test("typed rejection carries only allowlisted status-effect diagnostics", async () => {

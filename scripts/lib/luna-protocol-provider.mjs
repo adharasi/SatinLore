@@ -335,6 +335,28 @@ export function lunaProtocolLocalActionViolation(row, target, raw) {
   return targetId !== null || contextId !== null ? "local-action-evidence" : null;
 }
 
+const localActionEvidenceRelations = ["missing", "exact-target", "earlier-prefix", "outside-prefix", "after-target", "invalid-id"];
+
+export function sanitizeLunaLocalActionEvidenceDetail(detail) {
+  if (!exact(detail, ["status", "action", "targetEvidence", "contextEvidence"])) return undefined;
+  const {status, action, targetEvidence, contextEvidence} = detail;
+  if (!localActionFields.status.enum.includes(status) || !localActionFields.action.enum.includes(action) ||
+      !localActionEvidenceRelations.includes(targetEvidence) || !localActionEvidenceRelations.includes(contextEvidence)) return undefined;
+  return {status, action, targetEvidence, contextEvidence};
+}
+
+export function lunaProtocolLocalActionEvidenceDetail(row, target, raw) {
+  const {status, action, targetId, contextId} = row.localAction;
+  const relationship = id => {
+    if (id === null) return "missing";
+    if (!whole(id)) return "invalid-id";
+    if (id > target) return "after-target";
+    if (!raw(id)) return "outside-prefix";
+    return id === target ? "exact-target" : "earlier-prefix";
+  };
+  return sanitizeLunaLocalActionEvidenceDetail({status, action, targetEvidence: relationship(targetId), contextEvidence: relationship(contextId)});
+}
+
 export function sanitizeLunaStatusEffectDetail(detail) {
   const keys = ["status", "frame", "transition", "fact", "hasScope", "hasPriorAnchor", "citesTarget", "evidenceCount"];
   if (!exact(detail, keys)) return undefined;
@@ -478,7 +500,8 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
       } else reason = lunaProtocolCueViolation(row, mode);
     }
     if (reason) {
-      const detail = mode === "transition" && reason === "status-effect" ? transitionStatusEffectDetail(submitted) : undefined;
+      const detail = mode === "transition" && reason === "status-effect" ? transitionStatusEffectDetail(submitted) :
+        mode === "local-action" && reason === "local-action-evidence" ? lunaProtocolLocalActionEvidenceDetail(submitted, unitId, raw) : undefined;
       targetFailures.push({unitId, reason, ...(detail ? {detail} : {})});
     }
     else {

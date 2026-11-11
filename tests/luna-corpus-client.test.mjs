@@ -188,16 +188,20 @@ test("a transport error checkpoints the uncertain clip and reopening the exact p
   assert.deepEqual(exported.clips.map(clip => [clip.id, clip.status]), [[first.id, "unconfirmed"], [second.id, "completed"]]);
 });
 
-test("a saved checkpoint exports source-free supporting labels with their own clip and attempt", async () => {
+test("a saved checkpoint exports source-free supporting labels and rejection diagnostics with their own clip", async () => {
   const context = first.units[0];
   const unexpectedText = "Raw material is outside the replay schema.";
   const fact = {id: context.id, status: "verified", action: "anticipation", evidenceIds: [context.id]};
   const support = {mode: "verify", supportingPrefix: true, attempted: true, targetIds: [context.id], status: "returned"};
+  const targetId = first.targetIds[0];
+  const rejectedAction = {mode: "local-action", attempted: true, targetIds: [targetId], status: "invalid-response",
+    rejectedFacts: [{id: targetId, reason: "local-action-evidence", detail: {status: "verified", action: "continuation",
+      targetEvidence: "exact-target", contextEvidence: "missing"}}]};
   const initial = corpusPage({onShard: async ({clip}) => {
     const response = shardResult(clip);
     response.units.unshift({id: context.id, unitSha256: context.digest, text: unexpectedText,
       primaryPrefix: {...fact, note: unexpectedText}});
-    response.summary.attempts.unshift(support);
+    response.summary.attempts.unshift(support, rejectedAction);
     return Response.json(response);
   }});
   await initial.open();
@@ -215,6 +219,8 @@ test("a saved checkpoint exports source-free supporting labels with their own cl
   assert.equal(replayClips.length, 1);
   assert.equal(replayClips[0].id, first.id);
   assert.deepEqual(replayClips[0].attempts[0], support);
+  assert.deepEqual(replayClips[0].attempts[1], rejectedAction);
+  assert.deepEqual(works[0].summary.attempts[1], rejectedAction);
   assert.deepEqual(replayClips[0].units[0], {id: context.id, unitSha256: context.digest, primaryPrefix: fact});
   assert.ok(!download.includes(unexpectedText));
 });

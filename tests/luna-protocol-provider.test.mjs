@@ -51,10 +51,24 @@ test("local action check sends only the blind prefix and separates local action 
     invalidRequest);
   assert.equal(calls, 1);
 
+  const evidence = (targetEvidence, contextEvidence, status = "verified", action = "contact") =>
+    ({status, action, targetEvidence, contextEvidence});
+  for (const [extra, detail] of [
+    [{targetId: null}, evidence("missing", "earlier-prefix")],
+    [{targetId: 11}, evidence("earlier-prefix", "earlier-prefix")],
+    [{contextId: 12}, evidence("exact-target", "exact-target")],
+    [{contextId: 9}, evidence("exact-target", "outside-prefix")],
+    [{contextId: 13}, evidence("exact-target", "after-target")],
+    [{contextId: units[0].text}, evidence("exact-target", "invalid-id")],
+    [{action: "continuation", contrast: "same-action", contextId: null}, evidence("exact-target", "missing", "verified", "continuation")],
+    [{status: "none", action: "none", phase: "quiet", contrast: "neutral"}, evidence("exact-target", "earlier-prefix", "none", "none")],
+    [{status: "uncertain", action: "unknown", phase: "unknown", contrast: "ambiguous", contextId: null},
+      evidence("exact-target", "missing", "uncertain", "unknown")],
+  ]) {
+    const invalid = provider(async () => response([{...row, localAction: {...localAction, ...extra}}]));
+    assert.deepEqual(await invalid(supplied), rejected([{...targetFailure(12, "local-action-evidence"), detail}]));
+  }
   for (const [extra, reason] of [
-    [{targetId: 11}, "local-action-evidence"], [{contextId: 12}, "local-action-evidence"],
-    [{contextId: 9}, "local-action-evidence"], [{contextId: 13}, "local-action-evidence"],
-    [{action: "continuation", contrast: "same-action", contextId: null}, "local-action-evidence"],
     [{frame: "noncurrent"}, "local-action-shape"], [{action: "release"}, "local-action-shape"],
     [{phase: "quiet"}, "local-action-shape"], [{comment: units[0].text}, "local-action-shape"],
   ]) {

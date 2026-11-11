@@ -8,8 +8,8 @@ import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuityDis
   verifiedContextCut, verifiedSceneEntry} from "./luna-transition-verification.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
-  lunaProtocolBoundaryOnlyViolation, lunaProtocolLocalActionViolation, lunaProtocolSceneBoundaryViolation, lunaProtocolTransitionViolation,
-  sanitizeLunaStatusEffectDetail} from "./luna-protocol-provider.mjs";
+  lunaProtocolBoundaryOnlyViolation, lunaProtocolLocalActionEvidenceDetail, lunaProtocolLocalActionViolation, lunaProtocolSceneBoundaryViolation,
+  lunaProtocolTransitionViolation, sanitizeLunaLocalActionEvidenceDetail, sanitizeLunaStatusEffectDetail} from "./luna-protocol-provider.mjs";
 
 const clearance = "No blocking event recorded";
 const transitionCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
@@ -728,10 +728,15 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         const failureRows = (Array.isArray(answer?.targetFailures) ? answer.targetFailures : [])
           .filter(row => expected.has(row?.unitId) && LUNA_PROTOCOL_TARGET_FAILURES.includes(row.reason));
         const rejections = new Map(failureRows.map(row => [row.unitId, row.reason]));
-        const statusEffects = new Map(mode === "transition" ? failureRows.filter(row => row.reason === "status-effect")
-          .map(row => [row.unitId, sanitizeLunaStatusEffectDetail(row.detail)]) : []);
+        const details = new Map();
+        for (const {unitId, reason, detail} of failureRows) {
+          const safe = mode === "transition" && reason === "status-effect" ? sanitizeLunaStatusEffectDetail(detail) :
+            mode === "local-action" && reason === "local-action-evidence" ? sanitizeLunaLocalActionEvidenceDetail(detail) : undefined;
+          if (safe) details.set(unitId, {reason, detail: safe});
+        }
         const rejectionRows = () => [...rejections].map(([id, reason]) => {
-          const detail = reason === "status-effect" ? statusEffects.get(id) : undefined;
+          const recorded = details.get(id);
+          const detail = recorded?.reason === reason ? recorded.detail : undefined;
           return {id, reason, ...(detail ? {detail} : {})};
         });
         if (answer?.status !== "ok" && !(mode === "discovery" && answer?.status === "partial")) {
@@ -753,9 +758,14 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         const annotations = [];
         for (const id of window.targetIds) {
           const fact = byTarget.get(id);
-          const reason = rejections.get(id) ?? (fact ? factViolation(fact, submitted, id, mode, attested, requireSceneBoundary) : "missing-target");
-          if (reason) rejections.set(id, reason);
-          else annotations.push({...fact, id});
+          const providerReason = rejections.get(id);
+          const reason = providerReason ?? (fact ? factViolation(fact, submitted, id, mode, attested, requireSceneBoundary) : "missing-target");
+          if (reason) {
+            rejections.set(id, reason);
+            if (!providerReason && mode === "local-action" && reason === "local-action-evidence") {
+              details.set(id, {reason, detail: lunaProtocolLocalActionEvidenceDetail(fact, id, proofId => submitted.has(proofId))});
+            }
+          } else annotations.push({...fact, id});
         }
         const targetCoverageMismatch = facts.length !== expected.size || byTarget.size !== expected.size ||
           [...rejections.values()].some(reason => ["missing-target", "duplicate-target", "unexpected-row"].includes(reason));
