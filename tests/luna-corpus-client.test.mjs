@@ -31,7 +31,10 @@ function shardResult(clip) {
   return {
     schema: 1, runId, clipId: clip.id, clipDigest: sha256(JSON.stringify(clip)), storyId: clip.storyId,
     sourceSha256: clip.sourceSha256, editionDigest: clip.editionDigest, status: "completed",
-    rubricVersion: "v13", model: "test-luna", units: [{id: unit.id, unitSha256: unit.digest, status: "neutral"}],
+    rubricVersion: "v17", model: "test-luna", units: [{id: unit.id, unitSha256: unit.digest, status: "neutral",
+      transitionVerification: {unitId: unit.id, transition: "none", status: "neutral", sceneBoundary: {
+        status: "cut", reason: "time-jump", previousId: clip.units[0].id, entryId: unit.id,
+      }}}],
     summary: {attempts: [{mode: "verify", targetIds: clip.targetIds, status: "returned", attempted: true}]},
     budget: {chargedMicros: 200}, externalCalls: 1,
     hostedSpend: {capMicros: 3_000_000, settled: true, remainingMicros: 2_999_800},
@@ -142,6 +145,8 @@ test("the corpus page previews exact context locally and seals only fingerprints
   assert.deepEqual(exported.works.map(work => [work.id, work.units.map(unit => unit.id)]),
     [[first.storyId, first.targetIds], [second.storyId, []]]);
   assert.deepEqual(exported.clips.map(clip => [clip.id, clip.status]), [[first.id, "completed"], [second.id, "withheld"]]);
+  assert.deepEqual(exported.replayClips[0].units[0].transitionVerification.sceneBoundary,
+    {status: "cut", reason: "time-jump", previousId: 9, entryId: 10});
   for (const clip of reviewPacket.clips) for (const unit of clip.units) {
     assert.ok(!download.includes(unit.text));
     for (const retained of page.storage.values()) assert.ok(!retained.includes(unit.text));

@@ -5,6 +5,7 @@ const nonClosingEvents = new Set(["onset", "restart", "accent", "ease", "recover
 const enacted = new Set(["contact", "change"]);
 const explicitCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
 const frameEntries = new Set(["memory-entry", "imagined-entry", "reported-entry"]);
+const priorityOverSceneCut = new Set([...frameEntries, "present-return", "chapter-end", "hard-stop", "declined-restart"]);
 const earlierFrames = new Set(["remembered", "imagined", "reported"]);
 const pendingContextEffects = new Set(["none", "low", "continue", "ease"]);
 const pendingContextEvents = new Set(["none", "onset", "accent", "ease", "recover"]);
@@ -44,10 +45,31 @@ export function verifiedContextCut(annotation, id) {
     (annotation.fact === "cut" || explicitCuts.has(annotation.transition));
 }
 
+export function projectTypedTransition(verdict) {
+  const {sceneBoundary} = verdict ?? {};
+  if (sceneBoundary?.status !== "cut" || priorityOverSceneCut.has(verdict.transition) ||
+      sceneBoundary.entryId !== verdict.unitId || !Number.isSafeInteger(sceneBoundary.previousId) ||
+      sceneBoundary.previousId < 0 || sceneBoundary.previousId >= sceneBoundary.entryId) return verdict;
+  return {...verdict, status: "verified", transition: "scene-cut", fact: "cut", scopeId: verdict.unitId,
+    evidenceIds: [sceneBoundary.previousId, sceneBoundary.entryId], priorAnchor: null};
+}
+
+export function verifiedSceneEntry(annotation, typed, id) {
+  return annotation?.transition === "scene-cut" && annotation.fact === "cut" && typed?.sceneBoundary?.entryId === id &&
+    typed.sceneBoundary.status === "cut";
+}
+
+export function startsAtSceneEntry(cue, typed, id) {
+  return freshEnactedStart(cue, id) && (cue.scopeId === id || cue.evidenceIds.length === 1 &&
+    typed?.status === "verified" && [...cueStarts, "accent"].includes(typed.transition) && typed.evidenceIds.includes(id));
+}
+
 export function continuityDispute(primary, typed, discovery, id, localAnchors) {
   const exactCut = fact => verifiedContextCut(fact, id) && fact.fact === "cut" && explicitCuts.has(fact.transition);
-  const cut = exactCut(primary) && typed?.status === "neutral" ? primary :
-    exactCut(typed) && primary?.status === "neutral" ? typed : null;
+  const boundary = projectTypedTransition(typed);
+  const legacyPrimaryCut = primary?.transition !== "scene-cut" || typed?.sceneBoundary === undefined;
+  const cut = legacyPrimaryCut && exactCut(primary) && boundary?.status === "neutral" ? primary :
+    exactCut(boundary) && primary?.status === "neutral" ? boundary : null;
   const anchors = localAnchors.filter(anchor => anchor.frame === "current" && enacted.has(anchor.action));
   if (cut) return {cut, anchors: cut.transition === "scene-cut" && primary.frame === "current" && typed.frame === "current" ? anchors : []};
   if (anchors.length && primary?.status === "neutral" && primary.frame === "current" &&
@@ -122,8 +144,16 @@ export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {
 
 // Separate model verdicts remain in the diagnostic record. Playback applies
 // the checked boundary while retaining cue semantics from its independent pass.
-export function mergeTransitionVerdict(cue, verdict, discovery, prior) {
-  if (!verdict || !["verified", "neutral"].includes(verdict.status)) return {annotation: cue};
+export function mergeTransitionVerdict(cue, typed, discovery, prior, requireSceneBoundary = false) {
+  const verdict = projectTypedTransition(typed);
+  const primarySceneCut = cue?.transition === "scene-cut";
+  const unnamedCut = cue?.fact === "cut" && !explicitCuts.has(cue.transition);
+  const uncheckedCut = (requireSceneBoundary || typed?.sceneBoundary !== undefined) && (primarySceneCut || unnamedCut) &&
+    verdict?.transition !== "scene-cut";
+  if (uncheckedCut) cue = {...cue, transition: primarySceneCut ? "none" : cue.transition,
+    fact: cue.fact === "cut" ? "none" : cue.fact, priorAnchor: null};
+  const boundaryFlag = uncheckedCut ? "scene-boundary-unconfirmed" : undefined;
+  if (!verdict || !["verified", "neutral"].includes(verdict.status)) return {annotation: cue, flag: boundaryFlag};
   const protectiveCue = cue?.fact === "protective" || cue?.transition === "hard-stop";
   const conflict = cue && (cue.transition !== verdict.transition && !noEvent.has(cue.transition) ||
     cue.status === "neutral" && verifiedContextCut(verdict, verdict.unitId));
@@ -131,7 +161,9 @@ export function mergeTransitionVerdict(cue, verdict, discovery, prior) {
     return {annotation: cue, flag: "protective-transition-conflict"};
   }
   if (cue?.status === "verified" && cue.transition === "declined-restart" && cue.evidenceIds.includes(cue.unitId) &&
-      nonClosingEvents.has(verdict.transition)) return {annotation: cue, flag: "transition-conflict"};
+      (nonClosingEvents.has(verdict.transition) || verdict.transition === "scene-cut" && typed?.sceneBoundary?.status === "cut")) {
+    return {annotation: cue, flag: "transition-conflict"};
+  }
   if (verdict.status === "verified" && verdict.transition === "present-return" && verdict.frame === "mixed" &&
       cue?.status === "neutral" && earlierFrames.has(cue.frame) && cue.evidenceIds.includes(cue.unitId)) {
     return {annotation: cue, flag: "transition-conflict"};
@@ -148,14 +180,14 @@ export function mergeTransitionVerdict(cue, verdict, discovery, prior) {
         (matchedFrameEntry || matchedFrameReturn)) return {annotation: cue, flag: "transition-conflict"};
     if (freshEnactedStart(cue, cue.unitId) || cue.status === "verified" &&
         cue.evidenceIds.includes(cue.unitId) && (cue.transition === "uncertain-continuity" || cue.fact === "neutralize")) {
-      return {annotation: cue, flag: conflict ? "transition-conflict" : undefined};
+      return {annotation: cue, flag: boundaryFlag ?? (conflict ? "transition-conflict" : undefined)};
     }
     const fact = boundaryFacts.has(cue.fact) && !protectiveCue ? "none" : cue.fact;
     return {annotation: {...cue, fact, transition: "none", priorAnchor: fact === "none" ? null : cue.priorAnchor},
-      flag: conflict ? "transition-conflict" : undefined};
+      flag: boundaryFlag ?? (conflict ? "transition-conflict" : undefined)};
   }
   if (cueStarts.has(verdict.transition) && !freshEnactedStart(cue, verdict.unitId)) {
-    return {annotation: cue, flag: "transition-conflict"};
+    return {annotation: cue, flag: boundaryFlag ?? "transition-conflict"};
   }
   const effect = cue?.fact === "protective" || verdict.fact === "none" && cue?.fact && !boundaryFacts.has(cue.fact) ?
     cue.fact : verdict.fact;
@@ -164,5 +196,5 @@ export function mergeTransitionVerdict(cue, verdict, discovery, prior) {
     scopeId: verdict.scopeId ?? cue?.scopeId ?? null,
     priorAnchor: verdict.priorAnchor ?? (effect === cue?.fact ? cue?.priorAnchor : null) ?? null,
     evidenceIds: [...new Set([...(cue?.evidenceIds ?? []), ...verdict.evidenceIds])].sort((a, b) => a - b)},
-  flag: conflict ? "transition-conflict" : undefined};
+  flag: boundaryFlag ?? (conflict ? "transition-conflict" : undefined)};
 }

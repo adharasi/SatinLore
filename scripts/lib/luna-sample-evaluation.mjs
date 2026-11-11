@@ -1,5 +1,6 @@
 import {buildReferenceCorpus} from "./beat-continuity-evaluation.mjs";
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_MODEL, LUNA_PROTOCOL_RUBRIC_VERSION} from "./luna-protocol-provider.mjs";
+import {projectTypedTransition} from "./luna-transition-verification.mjs";
 
 const digest = /^[a-f0-9]{64}$/u;
 const modes = new Set(["discovery", "verify", "transition", "cue-check"]);
@@ -12,6 +13,8 @@ const transitions = new Set(LUNA_PROTOCOL_ENUMS.transition.filter(value => value
 const activePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
 const enacted = new Set(["contact", "change"]);
 const validResults = new Set(["verified", "neutral", "classified"]);
+const sceneBoundaryStatuses = new Set(["none", "uncertain", "cut"]);
+const sceneBoundaryReasons = new Set(["none", "unclear", "time-jump", "setting-shift", "objective-shift", "explicit-break"]);
 const cueGuards = new Set(["cue-boundary-suppressed", "cue-frame-ineligible", "cue-target-uncited", "cue-restart-unconfirmed",
   "cue-restart-required", "cue-stale-evidence"]);
 const playbackDispositions = new Set(["repeated-decline", "duplicate-frame-entry", "duplicate-frame-return", "unattested-scope",
@@ -99,9 +102,10 @@ function rawCue(fact, id) {
 }
 
 function rawTransition(fact, id) {
-  if (fact?.status === "neutral" && fact.transition === "none") return "none";
-  return fact?.status === "verified" && transitions.has(fact.transition) &&
-    Array.isArray(fact.evidenceIds) && fact.evidenceIds.includes(id) ? fact.transition : null;
+  const projected = projectTypedTransition(fact);
+  if (projected?.status === "neutral" && projected.transition === "none") return "none";
+  return projected?.status === "verified" && transitions.has(projected.transition) &&
+    Array.isArray(projected.evidenceIds) && projected.evidenceIds.includes(id) ? projected.transition : null;
 }
 
 function stageDisposition(fact, status, attempt, row, clip) {
@@ -125,7 +129,7 @@ function rowObservation(work, id, lane) {
         status: disposition(row?.status, clip)};
     case "typedTransition":
       return {value: rawTransition(row?.transitionVerification, id), dispatched: typed?.attempted === true,
-        status: stageDisposition(row?.transitionVerification, row?.transitionVerificationStatus, typed, row, clip)};
+        status: stageDisposition(projectTypedTransition(row?.transitionVerification), row?.transitionVerificationStatus, typed, row, clip)};
     case "appliedTransition":
       return {value: transitions.has(row?.appliedTransition) ? row.appliedTransition : null,
         status: disposition(row?.status, clip)};
@@ -204,11 +208,15 @@ function discrepancyContext(work, gold, lane) {
   if (!row && !contextIds) return {};
   const primary = row?.primaryPrefix;
   const typed = row?.transitionVerification;
+  const independentTransition = rawTransition(typed, gold.id);
   return {referenceNarrativePhase: gold.narrativePhase, referenceEvidenceOutsidePrefix,
     ...(LUNA_PROTOCOL_ENUMS.action.includes(primary?.action) ? {primaryAction: primary.action} : {}),
     ...(LUNA_PROTOCOL_ENUMS.fact.includes(primary?.fact) ? {primaryFact: primary.fact} : {}),
     ...(transitions.has(primary?.transition) ? {primaryTransition: primary.transition} : {}),
-    ...(transitions.has(typed?.transition) ? {independentTransition: typed.transition} : {}),
+    ...(independentTransition !== null ? {independentTransition} : {}),
+    ...(typed?.sceneBoundary && transitions.has(typed.transition) ? {independentLocalTransition: typed.transition} : {}),
+    ...(sceneBoundaryStatuses.has(typed?.sceneBoundary?.status) ? {independentSceneBoundary: typed.sceneBoundary.status} : {}),
+    ...(sceneBoundaryReasons.has(typed?.sceneBoundary?.reason) ? {sceneBoundaryReason: typed.sceneBoundary.reason} : {}),
     ...(cueGuards.has(row?.cueGuard) ? {cueGuard: row.cueGuard} : {}),
     ...(playbackDispositions.has(row?.playbackDisposition) ? {playbackDisposition: row.playbackDisposition} : {})};
 }
@@ -242,7 +250,7 @@ export function scoreLunaSample(reference, candidate, {loom, includeDiscrepancie
   return {measurement: "unweighted-frozen-sample-diagnostic", sourceProseIncluded: false,
     candidateProvenance: {measurement: candidate.measurement === "live-corpus-luna" ? "live-corpus-luna" : null,
       model: candidate.model === LUNA_PROTOCOL_MODEL ? candidate.model : null,
-      rubricVersion: ["nocturne-luna-protocol-v13", "nocturne-luna-protocol-v14", "nocturne-luna-protocol-v15", LUNA_PROTOCOL_RUBRIC_VERSION]
+      rubricVersion: ["nocturne-luna-protocol-v13", "nocturne-luna-protocol-v14", "nocturne-luna-protocol-v15", "nocturne-luna-protocol-v16", LUNA_PROTOCOL_RUBRIC_VERSION]
         .includes(candidate.rubricVersion) ? candidate.rubricVersion : null},
     summary: Object.fromEntries(panels.map(([panel]) => [panel, Object.fromEntries(definitions.map(([name, lane]) =>
       [name, metrics(totals.get(panel).get(name), lane)]))])),

@@ -1,5 +1,5 @@
 import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuationScope, crossesCurrentFrame, elapsedContinuityGap, exactCurrentCue, freshEnactedStart, isDeferredCurrentContext, restartCheckPending,
-  verifiedContextCut} from "./luna-transition-verification.mjs";
+  startsAtSceneEntry, verifiedContextCut, verifiedSceneEntry} from "./luna-transition-verification.mjs";
 
 const exits = new Set(["cut", "neutralize", "protective", "beat-end"]);
 const endings = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry",
@@ -15,7 +15,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
   const runs = new Map();
   return ({runId, firstId, target}) => {
     if (!runs.has(runId)) runs.set(runId, {cursor: runId, anchors: [], frame: null, scope: null,
-      barrierId: -1, restartBoundary: null, protectedScopes: new Set()});
+      barrierId: -1, sceneBoundaryId: -1, restartBoundary: null, protectedScopes: new Set()});
     const run = runs.get(runId);
     if (target < run.cursor) throw new Error("Verification must advance in source order.");
     for (; run.cursor < target; run.cursor++) {
@@ -28,7 +28,8 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const current = applyRepeatedReturn(framed, run.protectedScopes.has(prior?.scopeId) ? null : prior, rawCue, id);
       const annotation = run.restartBoundary === "declined-restart" && previous?.window?.runId === runId ?
         applyLatchedDecline(current, prior, row?.transitionVerification, id) : current;
-      const verified = row?.prefixVerified || row?.transitionVerification?.status === "verified";
+      const sceneEntry = verifiedSceneEntry(annotation, row?.transitionVerification, id);
+      const verified = row?.prefixVerified || row?.transitionVerification?.status === "verified" || sceneEntry;
       if (blocked.has(id) || row?.window?.runId !== runId || !annotation ||
           !["verified", "neutral", "candidate"].includes(annotation.status) || annotation.frame === "uncertain" ||
           annotation.narrativePhase === "unknown" && !verified) {
@@ -47,6 +48,7 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       const contextCut = verifiedContextCut(annotation, id);
       const cut = contextCut || frameChange || independentScope && !run.restartBoundary;
       const preCutContinuation = cut && rawCue?.fact === "continue";
+      if (contextCut && transition === "scene-cut") run.sceneBoundaryId = id;
       const barrier = exits.has(fact) || endings.has(transition) || cut || elapsedGap;
       if (barrier) {
         run.anchors = [];
@@ -57,23 +59,24 @@ export function createCausalAttestationLedger(decisions, blocked, maxAttested, u
       if (fact === "protective" && scopeId != null) run.protectedScopes.add(scopeId);
       if (fact === "protective") run.restartBoundary = "protective";
       else if (transition === "hard-stop" || transition === "declined-restart") run.restartBoundary = transition;
-      else if (contextCut && !preCutContinuation && row.transitionVerification?.status !== "neutral") run.restartBoundary = null;
+      else if (contextCut && !preCutContinuation && !sceneEntry && row.transitionVerification?.status !== "neutral") run.restartBoundary = null;
       const restart = enactedStart && !restartCheckPending(run.restartBoundary, row);
       // A hard exit never acts as an independent anchor. An ordinary cut can
       // also establish a new low cue on its own verified target.
       if (status !== "verified" || frame !== "current" || !exactCurrentCue(rawCue, id) || preCutContinuation ||
+          sceneEntry && (run.restartBoundary || !startsAtSceneEntry(rawCue, row.transitionVerification, id)) ||
           run.protectedScopes.has(scopeId) || run.protectedScopes.has(annotation.scopeId) || run.restartBoundary && !restart || elapsedGap ||
           ["neutralize", "protective", "beat-end"].includes(fact) ||
           ["hard-stop", "declined-restart", "uncertain-continuity", "beat-end", "interruption",
             "non-romantic-activity-stop", "span-end"].includes(transition) ||
           !evidenceIds.includes(id) || !cut && !restart && evidenceIds.some(id => id <= run.barrierId) ||
-          !(fact === "low" || fact === "none" && rises.has(narrativePhase) && actions.has(action))) continue;
+          !(sceneEntry || fact === "low" || fact === "none" && rises.has(narrativePhase) && actions.has(action))) continue;
       run.anchors.push({unitId: id, scopeId: scopeId ?? id, frame, action, narrativePhase});
       run.restartBoundary = null;
     }
     run.anchors = run.anchors.filter(({unitId}) => target - unitId <= MAX_ANCHOR_DISTANCE);
     return {anchors: run.anchors.filter(({unitId}) => unitId < firstId).slice(-maxAttested),
       localAnchors: run.anchors.filter(({unitId}) => unitId >= firstId), restartBoundary: run.restartBoundary,
-      protectedScopes: run.protectedScopes};
+      protectedScopes: run.protectedScopes, sceneBoundaryId: run.sceneBoundaryId};
   };
 }

@@ -191,6 +191,8 @@ A separate 25-section Loom and Nocturne evaluation measures exact phase, movemen
 
 The v16 Nocturne diagnostic adds a bounded independent check for disputed scene cuts and refines profile selection for verified buildup and sustained contact. Identical-label replay matched 90/148 profiles, up from 87/148 with the previous guarded compiler. Expected active intent stayed at 19/59 with no false activations. The paired live results, natural-story holdout and physical qualification are separate milestones. [Continuity and waveform verification](nocturne-beat-protocol-shadow.md#v16-focused-continuity-and-waveform-verification)
 
+V17 separates scene entry from the local event and requires cited evidence for both sides of a material cut in the approved prefix. Consecutive verified buildup can deepen the waveform within an evidenced scope. Replay of the 148 paid v16 facts improves exact profiles from 90 to 91, with 24/59 expected active decisions and zero false activations. The fixed paired benchmark and an independently adjudicated natural holdout measure recognition separately. [Independent scene boundary and local event](nocturne-beat-protocol-shadow.md#v17-independent-scene-boundary-and-local-event)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

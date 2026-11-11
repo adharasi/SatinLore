@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v16";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v17";
 export const LUNA_PROTOCOL_LIMITS = Object.freeze({
   maxUnits: 256, maxTargets: 192, maxVerifyUnits: 32, maxUnitBytes: 24_000,
   maxSourceBytes: 128_000, maxBodyBytes: 192_000, maxEvidenceIds: 8, maxAttested: 16,
@@ -34,11 +34,13 @@ export const LUNA_PROTOCOL_TARGET_FAILURES = Object.freeze([
   "missing-target", "duplicate-target", "unexpected-row", "row-shape", "row-enum", "status-mode", "scope-id", "evidence-id",
   "prior-anchor", "attested-evidence", "status-effect", "target-evidence", "transition-fact", "transition-frame", "cue-action",
   "fact-frame", "fact-action", "fact-phase", "phase-action", "transition-action",
+  "scene-boundary-shape", "scene-boundary-evidence", "scene-boundary-event",
 ]);
 const canonicalNoEvent = "canonical-no-event";
 const startContextAnchor = "start-context-anchor";
 const transitionContextAnchor = "transition-context-anchor";
-export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([canonicalNoEvent, startContextAnchor, transitionContextAnchor]);
+const protectiveSceneBoundary = "protective-scene-boundary-unresolved";
+export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([canonicalNoEvent, startContextAnchor, transitionContextAnchor, protectiveSceneBoundary]);
 
 const url = "https://api.openai.com/v1/responses";
 const safetyCodes = new Set(["content_filter", "content_policy_violation", "safety_violation"]);
@@ -51,13 +53,19 @@ const object = properties => ({type: "object", properties, required: Object.keys
 const fields = {unitId: integer, ...Object.fromEntries(enumFields.map(([name, values]) => [name, {type: "string", enum: values}])),
   scopeId: nullableInteger, evidenceIds: {type: "array", items: integer, maxItems: LUNA_PROTOCOL_LIMITS.maxEvidenceIds},
   priorAnchor: nullableInteger};
-const transitionFields = {unitId: fields.unitId, frame: fields.frame, transition: fields.transition,
+const materialSceneChanges = ["time-jump", "setting-shift", "objective-shift", "explicit-break"];
+const sceneBoundaryFields = {status: {type: "string", enum: ["none", "uncertain", "cut"]},
+  reason: {type: "string", enum: ["none", "unclear", ...materialSceneChanges]},
+  previousId: nullableInteger, entryId: nullableInteger};
+const transitionFields = {unitId: fields.unitId, frame: fields.frame,
+  transition: {type: "string", enum: LUNA_PROTOCOL_ENUMS.transition.filter(transition => transition !== "scene-cut")},
   fact: {type: "string", enum: [...new Set(Object.values(LUNA_PROTOCOL_TRANSITION_FACTS).flat())]},
-  scopeId: fields.scopeId, evidenceIds: fields.evidenceIds, priorAnchor: fields.priorAnchor, status: fields.status};
+  scopeId: fields.scopeId, evidenceIds: fields.evidenceIds, priorAnchor: fields.priorAnchor, status: fields.status,
+  sceneBoundary: object(sceneBoundaryFields)};
 const proposalStatus = {discovery: "candidate", verify: "verified", transition: "verified", "cue-check": "verified"};
 const statuses = mode => [proposalStatus[mode], "neutral", "uncertain", "abstain"];
 const formats = Object.fromEntries(Object.keys(proposalStatus).map(mode => [mode, {
-  type: "json_schema", strict: true, name: `nocturne_luna_${mode.replace("-", "_")}_v1`,
+  type: "json_schema", strict: true, name: `nocturne_luna_${mode.replace("-", "_")}_v${mode === "transition" ? 2 : 1}`,
   schema: object({facts: {type: "array", minItems: 1, maxItems: mode === "discovery" ? LUNA_PROTOCOL_LIMITS.maxTargets : 1,
     items: object({...(mode === "transition" ? transitionFields : fields), status: {type: "string", enum: statuses(mode)},
   })}}),
@@ -68,6 +76,7 @@ const ordinaryStop = "Use non-romantic-activity-stop only when the target ends a
 const continuityGap = "An elapsed interval can make continuity unresolved even with the same people and place. If a prior active beat is established and the target advances time by describing only where the participants remained or what they generally did, with no evidence that the specific interaction continued, use uncertain-continuity with neutralize and cite the target. Ordinary dialogue or background detail within a continuous moment supplies no such boundary. For this decision, use status uncertain only when you cannot determine whether the change itself occurred.";
 const frameReturn = "Use present-return at the first target that closes an established noncurrent frame and depicts activity in the surrounding present. Ending the account and handling its source in the present can establish the return without an explicit announcement. A task or stimulus within the imagined, remembered or reported episode leaves that frame in place. Compare time, setting and objective even with unchanged tense or people. Use uncertain when the switch cannot yet be located. Movement inside the noncurrent frame and a later reference after the return supply no additional return. Cite the earlier frame and the exact return when both are in the prefix.";
 const materialBoundary = "Before assigning scene-cut, identify what was underway, what materially displaced it and where the new episode becomes present. A definite temporal jump into a new episode can suffice in the same location. A time word, topic change, new speaker, ordinary movement between nearby places or next task step alone leaves the current scene in place. Locate the first enacted unit of the new episode. Cite the preceding context and the exact new scene target when both are supplied. A self-contained target can establish both sides explicitly. Use neutral for a routine continuation and uncertain if a material change cannot be resolved. After checking for a directly supported hard stop or protection, prefer a supported scene or frame boundary over the smaller event inside the new episode. The cue pass can still classify a separate enacted action at that target.";
+const sceneBoundaryAxis = "Classify sceneBoundary independently from the typed event. Identify what was underway in the old episode, what materially displaced it, and where the new episode first becomes present. For a cut, previousId cites a strictly earlier supplied text unit depicting the old episode, and entryId cites this exact target depicting entry into the new episode. The previous unit must establish the old situation, even if the target describes both episodes. An attestation, a reference back, an earlier cut, or an arbitrary earlier ID does not establish the old scene. Use time-jump for a definite jump into a new episode, including one in the same location. Use setting-shift for entry into a materially different setting, objective-shift for a new objective that replaces the old episode, or explicit-break for an authored scene break. A time word, topic change, new speaker, ordinary movement between nearby places or next task step alone leaves the current scene in place. Do not repeat the cut after entry. For ordinary continuity use status and reason none, with both IDs null. For a possible cut with unresolved displacement, a missing old scene or ambiguous entry, use status uncertain, reason unclear, and both IDs null. A new episode can begin with an independently enacted onset or accent. Return both decisions when supported.";
 const softBoundary = "Distinguish a local decline from ending the underlying interaction. Releasing one hold, pausing between gestures or shifting position can leave the interaction engaged. Use ease with release for an evidenced downshift and recover for the affection or reaction that follows it. Use a typed recover only where the target establishes the beginning of recovery. An ongoing recovery can have transition none. Use beat-end when the target establishes that the interaction itself concludes. If the text supports a decline but leaves the larger ending unresolved, retain the decline and avoid promoting it to beat-end.";
 const currentContribution = "Classify the action in the exact target independently of its place in the arc. Use contact for newly enacted contact and change for a distinct, enacted change within an existing interaction. A new touch or a visible modification of the same interaction can be direct even while the beat continues. Use continuation when the target depicts only the same ongoing action, restates it, or adds a routine movement. If the earlier anchor is unavailable, use fact none. Reserve fact continue for a cited same-scope anchor. Use release for softening or withdrawal alone. If an easing or recovery target also depicts a distinct newly enacted contact or change, keep that action with the easing or recovery phase. A target can show an easing or recovery cue without a new onset or typed event. A supported stop or restriction still takes priority. Depiction intensity, prior context alone, incidental contact and generic comfort supply no cue. Cite the exact target for each verified current contribution.";
 const buildup = "Reciprocal buildup requires the target to show a response that advances a current romantic exchange. When an earlier partner expresses anticipation, the target's deliberate echo with a meaningful reaction, gesture, or specific shared desire can be build with action anticipation. A visible invitation that advances an already mutually wanted immediate interaction can also be build before contact. Mere politeness, small talk, shared logistics, or an isolated opening request to which nobody responds at the target stays quiet without other charged evidence. An independently depicted reaction of attraction or charged hesitation can still be build without a reply. Cite the target for its contribution and the earlier unit when it establishes the relevant exchange.";
@@ -124,9 +133,9 @@ const transitionInstructions = [
   interactionPurpose,
   "Hard-stop ends or blocks current eligible interaction. A participant's explicit request to pause or stop with enacted release is a hard stop, even when voluntary or temporary. Use neutralize for a clearly enacted or directed stop of that interaction and protective only when the target directly establishes an active restriction involving age, agreement, capacity or another applicable block. An explicit withdrawal can establish a restriction. Ordinary movement stopping is not protective.",
   ordinaryStop,
-  "Interruption requires an external event to divert, pause or materially alter the ongoing activity at the target, with continuity still plausible. Require the effect of the disruption as well as the trigger, and place the event at the first unit showing its effect. Use ease when intensity actually falls or none when the activity merely pauses. A nearby sound, silence or independent glance supplies no interruption. Routine downtime after an established stop supplies no second beat-end. Ease and recover use fact ease. Span-end softly closes one span within a live beat. A clear new scene or chapter end uses cut.",
+  "Interruption requires an external event to divert, pause or materially alter the ongoing activity at the target, with continuity still plausible. Require the effect of the disruption as well as the trigger, and place the event at the first unit showing its effect. Use ease when intensity actually falls or none when the activity merely pauses. A nearby sound, silence or independent glance supplies no interruption. Routine downtime after an established stop supplies no second beat-end. Ease and recover use fact ease. Span-end softly closes one span within a live beat. A chapter end uses cut.",
   softBoundary,
-  materialBoundary,
+  sceneBoundaryAxis,
   continuityGap,
   freshStart,
   targetEnactment,
@@ -135,7 +144,7 @@ const transitionInstructions = [
   "Use memory-entry, imagined-entry or reported-entry only when the narrative starts depicting events in that frame. A target that begins reading or recounting a past account can be reported-entry. Set frame to reported if the target enters the account, or mixed if it also depicts live action. The speaker's physical presence alone does not make the destination current or mixed. A passing reference remains in its surrounding frame. Frame transitions use cut and the destination frame or mixed. A return alone supplies no action. Events within a recollection, imagined scene or report do not establish a transition of the live interaction. If the target remains inside that frame, return neutral unless the target itself establishes a true narrative boundary.",
   frameReturn,
   targetFrame,
-  "Choose one event and its matching fact. Ease or recover pairs with ease, span-end pairs with span-end, and beat-end pairs with beat-end. If the evidence leaves the event kind unresolved, use status uncertain or abstain with transition unknown. For no transition, use status neutral and transition none. In both cases use fact none, scopeId null, priorAnchor null and evidenceIds []. Only a verified event uses evidence IDs and may carry scope. An earlier same-scope priorAnchor may support ease, span-end or beat-end only, and it must be cited alongside the target.",
+  "Choose one typed event and its matching fact separately from sceneBoundary. Ease or recover pairs with ease, span-end pairs with span-end, and beat-end pairs with beat-end. If the evidence leaves the typed event kind unresolved, use status uncertain or abstain with transition unknown. For no typed event, use status neutral and transition none. In both cases use fact none, scopeId null, priorAnchor null and evidenceIds []. Only a verified event uses event evidence IDs and may carry scope. An earlier same-scope priorAnchor may support ease, span-end or beat-end only, and it must be cited alongside the target.",
 ].join(" ");
 const attestationInstructions = "The optional attested array contains typed labels independently verified earlier in this cleared run. Each record gives a unitId, scopeId, frame, action and narrativePhase. An attested scopeId names the earlier scope. It is not an evidence citation on its own. An attested unitId can support only an eligible priorAnchor fact for the same scope and frame. Also cite the current target itself and require support there for the claimed connection, easing or ending. Do not infer present action, a new rise, eligibility or uninterrupted continuity from an earlier attestation alone. The current prefix must independently support those decisions. If continuity is unclear, abstain or return uncertain.";
 
@@ -223,6 +232,22 @@ export function lunaProtocolTransitionViolation(row) {
     if (!evidenceIds.includes(unitId)) return "target-evidence";
   } else if (transition !== (status === "neutral" ? "none" : "unknown") || fact !== "none" ||
       scopeId !== null || evidenceIds.length || priorAnchor !== null) return "status-effect";
+  return null;
+}
+
+export function lunaProtocolSceneBoundaryViolation(row, raw) {
+  const {sceneBoundary, unitId, frame, transition} = row;
+  if (!exact(sceneBoundary, Object.keys(sceneBoundaryFields)) || !sceneBoundaryFields.status.enum.includes(sceneBoundary.status) ||
+      !sceneBoundaryFields.reason.enum.includes(sceneBoundary.reason)) return "scene-boundary-shape";
+  if (transition === "scene-cut") return "scene-boundary-event";
+  const {status, reason, previousId, entryId} = sceneBoundary;
+  if (status === "cut") {
+    if (!materialSceneChanges.includes(reason) || frame === "uncertain") return "scene-boundary-shape";
+    if (!raw(previousId) || previousId >= unitId || entryId !== unitId || !raw(entryId)) return "scene-boundary-evidence";
+  } else {
+    if (reason !== (status === "uncertain" ? "unclear" : "none")) return "scene-boundary-shape";
+    if (previousId !== null || entryId !== null) return "scene-boundary-evidence";
+  }
   return null;
 }
 
@@ -328,24 +353,33 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
   for (const unitId of targetIds) {
     const submitted = byTarget.get(unitId);
     let row = submitted;
-    let reason;
+    let reason, normalization;
     if (row === undefined) reason = "missing-target";
     else if (row === null) reason = "duplicate-target";
     else if (mode !== "discovery" && value.facts.length !== 1) reason = "unexpected-row";
     else reason = rowShapeViolation(row, validation);
     if (!reason) {
       if (mode === "transition") {
-        row = canonicalTransition(row, raw);
-        reason = lunaProtocolTransitionViolation(row);
+        const boundaryViolation = lunaProtocolSceneBoundaryViolation(row, raw);
+        if (boundaryViolation) {
+          const stop = row.transition === "hard-stop" || row.transition === "declined-restart";
+          if (stop && !lunaProtocolTransitionViolation(row)) {
+            row = {...row, sceneBoundary: {status: "uncertain", reason: "unclear", previousId: null, entryId: null}};
+            normalization = protectiveSceneBoundary;
+          } else reason = boundaryViolation;
+        } else {
+          row = canonicalTransition(row, raw);
+          reason = lunaProtocolTransitionViolation(row);
+        }
       } else reason = lunaProtocolCueViolation(row, mode);
     }
     if (reason) targetFailures.push({unitId, reason});
     else {
       facts.push(mode === "transition" ? {...row, depiction: "unknown", narrativePhase: "unknown", action: "unknown"} : row);
       if (row !== submitted) {
-        const reason = row.status !== "verified" ? canonicalNoEvent :
+        normalization ??= row.status !== "verified" ? canonicalNoEvent :
           starts.has(row.transition) ? startContextAnchor : transitionContextAnchor;
-        targetNormalizations.push({unitId, reason});
+        targetNormalizations.push({unitId, reason: normalization});
       }
     }
   }
@@ -473,7 +507,7 @@ export function createLunaProtocolProvider({apiKey, model = LUNA_PROTOCOL_MODEL,
       !/^[a-zA-Z0-9._-]{1,100}$/u.test(model) || typeof fetchImpl !== "function" ||
       !whole(timeoutMs) || !timeoutMs || timeoutMs > 90_000) throw new TypeError("Provide server-side Luna adapter options.");
 
-  return async (request, {signal: callerSignal} = {}) => {
+  const classify = async (request, {signal: callerSignal} = {}) => {
     if (callerSignal?.aborted) return failure("cancelled", "caller-cancelled");
     if (!request || !validRequest(request)) return failure("invalid-request", "request-shape");
     const {mode, focus} = request;
@@ -505,4 +539,5 @@ export function createLunaProtocolProvider({apiKey, model = LUNA_PROTOCOL_MODEL,
       return failure("transient", "transport");
     }
   };
+  return Object.assign(classify, {sceneBoundaryProtocol: true});
 }

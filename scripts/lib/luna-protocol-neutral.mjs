@@ -5,6 +5,7 @@ import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_MODEL,
   LUNA_PROTOCOL_TARGET_NORMALIZATIONS, LUNA_PROTOCOL_TRANSITION_FACTS}
   from "./luna-protocol-provider.mjs";
 import {createLunaShadowBudget, MAX_SHADOW_MICROS, runLunaProtocolShadow} from "./luna-protocol-shadow.mjs";
+import {projectTypedTransition} from "./luna-transition-verification.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "./whole-story-context-planning.mjs";
 
 const fixtureVersion = "neutral-stories-v1";
@@ -180,7 +181,7 @@ function observation(row, stage) {
   // A discovery label which did not require prefix review is in the final slot.
   const fact = {
     discovery: row.discovery ?? (row.verificationStatus === undefined && row.labelKnownAt !== null ? row : undefined),
-    prefix: row.primaryPrefix, transition: row.transitionVerification, cueRecovery: row.cueRecovery,
+    prefix: row.primaryPrefix, transition: projectTypedTransition(row.transitionVerification), cueRecovery: row.cueRecovery,
   }[stage];
   const fallback = {
     discovery: row.discoveryStatus ?? row.status,
@@ -956,7 +957,8 @@ export async function runLunaProtocolNeutral({mode = "offline", arm = "windowed"
     runs.push(await runLunaProtocolShadow({id, text, sourceSha256: reference.sourceSha256, grant, budget, signal, now, arm,
       provider: mode === "mock" ? guardedProvider ?? mockProvider(fixture) : guardedProvider,
       limits: {maxTargetsPerWindow: 4, maxOverlapUnits: 2}, verificationTargets: reference.units.map(({id}) => id),
-      verifyTransitions, maxTransitionVerification: transitionBudgets[index], verificationContext, maxCueChecks}));
+      verifyTransitions, maxTransitionVerification: transitionBudgets[index], verificationContext, maxCueChecks,
+      requireSceneBoundary: verifyTransitions && provider?.sceneBoundaryProtocol === true}));
   }
   const reference = {cohort: fixtures.map(({id}) => id), works: fixtures.map(({reference}) => reference)};
   const planning = runs.map(({id, summary}, index) => ({

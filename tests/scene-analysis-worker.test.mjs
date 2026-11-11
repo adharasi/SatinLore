@@ -7,6 +7,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { Miniflare } from "miniflare";
 import { createPrivateAppWorker } from "../deploy/cloudflare/worker.mjs";
 import { LUNA_CORPUS_PATH } from "../deploy/cloudflare/luna-corpus.mjs";
+import { LUNA_PROTOCOL_RUBRIC_VERSION } from "../scripts/lib/luna-protocol-provider.mjs";
 import { validateNocturneContext } from "../app/static/reader/nocturne-context-contract.mjs";
 import { wholeStoryAnnotationFixtures } from "./whole-story-annotation-fixtures.mjs";
 
@@ -112,7 +113,7 @@ test("whole-story study requires opt-in, exact app origin, founder Access and th
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   const html = await page.text();
   assert.match(html, /<form method="post"><button name="benchmark" value="whole-story-luna-v1"/);
-  assert.match(html, /Luna rubric v16 is active/);
+  assert.ok(html.includes(`Luna rubric ${LUNA_PROTOCOL_RUBRIC_VERSION.split("-").at(-1)} is active.`));
   assert.match(html, /Timing review v5 is active/);
   assert.match(html, /\$3 estimated spend cap for 24 hours/);
   assert.match(html, /Shared run ID \(optional\)/);
@@ -132,10 +133,11 @@ const studyAttempt = (fetchImpl, options = {}) => fetchImpl(studyProvider, { met
 function neutralProtocolUpstream(_url, options) {
   const body = JSON.parse(options.body);
   const { targetIds } = JSON.parse(body.input);
-  const transitionOnly = body.text.format.name === "nocturne_luna_transition_v1";
+  const transitionOnly = body.text.format.name === "nocturne_luna_transition_v2";
   const facts = targetIds.map(unitId => ({ unitId, status: "neutral", frame: "current", transition: "none",
     fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
-    ...(transitionOnly ? {} : { depiction: "neutral", narrativePhase: "quiet", action: "none" }),
+    ...(transitionOnly ? {sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null}} :
+      { depiction: "neutral", narrativePhase: "quiet", action: "none" }),
   }));
   return Response.json({ status: "completed", model: "gpt-6-luna", usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
     output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ facts }) }] }] });
@@ -493,6 +495,7 @@ const CONTEXT_V2_LABELS = [
 const CONTEXT_CONTRACT = "app/static/reader/nocturne-context-contract.mjs";
 const SCENE_ANALYSIS_MODULES = ["deploy/cloudflare/scene-analysis.mjs", CONTEXT_CONTRACT,
   "deploy/cloudflare/corpus-study-budget.mjs",
+  "scripts/lib/luna-protocol-provider.mjs",
   "deploy/cloudflare/decisions-benchmark.mjs", "deploy/cloudflare/scene-decisions.mjs",
   "deploy/cloudflare/decisions-corpus-benchmark.mjs", "deploy/cloudflare/decisions-corpus-pins.mjs",
   "deploy/cloudflare/decisions-story-study.mjs", "deploy/cloudflare/decisions-story-study-pins.mjs",
@@ -927,6 +930,8 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.deepEqual(result.summary.attempts.filter(row => row.attempted).map(row => row.targetIds), [[32, 33], [33], [33]]);
   assert.equal(result.units[1].primaryPrefix.unitId, 33);
   assert.equal(result.units[1].transitionVerification.unitId, 33);
+  assert.deepEqual(result.units[1].transitionVerification.sceneBoundary,
+    {status: "none", reason: "none", previousId: null, entryId: null});
   assert.ok(f.calls.every(({url, options}) => url === studyProvider && options.redirect === "manual" && options.headers.Authorization === `Bearer ${KEY}`));
   const sent = f.calls.flatMap(({options}) => JSON.parse(JSON.parse(options.body).input).units.map(row => row.text));
   assert.ok(sent.every(text => clip.units.some(unit => unit.text === text)));

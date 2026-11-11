@@ -63,8 +63,10 @@ function mapResult(result, first) {
   const coordinate = value => integer(value) ? value + first : value;
   const coordinates = value => value?.map(coordinate);
   const named = value => value?.replace(/:(beat|scene):(\d+)$/u, (_, kind, id) => `:${kind}:${coordinate(Number(id))}`) ?? value;
+  const boundary = row => ({...row, previousId: coordinate(row.previousId), entryId: coordinate(row.entryId)});
   const evidence = row => row && {...row, unitId: coordinate(row.unitId), id: coordinate(row.id),
-    scopeId: coordinate(row.scopeId), priorAnchor: coordinate(row.priorAnchor), evidenceIds: coordinates(row.evidenceIds)};
+    scopeId: coordinate(row.scopeId), priorAnchor: coordinate(row.priorAnchor), evidenceIds: coordinates(row.evidenceIds),
+    ...(row.sceneBoundary ? {sceneBoundary: boundary(row.sceneBoundary)} : {})};
   return {
     units: result.units.map(row => ({...evidence(row), knownAt: coordinate(row.knownAt), labelKnownAt: coordinate(row.labelKnownAt),
       labelEvidenceIds: coordinates(row.labelEvidenceIds), transitionEvidenceIds: coordinates(row.transitionEvidenceIds),

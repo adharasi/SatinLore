@@ -95,7 +95,7 @@ test("checks one target with the full cue schema and no prior judgment", async (
   const result = await run({...cueCheck, units: cueUnits, candidates: [enactedRestart], priorVerdict: fact(11)});
   assert.deepEqual(result, success([enactedRestart]));
   assert.deepEqual(JSON.parse(sent.input), {units: cueUnits, targetIds: [11]});
-  assert.match(sent.instructions, /nocturne-luna-protocol-v16/u);
+  assert.match(sent.instructions, /nocturne-luna-protocol-v17/u);
   assert.match(sent.instructions, /No candidate or previous judgment is supplied/u);
   assert.match(sent.instructions, /Every verified row must cite the target/u);
   assert.match(sent.instructions, /Reciprocal buildup requires the target to show a response/u);
@@ -246,8 +246,9 @@ test("preserves provider refusal on a request with an earlier attestation", asyn
 });
 
 const transitionRequest = {...withAttested, mode: "transition"};
+const noSceneBoundary = {status: "none", reason: "none", previousId: null, entryId: null};
 const transitionRow = (transition, fact, extra) => ({unitId: 11, frame: "current", transition, fact,
-  scopeId: null, evidenceIds: [11], priorAnchor: null, status: "verified", ...extra});
+  scopeId: null, evidenceIds: [11], priorAnchor: null, status: "verified", sceneBoundary: noSceneBoundary, ...extra});
 const normalizedTransitionRow = row => ({...row, depiction: "unknown", narrativePhase: "unknown", action: "unknown"});
 
 test("the spend reserve covers the largest actual rubric, attestation and schema overhead", async () => {
@@ -286,17 +287,17 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.match(sent.instructions, /final repetition or change in speed while the activity continues supplies no stop/u);
   assert.match(sent.instructions, /An unrelated object becoming still supplies no stop by itself/u);
   assert.match(sent.instructions, /Require the effect of the disruption as well as the trigger/u);
-  assert.match(sent.instructions, /A definite temporal jump into a new episode can suffice in the same location/u);
-  assert.match(sent.instructions, /identify what was underway, what materially displaced it/u);
+  assert.match(sent.instructions, /Use time-jump for a definite jump into a new episode, including one in the same location/u);
+  assert.match(sent.instructions, /Identify what was underway in the old episode, what materially displaced it/u);
   assert.match(sent.instructions, /new speaker, ordinary movement between nearby places or next task step alone leaves the current scene in place/u);
-  assert.match(sent.instructions, /Cite the preceding context and the exact new scene target when both are supplied/u);
-  assert.match(sent.instructions, /prefer a supported scene or frame boundary over the smaller event/u);
+  assert.match(sent.instructions, /previousId cites a strictly earlier supplied text unit/u);
+  assert.match(sent.instructions, /A new episode can begin with an independently enacted onset or accent/u);
   assert.match(sent.instructions, /An imagined scenario starts when its events are first presented/u);
   assert.match(sent.instructions, /Ending the account and handling its source in the present can establish the return/u);
   assert.match(sent.instructions, /A task or stimulus within the imagined, remembered or reported episode leaves that frame in place/u);
   assert.match(sent.instructions, /Movement inside the noncurrent frame and a later reference after the return supply no additional return/u);
   assert.match(sent.instructions, /Use beat-end when the target establishes that the interaction itself concludes/u);
-  assert.match(sent.instructions, /Choose one event and its matching fact/u);
+  assert.match(sent.instructions, /Choose one typed event and its matching fact separately from sceneBoundary/u);
   assert.match(sent.instructions, /use status uncertain or abstain with transition unknown/u);
   assert.match(sent.instructions, /reported or remembered action does not establish a prior current start/u);
   assert.match(sent.instructions, /If the target ends before participation begins, it has no restart/u);
@@ -307,8 +308,41 @@ test("sends an independent transition rubric with one compact typed row and no c
   assert.equal(rows.items.additionalProperties, false);
   assert.deepEqual(rows.items.required.toSorted(), Object.keys(eased).toSorted());
   assert.equal(rows.items.properties.fact.enum.includes("low"), false);
+  assert.equal(rows.items.properties.transition.enum.includes("scene-cut"), false);
+  assert.deepEqual(rows.items.properties.sceneBoundary.required.toSorted(), Object.keys(noSceneBoundary).toSorted());
   assert.deepEqual(await run({...transitionRequest, units}), failure("invalid-request", "request-shape"));
   assert.deepEqual(await run({...transitionRequest, targetIds: [10, 11]}), failure("invalid-request", "request-shape"));
+});
+
+test("independently accepts a supported scene boundary with an onset or no local event", async () => {
+  const sceneBoundary = {status: "cut", reason: "time-jump", previousId: 10, entryId: 11};
+  const possible = {status: "uncertain", reason: "unclear", previousId: null, entryId: null};
+  for (const row of [
+    transitionRow("onset", "none", {sceneBoundary}),
+    transitionRow("none", "none", {status: "neutral", evidenceIds: [], sceneBoundary}),
+    transitionRow("accent", "none", {sceneBoundary: possible}),
+    transitionRow("hard-stop", "protective", {sceneBoundary}),
+  ]) {
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), success([normalizedTransitionRow(row)]));
+  }
+});
+
+test("requires earlier supplied scene evidence and an exact new entry for any material cut", async () => {
+  const sceneBoundary = {status: "cut", reason: "objective-shift", previousId: 10, entryId: 11};
+  const row = transitionRow("accent", "none", {sceneBoundary});
+  for (const [fact, reason] of [
+    ...[{previousId: null}, {previousId: 5}, {previousId: 11}, {entryId: 10}, {entryId: 12}].map(change =>
+      [{...row, sceneBoundary: {...sceneBoundary, ...change}}, "scene-boundary-evidence"]),
+    [{...row, sceneBoundary: {...noSceneBoundary, previousId: 10}}, "scene-boundary-evidence"],
+    [{...row, sceneBoundary: {...sceneBoundary, reason: "unclear"}}, "scene-boundary-shape"],
+    [{...row, frame: "uncertain"}, "scene-boundary-shape"],
+    [{...row, transition: "scene-cut", fact: "cut"}, "scene-boundary-event"],
+    [{...row, sceneBoundary: undefined}, "row-shape"],
+  ]) {
+    const run = provider(async () => response([fact]));
+    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
+  }
 });
 
 test("rejects conflicting typed events without guessing the intended boundary", async () => {
@@ -358,6 +392,16 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
   }
 });
 
+test("a malformed scene claim cannot discard a verified local stop or introduce a cut", async () => {
+  for (const [event, effect] of [["hard-stop", "protective"], ["declined-restart", "neutralize"]]) {
+    const row = transitionRow(event, effect, {sceneBoundary: {status: "cut", reason: "time-jump", previousId: 11, entryId: 11}});
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), {...success([normalizedTransitionRow({...row,
+      sceneBoundary: {status: "uncertain", reason: "unclear", previousId: null, entryId: null}})]),
+    targetNormalizations: [{unitId: 11, reason: "protective-scene-boundary-unresolved"}]});
+  }
+});
+
 test("canonicalizes only benign no-event metadata after validating the response and exact prefix IDs", async () => {
   const neutral = transitionRow("none", "none", {status: "neutral", scopeId: 10, evidenceIds: [10, 11]});
   for (const row of [neutral, {...neutral, status: "uncertain"}, {...neutral, status: "abstain", transition: "unknown"}]) {
@@ -404,7 +448,7 @@ test("retains verified starts and their evidence when an in-prefix context ID is
 test("repairs only a redundant cited earlier ID on a valid non-linking transition", async () => {
   const reason = "transition-context-anchor";
   const earlier = {scopeId: 11, priorAnchor: 10, evidenceIds: [10, 11]};
-  for (const row of [transitionRow("scene-cut", "cut", earlier),
+  for (const row of [transitionRow("chapter-end", "cut", earlier),
     transitionRow("imagined-entry", "cut", {...earlier, frame: "imagined"}),
     transitionRow("present-return", "cut", earlier), transitionRow("accent", "none", earlier),
     transitionRow("interruption", "none", earlier), transitionRow("non-romantic-activity-stop", "none", earlier)]) {
@@ -413,7 +457,7 @@ test("repairs only a redundant cited earlier ID on a valid non-linking transitio
       targetNormalizations: [{unitId: 11, reason}]});
   }
   assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));
-  const cut = transitionRow("scene-cut", "cut", earlier);
+  const cut = transitionRow("chapter-end", "cut", earlier);
   for (const [row, expected] of [
     [{...cut, evidenceIds: [11]}, "prior-anchor"], [{...cut, evidenceIds: [10]}, "prior-anchor"],
     [{...cut, frame: "uncertain"}, "prior-anchor"], [{...cut, transition: "memory-entry"}, "prior-anchor"],

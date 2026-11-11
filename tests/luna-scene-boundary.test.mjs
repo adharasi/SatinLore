@@ -1,0 +1,100 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
+import {projectTypedTransition} from "../scripts/lib/luna-transition-verification.mjs";
+import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "../scripts/lib/whole-story-context-planning.mjs";
+
+const text = "June waited near the window. Lee took her hand. The next evening, they started their first dance together. The band took a break.";
+const index = buildWholeStoryIndex(text);
+const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
+  purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 1000,
+  spans: index.units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+const neutral = unitId => ({unitId, status: "neutral", frame: "current", depiction: "neutral", narrativePhase: "quiet",
+  action: "none", transition: "none", fact: "none", scopeId: null, evidenceIds: [], priorAnchor: null});
+const onset = unitId => ({...neutral(unitId), status: "verified", depiction: "romantic", narrativePhase: "onset",
+  action: "contact", transition: "onset", scopeId: unitId, evidenceIds: [unitId]});
+const primaryCut = unitId => ({...neutral(unitId), status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [unitId]});
+const noBoundary = {status: "none", reason: "none", previousId: null, entryId: null};
+const cut = {status: "cut", reason: "time-jump", previousId: 1, entryId: 2};
+const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown", narrativePhase: "unknown",
+  action: "unknown", sceneBoundary});
+
+async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, prefixUnits = 24} = {}) {
+  const provider = Object.assign(async ({mode, targetIds}) => {
+    if (mode === "transition" && targetIds[0] === 2 && boundary === null) return {status: "invalid-response"};
+    return {status: "ok", usage: {inputTokens: 120, outputTokens: 40}, facts: targetIds.map(id => {
+      const local = id === 1 ? onset(id) : id === 2 ? cue(id) : neutral(id);
+      if (mode === "transition") return id === 2 ? boundary : id === 3 && nextBoundary ? typed(local, nextBoundary) : typed(local);
+      if (mode === "discovery" && local.status === "verified") return {...local, status: "candidate"};
+      return local;
+    })};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "scene-boundary", text, grant, now: () => 1, provider, prefixUnits,
+    verificationTargets: [1, 2, 3], transitionTargets: [1, 2, 3], verifyTransitions: true, negativeStride: 0});
+}
+
+test("does not apply a primary target-only cut without independent proof", async () => {
+  for (const boundary of [typed(neutral(2)), typed(neutral(2), {...cut, previousId: 2}), null]) {
+    const {units, summary} = await study({cue: primaryCut, boundary});
+    const row = units[2];
+    assert.equal(row.primaryPrefix.transition, "scene-cut");
+    assert.equal(row.appliedTransition, "none");
+    assert.equal(row.transitionFlag, "scene-boundary-unconfirmed");
+    assert.equal(row.sceneId, units[1].sceneId);
+    assert.notEqual(row.pattern, "Reset");
+    if (boundary?.sceneBoundary.previousId === 2) {
+      assert.deepEqual(summary.attempts.find(attempt => attempt.mode === "transition" && attempt.targetIds.includes(2)).rejectedFacts,
+        [{id: 2, reason: "scene-boundary-evidence"}]);
+    }
+  }
+});
+
+test("a material cut can coexist with a local accent and preserve a new independently enacted onset", async () => {
+  const accent = typed({...onset(2), transition: "accent", scopeId: 1}, cut);
+  const {units} = await study({cue: id => ({...onset(id), scopeId: 1}), boundary: accent});
+  const row = units[2];
+  assert.equal(row.primaryPrefix.transition, "onset");
+  assert.equal(row.transitionVerification.transition, "accent");
+  assert.deepEqual(row.transitionVerification.sceneBoundary, cut);
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.equal(row.sceneId, "scene-boundary:scene:2");
+  assert.equal(row.beatId, "scene-boundary:beat:2");
+  assert.equal(row.pattern, "Onset rise");
+});
+
+test("a cut with no fresh onset isolates the scene and discards an old continuation", async () => {
+  const cue = id => ({...onset(id), narrativePhase: "sustain", action: "continuation", transition: "none",
+    fact: "continue", priorAnchor: 1, evidenceIds: [1, id]});
+  for (const options of [{}, {cue}]) {
+    const {units} = await study(options);
+    const row = units[2];
+    assert.equal(row.transitionVerification.status, "neutral");
+    assert.equal(row.appliedTransition, "scene-cut");
+    assert.deepEqual(row.transitionEvidenceIds, [1, 2]);
+    assert.equal(row.sceneId, "scene-boundary:scene:2");
+    assert.equal(row.beatId, null);
+    assert.equal(row.pattern, "Reset");
+  }
+});
+
+test("a repeated cut cannot reuse evidence from before the last verified entry", async () => {
+  for (const previousId of [1, 2]) {
+    const {units} = await study({nextBoundary: {...cut, entryId: 3, previousId}});
+    const row = units[3];
+    assert.equal(row.appliedTransition, previousId === 1 ? "none" : "scene-cut");
+    assert.equal(row.transitionFlag, previousId === 1 ? "scene-boundary-stale" : "transition-conflict");
+    assert.equal(row.sceneId, `scene-boundary:scene:${previousId + 1}`);
+    assert.deepEqual(row.transitionEvidenceIds, [previousId, 3]);
+  }
+});
+
+test("local hard stops and frame transitions take precedence over the material cut", async () => {
+  const stop = typed({...primaryCut(2), transition: "hard-stop", fact: "protective"}, cut);
+  const frame = typed({...primaryCut(2), transition: "reported-entry", frame: "reported"}, cut);
+  assert.equal(projectTypedTransition(stop), stop);
+  assert.equal(projectTypedTransition(frame), frame);
+  const {units} = await study({cue: onset, boundary: stop});
+  assert.equal(units[2].appliedTransition, "hard-stop");
+  assert.equal(units[2].pattern, "Stop");
+  assert.equal(units[2].beatId, null);
+});

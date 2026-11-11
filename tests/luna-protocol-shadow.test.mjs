@@ -990,6 +990,41 @@ test("a verified scene cut can start a new beat on independent target evidence w
   }
 });
 
+test("an independent scene boundary opens only an exact new local beat on a clear gate", async () => {
+  const input = fixture("They danced by the window. Hours later they arrived at the hall. The clock chimed.");
+  const cases = [
+    {local: "onset", pattern: "Onset rise"},
+    {local: "onset", scopeId: 0, pattern: "Reset"},
+    {local: "accent", pattern: "Reset"},
+    {local: "continuation", pattern: "Reset"},
+    {local: "none", pattern: "Reset"},
+    {local: "onset", blockedIds: [1], pattern: "Stop"},
+    {local: "onset", earlierStop: true, pattern: "Reset"},
+  ];
+  for (const {local, scopeId = 1, blockedIds = [], earlierStop, pattern} of cases) {
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: [],
+        sceneBoundary: {status: "cut", reason: "time-jump", previousId: 0, entryId: 1}});
+      if (id === 0) return earlierStop ? active(id, mode, {fact: "protective", action: "none", transition: "hard-stop"}) :
+        active(id, mode, {fact: "none", action: "contact", narrativePhase: "onset", transition: "onset"});
+      if (id !== 1 || local === "none") return neutral(id);
+      if (local === "continuation") return active(id, mode, {fact: "continue", action: "continuation", narrativePhase: "sustain",
+        priorAnchor: 0, evidenceIds: [0, 1]});
+      return active(id, mode, {fact: "none", action: local === "onset" ? "contact" : "change",
+        narrativePhase: local === "onset" ? "onset" : "sustain", transition: local, scopeId});
+    });
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2], blockedIds, verifyTransitions: true,
+      maxTransitionVerification: 1, transitionTargets: [1], requireSceneBoundary: true});
+    const row = run.units[1];
+    assert.equal(row.transitionVerification.transition, "none");
+    assert.equal(row.appliedTransition, "scene-cut");
+    assert.equal(row.pattern, pattern);
+    assert.equal(row.cue, pattern === "Onset rise");
+    assert.equal(row.beatId, pattern === "Onset rise" ? "fixture:beat:1" : null);
+    if (pattern === "Reset") assert.equal(run.units[2].pattern, "Baseline");
+  }
+});
+
 test("deferred context can support an exact low cue but cannot carry playback or suppress a prior block", async () => {
   for (const blocked of [false, true]) {
     const provider = fake((id, mode) => {
@@ -1023,6 +1058,37 @@ test("verified buildup with cited romantic context uses a gradual profile while 
     assert.equal(run.units[2].phase, "build");
     assert.equal(run.units[2].cue, false);
     assert.deepEqual(run.units[2].trace.evidence, evidenceIds);
+  }
+});
+
+test("adjacent exact buildup accumulates only within its open paragraph and declared scope", async () => {
+  const cases = [
+    {pattern: "Gradual build"},
+    {previousScope: 1, pattern: "Undertone"},
+    {paragraphBreak: true, pattern: "Undertone"},
+    {supporting: false, pattern: "Undertone"},
+    {blocked: true, pattern: "Baseline"},
+  ];
+  for (const {previousScope = 0, paragraphBreak, supporting = true, blocked, pattern} of cases) {
+    const separator = paragraphBreak ? "\n\n" : " ";
+    const input = fixture(`The doors opened. June looked forward to the dance.${separator}She felt her anticipation growing.`);
+    const provider = fake((id, mode) => {
+      if (id === 1) return active(id, mode, {narrativePhase: "build", scopeId: mode === "discovery" ? null : previousScope});
+      if (id === 2) return active(id, mode, {narrativePhase: "build"});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, maxVerification: 1, verificationTargets: [2],
+      maxSupportingVerification: supporting ? 1 : 0, blockedIds: blocked ? [1] : []});
+    const [previous, target] = run.units.slice(1);
+    assert.equal(previous.pattern, blocked ? "Stop" : "Baseline");
+    assert.equal(target.pattern, pattern);
+    assert.equal(target.cue, false);
+    assert.deepEqual(target.primaryPrefix.evidenceIds, [2]);
+    if (pattern === "Gradual build") {
+      assert.deepEqual(target.trace.evidence, [1, 2]);
+      assert.equal(target.knownAt, 2);
+      assert.equal(target.readerCue, true);
+    }
   }
 });
 
