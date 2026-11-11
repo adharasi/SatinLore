@@ -60,6 +60,44 @@ test("an enacted recovery cue preserves the compiled phase, envelope and continu
   }
 });
 
+const ordinaryEnd = {...neutral(1), status: "verified", transition: "beat-end", fact: "beat-end",
+  scopeId: 0, evidenceIds: [0, 1], priorAnchor: 0};
+const postBeatRecovery = {primary: recover, discovery: {...recover, evidenceIds: [2], priorAnchor: null},
+  prior: ordinaryEnd, transition: typed({...recover, scopeId: null, priorAnchor: 1, evidenceIds: [1, 2]})};
+
+test("exact contact in a compiled post-beat recovery adds only the cue designation", async () => {
+  const control = await run({...postBeatRecovery, local: null});
+  const actual = await run({...postBeatRecovery, local: directRecover});
+  const row = actual.units[2];
+  assert.equal(control.units[2].cue, false);
+  assert.equal(row.cue, true);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.localActionApplication, "post-beat-recovery-cue");
+  assert.equal(row.pattern, "Recovery");
+  assert.equal(row.trace.decision, "Local recovery");
+  assert.equal(row.beatId, null);
+  for (const key of ["readerCue", "pattern", "phase", "appliedTransition", "beatId", "sceneId", "knownAt", "trace"]) {
+    assert.deepEqual(row[key], control.units[2][key]);
+  }
+  assert.deepEqual(actual.units[3], control.units[3]);
+});
+
+test("post-beat contact designation requires exact independent evidence of the same ordinary ending", async () => {
+  for (const changes of [
+    {local: {...directRecover, action: "release", phase: "ease", contrast: "softening"}},
+    {local: {...directRecover, contextId: null}},
+    {local: {...directRecover, contextId: 0}},
+    {transition: typed({...postBeatRecovery.transition, priorAnchor: 0, evidenceIds: [0, 2]})},
+    {prior: stop},
+    {blockedIds: [1]},
+    {blockedIds: [2]},
+  ]) {
+    const {units: compared} = await run({...postBeatRecovery, local: directRecover, ...changes});
+    assert.notEqual(compared[2].localActionApplication, "post-beat-recovery-cue");
+    assert.equal(compared[2].cue, false);
+  }
+});
+
 test("a corroborated onset starts a new scope at a material cut", async () => {
   const control = await run({local: null});
   const {units: actual} = await run();

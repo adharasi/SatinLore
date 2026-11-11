@@ -213,6 +213,8 @@ V23 evaluates corroborated setting cuts in founder shadow. The 41-work evaluatio
 
 V24 separates independently checked same-episode boundaries, verified cue designation, sustain waveform selection and context opportunity. Keep fixed-response compiler deltas separate from live target comparisons and from the equal-budget 41-work reader-planning audit. [V24 evaluation](nocturne-beat-protocol-shadow.md#v24-same-episode-checks-cue-designation-and-context-opportunity)
 
+V25 evaluates independently confirmed boundaries, exact interruption releases and recovery cue designation. Earlier-state and broader context experiments must retain exact reviewed source boundaries and report every unavailable reference. [V25 evaluation](nocturne-beat-protocol-shadow.md#v25-boundary-confirmation-and-verified-release)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

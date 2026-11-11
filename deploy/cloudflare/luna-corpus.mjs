@@ -79,6 +79,7 @@ function mapResult(result, first) {
       primaryPrefix: evidence(row.primaryPrefix), transitionVerification: evidence(row.transitionVerification),
       boundaryVerification: evidence(row.boundaryVerification), localActionVerification: evidence(row.localActionVerification),
       sceneEntryVerification: evidence(row.sceneEntryVerification), cueRecovery: evidence(row.cueRecovery),
+      interruptionReleaseVerification: evidence(row.interruptionReleaseVerification),
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
         evidence: coordinates(row.trace.evidence)}})),
     summary: {...result.summary, nativeVerification: result.summary.nativeVerification.map(row => ({...row, id: coordinate(row.id)})),
@@ -147,7 +148,9 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const targets = clip.targetIds.map(id => id - first);
   const maxCueChecks = Math.min(2, targets.length);
   const maxSupportingVerification = Math.min(2, index.units.length - targets.length);
-  const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification + MAX_PRIMARY_ANCHOR_REPAIRS;
+  const maxBoundaryEntryConfirmations = 1;
+  const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification + MAX_PRIMARY_ANCHOR_REPAIRS +
+    maxBoundaryEntryConfirmations;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
   try {
@@ -169,7 +172,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       transitionTargets: targets, localActionVerificationTargets: targets, sceneEntryVerificationTargets: targets,
       maxCueChecks, maxSupportingVerification, maxPrimaryAnchorRepairs: MAX_PRIMARY_ANCHOR_REPAIRS,
       verifyContinuityBoundary: true, releaseUnusedRestartReservation: true, sceneEntryArbitration: true,
-      sameEpisodeArbitration: true});
+      sameEpisodeArbitration: true, boundaryEntryConfirmation: true, interruptionReleaseArbitration: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

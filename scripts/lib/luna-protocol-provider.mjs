@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v24";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v25";
 const controlRubricVersion = "nocturne-luna-protocol-v17";
 const boundaryRubricVersion = "nocturne-luna-protocol-v18";
 const localActionRubricVersion = "nocturne-luna-protocol-v19";
@@ -131,6 +131,7 @@ const cueCheckFocus = Object.freeze({
   frame: "Independently determine whether the target changes the frame. A sentence describing an event inside an established account remains in that account. Start a distinct nested frame only when the target introduces it. Mark return at the target that resumes the surrounding present. Keep a no-event result if the target stays inside the account.",
   "continuity-boundary": "Compare the active frame, participants, objective and interaction before and at this exact target. Verify the first supported boundary or an exact same-scope link. Cite the target and earlier link evidence when verifying continuity. A routine bridge, unchanged participants or an earlier active label alone supplies no link. Classify any separate enacted target action and its phase independently. If continuity is unresolved, omit the link and keep any independently supported target action. Use uncertain if the target itself cannot be classified. A stop or restriction takes priority over carry or renewed action.",
   "episode-boundary": "Independently assess the episode through the target. For positively evidenced same-episode continuity, return neutral, current, quiet, no action, event or effect, null scope and priorAnchor. Cite exactly two IDs: an earlier unit establishing the active episode and the target showing that it continues. A simultaneous change of viewpoint, completion of a step within the same objective or brief diversion can preserve an episode. Missing proof of a cut, unchanged participants and a nearby event alone do not prove continuity. Use uncertain when a link cannot be established. Preserve an evidenced stop or restriction.",
+  "interruption-release": "Independently test the immediate predecessor and final target for a diversion that visibly softens the current interaction within the same episode. The predecessor must show the active interaction, and the target must show both the diversion and its effect. A new topic, routine pause, sound, unrelated movement, or possible future effect alone is insufficient. Only for a supported softening, return verified, current, interruption, ease phase and ease fact. Use release action for depicted withdrawal or softening, or none if the change adds no local action. Cite exactly the predecessor and target in order, set priorAnchor to the predecessor and scopeId to the first available unit establishing the same interaction. Return neutral or uncertain if these conditions fail, and preserve independently evidenced stops or restrictions.",
 });
 
 const instructions = [
@@ -281,6 +282,7 @@ function validRequest({mode, units, targetIds, attested = [], focus} = {}) {
   if (targetIds[0] < first || targetIds.at(-1) > last) return false;
   if (mode === "discovery") return !attested.length;
   if (units.length > maxVerifyUnits || targetIds.length !== 1 || targetIds[0] !== last) return false;
+  if (focus === "interruption-release") return units.length >= 2 && !attested.length;
   if (mode === "scene-boundary" || mode === "local-action" || mode === "scene-entry") return !attested.length;
   return Array.from(attested).every((anchor, i) => exact(anchor, attestedKeys) && whole(anchor.unitId) &&
     anchor.unitId < first && (!i || anchor.unitId > attested[i - 1].unitId) &&

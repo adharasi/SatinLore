@@ -280,3 +280,117 @@ test("same-episode arbitration preserves genuine cuts, missing corroboration and
   assert.equal(protective.units[1].pattern, "Stop");
   assert.equal(protective.units[1].cue, false);
 });
+
+const objectiveEntry = {...firstEntry, reason: "material-objective"};
+const objectiveBoundary = {status: "cut", reason: "objective-shift", previousId: 0, changeId: 1, entryId: 1,
+  contrast: "material-change"};
+const onset = unitId => ({...neutral(unitId), status: "verified", depiction: "romantic", action: "contact",
+  narrativePhase: "onset", transition: "onset", scopeId: 0, evidenceIds: [unitId]});
+const accent = {...onset(1), action: "change", narrativePhase: "sustain", transition: "accent", evidenceIds: [0, 1]};
+const isolatedCue = {status: "verified", frame: "current", action: "change", phase: "onset", contrast: "enacted",
+  targetId: 1, contextId: null};
+
+function independentRun({enabled = true, action = false, entry = objectiveEntry, boundary = objectiveBoundary,
+  localAction = isolatedCue, priorStop = false, staleControl = false, explicitBoundary = false,
+  approved = [0, 1, 2, 3], blockedIds = [], budget, observed = []} = {}) {
+  const targets = [1, 2];
+  const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
+    purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: index.units.filter(({id}) => approved.includes(id)).map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const [id] = request.targetIds;
+    if (request.mode === "scene-entry") return result(id, id === 1 ? entry :
+      {...objectiveEntry, previousId: 1, changeId: 2, entryId: 2});
+    if (request.mode === "scene-boundary") return boundary?.status === "refused" ? {status: "refused", usage} :
+      {status: "ok", usage, facts: [{unitId: id, sceneBoundary: id === 1 ? boundary :
+        {...objectiveBoundary, previousId: 1, changeId: 2, entryId: 2}}]};
+    if (request.mode === "local-action") return {status: "ok", usage, facts: [
+      action ? {unitId: id, localAction} : localNone(id, "current")]};
+    return {status: "ok", usage, facts: request.targetIds.map(unitId => {
+      let cue = neutral(unitId);
+      if (unitId === 0 && priorStop) cue = {...cue, status: "verified", transition: "hard-stop",
+        fact: "protective", evidenceIds: [unitId]};
+      else if (action && unitId === 0) cue = onset(unitId);
+      else if (action && unitId === 1) cue = request.mode === "discovery" ? onset(unitId) : accent;
+      if (request.mode === "discovery" && cue.status === "verified") return {...cue, status: "candidate"};
+      if (request.mode === "transition") {
+        const rawBoundary = unitId === 2 && staleControl ? {...typedCut, entryId: 2} :
+          action && unitId === 1 ? {status: "uncertain", reason: "unclear", previousId: null, entryId: null} : noBoundary;
+        return typed(cue, rawBoundary);
+      }
+      return cue;
+    })};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "independent-entry-study", text, grant, now: () => 1, provider, budget, blockedIds,
+    prefixUnits: staleControl ? 24 : 2, negativeStride: 0,
+    verificationTargets: priorStop || action ? [0, ...targets] : targets, transitionTargets: targets, verifyTransitions: true,
+    maxTransitionVerification: targets.length, sceneEntryVerificationTargets: targets, boundaryVerificationTargets: explicitBoundary ? [1] : [],
+    localActionVerificationTargets: [1], sceneEntryArbitration: true, boundaryEntryConfirmation: enabled});
+}
+
+test("independent material-entry agreement uses the same causal prefix once and prevents reuse of old scope", async () => {
+  const controlRequests = [], observed = [];
+  const baseline = await independentRun({enabled: false, action: true, observed: controlRequests});
+  const candidate = await independentRun({action: true, observed});
+  const entry = observed.find(request => request.mode === "scene-entry" && request.targetIds[0] === 1);
+  const boundary = observed.find(request => request.mode === "scene-boundary");
+  const later = observed.find(request => request.mode === "verify" && request.targetIds[0] === 2);
+  assert.deepEqual(entry, {mode: "scene-entry", units: sourceUnits.slice(0, 2), targetIds: [1]});
+  assert.deepEqual(boundary, {...entry, mode: "scene-boundary"});
+  assert.ok(observed.indexOf(entry) < observed.indexOf(boundary));
+  assert.ok(observed.indexOf(boundary) < observed.indexOf(later));
+  assert.equal(observed.length, controlRequests.length + 1);
+  assert.equal(observed.filter(request => request.mode === "scene-boundary").length, 1);
+  assert.ok(controlRequests.find(request => request.mode === "verify" && request.targetIds[0] === 2).attested
+    .some(({unitId}) => unitId === 0));
+  assert.equal(later.attested, undefined);
+  assert.equal(baseline.units[1].appliedTransition, "accent");
+  assert.equal(baseline.units[1].readerCue, true);
+  const unit = candidate.units[1];
+  assert.equal(unit.appliedTransition, "scene-cut");
+  assert.equal(unit.pattern, "Reset");
+  assert.equal(unit.beatId, null);
+  assert.equal(unit.cue, true);
+  assert.equal(unit.readerCue, false);
+  assert.equal(unit.localActionApplication, "independent-cut-local-cue");
+  assert.equal(unit.sceneEntryArbitration, "independently-confirmed-cut");
+  assert.equal(unit.transitionFlag, "scene-boundary-independently-confirmed");
+  assert.equal(unit.transitionVerification.sceneBoundary.status, "uncertain");
+  assert.deepEqual(unit.boundaryVerification.sceneBoundary, objectiveBoundary);
+  assert.deepEqual(unit.transitionEvidenceIds, [0, 1]);
+  assert.notEqual(unit.sceneId, candidate.units[0].sceneId);
+  const withoutLocalProof = await independentRun({action: true, localAction: {...isolatedCue, contextId: 0}});
+  assert.equal(withoutLocalProof.units[1].pattern, "Reset");
+  assert.equal(withoutLocalProof.units[1].cue, false);
+  assert.equal(withoutLocalProof.units[1].readerCue, false);
+});
+
+test("an independently confirmed neutral cut rejects a stale later vote", async () => {
+  const candidate = await independentRun({staleControl: true});
+  assert.equal(candidate.units[1].pattern, "Reset");
+  assert.equal(candidate.units[1].cue, false);
+  assert.equal(candidate.units[2].appliedTransition, "none");
+  assert.equal(candidate.units[2].transitionFlag, "scene-boundary-stale");
+  assert.equal(candidate.units[2].sceneId, candidate.units[1].sceneId);
+});
+
+test("independent material-entry comparison preserves uncertain and protected targets", async () => {
+  for (const options of [{entry: uncertain}, {entry: noEntry}, {entry: enteredEarlier}, {entry: firstEntry},
+    {boundary: {...objectiveBoundary, reason: "setting-shift"}},
+    {boundary: {...noBoundary, changeId: null, contrast: "routine-movement"}},
+    {boundary: {status: "refused", usage}}, {approved: [1, 2, 3]}, {blockedIds: [0]}, {priorStop: true},
+    {explicitBoundary: true}, {budget: createLunaShadowBudget({maxAttempts: 5})}]) {
+    const observed = [];
+    const candidate = await independentRun({...options, observed});
+    assert.equal(candidate.units[1].sceneEntryArbitration, undefined, JSON.stringify(options));
+    if (options.priorStop) {
+      assert.equal(candidate.units[0].pattern, "Stop");
+      assert.equal(observed.some(request => request.mode === "scene-boundary"), false);
+    }
+    if (options.explicitBoundary) assert.equal(observed.filter(request =>
+      request.mode === "scene-boundary" && request.targetIds[0] === 1).length, 1);
+    if (options.budget) assert.ok(observed.some(request => request.mode === "transition" && request.targetIds[0] === 2),
+      JSON.stringify(candidate.summary.attempts));
+  }
+});

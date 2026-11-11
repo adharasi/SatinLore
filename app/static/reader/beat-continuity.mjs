@@ -113,13 +113,16 @@ export function planStory(story, units) {
     const boundary = availableFact(unit.boundary);
     const scope = availableFact(unit.scope);
     const neutral = availableFact(unit.neutral);
-    const ease = availableFact(unit.ease);
+    const requestedEase = availableFact(unit.ease);
+    const releaseAnchor = requestedEase?.requiresOpenAnchor;
+    const ease = releaseAnchor == null || beat?.established && !beat.provisional && !beat.quiet && !beat.released &&
+      beat.anchors.has(releaseAnchor) ? requestedEase : null;
     const low = availableFact(unit.low);
     const spanEnd = boundary?.kind === "span-end";
     const barrier = boundary && !spanEnd;
     if (barrier && boundary.kind === "cut") scene = `${story}:scene:${id}`;
     let mark = boundary || scope;
-    validateFacts(id, [boundary, scope, neutral, ease, low]);
+    validateFacts(id, [boundary, scope, neutral, requestedEase, low]);
     const lowProfile = low && Object.hasOwn(low, "profile") ? low.profile : "Undertone";
     if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile) && !(low.localOnly && lowProfile === "Taper"))) {
       throw new RangeError("Independent low evidence must name a low profile at its evidence unit.");
@@ -253,6 +256,9 @@ export function planStory(story, units) {
         mark = boundary || ease || scope;
         rationale = ease ? ease.reason : spanEnd ? boundary.reason : source.reason;
         Object.assign(result, {pattern: eased, reason: rationale});
+        if (ease && releaseAnchor != null) {
+          Object.assign(result, {phase_used: "ease", verifiedRelease: true, verifiedInterruptionRelease: true});
+        }
       } else if (signal) {
         lastBarrier = null;
         if (beat?.quiet && !scoped) beat = null;
