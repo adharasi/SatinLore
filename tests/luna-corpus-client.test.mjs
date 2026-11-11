@@ -31,12 +31,14 @@ function shardResult(clip) {
   return {
     schema: 1, runId, clipId: clip.id, clipDigest: sha256(JSON.stringify(clip)), storyId: clip.storyId,
     sourceSha256: clip.sourceSha256, editionDigest: clip.editionDigest, status: "completed",
-    rubricVersion: "v19", model: "test-luna", units: [{id: unit.id, unitSha256: unit.digest, status: "neutral",
+    rubricVersion: "v21", model: "test-luna", units: [{id: unit.id, unitSha256: unit.digest, status: "neutral",
       boundaryVerificationStatus: "cut", boundaryVerification: {unitId: unit.id, sceneBoundary: {status: "cut", reason: "time-jump",
         previousId: clip.units[0].id, entryId: unit.id, changeId: unit.id, contrast: "material-change"}},
       localActionVerificationStatus: "verified", localActionVerification: {unitId: unit.id,
         localAction: {status: "verified", frame: "current", action: "anticipation", phase: "build", contrast: "charged-reaction",
           targetId: unit.id, contextId: clip.units[0].id}},
+      sceneEntryVerificationStatus: "cut", sceneEntryVerification: {unitId: unit.id,
+        sceneEntry: {status: "cut", reason: "material-time", previousId: clip.units[0].id, changeId: unit.id, entryId: unit.id}},
       transitionVerification: {unitId: unit.id, transition: "none", status: "neutral", sceneBoundary: {
         status: "cut", reason: "time-jump", previousId: clip.units[0].id, entryId: unit.id,
       }}}],
@@ -158,6 +160,9 @@ test("the corpus page previews exact context locally and seals only fingerprints
   assert.deepEqual(exported.replayClips[0].units[0].localActionVerification,
     {unitId: 10, localAction: {status: "verified", frame: "current", action: "anticipation", phase: "build", contrast: "charged-reaction",
       targetId: 10, contextId: 9}});
+  assert.equal(exported.replayClips[0].units[0].sceneEntryVerificationStatus, "cut");
+  assert.deepEqual(exported.replayClips[0].units[0].sceneEntryVerification,
+    {unitId: 10, sceneEntry: {status: "cut", reason: "material-time", previousId: 9, changeId: 10, entryId: 10}});
   for (const clip of reviewPacket.clips) for (const unit of clip.units) {
     assert.ok(!download.includes(unit.text));
     for (const retained of page.storage.values()) assert.ok(!retained.includes(unit.text));

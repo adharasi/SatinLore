@@ -155,6 +155,9 @@ export function planStory(story, units) {
     let floorWords = 0;
     let traceBeat = beat;
     const evidence = [];
+    const renewsOpenBeat = low?.requiresBeat && pattern === "Baseline" && !barrier && !spanEnd && !ease &&
+      beat?.established && !beat.quiet && !beat.provisional && !beat.released &&
+      beat.anchors.has(low.priorAnchor) && cursor - beat.supportEnd < ESTABLISHED_HOLD_WORDS;
     if (protective || HARD_PROFILES.has(pattern)) {
       decision = protective ? "Eligibility gate" : pattern;
       traceBeat = null;
@@ -183,7 +186,7 @@ export function planStory(story, units) {
       floorWords = words;
       Object.assign(result, {pattern: lowProfile, block: null, reason: rationale});
       if (lowProfile === "Taper") result.verifiedRelease = true;
-    } else if (low && !low.localOnly && (!barrier || boundary.kind === "cut")) {
+    } else if (low && !low.localOnly && (low.requiresBeat ? renewsOpenBeat : !barrier || boundary.kind === "cut")) {
       const retained = scopedTo(beat, scope) || beat?.anchors.has(low.priorAnchor);
       if (!retained) {
         beat = new Beat(story, id, lowProfile, wordEnd, !low.provisional, paragraph);
@@ -206,7 +209,7 @@ export function planStory(story, units) {
       lastBarrier = null;
       traceBeat = beat;
       floorWords = words;
-      decision = barrier ? "Independent low after cut" : "Independent low cue";
+      decision = low.requiresBeat ? "Renew low envelope" : barrier ? "Independent low after cut" : "Independent low cue";
       rationale = low.reason;
       mark = low;
       if (barrier) citeEvidence(evidence, boundary, id);

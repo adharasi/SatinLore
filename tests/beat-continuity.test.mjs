@@ -191,6 +191,31 @@ test("local recovery after a closed beat never creates a continuation anchor", (
   assert.deepEqual(result[2][1].evidence, [1, 2]);
 });
 
+test("support-only low evidence cannot start, cross or reopen a beat", () => {
+  const buildup = row(0, "Gradual build", {words: 8});
+  const support = (id, priorAnchor, facts = {}) => row(id, "Baseline", {words: 8,
+    low: fact(id, {evidence: [priorAnchor, id], profile: "Undertone", requiresBeat: true, priorAnchor}), ...facts});
+  const open = planStory("TEST", [buildup, support(1, 0)])[1];
+  assert.equal(open[0].pattern, "Undertone");
+  assert.equal(open[1].decision, "Renew low envelope");
+  assert.equal(open[1].beat, "TEST:beat:0");
+  assert.deepEqual(open[1].evidence, [0, 1]);
+  for (const units of [
+    [row(0, "Baseline"), support(1, 0)],
+    [buildup, support(1, 0, {boundary: fact(1, {kind: "cut"})})],
+    [buildup, support(1, 0, {manualZero: true})],
+    [buildup, support(1, 0, {protective: true})],
+    [buildup, support(1, 0, {boundary: fact(1, {kind: "span-end"})})],
+    [buildup, row(1, "Baseline", {words: 55}), support(2, 0)],
+    [buildup, row(1, "Recovery"), support(2, 0)],
+    [buildup, row(1, "Baseline", {boundary: fact(1, {kind: "beat-end"})}), support(2, 0)],
+  ]) {
+    const [profile, trace] = planStory("TEST", units).at(-1);
+    assert.notEqual(trace.decision, "Renew low envelope");
+    assert.notEqual(profile.pattern, "Undertone");
+  }
+});
+
 test("future overlays never seed carry and future citations never appear in a trace", () => {
   const result = planStory("TEST", [
     row(0, "Gradual build", {tension: {decision: "Apply overlay", knownAt: 2}}),

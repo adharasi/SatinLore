@@ -105,4 +105,6 @@ Optional browser integration checks use Playwright and a fake vendor SDK. See th
 
 Install the official OpenAI Codex VS Code extension, sign in and open this repository root. See [the Codex workflow](docs/codex.md).
 
+For Luna annotation and discrepancy analysis, start with the [approved annotation protocol](docs/nocturne-approved-annotation-protocol.md) and [frozen development labels](docs/nocturne-frozen-labels.md). The label index links the three corpus parts and shows how to export the exact scoring JSON for local tooling.
+
 The next milestone is controlled-release qualification, including blind story labelling, replay, live contextual coverage and reader and device checks. Invited-beta access requires explicit tester configuration in both Access layers. Wider hardware support requires observed per-model results. Supply hosted device credentials through private runtime configuration or local process variables for the separate Python service. [Release acceptance](docs/release-acceptance.md) · [Software-first roadmap](docs/beta-roadmap.md)

@@ -68,6 +68,7 @@ function mapResult(result, first) {
   const evidence = row => row && {...row, unitId: coordinate(row.unitId), id: coordinate(row.id),
     scopeId: coordinate(row.scopeId), priorAnchor: coordinate(row.priorAnchor), evidenceIds: coordinates(row.evidenceIds),
     ...(row.sceneBoundary ? {sceneBoundary: boundary(row.sceneBoundary)} : {}),
+    ...(row.sceneEntry ? {sceneEntry: boundary(row.sceneEntry)} : {}),
     ...(row.localAction ? {localAction: {...row.localAction, targetId: coordinate(row.localAction.targetId),
       contextId: coordinate(row.localAction.contextId)}} : {})};
   return {
@@ -76,7 +77,7 @@ function mapResult(result, first) {
       beatId: named(row.beatId), sceneId: named(row.sceneId), discovery: evidence(row.discovery),
       primaryPrefix: evidence(row.primaryPrefix), transitionVerification: evidence(row.transitionVerification),
       boundaryVerification: evidence(row.boundaryVerification), localActionVerification: evidence(row.localActionVerification),
-      cueRecovery: evidence(row.cueRecovery),
+      sceneEntryVerification: evidence(row.sceneEntryVerification), cueRecovery: evidence(row.cueRecovery),
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
         evidence: coordinates(row.trace.evidence)}})),
     summary: {...result.summary, nativeVerification: result.summary.nativeVerification.map(row => ({...row, id: coordinate(row.id)})),
@@ -145,7 +146,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const targets = clip.targetIds.map(id => id - first);
   const maxCueChecks = Math.min(2, targets.length);
   const maxSupportingVerification = Math.min(2, index.units.length - targets.length);
-  const maxAttempts = 1 + 3 * targets.length + maxCueChecks + maxSupportingVerification;
+  const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
   try {
@@ -164,7 +165,8 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
     result = await runLunaProtocolShadow({id: clip.storyId, text, sourceSha256: clip.sourceSha256, grant, provider, budget,
       signal: execution, limits: CLIP_LIMITS, prefixUnits: MAX_UNITS, maxVerification: targets.length,
       verificationTargets: targets, verifyTransitions: true, maxTransitionVerification: targets.length,
-      transitionTargets: targets, localActionVerificationTargets: targets, maxCueChecks, maxSupportingVerification,
+      transitionTargets: targets, localActionVerificationTargets: targets, sceneEntryVerificationTargets: targets,
+      maxCueChecks, maxSupportingVerification,
       verifyContinuityBoundary: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();

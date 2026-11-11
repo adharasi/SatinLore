@@ -205,6 +205,8 @@ V20 applies corroborated current action during Recovery and at a material scene 
 
 The V20 live comparison finds 12/26 active profiles and 26/37 exact applied events. Correct cuts fall to 2/5 and the fresh run produces one extra cut. The follow-up removes that extra on the same responses and lifts exact events to 27/37. Earlier-state recognition, first-entry adjudication, the independent natural holdout and physical qualification remain open. [V20 live evidence and follow-up](nocturne-beat-protocol-shadow.md#v20-live-evidence)
 
+V21 uses exact, independently corroborated scope evidence to advance a buildup and lets one adjacent verified support unit refresh an open low envelope. The 18-target archived natural replay restores two exact profiles, from 8 to 10, while preserving cue, event, phase and active-intent decisions. An independent first-entry diagnostic tests the missed and late cut cases and repeats the same causal inputs to measure stability. [V21 playback and entry evaluation](nocturne-beat-protocol-shadow.md#v21-exact-buildup-evidence-and-first-entry-evaluation)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

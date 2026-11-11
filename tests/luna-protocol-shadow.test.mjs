@@ -1122,6 +1122,46 @@ test("adjacent exact buildup accumulates only within its open paragraph and decl
   }
 });
 
+test("an independently linked build lets auxiliary evidence renew only an open low envelope", async () => {
+  const source = "The music began and both friends smiled. June looked forward to the dance. " +
+    "She expected that sharing the dance would be pleasant and kept thinking of that quiet moment while the musicians continued playing for the people gathering in the room. " +
+    "The guests chatted quietly nearby while someone in the hall adjusted the lights for the music. The doors stayed open.";
+  const cases = [
+    {target: "Gradual build", support: "Renew low envelope", tail: "Undertone"},
+    {contextId: null, target: "Undertone", tail: "Taper"},
+    {supportScope: 1, target: "Gradual build", tail: "Taper"},
+    {blocked: true, target: "Baseline", tail: "Baseline"},
+  ];
+  for (const {contextId = 0, supportScope = 0, blocked, target, support, tail} of cases) {
+    const provider = Object.assign(fake((id, mode) => {
+      if (mode === "local-action") return {unitId: id, localAction: {status: "verified", frame: "current", action: "anticipation",
+        phase: "build", contrast: "charged-reaction", targetId: id, contextId}};
+      if (mode === "transition") return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: [],
+        sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null}});
+      if (id <= 2) return active(id, mode, {narrativePhase: "build", scopeId: mode === "discovery" || id === 0 ? null :
+        id === 2 ? supportScope : 0});
+      return neutral(id);
+    }), {sceneBoundaryProtocol: true});
+    const run = await runLunaProtocolShadow({...fixture(source), provider, verificationTargets: [1, 4], maxVerification: 2,
+      maxSupportingVerification: 2, verifyTransitions: true, transitionTargets: [1], maxTransitionVerification: 1,
+      localActionVerificationTargets: [1], blockedIds: blocked ? [0] : []});
+    const [earlier, buildup, auxiliary, , quiet] = run.units;
+    assert.equal(earlier.pattern, blocked ? "Stop" : "Baseline");
+    assert.equal(buildup.pattern, target);
+    assert.equal(quiet.pattern, tail);
+    assert.equal(auxiliary.readerCue, false);
+    assert.equal(quiet.readerCue, false);
+    assert.equal(buildup.cue, false);
+    assert.deepEqual(buildup.primaryPrefix.evidenceIds, [1]);
+    if (support) {
+      assert.equal(auxiliary.trace.decision, support);
+      assert.deepEqual(buildup.trace.evidence, [0, 1]);
+      assert.deepEqual(quiet.trace.evidence, [2]);
+      assert.equal(quiet.knownAt, 2);
+    } else assert.notEqual(auxiliary.trace.decision, "Renew low envelope");
+  }
+});
+
 test("exact sustained contact can use a separately verified onset without promoting ordinary continuation", async () => {
   const input = fixture("The doors opened. They took hands. They held hands closely. The music played on.");
   for (const [priorPhase, action, pattern] of [["onset", "contact", "Sustain wave"], ["onset", "continuation", "Undertone"],

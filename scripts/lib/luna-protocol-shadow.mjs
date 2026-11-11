@@ -9,7 +9,8 @@ import {applyFrameScope, applyLatchedDecline, applyRepeatedReturn, continuityDis
 import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_RUBRIC_VERSION,
   LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolCueViolation, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
   lunaProtocolBoundaryOnlyViolation, lunaProtocolLocalActionEvidenceDetail, lunaProtocolLocalActionViolation, lunaProtocolSceneBoundaryViolation,
-  lunaProtocolTransitionViolation, sanitizeLunaLocalActionEvidenceDetail, sanitizeLunaStatusEffectDetail} from "./luna-protocol-provider.mjs";
+  lunaProtocolSceneEntryViolation, lunaProtocolTransitionViolation, sanitizeLunaLocalActionEvidenceDetail, sanitizeLunaStatusEffectDetail}
+  from "./luna-protocol-provider.mjs";
 
 const clearance = "No blocking event recorded";
 const transitionCuts = new Set(["scene-cut", "chapter-end", "memory-entry", "imagined-entry", "reported-entry", "present-return"]);
@@ -41,10 +42,12 @@ const startTransitions = new Set(["onset", "restart"]);
 const diagnosticLanes = {
   "scene-boundary": {verdictKey: "boundaryVerification", statusKey: "boundaryVerificationStatus", factKey: "sceneBoundary"},
   "local-action": {verdictKey: "localActionVerification", statusKey: "localActionVerificationStatus", factKey: "localAction"},
+  "scene-entry": {verdictKey: "sceneEntryVerification", statusKey: "sceneEntryVerificationStatus", factKey: "sceneEntry"},
 };
 export const MAX_SHADOW_MICROS = 3_000_000;
 export const MAX_SHADOW_VERIFICATIONS = 384;
 export const MAX_LOCAL_ACTION_DIAGNOSTIC_TARGETS = 24;
+const MAX_SCENE_ENTRY_DIAGNOSTIC_TARGETS = 24;
 
 function currentCueAt(fact, id, status) {
   return fact?.status === status && fact.frame === "current" && activePhases.has(fact.narrativePhase) &&
@@ -86,6 +89,7 @@ function followsDisputedStart(decisions, blocked, id, runId, primary, typed) {
 function factViolation(fact, ids, target, mode, attested, requireSceneBoundary) {
   if (mode === "scene-boundary") return lunaProtocolBoundaryOnlyViolation(fact, target, id => ids.has(id));
   if (mode === "local-action") return lunaProtocolLocalActionViolation(fact, target, id => ids.has(id));
+  if (mode === "scene-entry") return lunaProtocolSceneEntryViolation(fact, target, id => ids.has(id));
   const verify = mode !== "discovery";
   const anchors = new Map(attested.map(row => [row.unitId, row]));
   const scopeAllowed = id => id === null || id <= target &&
@@ -274,10 +278,26 @@ function corroboratesRecoveryCue(row, cue, typed, id) {
     (local.contextId === null || cue.evidenceIds.includes(local.contextId) && typed.evidenceIds.includes(local.contextId));
 }
 
+function corroboratesAdjacentBuild(row, cue, typed, prior, id) {
+  const local = row.localActionVerification?.localAction;
+  // The primary pass names the earlier unit as the scope start. The exact local
+  // pass must independently link to that unit before its unspecified scope can
+  // be used for this progression.
+  return cue === row.primaryPrefix && cue.scopeId === id - 1 && cue.transition === "none" && cue.priorAnchor === null &&
+    cue.evidenceIds.length === 1 && romanticDepictions.has(cue.depiction) && row.cueRecovery?.status !== "neutral" &&
+    prior.scopeId === null && prior.priorAnchor === null && prior.evidenceIds.length === 1 &&
+    prior.fact === "low" && prior.transition === "none" &&
+    prior.action === "anticipation" && prior.narrativePhase === "build" && romanticDepictions.has(prior.depiction) &&
+    local?.status === "verified" && local.frame === "current" && local.targetId === id && local.contextId === id - 1 &&
+    local.action === "anticipation" && local.phase === "build" && local.contrast === "charged-reaction" &&
+    typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.sceneBoundary?.status === "none";
+}
+
 function playbackInputs(index, decisions, blocked, supportingIds) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
   let restartBoundary = null, lastAnchor = null, lastBarrierWasBeatEnd = false;
   let lastBarrierWasFrameReturn = false, firstLocalFrameRelease = null;
+  let priorBuildLink = null;
   const anchors = new Map(), supportingAnchors = new Set(), provisionalAnchors = new Set(), blockedScopes = new Set();
   return index.units.map(unit => {
     const result = decisions.get(unit.id);
@@ -433,20 +453,34 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const priorId = unit.id - 1;
     // Two exact, adjacent buildup units in the same declared scope can establish
     // progression even when each pass cites only the unit it verified.
-    const adjacentBuild = canProgressBuild && lastParagraph === unit.paragraph && rawCue.scopeId != null &&
+    const adjacentContext = canProgressBuild && lastParagraph === unit.paragraph && rawCue.scopeId != null &&
       rawCue.scopeId === scopeId && anchors.get(priorId) === scopeId &&
-      previous?.prefixVerified && exactCurrentCue(priorFact, priorId) &&
+      previous?.prefixVerified && exactCurrentCue(priorFact, priorId);
+    const adjacentBuild = adjacentContext &&
       priorFact.scopeId === scopeId && priorFact.fact === "low" && priorFact.transition === "none" &&
       priorFact.action === "anticipation" && priorFact.narrativePhase === "build" &&
       romanticDepictions.has(priorFact.depiction) && romanticDepictions.has(rawCue.depiction);
-    const buildProgress = citedBuildContext || adjacentBuild;
+    const independentlyLinkedBuild = adjacentContext && !restartBoundary &&
+      corroboratesAdjacentBuild(result, rawCue, typed, priorFact, unit.id);
+    const buildProgress = citedBuildContext || adjacentBuild || independentlyLinkedBuild;
+    // A matching support-only unit may renew the low envelope of the preceding
+    // corroborated buildup. It cannot start a beat or acquire a reader cue.
+    const supportsVerifiedBuild = auxiliary && !cut && !restartBoundary && hasLow && lastParagraph === unit.paragraph &&
+      priorBuildLink?.id === priorId && rawCue === result.primaryPrefix && rawCue.scopeId === priorBuildLink.scopeId &&
+      rawCue.action === "anticipation" && rawCue.narrativePhase === "build" && rawCue.transition === "none" &&
+      rawCue.priorAnchor === null && rawCue.evidenceIds.length === 1 &&
+      currentCueAt(proposal, unit.id, "candidate") && proposal.scopeId === null && proposal.priorAnchor === null &&
+      proposal.evidenceIds.length === 1 && ["action", "narrativePhase", "transition", "fact", "depiction"].every(key => proposal[key] === rawCue[key]);
+    priorBuildLink = independentlyLinkedBuild ? {id: unit.id, scopeId} : null;
     const linkedSustain = !auxiliary && !quietBoundary && supportLinked && rawCue.action === "contact" &&
       rawCue.narrativePhase === "sustain" && romanticDepictions.has(rawCue.depiction) &&
       freshEnactedStart(decisions.get(prior)?.annotation, prior);
     const scope = linked && !supporting ? {...mark("continue", "Prefix evidence links to an independently attested cue."), priorAnchor: prior,
       ...(confirmsProvisional ? {confirmsProvisional} : {})} :
       citedBuildContext ? mark("build", "Exact buildup advances previously cited romantic context.") :
-      adjacentBuild ? mark("build", "Adjacent verified buildup advances the same romantic scope.", [priorId, ...evidence]) : null;
+      adjacentBuild ? mark("build", "Adjacent verified buildup advances the same romantic scope.", [priorId, ...evidence]) :
+      independentlyLinkedBuild ? mark("build", "Independent current evidence links the buildup to its verified scope start.",
+        [priorId, ...evidence]) : null;
     const recoveryAfterEnd = !auxiliary && !quietBoundary && !cut && !restartBoundary && lastAnchor === null && lastBarrierWasBeatEnd &&
       current && ownCueEvidence && rawCue.fact === "ease" && rawCue.narrativePhase === "recover" && rawCue.action === "contact" &&
       rawCue.transition === "recover" && romanticDepictions.has(rawCue.depiction) &&
@@ -480,6 +514,8 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
         evidence.filter(id => id >= previousEvidenceBarrier)), profile: "Taper", localOnly: true} :
       recoveryAfterEnd ? {...mark("low", "Exact current contact supports local recovery after a verified beat end.",
       [previousEvidenceBarrier, unit.id]), profile: "Recovery", localOnly: true} :
+      supportsVerifiedBuild ? {...mark("low", "Verified support renews the low envelope of an open buildup.", [priorId, unit.id]),
+        profile: "Undertone", priorAnchor: priorId, requiresBeat: true} :
       !supporting && !quietBoundary && (hasLow && !buildProgress || supportLinked && !linkedSustain) ?
       {...mark("low", supportLinked ? "Exact target evidence renews a beat supported by its prefix." :
         "Prefix evidence establishes an independent low cue."), profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone",
@@ -556,7 +592,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   verificationTargets = [], verificationContext = "attested", verifyTransitions = false,
   maxTransitionVerification = 32, transitionTargets = [], maxCueChecks = 0, maxSupportingVerification = 0,
   verifyContinuityBoundary = false, requireSceneBoundary = verifyTransitions && provider?.sceneBoundaryProtocol === true,
-  boundaryVerificationTargets = [], localActionVerificationTargets = []} = {}) {
+  boundaryVerificationTargets = [], localActionVerificationTargets = [], sceneEntryVerificationTargets = []} = {}) {
   if (typeof id !== "string" || !/^[a-z0-9-]{1,48}$/iu.test(id) || typeof now !== "function" ||
       !["windowed", "complete"].includes(arm) || !["recent", "attested"].includes(verificationContext) ||
       !int(maxVerification) || maxVerification > MAX_SHADOW_VERIFICATIONS || !Array.isArray(verificationTargets) ||
@@ -565,6 +601,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       !int(maxCueChecks) || maxCueChecks > 8 || typeof verifyContinuityBoundary !== "boolean" || typeof requireSceneBoundary !== "boolean" ||
       !Array.isArray(transitionTargets) || (!verifyTransitions && transitionTargets.length > 0) || !Array.isArray(boundaryVerificationTargets) ||
       !Array.isArray(localActionVerificationTargets) || localActionVerificationTargets.length > MAX_LOCAL_ACTION_DIAGNOSTIC_TARGETS ||
+      !Array.isArray(sceneEntryVerificationTargets) || sceneEntryVerificationTargets.length > MAX_SCENE_ENTRY_DIAGNOSTIC_TARGETS ||
       !int(prefixUnits) || prefixUnits < 1 || prefixUnits > 32 || !int(negativeStride) || !Array.isArray(blockedIds)) {
     throw new TypeError("Invalid shadow study options.");
   }
@@ -588,6 +625,10 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   const localActionTargets = new Set(localActionVerificationTargets);
   if (localActionTargets.size !== localActionVerificationTargets.length || !localActionVerificationTargets.every(id => typedTargets.has(id))) {
     throw new TypeError("Local action verification requires a unique pinned transition target.");
+  }
+  const sceneEntryTargets = new Set(sceneEntryVerificationTargets);
+  if (sceneEntryTargets.size !== sceneEntryVerificationTargets.length || !sceneEntryVerificationTargets.every(id => typedTargets.has(id))) {
+    throw new TypeError("Scene entry verification requires a unique pinned transition target.");
   }
   const decisions = new Map(index.units.map(unit => [unit.id, {status: unit.structuralBoundary ? "structural" :
     !approved.has(unit.id) ? "withheld" : provider ? "budget-deferred" : "provider-unavailable"}]));
@@ -909,12 +950,13 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       }
     }
     const verification = pickVerification(priority, important, routine, controls, maxVerification);
-    const diagnosticJobs = {"scene-boundary": [], "local-action": []};
+    const diagnosticJobs = Object.fromEntries(Object.keys(diagnosticLanes).map(mode => [mode, []]));
     for (const {id, window} of transitionJobs.sort((a, b) => b.rank - a.rank || a.id - b.id).slice(0, maxTransitionVerification)) {
       const job = prefixJob(window, id, index, prefixUnits, "transition");
       verification.push(job);
       if (boundaryTargets.has(id)) diagnosticJobs["scene-boundary"].push({...job, id: `scene-boundary:${id}`});
       if (localActionTargets.has(id)) diagnosticJobs["local-action"].push({...job, id: `local-action:${id}`});
+      if (sceneEntryTargets.has(id)) diagnosticJobs["scene-entry"].push({...job, id: `scene-entry:${id}`});
     }
     let supporting = [];
     if (maxSupportingVerification) {
@@ -973,6 +1015,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
       transitionVerificationStatus, boundaryVerification, boundaryVerificationStatus, localActionVerification, localActionVerificationStatus,
+      sceneEntryVerification, sceneEntryVerificationStatus,
       transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue, localActionApplication,
       primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered, cueContractRepaired,
       cueRecoveryReason, cueRecoveryGuard, cueRecoveryCorrection, continuityGuard, appliedTransitionOverride} = decisions.get(unit.id);
@@ -994,6 +1037,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       boundaryVerification, boundaryVerificationStatus: boundaryVerificationStatus ?? (boundaryTargets.has(unit.id) ? status : undefined),
       ...(localActionTargets.has(unit.id) ? {localActionVerification,
         localActionVerificationStatus: localActionVerificationStatus ?? status} : {}),
+      ...(sceneEntryTargets.has(unit.id) ? {sceneEntryVerification,
+        sceneEntryVerificationStatus: sceneEntryVerificationStatus ?? status} : {}),
       ...(appliedLocalAction ? {localActionApplication: appliedLocalAction} : {}),
       transitionEvidenceIds: projectTypedTransition(transitionVerification)?.evidenceIds,
       transitionFlag, cueGuard, readerCue: recoveryCue || readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
