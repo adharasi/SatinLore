@@ -98,6 +98,75 @@ test("post-beat contact designation requires exact independent evidence of the s
   }
 });
 
+const recoveryText = "They listened to the music. Lee let go of June's hand. The song ended. Neither spoke. June reached for Lee's hand. The lights dimmed.";
+const recoveryIndex = buildWholeStoryIndex(recoveryText);
+const releaseAnchor = {...neutral(1), status: "verified", depiction: "romantic", narrativePhase: "ease", action: "release",
+  transition: "ease", fact: "ease", scopeId: 0, evidenceIds: [0, 1], priorAnchor: 0};
+const recoveryConnector = {...neutral(2), status: "verified", narrativePhase: "recover", scopeId: 0, evidenceIds: [0, 1, 2]};
+const linkedRecovery = {...neutral(4), status: "verified", depiction: "romantic", narrativePhase: "recover", action: "contact",
+  transition: "recover", scopeId: 0, evidenceIds: [1, 4]};
+const linkedRecoveryDiscovery = {...linkedRecovery, transition: "none", fact: "low", scopeId: null, evidenceIds: [4]};
+const linkedRecoveryTyped = typed({...linkedRecovery, fact: "ease", scopeId: null, priorAnchor: 1});
+const linkedRecoveryLocal = {...directRecover, targetId: 4};
+
+function runReleaseLinkedRecovery({local = linkedRecoveryLocal, primary = linkedRecovery, discovery = linkedRecoveryDiscovery,
+  transition = linkedRecoveryTyped, anchor = releaseAnchor, connector = recoveryConnector, blockedIds = []} = {}) {
+  const {units, editionDigest, segmentationVersion} = recoveryIndex;
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const provider = Object.assign(async ({mode, targetIds}) => ({status: "ok", usage: {inputTokens: 100, outputTokens: 20},
+    facts: targetIds.map(id => {
+      if (mode === "local-action") return {unitId: id, localAction: local};
+      if (mode === "transition") return transition;
+      const row = id === 0 ? {...releaseAnchor, unitId: 0, scopeId: null, priorAnchor: null, evidenceIds: [0]} :
+        id === 1 ? anchor : id === 2 ? connector : id === 4 ? mode === "discovery" ? discovery : primary : neutral(id);
+      return mode === "discovery" && row.status === "verified" ? {...row, status: "candidate"} : row;
+    })}), {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "action", text: recoveryText, grant, now: () => 1, provider, blockedIds, negativeStride: 0,
+    maxVerification: 2, maxSupportingVerification: 2, verificationTargets: [3, 4], verifyTransitions: true, maxTransitionVerification: 1,
+    transitionTargets: [4], localActionVerificationTargets: local ? [4] : []});
+}
+
+test("exact release-linked contact counts without changing the compiled recovery or reader cue", async () => {
+  const {units: control} = await runReleaseLinkedRecovery({local: null});
+  const {units: actual} = await runReleaseLinkedRecovery();
+  const row = actual[4];
+  assert.equal(control[4].cue, false);
+  assert.equal(row.cue, true);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.localActionApplication, "release-linked-recovery-cue");
+  assert.equal(row.pattern, "Recovery");
+  assert.equal(row.trace.decision, "Enter recovery");
+  assert.deepEqual(row.trace.evidence, [1, 4]);
+  for (const key of ["readerCue", "pattern", "phase", "appliedTransition", "beatId", "sceneId", "knownAt", "trace"]) {
+    assert.deepEqual(row[key], control[4][key]);
+  }
+  assert.deepEqual(actual.slice(0, 4), control.slice(0, 4));
+  assert.deepEqual(actual[5], control[5]);
+});
+
+test("release-linked contact requires an exact verified release, its connectors and independent contact", async () => {
+  for (const changes of [
+    {local: {...linkedRecoveryLocal, contextId: null}},
+    {local: {...linkedRecoveryLocal, contextId: 2}},
+    {local: {...linkedRecoveryLocal, action: "release", phase: "ease", contrast: "softening"}},
+    {anchor: neutral(1)},
+    {anchor: {...releaseAnchor, scopeId: 1}},
+    {connector: {...stop, unitId: 2, evidenceIds: [2]}},
+    {connector: {...recoveryConnector, scopeId: 2}},
+    {discovery: {...linkedRecoveryDiscovery, evidenceIds: [1, 4]}},
+    {transition: {...linkedRecoveryTyped, priorAnchor: 2, evidenceIds: [2, 4]}},
+    {transition: {...linkedRecoveryTyped, priorAnchor: null}},
+    {blockedIds: [1]},
+    {blockedIds: [2]},
+    {blockedIds: [4]},
+  ]) {
+    const {units: compared} = await runReleaseLinkedRecovery(changes);
+    assert.equal(compared[4].cue, false, JSON.stringify(changes));
+    assert.equal(compared[4].localActionApplication, undefined, JSON.stringify(changes));
+  }
+});
+
 test("a corroborated onset starts a new scope at a material cut", async () => {
   const control = await run({local: null});
   const {units: actual} = await run();

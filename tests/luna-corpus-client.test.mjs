@@ -39,6 +39,10 @@ function shardResult(clip) {
           targetId: unit.id, contextId: clip.units[0].id}},
       sceneEntryVerificationStatus: "cut", sceneEntryVerification: {unitId: unit.id,
         sceneEntry: {status: "cut", reason: "material-time", previousId: clip.units[0].id, changeId: unit.id, entryId: unit.id}},
+      independentBoundaryStatus: "corroborated", interruptionContinuationVerificationStatus: "verified",
+      interruptionContinuationVerification: {unitId: unit.id, status: "verified", frame: "current", action: "continuation",
+        transition: "none", fact: "continue", scopeId: clip.units[0].id, priorAnchor: clip.units[0].id,
+        evidenceIds: [clip.units[0].id, unit.id]},
       interruptionReleaseVerificationStatus: "verified", interruptionReleaseVerification: {unitId: unit.id,
         status: "verified", frame: "current", transition: "interruption", fact: "ease", scopeId: clip.units[0].id,
         priorAnchor: clip.units[0].id, evidenceIds: [clip.units[0].id, unit.id]},
@@ -183,6 +187,11 @@ test("the corpus page previews exact context locally and seals only fingerprints
   assert.equal(exported.replayClips[0].units[0].sceneEntryVerificationStatus, "cut");
   assert.deepEqual(exported.replayClips[0].units[0].sceneEntryVerification,
     {unitId: 10, sceneEntry: {status: "cut", reason: "material-time", previousId: 9, changeId: 10, entryId: 10}});
+  assert.equal(exported.replayClips[0].units[0].independentBoundaryStatus, "corroborated");
+  assert.equal(exported.replayClips[0].units[0].interruptionContinuationVerificationStatus, "verified");
+  assert.deepEqual(exported.replayClips[0].units[0].interruptionContinuationVerification,
+    {unitId: 10, status: "verified", frame: "current", action: "continuation", transition: "none", fact: "continue",
+      scopeId: 9, priorAnchor: 9, evidenceIds: [9, 10]});
   assert.equal(exported.replayClips[0].units[0].interruptionReleaseVerificationStatus, "verified");
   assert.deepEqual(exported.replayClips[0].units[0].interruptionReleaseVerification,
     {unitId: 10, status: "verified", frame: "current", transition: "interruption", fact: "ease", scopeId: 9,

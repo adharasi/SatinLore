@@ -99,6 +99,93 @@ test("an interruption check leaves real boundaries and blocked targets in contro
   assert.equal(stopped.units[4].pattern, "Stop");
 });
 
+const continuation = {...sustain, action: "continuation", scopeId: 0, fact: "continue", priorAnchor: 1};
+const continuationDispute = {...neutral(3), status: "verified", depiction: "romantic", transition: "scene-cut", fact: "cut",
+  scopeId: 0, evidenceIds: [0, 1, 2, 3]};
+
+function runRepair({observed = [], answer = continuation, releaseAnswer = release, maxCueChecks = 2,
+  blockedIds = [], priorAnswer = onset, connector = neutral(2), entryReason = "same-episode"} = {}) {
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const facts = request.targetIds.map(id => {
+      if (request.mode === "cue-check") {
+        return request.focus === "continuation-repair" ? answer : releaseAnswer;
+      }
+      if (request.mode === "scene-entry") return {unitId: id,
+        sceneEntry: id === 3 ? {...noEntry, reason: entryReason} : noEntry};
+      if (request.mode === "local-action") return {unitId: id, localAction: id === 3 ?
+        {status: "verified", frame: "current", action: "continuation", phase: "sustain", contrast: "same-action",
+          targetId: id, contextId: 1} :
+        {status: "none", frame: "noncurrent", action: "none", phase: "quiet", contrast: "noncurrent",
+          targetId: null, contextId: null}};
+      if (request.mode === "transition") return {...neutral(id), depiction: "unknown", action: "unknown", narrativePhase: "unknown",
+        sceneBoundary: noBoundary};
+      if (request.mode === "verify") return id === 1 ? priorAnswer : id === 3 ? continuationDispute : neutral(id);
+      if (id === 1) return {...onset, status: "candidate", scopeId: id};
+      if (id === 2) return connector;
+      if (id === 3) return {...continuation, status: "candidate", scopeId: 1};
+      if (id === 4) return {...oldScope, status: "candidate", scopeId: id};
+      return neutral(id);
+    });
+    return {status: "ok", usage, facts};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "interruption-repair", text, grant, now: () => 1, provider, blockedIds,
+    verificationTargets: [3, 4], maxVerification: 2, transitionTargets: [3, 4], maxTransitionVerification: 2,
+    verifyTransitions: true, negativeStride: 0,
+    verifyContinuityBoundary: true, maxCueChecks, maxSupportingVerification: 2,
+    localActionVerificationTargets: [3, 4], sceneEntryVerificationTargets: [3, 4], interruptionReleaseArbitration: true});
+}
+
+test("a verified short continuation can resolve an unchecked cut before an independent taper", async () => {
+  const observed = [], {units: compared, summary} = await runRepair({observed});
+  const [prior, connector, sustain, taper] = compared.slice(1, 5);
+  assert.equal(prior.pattern, "Baseline");
+  assert.equal(connector.pattern, "Baseline");
+  assert.equal(sustain.primaryPrefix.transition, "scene-cut");
+  assert.equal(sustain.pattern, "Sustain wave");
+  assert.equal(sustain.phase, "sustain");
+  assert.equal(sustain.cue, false);
+  assert.equal(sustain.readerCue, true);
+  assert.equal(sustain.interruptionContinuationApplication, "linked-sustain");
+  assert.equal(sustain.interruptionContinuationVerificationStatus, "verified");
+  assert.deepEqual(sustain.evidenceIds, [1, 3]);
+  assert.equal(taper.pattern, "Taper");
+  assert.equal(taper.appliedTransition, "interruption");
+  assert.equal(taper.interruptionReleaseApplication, "interruption-taper");
+  assert.equal(taper.beatId, sustain.beatId);
+  assert.equal(taper.sceneId, sustain.sceneId);
+  assert.deepEqual(taper.evidenceIds, [3, 4]);
+  assert.equal(taper.readerCue, false);
+  assert.deepEqual(observed.filter(request => request.mode === "cue-check"), [
+    {mode: "cue-check", units: sourceUnits.slice(0, 4), targetIds: [3], focus: "continuation-repair"},
+    {mode: "cue-check", units: sourceUnits.slice(0, 5), targetIds: [4], focus: "interruption-release"},
+  ]);
+  assert.equal(summary.attempts.filter(row => row.mode === "cue-check" && row.attempted).length, 2);
+});
+
+test("the continuation requires exact positive support and keeps boundary, protection and quota priority", async () => {
+  const priorStop = {...neutral(1), status: "verified", transition: "hard-stop", fact: "protective", evidenceIds: [1]};
+  const targetStop = {...neutral(3), status: "verified", transition: "hard-stop", fact: "protective", evidenceIds: [3]};
+  for (const options of [{answer: neutral(3)}, {answer: {...continuation, scopeId: 2}},
+    {answer: {...continuation, evidenceIds: [0, 1, 3]}}, {answer: {...continuation, frame: "reported"}},
+    {priorAnswer: neutral(1)}, {priorAnswer: priorStop}, {blockedIds: [2]},
+    {entryReason: "routine-movement"}, {connector: {...neutral(2), evidenceIds: [2]}}, {answer: targetStop}]) {
+    const observed = [], {units: compared} = await runRepair({...options, observed});
+    assert.equal(compared[3].interruptionContinuationApplication, undefined);
+    assert.equal(compared[3].readerCue, false);
+    assert.equal(compared[4].interruptionReleaseApplication, undefined);
+    assert.equal(observed.some(request => request.focus === "interruption-release"), false);
+    if (options.answer === targetStop) {
+      assert.equal(compared[3].pattern, "Stop");
+      assert.equal(compared[3].interruptionContinuationVerificationStatus, "protective-override");
+    }
+  }
+  const exhausted = await runRepair({maxCueChecks: 1});
+  assert.equal(exhausted.units[3].interruptionContinuationApplication, "linked-sustain");
+  assert.equal(exhausted.units[4].interruptionReleaseVerificationStatus, "budget-deferred");
+  assert.equal(exhausted.units[4].interruptionReleaseApplication, undefined);
+});
+
 test("the provider accepts an independent release prefix and rejects an attached attestation", async () => {
   let calls = 0;
   const provider = createLunaProtocolProvider({apiKey: "fixture", fetchImpl: async () => {
@@ -110,6 +197,8 @@ test("the provider accepts an independent release prefix and rejects an attached
   const request = {mode: "cue-check", units: sourceUnits.slice(0, 5), targetIds: [4], focus: "interruption-release"};
   assert.deepEqual((await provider(request)).facts, [release]);
   assert.equal((await provider({...request, units: sourceUnits.slice(1, 5), attested: [
+    {unitId: 0, scopeId: 0, frame: "current", action: "contact", narrativePhase: "sustain"}]})).status, "invalid-request");
+  assert.equal((await provider({...request, focus: "continuation-repair", units: sourceUnits.slice(1, 5), attested: [
     {unitId: 0, scopeId: 0, frame: "current", action: "contact", narrativePhase: "sustain"}]})).status, "invalid-request");
   assert.equal(calls, 1);
 });

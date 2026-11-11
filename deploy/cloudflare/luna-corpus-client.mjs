@@ -26,11 +26,12 @@ const returned = new Set(["completed", "provider-refused", "provider-unavailable
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
 const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus",
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
-  "interruptionReleaseVerificationStatus"];
+  "independentBoundaryStatus", "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus"];
 const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
 const replayBoundaryKeys = ["status", "reason", "previousId", "entryId"];
 const replayLocalActionKeys = ["status", "frame", "action", "phase", "contrast", "targetId", "contextId"];
-const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery", "interruptionReleaseVerification"];
+const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery",
+  "interruptionContinuationVerification", "interruptionReleaseVerification"];
 const encoder = new TextEncoder();
 const natural = n => Number.isSafeInteger(n) && n >= 0;
 let packet, packetDigest, state, busy = false, pausing = false;

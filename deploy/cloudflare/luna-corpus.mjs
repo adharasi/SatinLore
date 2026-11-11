@@ -79,6 +79,7 @@ function mapResult(result, first) {
       primaryPrefix: evidence(row.primaryPrefix), transitionVerification: evidence(row.transitionVerification),
       boundaryVerification: evidence(row.boundaryVerification), localActionVerification: evidence(row.localActionVerification),
       sceneEntryVerification: evidence(row.sceneEntryVerification), cueRecovery: evidence(row.cueRecovery),
+      interruptionContinuationVerification: evidence(row.interruptionContinuationVerification),
       interruptionReleaseVerification: evidence(row.interruptionReleaseVerification),
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
         evidence: coordinates(row.trace.evidence)}})),
