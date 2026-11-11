@@ -117,17 +117,29 @@ function verifiedInterruptionRelease(verdict, candidate, id) {
 const sameEpisodeReasons = new Set(["viewpoint-only", "same-episode", "ordinary-interruption", "routine-movement", "elapsed-continuation"]);
 const materialEntryReasons = {"material-time": "time-jump", "material-setting": "setting-shift", "material-objective": "objective-shift"};
 
-function sameEpisodeCutCandidate(row, id) {
+function sameEpisodeCutCandidate(row, id, causal) {
   const {primaryPrefix: primary, transitionVerification: typed, discovery} = row;
   const cut = typed?.sceneBoundary;
-  return row.effectiveAnnotation?.transition === "scene-cut" && row.transitionFlag !== "scene-boundary-stale" &&
-    quietNegative(discovery) && discovery.evidenceIds.every(evidence => evidence === id) &&
+  const quietCut = row.effectiveAnnotation?.transition === "scene-cut" && row.transitionFlag !== "scene-boundary-stale" &&
     primary?.status === "verified" && primary.frame === "current" && primary.narrativePhase === "quiet" &&
     primary.action === "none" && primary.transition === "scene-cut" && primary.fact === "cut" && primary.priorAnchor === null &&
     typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.fact === "none" &&
     typed.scopeId === null && typed.priorAnchor === null && typed.evidenceIds.length === 0 &&
     cut?.status === "cut" && ["setting-shift", "objective-shift"].includes(cut.reason) && cut.entryId === id &&
     cut.previousId >= row.previousSceneBoundaryId && primary.evidenceIds.includes(cut.previousId) && primary.evidenceIds.includes(id);
+  if (!quietCut) return false;
+  if (quietNegative(discovery) && discovery.evidenceIds.every(evidence => evidence === id)) return true;
+  // A discovery cut can be a correlated reading of a viewpoint change. Reopen
+  // this exact setting dispute only with an already verified episode.
+  if (!causal || cut.reason !== "setting-shift" || cut.previousId !== id - 1 ||
+      primary.depiction !== "neutral" || primary.scopeId !== id || discovery?.status !== "candidate" ||
+      discovery.frame !== "current" || discovery.depiction !== "neutral" || discovery.narrativePhase !== "quiet" ||
+      discovery.action !== "none" || discovery.transition !== "scene-cut" || discovery.fact !== "cut" ||
+      discovery.scopeId !== id || discovery.priorAnchor !== null || discovery.evidenceIds.length !== 2 ||
+      discovery.evidenceIds[0] !== cut.previousId || discovery.evidenceIds[1] !== id) return false;
+  const previous = causal.localAnchors.find(anchor => anchor.unitId === cut.previousId);
+  return previous && !causal.protectedScopes.has(previous.scopeId) && causal.localAnchors.some(anchor =>
+    anchor.unitId < previous.unitId && anchor.scopeId === previous.scopeId);
 }
 
 function sameEpisodeNoCut(entry) {
@@ -995,8 +1007,10 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
             !causal.restartBoundary && row.discovery?.status === "neutral" && row.discovery.frame === "current" &&
             typed?.status === "neutral" && ["current", "neutral"].includes(typed.frame) && typed.transition === "none" &&
             (!typed.sceneBoundary || typed.sceneBoundary.status === "none");
+          const entry = row.sceneEntryVerification?.sceneEntry;
           const episodeDispute = sameEpisodeArbitration && !sameEpisodeCheckStarted && !causal.restartBoundary &&
-            sameEpisodeNoCut(row.sceneEntryVerification?.sceneEntry) && sameEpisodeCutCandidate(row, id);
+            sameEpisodeNoCut(entry) && (row.discovery?.status !== "candidate" || entry.reason === "viewpoint-only") &&
+            sameEpisodeCutCandidate(row, id, causal);
           record.cueCheckReason = restartState ? "restart-state" : typedStart ? "typed-start" :
             episodeDispute ? "same-episode-boundary" : dispute ? "continuity-boundary" : adjacent ? "adjacent-start" : opening ? "opening-buildup" :
             romanticContext ? "romantic-context" : disagreement ? "discovery-disagreement" :
@@ -1286,7 +1300,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         if (check) {
           await applyPrefixJobs(jobs.filter(job => job !== check));
           const row = decisions.get(id);
-          if (sameEpisodeCutCandidate(row, id) && !invalidated(entryJob)) {
+          if (row.transitionVerification?.sceneBoundary?.status === "cut" && !invalidated(entryJob)) {
             const {previousId} = row.transitionVerification.sceneBoundary;
             const firstId = inputFor(entryJob).units[0].id;
             const causal = attest({runId: entryJob.runId, firstId, target: id});
@@ -1297,12 +1311,16 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
               return !blocked.has(unit.id) && !unit.structuralBoundary && prior.window?.runId === entryJob.runId &&
                 (unit.id === id || !recoveryBarriers.has(fact?.transition) && !recoveryBlockingFacts.has(fact?.fact));
             });
-            if (previousId >= firstId && open && !causal.restartBoundary && !causal.protectedScopes.has(row.primaryPrefix.scopeId)) {
+            if (sameEpisodeCutCandidate(row, id, causal) && previousId >= firstId && open &&
+                !causal.restartBoundary && !causal.protectedScopes.has(row.primaryPrefix.scopeId)) {
               await applyDiagnosticJobs("scene-entry", [entryJob], true);
               entryJobs.delete(id);
             }
           }
           await applyPrefixJobs([check]);
+          const reviewed = decisions.get(id);
+          if (reviewed.discovery?.status === "candidate" && reviewed.cueRecoveryReason === "same-episode-boundary" &&
+              reviewed.effectiveAnnotation?.transition === "scene-cut") reviewed.sceneEntryArbitration = "viewpoint-conflict";
         } else await applyPrefixJobs(jobs);
         const row = decisions.get(id);
         if (!entryJobs.has(id) || invalidated(entryJob)) continue;

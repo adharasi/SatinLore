@@ -394,3 +394,87 @@ test("independent material-entry comparison preserves uncertain and protected ta
       JSON.stringify(candidate.summary.attempts));
   }
 });
+
+const viewpointText = "The music began. Lee watched the doorway. June waited beside Lee. Across the room, Pat looked up. They waited for the signal.";
+const viewpointIndex = buildWholeStoryIndex(viewpointText);
+const viewpointTarget = 3;
+const viewpointCut = {status: "cut", reason: "setting-shift", previousId: 2, entryId: viewpointTarget};
+const viewpointEntry = {status: "cut", reason: "material-setting", previousId: 2, changeId: viewpointTarget, entryId: viewpointTarget};
+const sameEpisodeProof = {...neutral(viewpointTarget), evidenceIds: [2, viewpointTarget]};
+
+function viewpointRun({entry = noEntry, proof = sameEpisodeProof, cut = viewpointCut,
+  discoveryEvidence = [2, viewpointTarget], firstAnchor = true, sharedScope = true, priorStop = false,
+  blockedIds = [], approved = [0, 1, 2, 3, 4], budget, observed = []} = {}) {
+  const targets = [1, 2, 3, 4].filter(id => approved.includes(id));
+  const grant = {editionDigest: viewpointIndex.editionDigest, segmentationVersion: viewpointIndex.segmentationVersion,
+    purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: viewpointIndex.units.filter(({id}) => approved.includes(id)).map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const [target] = request.targetIds;
+    if (request.mode === "scene-entry") return result(target, entry);
+    if (request.mode === "cue-check") return {status: "ok", usage, facts: [proof]};
+    return {status: "ok", usage, facts: request.targetIds.map(id => {
+      if (request.mode === "transition") return typed(neutral(id), id === viewpointTarget ? cut : {...viewpointCut, entryId: 4});
+      if (id === viewpointTarget) {
+        const discovery = request.mode === "discovery";
+        return {...neutral(id), status: discovery ? "candidate" : "verified", fact: "cut", transition: "scene-cut",
+          scopeId: id, evidenceIds: discovery ? discoveryEvidence : [0, 1, 2, id]};
+      }
+      if (id === 2 && priorStop) return {...neutral(id), status: request.mode === "discovery" ? "candidate" : "verified",
+        transition: "hard-stop", fact: "protective", evidenceIds: [id]};
+      if (id === 2 || id === 1 && firstAnchor) return {...neutral(id), status: request.mode === "discovery" ? "candidate" : "verified",
+        depiction: id === 1 ? "suggestive" : "romantic", narrativePhase: "build", action: "anticipation", fact: "low",
+        scopeId: id === 2 && !sharedScope ? 1 : 0, evidenceIds: id === 2 ? [1, id] : [0, id]};
+      return neutral(id);
+    })};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "viewpoint-setting-study", text: viewpointText, grant, now: () => 1, provider, budget,
+    blockedIds, negativeStride: 0, verificationTargets: targets, transitionTargets: [3, 4], maxTransitionVerification: 2,
+    verifyTransitions: true, sceneEntryVerificationTargets: [3], maxCueChecks: 1,
+    sceneEntryArbitration: true, sameEpisodeArbitration: true});
+}
+
+test("exact discovery-supported setting disagreement gets one independent viewpoint continuity check", async () => {
+  const observed = [];
+  const candidate = await viewpointRun({observed});
+  const entry = observed.findIndex(request => request.mode === "scene-entry");
+  const proof = observed.findIndex(request => request.focus === "episode-boundary");
+  const next = observed.findIndex(request => request.mode === "verify" && request.targetIds[0] === 4);
+  assert.ok(entry >= 0 && entry < proof && proof < next);
+  assert.deepEqual(observed[proof], {...observed[entry], mode: "cue-check", focus: "episode-boundary"});
+  assert.equal(observed.filter(request => request.mode === "cue-check").length, 1);
+  const row = candidate.units[viewpointTarget];
+  assert.equal(row.sceneEntryArbitration, "same-episode-veto");
+  assert.equal(row.discovery.transition, "scene-cut");
+  assert.equal(row.primaryPrefix.transition, "scene-cut");
+  assert.equal(row.transitionVerification.sceneBoundary.status, "cut");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.sceneId, candidate.units[2].sceneId);
+  assert.equal(row.beatId, candidate.units[2].beatId);
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(candidate.units[4].appliedTransition, "scene-cut");
+});
+
+test("a discovery-supported cut keeps precedence without exact earlier state and affirmative viewpoint continuity", async () => {
+  const protectedProof = {...neutral(viewpointTarget), status: "verified", transition: "hard-stop",
+    fact: "protective", evidenceIds: [viewpointTarget]};
+  for (const options of [{entry: viewpointEntry}, {entry: uncertain}, {entry: {...noEntry, reason: "routine-movement"}},
+    {cut: {...viewpointCut, reason: "objective-shift"}}, {discoveryEvidence: [viewpointTarget]},
+    {proof: neutral(viewpointTarget)}, {proof: {...sameEpisodeProof, evidenceIds: [1, viewpointTarget]}},
+    {proof: protectedProof}, {firstAnchor: false}, {sharedScope: false}, {priorStop: true},
+    {blockedIds: [1]}, {approved: [0, 2, 3, 4]}, {budget: createLunaShadowBudget({maxAttempts: 8})}]) {
+    const observed = [];
+    const candidate = await viewpointRun({...options, observed});
+    assert.notEqual(candidate.units[viewpointTarget].sceneEntryArbitration, "same-episode-veto");
+    if (options.proof === protectedProof) assert.equal(candidate.units[viewpointTarget].pattern, "Stop");
+    else if (options.approved === undefined) assert.equal(candidate.units[viewpointTarget].appliedTransition, "scene-cut");
+    if (options.priorStop) assert.equal(candidate.units[2].pattern, "Stop");
+    if (options.approved) assert.ok(observed.every(request => request.units.every(({id}) => options.approved.includes(id))));
+    if (options.proof && options.proof !== protectedProof) {
+      assert.equal(candidate.units[viewpointTarget].sceneEntryArbitration, "viewpoint-conflict");
+    }
+    if (!options.proof) assert.equal(observed.some(request => request.focus === "episode-boundary"), false);
+  }
+});
