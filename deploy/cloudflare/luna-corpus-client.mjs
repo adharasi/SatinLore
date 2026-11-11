@@ -3,7 +3,7 @@ import { LUNA_PROTOCOL_RUBRIC_VERSION } from "../../scripts/lib/luna-protocol-pr
 export const LUNA_CORPUS_PAGE = `<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SatinLore founder Luna corpus review</title>
 <main><h1>SatinLore founder Luna corpus review</h1>
-<p>Luna rubric ${LUNA_PROTOCOL_RUBRIC_VERSION.split("-").at(-1)} with independent local-action and scene-entry checks.</p>
+<p>Luna rubric ${LUNA_PROTOCOL_RUBRIC_VERSION.split("-").at(-1)} with local-action and scene-entry checks and bounded anchor repair.</p>
 <p>Open a private review packet. The file is read in this browser. Review every sentence in a clip before approving it, including the sentences supplied as context.</p>
 <p>Sealing sends clip fingerprints. Running sends the selected excerpts to the private Worker and OpenAI. One sealed run has a $3 estimated spend cap. Checkpoints include labels and evidence IDs for offline replay.</p>
 <p><label>Review packet <input id="packet" type="file" accept=".json,application/json"></label></p>

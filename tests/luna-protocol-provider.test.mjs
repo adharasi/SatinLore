@@ -264,6 +264,7 @@ test("focuses independent cue rechecks without transmitting a prior judgment or 
     ["restart-gate", /offering a hand and accepting the offer do not establish hand-holding/u],
     ["frame", /A sentence describing an event inside an established account remains in that account/u],
     ["continuity-boundary", /Verify the first supported boundary or an exact same-scope link/u],
+    ["anchor-repair", /Earlier activity alone supplies no anchor or local effect/u],
   ]) {
     assert.deepEqual(await run({...cueCheck, focus, previous: {action: "contact"}}), success([neutral]));
     assert.match(sent.instructions, instruction);
@@ -274,7 +275,7 @@ test("focuses independent cue rechecks without transmitting a prior judgment or 
     {...cueCheck, mode: "verify", focus: "continuity-boundary"}]) {
     assert.deepEqual(await run(invalid), failure("invalid-request", "request-shape"));
   }
-  assert.equal(attempts, 5);
+  assert.equal(attempts, 6);
 });
 
 test("requires present target evidence for activation and preserves no-cue and stop verdicts", async () => {
@@ -388,10 +389,10 @@ test("the spend reserve covers the largest actual rubric, attestation and schema
     observed.push(Buffer.byteLength(request.instructions) + Buffer.byteLength(JSON.stringify(request.text.format)));
     return new Response(null, {status: 500});
   });
-  const focused = [undefined, "buildup", "enactment", "restart-gate", "frame", "continuity-boundary"]
+  const focused = [undefined, "buildup", "enactment", "restart-gate", "frame", "continuity-boundary", "anchor-repair"]
     .map(focus => ({...withAttested, mode: "cue-check", focus}));
   for (const supplied of [request(), withAttested, transitionRequest, ...focused]) await run(supplied);
-  assert.equal(observed.length, 9);
+  assert.equal(observed.length, 10);
   assert.equal(lunaProtocolInputOverhead, Math.max(...observed) + 512);
 });
 

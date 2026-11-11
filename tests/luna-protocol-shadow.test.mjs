@@ -657,6 +657,99 @@ test("a single invalid discovery fact does not discard valid neighboring facts",
   assert.deepEqual(run.summary.attempts[0].rejectedFacts, [{id: 2, reason: "scope-id"}]);
 });
 
+async function anchorRepairStudy({answer = id => neutral(id), maxPrimaryAnchorRepairs = 1, blockedIds = [],
+  typedCut = false, typedFrame = "current", stopBefore = false, maxAttempts = 12, failSecond = false, refusedRepair = false} = {}) {
+  const calls = [];
+  const provider = async request => {
+    calls.push({mode: request.mode, targetIds: request.targetIds, contextIds: request.units.map(({id}) => id), focus: request.focus});
+    const id = request.targetIds[0];
+    const usage = {inputTokens: 100, outputTokens: 20};
+    if (request.mode === "cue-check") {
+      return refusedRepair ? {status: "refused", usage} : {status: "ok", facts: [answer(id)], usage};
+    }
+    if (request.mode === "transition") {
+      const cut = typedCut && id === 2;
+      const fact = stopBefore && id === 1 ? typedTransition(id) : typedTransition(id, {
+        status: "neutral", transition: "none", fact: "none", evidenceIds: [], frame: typedFrame,
+        sceneBoundary: cut ? {status: "cut", reason: "time-jump", previousId: 1, entryId: id} :
+          {status: "none", reason: "none", previousId: null, entryId: null},
+      });
+      return {status: "ok", facts: [fact], usage};
+    }
+    if (request.mode === "verify" && (id === 2 || failSecond && id === 3)) {
+      return {status: "invalid-response", targetFailures: [{unitId: id, reason: "prior-anchor"}], usage};
+    }
+    return {status: "ok", facts: request.targetIds.map(id => id === 1 ? active(id, request.mode, {
+      action: stopBefore ? "none" : "release", narrativePhase: stopBefore ? "quiet" : "ease",
+      fact: stopBefore ? "neutralize" : "ease", transition: stopBefore ? "hard-stop" : "interruption",
+    }) : neutral(id)), usage};
+  };
+  const run = await runLunaProtocolShadow({...fixture(), provider, blockedIds, maxPrimaryAnchorRepairs, maxCueChecks: 0,
+    budget: createLunaShadowBudget({maxAttempts}), verificationTargets: failSecond ? [1, 2, 3] : [1, 2],
+    verifyTransitions: true, maxTransitionVerification: failSecond ? 3 : 2,
+    transitionTargets: failSecond ? [1, 2, 3] : [1, 2]});
+  return {run, calls};
+}
+
+test("an exact current neutral repair restores only the missing primary decision", async () => {
+  const control = await anchorRepairStudy({maxPrimaryAnchorRepairs: 0});
+  const {run, calls} = await anchorRepairStudy({typedFrame: "neutral"});
+  const row = run.units[2];
+  assert.equal(control.run.units[2].status, "invalid-response");
+  assert.deepEqual(calls.filter(row => row.mode === "cue-check"), [
+    {mode: "cue-check", targetIds: [2], contextIds: [0, 1, 2], focus: "anchor-repair"},
+  ]);
+  assert.equal(row.primaryFailure, "prior-anchor");
+  assert.equal(row.primaryPrefix, undefined);
+  assert.equal(row.verificationStatus, "invalid-response");
+  assert.equal(row.cueContractRepaired, true);
+  assert.equal(row.cueRecoveryReason, "primary-anchor-repair");
+  assert.equal(row.status, "neutral");
+  assert.equal(row.phase, "quiet");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.deepEqual(row.labelEvidenceIds, []);
+  assert.equal(run.summary.budget.unsettled, 0);
+});
+
+test("anchor repair does not promote unresolved, effectful or scoped responses", async () => {
+  for (const answer of [
+    id => ({...neutral(id), status: "uncertain", frame: "uncertain", narrativePhase: "unknown", transition: "unknown"}),
+    id => active(id, "cue-check", {action: "contact", narrativePhase: "onset", fact: "none", transition: "onset"}),
+    id => ({...neutral(id), scopeId: 1, evidenceIds: [1]}),
+    id => ({...neutral(id), frame: "reported"}),
+    id => ({...neutral(id), evidenceIds: [id + 1]}),
+  ]) {
+    const {run, calls} = await anchorRepairStudy({answer});
+    assert.equal(calls.filter(row => row.mode === "cue-check").length, 1);
+    assert.equal(run.units[2].status, "invalid-response");
+    assert.equal(run.units[2].cueContractRepaired, false);
+    assert.equal(run.units[2].cue, undefined);
+    assert.equal(run.units[2].pattern, "Baseline");
+  }
+});
+
+test("anchor repair respects exact eligibility, typed barriers, and its separate quota", async () => {
+  for (const options of [{blockedIds: [2]}, {typedCut: true}, {typedFrame: "reported"}, {stopBefore: true}]) {
+    const {run, calls} = await anchorRepairStudy(options);
+    assert.equal(calls.some(row => row.mode === "cue-check"), false);
+    assert.equal(run.units[2].cueContractRepaired, false);
+  }
+  const tight = await anchorRepairStudy({maxAttempts: 5});
+  assert.equal(tight.calls.some(row => row.mode === "cue-check"), false);
+  assert.equal(tight.run.summary.attempts.find(row => row.cueCheckReason === "primary-anchor-repair").deferralReason, "request-budget");
+  const repeated = await anchorRepairStudy({failSecond: true});
+  assert.equal(repeated.calls.filter(row => row.mode === "cue-check").length, 1);
+  assert.equal(repeated.run.units[3].cueContractRepaired, false);
+  assert.equal(repeated.run.summary.attempts.find(row => row.id === "cue-check:3").deferralReason, "primary-anchor-repair-limit");
+  const refused = await anchorRepairStudy({refusedRepair: true});
+  assert.equal(refused.calls.filter(row => row.mode === "cue-check").length, 1);
+  assert.equal(refused.run.summary.attempts.find(row => row.id === "cue-check:2").status, "provider-refused");
+  assert.equal(refused.run.units[2].pattern, "Baseline");
+  assert.equal(refused.run.units[2].cue, undefined);
+});
+
 test("a transition citation cannot supply a missing exact target citation for a cue", async () => {
   const provider = fake((id, mode) => {
     if (mode === "transition") return typedTransition(id, {fact: "none", transition: "onset"});
@@ -791,7 +884,7 @@ test("a restart can use the last cue check and requires confirmation when verifi
     }, request => calls.push(request));
     const input = fixture("June looked forward to dancing. Lee declined to dance again. Then Lee took her hand and began to dance.");
     const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [0, 1, 2],
-      maxCueChecks: outcome === "disabled" ? 0 : 1,
+      maxCueChecks: outcome === "disabled" ? 0 : 1, releaseUnusedRestartReservation: true,
       ...(outcome === "budget-deferred" ? {budget: createLunaShadowBudget({maxAttempts: 4})} : {})});
     const checks = calls.filter(call => call.mode === "cue-check");
     assert.deepEqual(checks.map(call => [call.targetIds[0], call.focus]),

@@ -3,10 +3,7 @@ import test from "node:test";
 import {runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "../scripts/lib/whole-story-context-planning.mjs";
 
-const text = "The hall opened for the dance. They took hands. The clock chimed. The room fell quiet.";
-const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
-const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
-  spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+const story = "The hall opened for the dance. They took hands. The clock chimed. The room fell quiet.";
 const neutral = unitId => ({unitId, depiction: "neutral", frame: "current", narrativePhase: "quiet", action: "none",
   status: "neutral", transition: "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: []});
 const cut = unitId => ({...neutral(unitId), status: "verified", transition: "scene-cut", fact: "cut",
@@ -17,11 +14,16 @@ const linked = (unitId, scopeId = 0) => ({...neutral(unitId), status: "verified"
   action: "continuation", narrativePhase: "sustain", scopeId, priorAnchor: 1, evidenceIds: [1, unitId]});
 
 async function study({cutPass = "transition", answer = id => linked(id), verifyContinuityBoundary = true,
-  blockPrior = false, blockTarget = false, refusal = false} = {}) {
+  blockPrior = false, blockTarget = false, refusal = false, text = story, maxCueChecks = 2,
+  releaseUnusedRestartReservation = false, checkFuture = false} = {}) {
+  const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
   const requests = [];
+  const targets = checkFuture ? [1, 2, 3] : [1, 2];
   const result = await runLunaProtocolShadow({id: "continuity-fixture", text, grant, now: () => 1,
-    verifyContinuityBoundary, verifyTransitions: true, verificationTargets: [1, 2], transitionTargets: [1, 2],
-    maxVerification: 2, maxTransitionVerification: 2, maxCueChecks: 2, negativeStride: 0,
+    verifyContinuityBoundary, verifyTransitions: true, verificationTargets: targets, transitionTargets: targets,
+    maxVerification: targets.length, maxTransitionVerification: targets.length, maxCueChecks, releaseUnusedRestartReservation, negativeStride: 0,
     provider: async request => {
       requests.push(request);
       const {mode, targetIds} = request;
@@ -82,4 +84,18 @@ test("known hard gates and refusal retain precedence over the focused recheck", 
   const refused = await study({refusal: true});
   assert.equal(refused.result.summary.attempts.some(({status}) => status === "provider-refused"), true);
   assert.equal(refused.row.pattern, "Baseline");
+});
+
+test("a disproved earlier stop hint releases the reserved slot for a later continuity check", async () => {
+  const pastHint = {maxCueChecks: 1, text: "The hall opened for the dance. They took hands as the clock stopped. The room fell quiet."};
+  const archived = await study(pastHint);
+  assert.equal(archived.requests.some(({mode}) => mode === "cue-check"), false);
+  assert.equal(archived.result.summary.attempts.find(row => row.id === "cue-check:2").deferralReason, "restart-check-reserved");
+  const released = await study({...pastHint, releaseUnusedRestartReservation: true});
+  assert.equal(released.requests.find(({mode}) => mode === "cue-check").focus, "continuity-boundary");
+  assert.equal(released.row.cueRecoveryCorrection, "continuity-linked");
+
+  const futureHint = await study({maxCueChecks: 1, releaseUnusedRestartReservation: true, checkFuture: true,
+    text: "The hall opened for the dance. They took hands. The room fell quiet. The clock stopped."});
+  assert.equal(futureHint.result.summary.attempts.find(row => row.id === "cue-check:2").deferralReason, "restart-check-reserved");
 });

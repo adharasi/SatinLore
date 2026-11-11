@@ -9,6 +9,7 @@ const API = "https://api.openai.com/v1/responses";
 const MAX_UNITS = 24;
 const MAX_TARGETS = 6;
 const MAX_CLIP_BYTES = 6000;
+const MAX_PRIMARY_ANCHOR_REPAIRS = 1;
 const CLIP_LIMITS = {maxRequests: 1, maxTargetsPerWindow: MAX_UNITS, maxWindowSourceBytes: MAX_CLIP_BYTES};
 const encoder = new TextEncoder();
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -146,7 +147,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const targets = clip.targetIds.map(id => id - first);
   const maxCueChecks = Math.min(2, targets.length);
   const maxSupportingVerification = Math.min(2, index.units.length - targets.length);
-  const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification;
+  const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification + MAX_PRIMARY_ANCHOR_REPAIRS;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
   try {
@@ -166,8 +167,8 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       signal: execution, limits: CLIP_LIMITS, prefixUnits: MAX_UNITS, maxVerification: targets.length,
       verificationTargets: targets, verifyTransitions: true, maxTransitionVerification: targets.length,
       transitionTargets: targets, localActionVerificationTargets: targets, sceneEntryVerificationTargets: targets,
-      maxCueChecks, maxSupportingVerification,
-      verifyContinuityBoundary: true});
+      maxCueChecks, maxSupportingVerification, maxPrimaryAnchorRepairs: MAX_PRIMARY_ANCHOR_REPAIRS,
+      verifyContinuityBoundary: true, releaseUnusedRestartReservation: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

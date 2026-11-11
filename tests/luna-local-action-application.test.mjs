@@ -95,3 +95,35 @@ test("old-scope onset requires all new-scope roles and an open gate", async () =
     assert.equal(row.localActionApplication, undefined);
   }
 });
+
+const sustainedContact = {...onset(2), narrativePhase: "sustain", action: "continuation", transition: "none",
+  fact: "continue", scopeId: 0, priorAnchor: 0, evidenceIds: [0, 2]};
+const sameAction = {status: "verified", frame: "current", action: "continuation", phase: "sustain",
+  contrast: "same-action", targetId: 2, contextId: 0};
+const continuation = {primary: sustainedContact, discovery: sustainedContact, transition: typed(neutral(2))};
+
+test("exact sustained action corrects its local waveform without renewing the surrounding beat", async () => {
+  const {units: control} = await run({...continuation, local: null});
+  const {units: actual} = await run({...continuation, local: sameAction});
+  assert.equal(control[2].pattern, "Onset rise");
+  assert.equal(actual[2].pattern, "Sustain wave");
+  assert.equal(actual[2].localActionApplication, "sustain-profile");
+  for (const key of ["phase", "appliedTransition", "cue", "readerCue", "beatId", "knownAt", "trace"]) {
+    assert.deepEqual(actual[2][key], control[2][key]);
+  }
+  assert.deepEqual(actual[3], control[3]);
+});
+
+test("sustain waveform requires the same attested action and an uninterrupted scope", async () => {
+  for (const options of [
+    {local: {...sameAction, contextId: 1}},
+    {local: {...sameAction, action: "contact", contrast: "enacted"}},
+    {transition: typed(neutral(2), cut)},
+    {prior: stop},
+    {blockedIds: [2]},
+  ]) {
+    const {units} = await run({...continuation, local: sameAction, ...options});
+    assert.notEqual(units[2].pattern, "Sustain wave");
+    assert.equal(units[2].localActionApplication, undefined);
+  }
+});

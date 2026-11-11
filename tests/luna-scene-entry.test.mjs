@@ -38,6 +38,10 @@ test("first-entry request is a strict independent causal comparison", async () =
   assert.deepEqual(schema.required, ["unitId", "sceneEntry"]);
   assert.equal(schema.properties.sceneEntry.additionalProperties, false);
   assert.match(sent.instructions, /earliest supplied unit/u);
+  assert.match(sent.instructions, /why the prior episode no longer governs/u);
+  assert.match(sent.instructions, /enacted departure into a distinct journey/u);
+  assert.match(sent.instructions, /a simultaneous glance at a background action/u);
+  assert.match(sent.instructions, /a step that fulfills, resolves or interrupts the prior activity/u);
   assert.match(sent.instructions, /elapsed time alone can bridge the same episode/u);
   assert.equal((await provider({...request, units: sourceUnits})).status, "invalid-request");
   assert.equal((await provider({...request, focus: "continuity-boundary"})).status, "invalid-request");
@@ -47,6 +51,9 @@ test("first-entry request is a strict independent causal comparison", async () =
 
 test("first-entry coordinates and status are validated before facts leave the provider", async () => {
   for (const [sceneEntry, expected] of [[enteredEarlier, null], [noEntry, null], [uncertain, null],
+    [{...firstEntry, entryId: 3, changeId: 2, reason: "material-setting"}, null],
+    [{...firstEntry, entryId: 3, changeId: 2, reason: "material-objective"}, null],
+    [{...noEntry, reason: "ordinary-interruption"}, null], [{...noEntry, reason: "routine-movement"}, null],
     [{...firstEntry, entryId: 3, changeId: 2}, null],
     [{...firstEntry, entryId: 2}, "scene-entry-evidence"],
     [{...firstEntry, entryId: 3, previousId: 2}, "scene-entry-evidence"],

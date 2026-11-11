@@ -989,6 +989,42 @@ test("a Luna corpus refusal halts the approved run without replaying another cli
   assert.equal(f.calls.length, 1);
 });
 
+test("the Luna corpus Worker funds an exact-prefix recheck for a rejected primary anchor", {timeout: 30000}, async t => {
+  const {reviewedSpend} = await studyBudget(t);
+  const f = fixture({spend: reviewedSpend, provider: async (url, options) => {
+    const reply = neutralProtocolUpstream(url, options);
+    const requestBody = JSON.parse(options.body);
+    if (requestBody.text.format.name !== "nocturne_luna_verify_v1") return reply;
+    const input = JSON.parse(requestBody.input);
+    const envelope = await reply.json();
+    const answer = envelope.output[0].content[0];
+    const {facts} = JSON.parse(answer.text);
+    Object.assign(facts[0], {status: "verified", depiction: "romantic", narrativePhase: "build", action: "anticipation",
+      fact: "low", scopeId: input.units[0].id, priorAnchor: input.units[0].id, evidenceIds: input.units.map(unit => unit.id)});
+    answer.text = JSON.stringify({facts});
+    return Response.json(envelope);
+  }});
+  const founder = await token(), runId = randomUUID(), env = enableWholeStory(f.env);
+  const clip = reviewedClip();
+  const post = (path, body) => f.worker.fetch(request(founder, {path: `${LUNA_CORPUS_PATH}/${path}`, body}), env);
+  const approved = await post("approve", {runId, clips: [{id: clip.id, digest: sha256(JSON.stringify(clip))}], reviewConfirmed: true});
+  assert.equal(approved.status, 200);
+  const response = await post("shard", {runId, clip});
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.hostedSpend.settled, true);
+  assert.equal(result.externalCalls, 6);
+  const primary = result.summary.attempts.find(row => row.mode === "verify");
+  const repair = result.summary.attempts.find(row => row.cueCheckReason === "primary-anchor-repair");
+  assert.deepEqual(primary.rejectedFacts, [{id: 33, reason: "prior-anchor"}]);
+  assert.equal(repair?.status, "returned");
+  assert.deepEqual(repair?.targetIds, [33]);
+  assert.deepEqual(repair?.contextIds, [32]);
+  assert.equal(result.units[1].cueRecovery?.status, "neutral");
+  assert.equal(result.units[1].cue, false);
+  assert.equal(result.units[1].appliedTransition, "none");
+});
+
 test("a Luna corpus unknown shard keeps its spend hold and releases the in-flight lease for a different clip", {timeout: 30000}, async t => {
   const {reviewedSpend, expireReviewedLease} = await studyBudget(t);
   const runId = randomUUID();
