@@ -504,3 +504,13 @@ A provisional continuation disputed by an unconfirmed primary cut can use a blin
 Report-only recovery designation can use a typed exact release link and independent current contact when the compiler already emits Recovery. Compare the referenced preceding release, scope and intervening boundaries. The designation does not authorize a new reader cue or waveform. Verify cue, event, phase, profile and reader command traces independently.
 
 Keep exact clipped inputs, expanded context and offline state qualification separate. A proposed earlier-state checkpoint requires the same edition, reviewed intervening route and independently verified earlier evidence. Frozen labels are comparison data. Before a wider reader rollout, qualify cleared paragraph scheduling at opening, midpoint and seek under matched budgets and account for every flagged input opportunity.
+
+## V28 setting evidence and waveform qualification
+
+When two blind setting votes agree on a quiet target and the typed boundary remains uncertain, the founder study can ask one additional blind question. The response must independently identify the earlier established place and the materially distinct place at the current target before the compiler clears the scene with Reset. A verified continuing place or action preserves continuity. Unavailable or unresolved evidence closes active carry with uncertain continuity. The response records controlled evidence types and reviewed coordinates. Verified time cuts and protective events keep priority.
+
+A disputed supporting connector can use an unused cue check to establish continuity on the exact anchor and connector. This question ends at the connector and receives no later target or attested facts. A qualifying answer can help select Sustain wave at a subsequent target that already independently verifies exact continuation. The connector proof supplies no new beat, event or cue. A contradictory cut, ungrounded neutral vote or protective result cannot elevate the waveform.
+
+An independently verified release can select a target-local Taper when an effect-free typed interruption has removed an otherwise corroborated decay. Require the exact adjacent verified support and current release. This path uses no additional provider request and creates no beat or carry. The separate interruption release path still requires an existing open beat.
+
+Measure provider recognition, applied event, exact phase, cue and waveform independently. Replay accepted answers through both compilers when requests and evidence match. Keep newly required answers visible and use labeled counterfactuals for conditional behavior. Match protected controls, previously reviewed short and wider arms, and true setting shifts before assessing any wider adoption.

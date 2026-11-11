@@ -40,6 +40,12 @@ function shardResult(clip) {
       sceneEntryVerificationStatus: "cut", sceneEntryVerification: {unitId: unit.id,
         sceneEntry: {status: "cut", reason: "material-time", previousId: clip.units[0].id, changeId: unit.id, entryId: unit.id}},
       independentBoundaryStatus: "corroborated", interruptionContinuationVerificationStatus: "verified",
+      sceneSituationVerificationStatus: "changed", sceneSituationVerification: {unitId: unit.id,
+        sceneSituation: {status: "changed", earlierId: clip.units[0].id, currentId: unit.id,
+          earlierBasis: "established-place", currentBasis: "distinct-place"}},
+      sustainConnectorVerificationStatus: "verified", sustainConnectorVerification: {unitId: unit.id,
+        status: "neutral", frame: "current", narrativePhase: "quiet", action: "none", transition: "none",
+        fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [clip.units[0].id, unit.id]},
       interruptionContinuationVerification: {unitId: unit.id, status: "verified", frame: "current", action: "continuation",
         transition: "none", fact: "continue", scopeId: clip.units[0].id, priorAnchor: clip.units[0].id,
         evidenceIds: [clip.units[0].id, unit.id]},
@@ -188,6 +194,14 @@ test("the corpus page previews exact context locally and seals only fingerprints
   assert.deepEqual(exported.replayClips[0].units[0].sceneEntryVerification,
     {unitId: 10, sceneEntry: {status: "cut", reason: "material-time", previousId: 9, changeId: 10, entryId: 10}});
   assert.equal(exported.replayClips[0].units[0].independentBoundaryStatus, "corroborated");
+  assert.equal(exported.replayClips[0].units[0].sceneSituationVerificationStatus, "changed");
+  assert.deepEqual(exported.replayClips[0].units[0].sceneSituationVerification,
+    {unitId: 10, sceneSituation: {status: "changed", earlierId: 9, currentId: 10,
+      earlierBasis: "established-place", currentBasis: "distinct-place"}});
+  assert.equal(exported.replayClips[0].units[0].sustainConnectorVerificationStatus, "verified");
+  assert.deepEqual(exported.replayClips[0].units[0].sustainConnectorVerification,
+    {unitId: 10, status: "neutral", frame: "current", narrativePhase: "quiet", action: "none", transition: "none",
+      fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [9, 10]});
   assert.equal(exported.replayClips[0].units[0].interruptionContinuationVerificationStatus, "verified");
   assert.deepEqual(exported.replayClips[0].units[0].interruptionContinuationVerification,
     {unitId: 10, status: "verified", frame: "current", action: "continuation", transition: "none", fact: "continue",

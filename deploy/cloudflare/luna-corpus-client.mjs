@@ -26,12 +26,14 @@ const returned = new Set(["completed", "provider-refused", "provider-unavailable
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
 const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus",
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
-  "independentBoundaryStatus", "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus"];
+  "independentBoundaryStatus", "sceneSituationVerificationStatus", "sustainConnectorVerificationStatus",
+  "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus"];
 const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
 const replayBoundaryKeys = ["status", "reason", "previousId", "entryId"];
 const replayLocalActionKeys = ["status", "frame", "action", "phase", "contrast", "targetId", "contextId"];
+const replaySituationKeys = ["status", "earlierId", "currentId", "earlierBasis", "currentBasis"];
 const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery",
-  "interruptionContinuationVerification", "interruptionReleaseVerification"];
+  "interruptionContinuationVerification", "interruptionReleaseVerification", "sustainConnectorVerification"];
 const encoder = new TextEncoder();
 const natural = n => Number.isSafeInteger(n) && n >= 0;
 let packet, packetDigest, state, busy = false, pausing = false;
@@ -268,6 +270,10 @@ function replayUnit(row) {
   if (row.sceneEntryVerification?.sceneEntry) {
     result.sceneEntryVerification = {...fields(row.sceneEntryVerification, ["id", "unitId"]),
       sceneEntry: fields(row.sceneEntryVerification.sceneEntry, [...replayBoundaryKeys, "changeId"])};
+  }
+  if (row.sceneSituationVerification?.sceneSituation) {
+    result.sceneSituationVerification = {...fields(row.sceneSituationVerification, ["id", "unitId"]),
+      sceneSituation: fields(row.sceneSituationVerification.sceneSituation, replaySituationKeys)};
   }
   return result;
 }

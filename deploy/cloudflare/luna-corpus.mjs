@@ -70,6 +70,8 @@ function mapResult(result, first) {
     scopeId: coordinate(row.scopeId), priorAnchor: coordinate(row.priorAnchor), evidenceIds: coordinates(row.evidenceIds),
     ...(row.sceneBoundary ? {sceneBoundary: boundary(row.sceneBoundary)} : {}),
     ...(row.sceneEntry ? {sceneEntry: boundary(row.sceneEntry)} : {}),
+    ...(row.sceneSituation ? {sceneSituation: {...row.sceneSituation, earlierId: coordinate(row.sceneSituation.earlierId),
+      currentId: coordinate(row.sceneSituation.currentId)}} : {}),
     ...(row.localAction ? {localAction: {...row.localAction, targetId: coordinate(row.localAction.targetId),
       contextId: coordinate(row.localAction.contextId)}} : {})};
   return {
@@ -79,6 +81,8 @@ function mapResult(result, first) {
       primaryPrefix: evidence(row.primaryPrefix), transitionVerification: evidence(row.transitionVerification),
       boundaryVerification: evidence(row.boundaryVerification), localActionVerification: evidence(row.localActionVerification),
       sceneEntryVerification: evidence(row.sceneEntryVerification), cueRecovery: evidence(row.cueRecovery),
+      sceneSituationVerification: evidence(row.sceneSituationVerification),
+      sustainConnectorVerification: evidence(row.sustainConnectorVerification),
       interruptionContinuationVerification: evidence(row.interruptionContinuationVerification),
       interruptionReleaseVerification: evidence(row.interruptionReleaseVerification),
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
@@ -150,8 +154,9 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const maxCueChecks = Math.min(2, targets.length);
   const maxSupportingVerification = Math.min(2, index.units.length - targets.length);
   const maxBoundaryEntryConfirmations = 1;
+  const maxSettingSituationVerifications = 1;
   const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification + MAX_PRIMARY_ANCHOR_REPAIRS +
-    maxBoundaryEntryConfirmations;
+    maxBoundaryEntryConfirmations + maxSettingSituationVerifications;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
   try {
@@ -173,7 +178,8 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       transitionTargets: targets, localActionVerificationTargets: targets, sceneEntryVerificationTargets: targets,
       maxCueChecks, maxSupportingVerification, maxPrimaryAnchorRepairs: MAX_PRIMARY_ANCHOR_REPAIRS,
       verifyContinuityBoundary: true, releaseUnusedRestartReservation: true, sceneEntryArbitration: true,
-      sameEpisodeArbitration: true, boundaryEntryConfirmation: true, interruptionReleaseArbitration: true});
+      sameEpisodeArbitration: true, boundaryEntryConfirmation: true, interruptionReleaseArbitration: true,
+      verifySettingSituation: true, sustainConnectorVerification: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

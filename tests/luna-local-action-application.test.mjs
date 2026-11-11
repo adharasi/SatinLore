@@ -263,3 +263,82 @@ test("a rooted sustain can refine an active waveform with effect-free typed unce
     assert.notEqual(units[2].pattern, "Sustain wave");
   }
 });
+
+const disputedConnector = {...neutral(2), status: "verified", transition: "scene-cut", fact: "cut",
+  scopeId: 0, evidenceIds: [0, 1, 2]};
+const connectorContinuity = {...neutral(2), evidenceIds: [1, 2]};
+
+async function runDisputedConnector({answer = connectorContinuity, enabled = true, maxCueChecks = 1, blockedIds = [],
+  connectorText = "They took a seat."} = {}) {
+  const text = `The music started. June took Lee's hand. ${connectorText} June kept Lee's hand in hers. The lights dimmed.`;
+  const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const anchor = {...onset(1), evidenceIds: [0, 1]};
+  const sustain = {...sustainedContact, unitId: 3, scopeId: 1, priorAnchor: 1, evidenceIds: [1, 3]};
+  const checks = [];
+  const provider = Object.assign(async request => {
+    const {mode, targetIds} = request;
+    const usage = {inputTokens: 100, outputTokens: 20};
+    if (request.focus === "episode-boundary") {
+      checks.push(request);
+      return answer ? {status: "ok", usage, facts: [answer]} : {status: "failed", usage};
+    }
+    const facts = targetIds.map(id => {
+      if (mode === "local-action") return {unitId: id, localAction: {...sameAction, targetId: id, contextId: 1}};
+      if (mode === "scene-entry") return {unitId: id, sceneEntry: {status: "none", reason: "same-episode",
+        previousId: null, entryId: null, changeId: null}};
+      if (mode === "transition") return typed(neutral(id));
+      if (id === 1) return mode === "discovery" ? {...anchor, status: "candidate", scopeId: 0} : anchor;
+      if (id === 2) return mode === "discovery" ? {...disputedConnector, status: "candidate",
+        scopeId: 2, evidenceIds: [1, 2]} : disputedConnector;
+      if (id === 3 && mode === "verify") return sustain;
+      return neutral(id);
+    });
+    return {status: "ok", usage, facts};
+  }, {sceneBoundaryProtocol: true});
+  const result = await runLunaProtocolShadow({id: "connector", text, grant, now: () => 1, provider,
+    blockedIds, negativeStride: 0, maxVerification: 2, maxSupportingVerification: 2,
+    verificationTargets: [3, 4], verifyTransitions: true, maxTransitionVerification: 2, transitionTargets: [3, 4], sceneEntryVerificationTargets: [3],
+    localActionVerificationTargets: [3], maxCueChecks, sustainConnectorVerification: enabled});
+  return {...result, checks};
+}
+
+test("a disputed support connector needs its own exact blind continuity proof to refine sustain", async () => {
+  const baseline = await runDisputedConnector({enabled: false});
+  const candidate = await runDisputedConnector();
+  assert.equal(baseline.units[2].transitionFlag, "scene-boundary-unconfirmed");
+  assert.equal(baseline.units[3].pattern, "Undertone");
+  assert.equal(candidate.units[2].sustainConnectorVerificationStatus, "verified");
+  assert.deepEqual(candidate.units[2].sustainConnectorVerification.evidenceIds, [1, 2]);
+  assert.equal(candidate.checks.length, 1);
+  assert.deepEqual(candidate.checks[0].targetIds, [2]);
+  assert.deepEqual(candidate.checks[0].units.map(({id}) => id), [0, 1, 2]);
+  assert.equal(candidate.checks[0].attested, undefined);
+  assert.deepEqual(candidate.units[3], {...baseline.units[3], pattern: "Sustain wave", localActionApplication: "sustain-profile"});
+  const {sustainConnectorVerification, sustainConnectorVerificationStatus, ...connector} = candidate.units[2];
+  assert.deepEqual(connector, baseline.units[2]);
+  assert.deepEqual(candidate.units.slice(0, 2), baseline.units.slice(0, 2));
+  assert.deepEqual(candidate.units[4], baseline.units[4]);
+});
+
+test("a true cut or ungrounded connector verdict cannot elevate sustain and a stop retains priority", async () => {
+  for (const options of [
+    {answer: neutral(2)},
+    {answer: {...connectorContinuity, evidenceIds: [0, 2]}},
+    {answer: {...connectorContinuity, unitId: 3}},
+    {answer: null},
+    {answer: {...disputedConnector, evidenceIds: [1, 2]}, connectorText: "Months later, Lee moved to another city."},
+    {maxCueChecks: 0},
+    {blockedIds: [2]},
+  ]) {
+    const {units} = await runDisputedConnector(options);
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+    assert.equal(units[3].localActionApplication, undefined);
+  }
+  const stopped = await runDisputedConnector({answer: {...stop, unitId: 2, evidenceIds: [2]}});
+  assert.equal(stopped.units[2].sustainConnectorVerificationStatus, "protective-override");
+  assert.equal(stopped.units[2].pattern, "Stop");
+  assert.equal(stopped.units[3].readerCue, false);
+  assert.notEqual(stopped.units[3].pattern, "Sustain wave");
+});

@@ -973,6 +973,59 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.equal(f.calls.length, 6);
 });
 
+test("the Luna corpus Worker funds one exact setting proof and maps its evidence coordinates", {timeout: 30000}, async t => {
+  const {reviewedSpend} = await studyBudget(t);
+  const f = fixture({spend: reviewedSpend, provider: async (url, options) => {
+    const requestBody = JSON.parse(options.body);
+    const input = JSON.parse(requestBody.input);
+    const [unitId] = input.targetIds;
+    const earlierId = input.units[0].id;
+    const reply = await neutralProtocolUpstream(url, options).json();
+    const answer = reply.output[0].content[0];
+    const {facts} = JSON.parse(answer.text);
+    switch (requestBody.text.format.name) {
+      case "nocturne_luna_transition_v2":
+        facts[0].sceneBoundary = {status: "uncertain", reason: "unclear", previousId: null, entryId: null};
+        break;
+      case "nocturne_luna_scene_entry_v1":
+        facts[0].sceneEntry = {status: "cut", reason: "material-setting", previousId: earlierId, changeId: unitId, entryId: unitId};
+        break;
+      case "nocturne_luna_scene_boundary_v1":
+        facts[0].sceneBoundary = {status: "cut", reason: "setting-shift", contrast: "material-change",
+          previousId: earlierId, changeId: unitId, entryId: unitId};
+        break;
+      case "nocturne_luna_scene_situation_v1":
+        facts[0] = {unitId, sceneSituation: {status: "changed", earlierId, currentId: unitId,
+          earlierBasis: "established-place", currentBasis: "distinct-place"}};
+        break;
+    }
+    answer.text = JSON.stringify({facts});
+    return Response.json(reply);
+  }});
+  const founder = await token(), runId = randomUUID(), env = enableWholeStory(f.env);
+  const clip = reviewedClip(32, "She left the office and entered the bakery across the street.");
+  const post = (path, body) => f.worker.fetch(request(founder, {path: `${LUNA_CORPUS_PATH}/${path}`, body}), env);
+  assert.equal((await post("approve", {runId, clips: [{id: clip.id, digest: sha256(JSON.stringify(clip))}], reviewConfirmed: true})).status, 200);
+  const response = await post("shard", {runId, clip});
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  const proof = result.summary.attempts.filter(row => row.mode === "scene-situation");
+  assert.equal(proof.length, 1);
+  assert.deepEqual(proof[0].contextIds, [32]);
+  assert.deepEqual(proof[0].targetIds, [33]);
+  assert.equal(proof[0].status, "returned");
+  assert.equal(result.externalCalls, 7);
+  assert.equal(result.hostedSpend.settled, true);
+  assert.equal(result.units[1].appliedTransition, "scene-cut");
+  assert.equal(result.units[1].sceneSituationVerificationStatus, "changed");
+  assert.deepEqual(result.units[1].sceneSituationVerification.sceneSituation, {status: "changed", earlierId: 32, currentId: 33,
+    earlierBasis: "established-place", currentBasis: "distinct-place"});
+  const calls = f.calls.map(({options}) => JSON.parse(options.body));
+  const sent = calls.find(call => call.text.format.name === "nocturne_luna_scene_situation_v1");
+  const firstEntry = calls.find(call => call.text.format.name === "nocturne_luna_scene_entry_v1");
+  assert.deepEqual(JSON.parse(sent.input), JSON.parse(firstEntry.input));
+});
+
 test("a Luna corpus refusal halts the approved run without replaying another clip", {timeout: 30000}, async t => {
   const {reviewedSpend} = await studyBudget(t);
   const f = fixture({spend: reviewedSpend, provider: () => Response.json({status: "completed", model: "gpt-6-luna",
