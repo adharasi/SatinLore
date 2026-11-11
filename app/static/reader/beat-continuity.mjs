@@ -311,7 +311,15 @@ export function planStory(story, units) {
           rationale = "Uncertain continuity eases over a reading-distance budget.";
           fadeWords = beat.release(cursor, weakSwitch ? Math.min(FADE_WORDS, fadeEnd - age) : fadeEnd - age);
           const fadeProfile = beat.easing && beat.profile === "Recovery" ? "Recovery" : "Taper";
-          Object.assign(result, {pattern: fadeProfile, reason: rationale});
+          // A one-word release tail cannot describe a longer, unlinked quiet unit.
+          const exhaustedTail = beat.easing && fadeProfile === "Taper" && pattern === "Baseline" &&
+            !supportedFloor && !connector && fadeWords <= 1 && words > FADE_WORDS;
+          if (exhaustedTail) {
+            traceBeat = null;
+            decision = "Quiet after release";
+            rationale = "Only the last word of a release reaches this unlinked unit.";
+          }
+          Object.assign(result, {pattern: exhaustedTail ? "Baseline" : fadeProfile, reason: rationale});
         } else {
           beat.quiet = true;
           traceBeat = null;

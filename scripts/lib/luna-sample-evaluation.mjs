@@ -251,7 +251,7 @@ export function scoreLunaSample(reference, candidate, {loom, includeDiscrepancie
     candidateProvenance: {measurement: candidate.measurement === "live-corpus-luna" ? "live-corpus-luna" : null,
       model: candidate.model === LUNA_PROTOCOL_MODEL ? candidate.model : null,
       rubricVersion: ["nocturne-luna-protocol-v13", "nocturne-luna-protocol-v14", "nocturne-luna-protocol-v15", "nocturne-luna-protocol-v16",
-        "nocturne-luna-protocol-v17", "nocturne-luna-protocol-v18", LUNA_PROTOCOL_RUBRIC_VERSION]
+        "nocturne-luna-protocol-v17", "nocturne-luna-protocol-v18", "nocturne-luna-protocol-v19", LUNA_PROTOCOL_RUBRIC_VERSION]
         .includes(candidate.rubricVersion) ? candidate.rubricVersion : null},
     summary: Object.fromEntries(panels.map(([panel]) => [panel, Object.fromEntries(definitions.map(([name, lane]) =>
       [name, metrics(totals.get(panel).get(name), lane)]))])),

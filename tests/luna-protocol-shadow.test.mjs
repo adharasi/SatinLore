@@ -447,6 +447,36 @@ test("a neutral transition check does not erase a verified continuity veto or mu
   }
 });
 
+test("a corroborated release can cite the current return without carrying an old scope", async () => {
+  const input = fixture("They recalled the previous evening. A warm smile brought them back to the present. The moment softened. The kettle clicked.");
+  const options = {verificationTargets: [2, 3], maxVerification: 2, maxSupportingVerification: 2,
+    verifyTransitions: true, transitionTargets: [2, 3], maxTransitionVerification: 2, localActionVerificationTargets: [2]};
+  const provider = (contextId, citesReturn = true) => Object.assign(fake((id, mode) => {
+    if (mode === "local-action") return {unitId: id, localAction: {status: "verified", frame: "current", action: "release",
+      phase: "ease", contrast: "softening", targetId: id, contextId}};
+    if (mode === "transition") return {...neutral(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
+      sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null},
+      ...(id === 2 ? {status: "verified", transition: "interruption", evidenceIds: citesReturn ? [1, 2] : [2]} : {})};
+    if (id === 0 && mode !== "discovery") return {...neutral(id), frame: "remembered", evidenceIds: [0]};
+    if (id <= 1) return active(id, mode, {narrativePhase: "build", ...(mode === "discovery" ? {scopeId: null} : {})});
+    if (id === 2 && mode !== "discovery") return active(id, mode, {action: "release", narrativePhase: "ease", transition: "interruption", fact: "ease"});
+    return neutral(id);
+  }), {sceneBoundaryProtocol: true});
+  const {units} = await runLunaProtocolShadow({...input, ...options, provider: provider(1)});
+  assert.equal(units[2].pattern, "Taper");
+  assert.equal(units[2].verifiedRelease, true);
+  assert.equal(units[2].beatId, null);
+  assert.deepEqual(units[2].trace.evidence, [1, 2]);
+  assert.equal(units[3].pattern, "Baseline");
+  for (const missing of [provider(null), provider(0)]) {
+    const rejected = await runLunaProtocolShadow({...input, ...options, provider: missing});
+    assert.equal(rejected.units[2].pattern, "Baseline");
+  }
+  const ordinary = await runLunaProtocolShadow({...input, ...options, provider: provider(1, false)});
+  assert.equal(ordinary.units[2].trace.decision, "Ease");
+  assert.equal(ordinary.units[2].verifiedRelease, undefined);
+});
+
 test("an independently enacted onset after a frame return may cite that return as context", async () => {
   const text = "She finished reading the old note. She put it down. They took each other's hands.";
   const provider = fake((id, mode) => {

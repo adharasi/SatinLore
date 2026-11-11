@@ -62,6 +62,49 @@ test("does not apply a primary target-only cut without independent proof", async
   }
 });
 
+test("an explicit-break vote inside a contiguous prefix does not supply a structural divider", async () => {
+  const unproved = {...cut, reason: "explicit-break"};
+  const {units} = await study({cue: primaryCut, boundary: typed(neutral(2), unproved)});
+  assert.deepEqual(units[2].transitionVerification.sceneBoundary, unproved);
+  assert.equal(units[2].transitionFlag, "scene-boundary-divider-unproved");
+  assert.equal(units[2].appliedTransition, "none");
+  assert.equal(units[2].sceneId, units[1].sceneId);
+  assert.notEqual(units[2].pattern, "Reset");
+
+  const local = await study({cue: onset, boundary: typed(onset(2), unproved)});
+  assert.equal(local.units[2].appliedTransition, "onset");
+  assert.notEqual(local.units[2].pattern, "Reset");
+});
+
+test("a source divider remains local and is excluded from both model prefixes", async () => {
+  const text = "June waited near the window.\n\n***\n\nLee carried a lamp.";
+  const {editionDigest, segmentationVersion, units} = buildWholeStoryIndex(text);
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 1000,
+    spans: units.filter(unit => !unit.structuralBoundary).map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  async function divider(before, after) {
+    const provider = Object.assign(async ({mode, targetIds, units}) => {
+      assert.ok(!units.some(unit => unit.id === 1));
+      return {status: "ok", usage: {inputTokens: 120, outputTokens: 40}, facts: targetIds.map(id => {
+        const local = id === 0 ? before : after;
+        return mode === "transition" ? typed(local) :
+          mode === "discovery" && local.status === "verified" ? {...local, status: "candidate"} : local;
+      })};
+    }, {sceneBoundaryProtocol: true});
+    return runLunaProtocolShadow({id: "divider", text, grant, now: () => 1, provider,
+      verificationTargets: [0, 2], transitionTargets: [0, 2], verifyTransitions: true});
+  }
+  const result = await divider(onset(0), neutral(2));
+  assert.equal(result.units[0].pattern, "Onset rise");
+  assert.equal(result.units[1].pattern, "Divider");
+  assert.equal(result.units[2].pattern, "Baseline");
+  assert.notEqual(result.units[2].sceneId, result.units[0].sceneId);
+  const stop = {...neutral(0), status: "verified", transition: "hard-stop", fact: "neutralize", evidenceIds: [0]};
+  const stopped = await divider(stop, onset(2));
+  assert.equal(stopped.units[0].pattern, "Stop");
+  assert.equal(stopped.units[1].pattern, "Divider");
+  assert.equal(stopped.units[2].pattern, "Baseline");
+});
+
 test("a material cut can coexist with a local accent and preserve a new independently enacted onset", async () => {
   const accent = typed({...onset(2), transition: "accent", scopeId: 1}, cut);
   const {units} = await study({cue: id => ({...onset(id), scopeId: 1}), boundary: accent});
@@ -165,6 +208,24 @@ test("two independent no-event judgments can withhold a disputed material cut wi
   const frameEntry = typed({...primaryCut(2), transition: "reported-entry", frame: "reported"}, cut);
   const {units} = await study({boundary: frameEntry, focusAnswer: neutral(2)});
   assert.equal(units[2].appliedTransition, "reported-entry");
+});
+
+test("a disputed objective shift cannot restart the scene when the check retains the old scope", async () => {
+  const oldScope = {...primaryCut(2), evidenceIds: [1, 2], scopeId: 1};
+  const objective = {...cut, reason: "objective-shift"};
+  const {units} = await study({boundary: typed(neutral(2), objective), focusAnswer: oldScope});
+  assert.deepEqual(units[2].transitionVerification.sceneBoundary, objective);
+  assert.equal(units[2].cueRecovery.scopeId, 1);
+  assert.equal(units[2].cueRecoveryCorrection, "continuity-old-scope-veto");
+  assert.equal(units[2].transitionFlag, "scene-boundary-old-scope");
+  assert.equal(units[2].appliedTransition, "none");
+  assert.equal(units[2].sceneId, units[1].sceneId);
+  assert.notEqual(units[2].pattern, "Reset");
+
+  const confirmed = await study({boundary: typed(neutral(2), objective), focusAnswer: {...oldScope, scopeId: 2}});
+  assert.equal(confirmed.units[2].appliedTransition, "scene-cut");
+  const timeJump = await study({focusAnswer: oldScope});
+  assert.equal(timeJump.units[2].appliedTransition, "scene-cut");
 });
 
 test("local hard stops and frame transitions take precedence over the material cut", async () => {

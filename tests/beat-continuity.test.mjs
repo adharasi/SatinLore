@@ -98,6 +98,23 @@ test("weak paragraph transitions release once and ordinary connectors cannot res
   ]);
 });
 
+test("an exhausted release does not classify a long unlinked quiet unit as a taper", () => {
+  const start = row(0, "Onset rise", {words: 4});
+  const release = row(1, "Taper", {words: 15, ease: fact(1)});
+  const quietUnit = row(2, "Baseline", {words: 19});
+  const [profile, trace] = planStory("TEST", [start, release, quietUnit])[2];
+  assert.equal(profile.pattern, "Baseline");
+  assert.equal(trace.beat, null);
+  assert.equal(trace.decision, "Quiet after release");
+  assert.equal(trace.fadeWords, 1);
+  for (const linked of [row(2, "Baseline", {words: 19, scope: link(2, 0)}),
+    row(2, "Baseline", {words: 19, connector: true}), row(2, "Baseline", {words: 6})]) {
+    const [retained, evidence] = planStory("TEST", [start, release, linked])[2];
+    assert.equal(retained.pattern, "Taper");
+    assert.equal(evidence.beat, "TEST:beat:0");
+  }
+});
+
 test("provisional auxiliary low uses bounded carry and only an exact scoped target can establish its floor", () => {
   const units = [
     row(0, "Baseline", {low: fact(0, {provisional: true})}),

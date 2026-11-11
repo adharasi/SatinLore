@@ -98,6 +98,12 @@ export function resolveContinuityDispute(dispute, verdict, id) {
   if (!dispute || verdict?.status !== "verified" || !verdict.evidenceIds.includes(id)) return undefined;
   if (verdict.transition === "hard-stop" || verdict.transition === "declined-restart") return "continuity-stop";
   const {cut, anchors} = dispute;
+  // The check corroborates a change of subject but places it within an older
+  // scope. That contradicts a scene entry whose new objective must start here.
+  if (cut?.sceneBoundary?.reason === "objective-shift" && verdict.transition === "scene-cut" &&
+      verdict.fact === "cut" && verdict.frame === cut.frame && verdict.action === "none" &&
+      verdict.narrativePhase === "quiet" && Number.isSafeInteger(verdict.scopeId) && verdict.scopeId < id &&
+      verdict.evidenceIds.includes(cut.sceneBoundary.previousId)) return "continuity-old-scope-veto";
   if (cut && verdict.fact === "cut" && verdict.transition === cut.transition && verdict.frame === cut.frame &&
       verdict.action === "none" && verdict.narrativePhase === "quiet" && verdict.evidenceIds.some(evidence => evidence < id) &&
       (verdict.transition !== "scene-cut" || verdict.scopeId === id)) return "continuity-cut";
@@ -160,14 +166,19 @@ export function elapsedContinuityGap(unit, cue, annotation, lastAnchor) {
 // Separate model verdicts remain in the diagnostic record. Playback applies
 // the checked boundary while retaining cue semantics from its independent pass.
 export function mergeTransitionVerdict(cue, typed, discovery, prior, requireSceneBoundary = false) {
-  const verdict = projectTypedTransition(typed);
+  // Authored dividers are processed locally and split approval runs before a
+  // typed request. The model cannot supply new structural authority from a
+  // contiguous text prefix. Retain the typed local event and raw boundary vote.
+  const dividerUnproved = typed?.sceneBoundary?.status === "cut" && typed.sceneBoundary.reason === "explicit-break" &&
+    !priorityOverSceneCut.has(typed.transition);
+  const verdict = dividerUnproved ? typed : projectTypedTransition(typed);
   const primarySceneCut = cue?.transition === "scene-cut";
   const unnamedCut = cue?.fact === "cut" && !explicitCuts.has(cue.transition);
   const uncheckedCut = (requireSceneBoundary || typed?.sceneBoundary !== undefined) && (primarySceneCut || unnamedCut) &&
     verdict?.transition !== "scene-cut";
   if (uncheckedCut) cue = {...cue, transition: primarySceneCut ? "none" : cue.transition,
     fact: cue.fact === "cut" ? "none" : cue.fact, priorAnchor: null};
-  const boundaryFlag = uncheckedCut ? "scene-boundary-unconfirmed" : undefined;
+  const boundaryFlag = dividerUnproved ? "scene-boundary-divider-unproved" : uncheckedCut ? "scene-boundary-unconfirmed" : undefined;
   if (!verdict || !["verified", "neutral"].includes(verdict.status)) return {annotation: cue, flag: boundaryFlag};
   const protectiveCue = cue?.fact === "protective" || cue?.transition === "hard-stop";
   const conflict = cue && (cue.transition !== verdict.transition && !noEvent.has(cue.transition) ||

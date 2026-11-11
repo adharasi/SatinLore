@@ -414,3 +414,21 @@ Six matched authored context pairs improved applied cut decisions from 3/6 to 5/
 1. Use the exact same approved target and model input in a repeat panel to estimate false-cut stability. Include viewpoint headings and ordinary interruptions alongside true scene changes, and require separate evidence for old state, material change and entry.
 2. Verify current action separately when a direct action falls during recovery or at a true scene entry. A corroborated local act can coexist with the applied recovery or cut. Require independent evidence for a fresh scope after a cut. Test any arbitration change against the frozen trace and measured simulator output.
 3. Expand the paired context study to independently reviewed natural examples and wider prefixes that contain the decisive earlier state. Preserve target placement, measure evidence citations, and compare a bounded earlier-state handoff where a single contiguous clip cannot fit.
+
+## V20 boundary arbitration and exact local action
+
+V20 keeps the provider request formats and prompts byte-identical. It changes how the founder shadow compiler applies validated evidence. A typed explicit-break claim inside a structurally continuous excerpt remains visible as a raw judgment. A parser-confirmed divider resets inherited continuity and stays outside the model requests. A disputed objective shift needs an independently verified entry whose scope starts on the target. Existing stop and protection gates keep precedence.
+
+When the primary, typed and blinded local-action lanes corroborate enacted current contact in Recovery, the compiler records an applied cue and keeps the Recovery envelope. A new onset at a verified scene entry needs target-owned scope from discovery plus independent target-only typed and blinded evidence. The compiler clears the old scope and records the real cut and the fresh onset together. For a short release after a verified return to the current frame, typed and blinded evidence can supply the exact return link when the primary confirms the current release itself. The resulting local taper has no continuation anchor. An exhausted one-word taper on a longer unlinked quiet unit returns to Baseline. Exact scope links and short connectors retain their existing release evidence.
+
+| Measure on 37 identical archived targets | V19 compiler | V20 compiler |
+| --- | ---: | ---: |
+| Exact profiles | 14 | 16 |
+| Expected active profiles found | 11/26 | 14/26 |
+| Extra active profiles | 1 | 0 |
+| Exact applied events | 25 | 26 |
+| Correct cuts | 3/5 | 3/5 |
+| Extra cuts | 2 | 0 |
+| Exact applied cue labels | 29/35 | 31/35 |
+
+Track raw votes, application, and output separately. Repeat the 19 sealed development clips and score the earlier approved natural clips outside that panel as an extension. Keep narrow and wider context results paired by exact edition and target. Cases with excluded source or missing earlier units remain unavailable for contiguous comparison. Independent first-knowable transition labels, author-separated natural holdout, and physical output remain release dependencies.

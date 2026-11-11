@@ -21,7 +21,8 @@ const prefixOrder = {verify: 0, transition: 1, "cue-check": 2};
 const editorialFrames = new Set(["current", "remembered", "imagined", "reported", "mixed"]);
 const activePhases = new Set(["build", "onset", "rebuild", "sustain", "peak"]);
 const activeActions = new Set(["anticipation", "contact", "continuation", "change", "release"]);
-const enactedActions = new Set(["contact", "continuation", "change"]);
+const directActions = new Set(["contact", "change"]);
+const enactedActions = new Set([...directActions, "continuation"]);
 const usable = new Set(["candidate", "verified", "neutral"]);
 const direct = new Set(["explicit", "graphic"]);
 const overt = new Set(["overt-sexual", ...direct]);
@@ -242,6 +243,37 @@ function profileFor(fact, recent, last) {
     "Undertone" : "Baseline";
 }
 
+function localDirectAction(row, id) {
+  const local = row?.localActionVerification?.localAction;
+  return local?.status === "verified" && local.frame === "current" && local.targetId === id &&
+    local.contrast === "enacted" && directActions.has(local.action) ? local : null;
+}
+
+function corroboratesSceneEntry(row, cue, typed, id) {
+  const local = localDirectAction(row, id);
+  const proposal = row.discovery;
+  const previousSceneId = typed?.sceneBoundary?.previousId;
+  // The old scope can be cited by the combined primary reading. The other
+  // three roles must isolate the new action at the entry itself.
+  return local?.phase === "onset" && local.contextId === null && cue === row.primaryPrefix && row.cueRecovery?.status !== "neutral" &&
+    freshEnactedStart(cue, id) && cue.narrativePhase === "onset" && cue.transition === "onset" && cue.fact === "none" &&
+    cue.scopeId != null && cue.scopeId <= previousSceneId && cue.priorAnchor === null &&
+    cue.evidenceIds.length === 2 && cue.evidenceIds[0] === cue.scopeId &&
+    proposal?.status === "candidate" && proposal.frame === "current" && proposal.action === cue.action &&
+    proposal.narrativePhase === "onset" && proposal.transition === "onset" && proposal.fact === "none" &&
+    proposal.scopeId === id && proposal.priorAnchor === null && proposal.evidenceIds.length === 1 && proposal.evidenceIds[0] === id &&
+    exactCurrentCue(typed, id) && typed.transition === "onset" && typed.fact === "none" && typed.priorAnchor === null &&
+    (typed.scopeId === null || typed.scopeId === id) && typed.evidenceIds.length === 1;
+}
+
+function corroboratesRecoveryCue(row, cue, typed, id) {
+  const local = localDirectAction(row, id);
+  return local?.phase === "recover" && local.action === cue?.action && cue === row.primaryPrefix && row.cueRecovery?.status !== "neutral" &&
+    cue.narrativePhase === "recover" && cue.transition === "recover" && cue.fact === "ease" &&
+    exactCurrentCue(typed, id) && typed.transition === "recover" && typed.fact === "ease" && typed.sceneBoundary?.status === "none" &&
+    (local.contextId === null || cue.evidenceIds.includes(local.contextId) && typed.evidenceIds.includes(local.contextId));
+}
+
 function playbackInputs(index, decisions, blocked, supportingIds) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
   let restartBoundary = null, lastAnchor = null, lastBarrierWasBeatEnd = false;
@@ -292,7 +324,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const enactedStart = freshEnactedStart(rawCue, unit.id);
     const scopeChange = enactedStart && scopeId === unit.id && lastScope !== null && scopeId !== lastScope;
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
-    const cut = contextCut || frameChange || scopeChange && !restartBoundary;
+    const cut = unit.structuralBoundary || contextCut || frameChange || scopeChange && !restartBoundary;
     const proposal = result?.discovery;
     const corroboratedSeed = auxiliary && ownCueEvidence && current && !protective && !neutralize && !cut && !beatEnd && !restartBoundary &&
       proposal?.status === "candidate" && proposal.frame === "current" && proposal.scopeId != null && proposal.scopeId === rawCue.scopeId &&
@@ -305,10 +337,15 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const provisionalSeed = corroboratedSeed && rawCue.action === "anticipation" && rawCue.evidenceIds.length === 1;
     // A typed cut can replace the primary fact, but its earlier link still cannot cross the cut.
     const preCutContinuation = cut && rawCue?.fact === "continue";
-    const localStartAfterCut = !preCutContinuation && (!verifiedSceneBoundary ||
-      !restartBoundary && startsAtSceneEntry(rawCue, result.transitionVerification, unit.id));
+    const directEntry = verifiedSceneBoundary && !restartBoundary && startsAtSceneEntry(rawCue, typed, unit.id);
+    const corroboratedEntry = verifiedSceneBoundary && !directEntry && !restartBoundary && !auxiliary &&
+      !protective && !neutralize && corroboratesSceneEntry(result, rawCue, typed, unit.id);
+    const localStartAfterCut = !preCutContinuation && (!verifiedSceneBoundary || directEntry || corroboratedEntry);
+    const boundaryEvidence = corroboratedEntry ? [typed.sceneBoundary.previousId, unit.id] : evidence;
     const boundary = protective ? mark("hard-stop", "Playback gate blocks automatic activation.") :
-      cut ? mark("cut", contextCut ? "Verified scene or narrative-frame boundary." : "A changed frame or fresh scope isolates earlier playback.") :
+      unit.structuralBoundary ? mark("cut", "A source divider isolates earlier playback.", [unit.id]) :
+      cut ? mark("cut", contextCut ? "Verified scene or narrative-frame boundary." : "A changed frame or fresh scope isolates earlier playback.",
+        boundaryEvidence) :
       beatEnd ? mark("beat-end", "Verified narrative beat ending.") :
       kind === "span-end" || transition === "span-end" ? mark("span-end", "Verified release of the current span.") : null;
     if (independentBlock) restartBoundary = "blocked";
@@ -419,19 +456,28 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     // stay in the raw judgment and never renew a remembered beat.
     const releaseAfterReturn = !canEase && !auxiliary && !protective && !neutralize && !cut && !restartBoundary && current &&
       lastBarrierWasFrameReturn && size <= 16 && ownCueEvidence && rawCue.action === "release" &&
-      rawCue.narrativePhase === "ease" && rawCue.fact === "ease" && rawCue.scopeId === previousEvidenceBarrier &&
-      rawCue.priorAnchor === previousEvidenceBarrier &&
+      rawCue.narrativePhase === "ease" && rawCue.fact === "ease" &&
       decisions.get(previousEvidenceBarrier)?.window?.runId === result.window?.runId &&
       typed?.frame === "current" && typed.sceneBoundary?.status === "none";
+    const primaryReturnLink = rawCue?.scopeId === previousEvidenceBarrier && rawCue.priorAnchor === previousEvidenceBarrier;
+    const localReleaseVote = result?.localActionVerification?.localAction;
+    const corroboratedReturnLink = releaseAfterReturn && rawCue === result.primaryPrefix && rawCue.priorAnchor === null &&
+      rawCue.evidenceIds.length === 1 && rawCue.evidenceIds[0] === unit.id &&
+      typed.evidenceIds.length === 2 && typed.evidenceIds[0] === previousEvidenceBarrier &&
+      localReleaseVote?.status === "verified" && localReleaseVote.frame === "current" && localReleaseVote.action === "release" &&
+      localReleaseVote.phase === "ease" && localReleaseVote.contrast === "softening" &&
+      localReleaseVote.targetId === unit.id && localReleaseVote.contextId === previousEvidenceBarrier;
     const firstRelease = releaseAfterReturn && unit.id === previousEvidenceBarrier + 1 &&
+      (primaryReturnLink || corroboratedReturnLink) &&
       transition === "interruption" && rawCue.transition === "interruption" &&
       exactCurrentCue(typed, unit.id) && typed.transition === "interruption" && typed.fact === "none";
-    const nextRelease = releaseAfterReturn && firstLocalFrameRelease === unit.id - 1 &&
+    const nextRelease = releaseAfterReturn && primaryReturnLink && firstLocalFrameRelease === unit.id - 1 &&
       unit.paragraph === lastParagraph && rawCue.evidenceIds.includes(firstLocalFrameRelease) &&
       transition === "none" && rawCue.transition === "none" && typed.status === "neutral" && typed.transition === "none";
     if (firstRelease) firstLocalFrameRelease = unit.id;
     const low = firstRelease || nextRelease ? {...mark("low", "Exact release follows a verified return to the current frame.",
-      evidence.filter(id => id >= previousEvidenceBarrier)), profile: "Taper", localOnly: true} :
+      firstRelease && corroboratedReturnLink ? [previousEvidenceBarrier, unit.id] :
+        evidence.filter(id => id >= previousEvidenceBarrier)), profile: "Taper", localOnly: true} :
       recoveryAfterEnd ? {...mark("low", "Exact current contact supports local recovery after a verified beat end.",
       [previousEvidenceBarrier, unit.id]), profile: "Recovery", localOnly: true} :
       !supporting && !quietBoundary && (hasLow && !buildProgress || supportLinked && !linkedSustain) ?
@@ -440,6 +486,11 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       ...(provisionalSeed ? {provisional: true} : {})} : null;
     const signal = clear && ownCueEvidence && !quietBoundary && !["continue", "span-end"].includes(kind);
     const canSignal = !supporting && signal;
+    if (canSignal && corroboratedEntry) result.localActionApplication = "scene-entry-onset";
+    if (canSignal && !auxiliary && !cut && !restartBoundary && transition === "recover" && kind === "ease" &&
+        corroboratesRecoveryCue(result, rawCue, typed, unit.id)) {
+      result.localActionApplication = "recovery-cue";
+    }
     if (canSignal && rebuild && !verifiedSceneBoundary && restartCheckPending(restartBoundary)) {
       result.appliedTransitionOverride = "restart";
     }
@@ -480,8 +531,12 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const connector = !frameChange && !neutralize && !protective && !cut &&
       (unit.paragraph === lastParagraph && size <= 12 || /^\s*[“"‘']/u.test(unit.text) && size <= 16);
     lastParagraph = unit.paragraph;
-    if (editorialFrames.has(frame)) lastFrame = frame;
-    if (effectVerified && scopeId != null) lastScope = scopeId;
+    if (unit.structuralBoundary) {
+      lastFrame = lastScope = null;
+    } else {
+      if (editorialFrames.has(frame)) lastFrame = frame;
+      if (effectVerified && scopeId != null) lastScope = scopeId;
+    }
     return {id: unit.id, words: size, paragraph: unit.paragraph,
       profile: {id: unit.id, pattern, block: null,
         phase_used: pendingRestart ? "quiet" : canSignal && rebuild ? "rebuild" : fact?.narrativePhase ?? "unknown",
@@ -557,6 +612,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const before = decisions.get(id);
     const continuity = mode === "cue-check" && cueCheckReason === "continuity-boundary";
     const continuityCorrection = continuity ? resolveContinuityDispute(before.continuityDispute, verdict, id) : undefined;
+    const oldScopeVeto = continuityCorrection === "continuity-old-scope-veto";
     let row;
     if (mode === "transition") {
       row = {...before, transitionVerification: verdict, transitionVerificationStatus: verdict?.status ?? status};
@@ -564,7 +620,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       row = {...before, cueRecovery: verdict, cueRecoveryStatus: verdict?.status ?? status,
         cueRecoveryReason: cueCheckReason, cueRecoveryCorrection: continuityCorrection,
         cueRecoveryGuard: verdict && !continuityCorrection ? "continuity-unresolved" : undefined};
-      if (continuityCorrection) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
+      if (continuityCorrection && !oldScopeVeto) Object.assign(row, {annotation: verdict, prefixVerified: true, status: verdict.status});
     } else if (mode === "cue-check") {
       const candidate = currentCueAt(verdict, id, "verified");
       const opening = cueCheckReason === "opening-buildup";
@@ -603,7 +659,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const staleBoundary = typed?.sceneBoundary?.status === "cut" && typed.sceneBoundary.previousId < row.previousSceneBoundaryId;
     const applicableTyped = staleBoundary ? {...typed, sceneBoundary: undefined} : typed;
     const legacyContinuityCorrection = continuityCorrection && !(continuityCorrection === "continuity-cut" && applicableTyped?.sceneBoundary);
-    const merged = legacyContinuityCorrection ? {annotation: row.annotation, flag: "transition-conflict"} :
+    const merged = legacyContinuityCorrection ? {annotation: row.annotation,
+      flag: oldScopeVeto ? "scene-boundary-old-scope" : "transition-conflict"} :
       mergeTransitionVerdict(row.annotation, applicableTyped, row.discovery, prior, requireSceneBoundary);
     row.effectiveAnnotation = merged.annotation;
     row.transitionFlag = staleBoundary ? "scene-boundary-stale" : merged.flag;
@@ -885,7 +942,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         decisions.set(id, {status: approved.has(id) ? "cancelled" : decision.status});
       }
     }
-    // Each diagnostic sees the typed prefix after controls have finished. It cannot affect the accepted facts.
+    // Each diagnostic sees the typed prefix after controls have finished. Only
+    // the playback compiler can use corroboration from the local-action lane.
     for (const [mode, jobs] of Object.entries(diagnosticJobs)) {
       const {verdictKey, statusKey, factKey} = diagnosticLanes[mode];
       for (let start = 0; start < jobs.length; start += MAX_WHOLE_STORY_REQUESTS) {
@@ -903,24 +961,30 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
       transitionVerificationStatus, boundaryVerification, boundaryVerificationStatus, localActionVerification, localActionVerificationStatus,
-      transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue,
+      transitionFlag, playbackDisposition, prefixVerified, cue, cueGuard, readerCue, localActionApplication,
       primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered, cueContractRepaired,
       cueRecoveryReason, cueRecoveryGuard, cueRecoveryCorrection, continuityGuard, appliedTransitionOverride} = decisions.get(unit.id);
     const {unitId: _target, id: _transportId, ...labels} = annotation ?? {};
     const {unitId: _discoveryTarget, id: _discoveryTransportId, ...provisionalLabels} = discovery ?? {};
+    // A recovery cue can report enacted contact at the active target without
+    // renewing a beat or changing the compiled profile or transition.
+    const recoveryCue = localActionApplication === "recovery-cue" && profile.pattern === "Recovery";
+    const appliedLocalAction = recoveryCue || localActionApplication === "scene-entry-onset" ? localActionApplication : undefined;
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
       pattern: profile.pattern, phase: profile.phase_used, beatId: trace.beat, sceneId: trace.scene,
       ...(profile.verifiedRelease ? {verifiedRelease: true} : {}),
       knownAt: trace.knownAt, evidenceIds: trace.evidence, labelKnownAt: annotation ? unit.id : null,
-      labelEvidenceIds: annotation?.evidenceIds ?? [], trace, playbackDisposition, prefixVerified: Boolean(prefixVerified), cue,
+      labelEvidenceIds: annotation?.evidenceIds ?? [], trace, playbackDisposition, prefixVerified: Boolean(prefixVerified),
+      cue: recoveryCue || cue,
       discovery: discovery ? provisionalLabels : undefined,
       discoveryStatus: discoveryStatus ?? status,
       transitionVerification, transitionVerificationStatus: transitionVerificationStatus ?? (verifyTransitions ? "not-requested" : undefined),
       boundaryVerification, boundaryVerificationStatus: boundaryVerificationStatus ?? (boundaryTargets.has(unit.id) ? status : undefined),
       ...(localActionTargets.has(unit.id) ? {localActionVerification,
         localActionVerificationStatus: localActionVerificationStatus ?? status} : {}),
+      ...(appliedLocalAction ? {localActionApplication: appliedLocalAction} : {}),
       transitionEvidenceIds: projectTypedTransition(transitionVerification)?.evidenceIds,
-      transitionFlag, cueGuard, readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
+      transitionFlag, cueGuard, readerCue: recoveryCue || readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
       cueContractRepaired, cueRecoveryReason, cueRecoveryGuard, cueRecoveryCorrection, continuityGuard,
       appliedTransition: continuityGuard ? "uncertain-continuity" : appliedTransitionOverride ?? (effectiveAnnotation ?? annotation)?.transition,
       verificationStatus: verificationStatus ?? (status === "verification-deferred" ? status : undefined)};
