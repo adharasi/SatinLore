@@ -139,3 +139,85 @@ test("first-entry calls obey approved spans, budget and diagnostic refusal", asy
   await assert.rejects(run({sceneEntryVerificationTargets: [1, 1]}), /pinned transition target/u);
   await assert.rejects(run({sceneEntryVerificationTargets: Array(25).fill(1)}), /Invalid shadow study options/u);
 });
+
+const settingCut = {...typedCut, reason: "setting-shift"};
+const settingEntry = {...firstEntry, reason: "material-setting"};
+const localNone = (unitId, frame) => ({unitId, localAction: {status: "none", frame, action: "none", phase: "quiet",
+  contrast: frame === "current" ? "neutral" : "noncurrent", targetId: null, contextId: null}});
+
+function researchRun({enabled = true, boundary = settingCut, entry = settingEntry, entryResult, focus = neutral,
+  doublePositive = false, blockedIds = [], approved = [0, 1, 2, 3], observed = [], budget} = {}) {
+  const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
+    purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: index.units.filter(({id}) => approved.includes(id)).map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const [id] = request.targetIds;
+    if (request.mode === "scene-entry") return id === 1 && entryResult ? entryResult : result(id, id === 1 ? entry : enteredEarlier);
+    if (request.mode === "local-action") return {status: "ok", usage, facts: [localNone(id, doublePositive ? "noncurrent" : "current")]};
+    if (request.mode === "cue-check") return {status: "ok", usage, facts: [focus(id)]};
+    if (request.mode === "transition") {
+      const later = {...typedCut, previousId: 0, entryId: 2};
+      const local = id === 1 && !doublePositive ? {...neutral(id), status: "verified", transition: "non-romantic-activity-stop",
+        evidenceIds: [id]} : neutral(id);
+      return {status: "ok", usage, facts: [typed(local, id === 1 ? boundary : later)]};
+    }
+    return {status: "ok", usage, facts: request.targetIds.map(id => request.mode === "verify" && id === 1 && doublePositive ?
+      {...neutral(id), status: "verified", fact: "cut", transition: "scene-cut", evidenceIds: [0, 1]} : neutral(id))};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "setting-entry-study", text, grant, now: () => 1, provider, budget, blockedIds,
+    verificationTargets: [1, 2], transitionTargets: [1, 2], verifyTransitions: true, verifyContinuityBoundary: true,
+    maxCueChecks: 2, maxSupportingVerification: 1, sceneEntryVerificationTargets: [1, 2], localActionVerificationTargets: [1, 2],
+    sceneEntryArbitration: enabled});
+}
+
+test("opt-in arbitration restores only a corroborated exact setting cut before later causal controls", async () => {
+  const controlRequests = [], observed = [];
+  const baseline = await researchRun({enabled: false, observed: controlRequests});
+  const candidate = await researchRun({observed});
+  const firstEntryRequest = observed.find(row => row.mode === "scene-entry" && row.targetIds[0] === 1);
+  const nextControl = observed.find(row => row.mode === "verify" && row.targetIds[0] === 2);
+  assert.deepEqual(firstEntryRequest, controlRequests.find(row => row.mode === "scene-entry" && row.targetIds[0] === 1));
+  assert.deepEqual(firstEntryRequest, {mode: "scene-entry", units: sourceUnits.slice(0, 2), targetIds: [1]});
+  assert.ok(observed.indexOf(firstEntryRequest) > observed.findIndex(row => row.mode === "cue-check" && row.targetIds[0] === 1));
+  assert.ok(observed.indexOf(firstEntryRequest) < observed.indexOf(nextControl));
+  assert.equal(baseline.units[1].appliedTransition, "none");
+  assert.equal(candidate.units[1].appliedTransition, "scene-cut");
+  assert.equal(candidate.units[1].pattern, "Reset");
+  assert.equal(candidate.units[1].sceneEntryArbitration, "corroborated-setting-cut");
+  assert.equal(candidate.units[1].cue, false);
+  assert.equal(candidate.units[1].cueRecoveryCorrection, "continuity-cut-veto");
+  assert.equal(candidate.units[1].transitionVerification.transition, "non-romantic-activity-stop");
+  assert.equal(candidate.units[2].transitionFlag, "scene-boundary-stale");
+  assert.equal(candidate.units[2].appliedTransition, "none");
+  assert.equal(candidate.units[2].sceneId, candidate.units[1].sceneId);
+  assert.equal(observed.filter(row => row.mode === "scene-entry").length, 2);
+});
+
+test("setting arbitration leaves uncertainty, disagreement, verified stops, blocked paths and refusals unapplied", async () => {
+  for (const options of [{entry: noEntry}, {entry: uncertain}, {entry: firstEntry}, {entry: {...settingEntry, changeId: 2}},
+    {entry: {...settingEntry, previousId: 1}}, {boundary: typedCut}, {blockedIds: [0]}, {approved: [1, 2, 3]},
+    {focus: id => ({...neutral(id), evidenceIds: [id]})},
+    {focus: id => ({...neutral(id), status: "verified", transition: "hard-stop", fact: "protective", evidenceIds: [id]})}]) {
+    const candidate = await researchRun(options);
+    assert.equal(candidate.units[1].sceneEntryArbitration, undefined);
+    if (candidate.units[1].cueRecovery?.transition === "hard-stop") assert.equal(candidate.units[1].pattern, "Stop");
+  }
+  const observed = [];
+  const refused = await researchRun({entryResult: {status: "refused", usage}, observed});
+  assert.equal(refused.units[1].sceneEntryArbitration, undefined);
+  assert.equal(refused.summary.attempts.find(row => row.mode === "scene-entry" && row.targetIds[0] === 1).status, "provider-refused");
+  assert.equal(observed.some(row => row.mode === "transition" && row.targetIds[0] === 2), false);
+  const deferred = await researchRun({budget: createLunaShadowBudget({maxAttempts: 6})});
+  assert.equal(deferred.units[1].sceneEntryArbitration, undefined);
+  assert.equal(deferred.summary.attempts.find(row => row.mode === "scene-entry" && row.targetIds[0] === 1).status, "budget-deferred");
+});
+
+test("a strict viewpoint conflict stays diagnostic when both legacy setting votes agree", async () => {
+  const candidate = await researchRun({doublePositive: true, entry: noEntry});
+  assert.equal(candidate.units[1].appliedTransition, "scene-cut");
+  assert.equal(candidate.units[1].sceneEntryArbitration, "viewpoint-conflict");
+  const control = await researchRun({doublePositive: true, entry: noEntry, boundary: typedCut});
+  assert.equal(control.units[1].appliedTransition, "scene-cut");
+  assert.equal(control.units[1].sceneEntryArbitration, undefined);
+});

@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v22";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v23";
 const controlRubricVersion = "nocturne-luna-protocol-v17";
 const boundaryRubricVersion = "nocturne-luna-protocol-v18";
 const localActionRubricVersion = "nocturne-luna-protocol-v19";
@@ -42,12 +42,13 @@ export const LUNA_PROTOCOL_TARGET_FAILURES = Object.freeze([
   "scene-entry-shape", "scene-entry-evidence",
 ]);
 const canonicalNoEvent = "canonical-no-event";
+const canonicalUnresolvedContinuity = "canonical-unresolved-continuity";
 const canonicalLocalNoAction = "canonical-local-no-action";
 const startContextAnchor = "start-context-anchor";
 const transitionContextAnchor = "transition-context-anchor";
 const protectiveSceneBoundary = "protective-scene-boundary-unresolved";
 export const LUNA_PROTOCOL_TARGET_NORMALIZATIONS = Object.freeze([
-  canonicalNoEvent, canonicalLocalNoAction, startContextAnchor, transitionContextAnchor, protectiveSceneBoundary,
+  canonicalNoEvent, canonicalUnresolvedContinuity, canonicalLocalNoAction, startContextAnchor, transitionContextAnchor, protectiveSceneBoundary,
 ]);
 
 const url = "https://api.openai.com/v1/responses";
@@ -417,6 +418,11 @@ function transitionStatusEffectDetail(row) {
 
 function canonicalTransition(row, raw) {
   const {status, transition, fact, frame, unitId, scopeId, evidenceIds, priorAnchor} = row;
+  // An unresolved typed verdict can echo the continuity event being considered.
+  // Its own target ID supplies no verified action, scope or boundary.
+  if (status === "uncertain" && frame === "current" && transition === "uncertain-continuity" && fact === "neutralize" &&
+      scopeId === null && priorAnchor === null && evidenceIds.length === 1 && evidenceIds[0] === unitId &&
+      row.sceneBoundary.status === "none") return {...row, transition: "unknown", fact: "none", evidenceIds: []};
   // Non-linking events can keep a cited in-prefix context unit in evidence.
   // A repair removes only its redundant link field, preserving the event and effect.
   if (status === "verified" && contextualTransitions.has(transition) && !anchorFacts.has(fact) && frame !== "uncertain" &&
@@ -547,6 +553,9 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
         } else {
           row = canonicalTransition(row, raw);
           reason = lunaProtocolTransitionViolation(row);
+          if (row !== submitted && submitted.transition === "uncertain-continuity" && row.transition === "unknown") {
+            normalization = canonicalUnresolvedContinuity;
+          }
         }
       } else reason = lunaProtocolCueViolation(row, mode);
     }

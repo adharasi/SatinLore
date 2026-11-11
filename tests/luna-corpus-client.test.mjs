@@ -118,10 +118,26 @@ function corpusPage({storage = new Map(), onShard = async body => Response.json(
   };
 }
 
+test("selecting all reviewed excerpts is local and each excerpt can still be removed before sealing", async () => {
+  const page = corpusPage();
+  await page.open();
+  await page.get("selectall").click();
+  assert.equal(page.row(0).children[2].children[0].checked, true);
+  const secondSelection = page.row(1).children[2].children[0];
+  assert.equal(secondSelection.checked, true);
+  assert.deepEqual(page.calls, []);
+  secondSelection.checked = false;
+  await secondSelection.dispatch("change");
+  await page.get("seal").click();
+  assert.deepEqual(page.calls, [{path: base + "/approve", body: {runId,
+    clips: [{id: first.id, digest: sha256(JSON.stringify(first))}], reviewConfirmed: true}}]);
+});
+
 test("the corpus page previews exact context locally and seals only fingerprints before dispatching selected prose", async () => {
   const page = corpusPage();
   await page.open();
   assert.equal(page.get("seal").disabled, true);
+  assert.equal(page.get("selectall").disabled, false);
   assert.equal(page.get("run").disabled, true);
   assert.equal(page.get("save").disabled, true);
   assert.equal(page.row(0).children[1].textContent, "Context 9\nThe café opened early.\n\nTarget 10\nSam switched on the lamps.");
@@ -137,6 +153,7 @@ test("the corpus page previews exact context locally and seals only fingerprints
   assert.equal(page.get("seal").disabled, true);
   assert.equal(page.get("run").disabled, false);
   assert.equal(page.row(1).children[2].children[0].disabled, true);
+  assert.equal(page.get("selectall").disabled, true);
 
   await page.get("run").click();
   assert.deepEqual(page.calls[1], {path: base + "/shard", body: {runId, clip: first}});

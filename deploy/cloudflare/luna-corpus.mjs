@@ -168,7 +168,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       verificationTargets: targets, verifyTransitions: true, maxTransitionVerification: targets.length,
       transitionTargets: targets, localActionVerificationTargets: targets, sceneEntryVerificationTargets: targets,
       maxCueChecks, maxSupportingVerification, maxPrimaryAnchorRepairs: MAX_PRIMARY_ANCHOR_REPAIRS,
-      verifyContinuityBoundary: true, releaseUnusedRestartReservation: true});
+      verifyContinuityBoundary: true, releaseUnusedRestartReservation: true, sceneEntryArbitration: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

@@ -8,7 +8,7 @@ export const LUNA_CORPUS_PAGE = `<!doctype html><html lang="en"><meta charset="u
 <p>Sealing sends clip fingerprints. Running sends the selected excerpts to the private Worker and OpenAI. One sealed run has a $3 estimated spend cap. Checkpoints include labels and evidence IDs for offline replay.</p>
 <p><label>Review packet <input id="packet" type="file" accept=".json,application/json"></label></p>
 <p id="status" role="status" aria-live="polite">Load a review packet to begin.</p>
-<p><button id="seal" type="button" disabled>Seal selected excerpts</button> <button id="run" type="button" disabled>Run sealed excerpts</button>
+<p><button id="selectall" type="button" disabled>Select all reviewed excerpts</button> <button id="seal" type="button" disabled>Seal selected excerpts</button> <button id="run" type="button" disabled>Run sealed excerpts</button>
 <button id="pause" type="button" disabled>Pause after current clip</button> <button id="save" type="button" disabled>Download results checkpoint</button></p>
 <section id="review" aria-label="Proposed excerpts"></section></main>
 <script type="module" src="/api/scene-analysis/luna-corpus/client.mjs"></script></html>`;
@@ -17,6 +17,7 @@ export const LUNA_CORPUS_CLIENT = String.raw`
 const base = "/api/scene-analysis/luna-corpus";
 const byId = id => document.getElementById(id);
 const packetInput = byId("packet"), message = byId("status"), review = byId("review");
+const selectAll = byId("selectall");
 const seal = byId("seal"), run = byId("run"), pause = byId("pause"), save = byId("save");
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const digest = /^[a-f0-9]{64}$/u;
@@ -63,6 +64,7 @@ function key() { return "satinlore:luna-corpus:v1:" + packet.runId; }
 
 function updateControls() {
   packetInput.disabled = busy;
+  selectAll.disabled = busy || !packet || Boolean(state) || [...selections.values()].every(input => input.checked);
   seal.disabled = busy || !packet || Boolean(state) || ![...selections.values()].some(input => input.checked);
   run.disabled = busy || !state || state.haltReason || state.expiresAt <= Date.now() || !state.approved.some(row => !done.has(state.outcomes[row.id]));
   pause.disabled = !busy || !state || pausing;
@@ -152,6 +154,12 @@ packetInput.addEventListener("change", async () => {
     if (packet) render();
     else updateControls();
   }
+});
+
+selectAll.addEventListener("click", () => {
+  if (!packet || busy || state) return;
+  for (const input of selections.values()) input.checked = true;
+  updateControls();
 });
 
 seal.addEventListener("click", async () => {

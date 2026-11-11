@@ -555,6 +555,26 @@ test("canonicalizes only benign no-event metadata after validating the response 
   }
 });
 
+test("the exact unresolved continuity echo keeps uncertainty and supplies no event evidence", async () => {
+  const row = transitionRow("uncertain-continuity", "neutralize", {status: "uncertain"});
+  const run = extra => provider(async () => response([{...row, ...extra}]))(transitionRequest);
+  const reason = "canonical-unresolved-continuity";
+  assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));
+  assert.deepEqual(await run(), {...success([normalizedTransitionRow({...row, transition: "unknown", fact: "none", evidenceIds: []})]),
+    targetNormalizations: [{unitId: 11, reason}]});
+  const verified = {...row, status: "verified"};
+  assert.deepEqual(await run({status: "verified"}), success([normalizedTransitionRow(verified)]));
+
+  for (const [extra, reason] of [
+    [{status: "abstain"}, "status-effect"], [{frame: "reported"}, "status-effect"],
+    [{evidenceIds: [10, 11]}, "status-effect"], [{evidenceIds: [11, 12]}, "evidence-id"],
+    [{scopeId: 10}, "status-effect"], [{priorAnchor: 10}, "prior-anchor"],
+    [{transition: "hard-stop", fact: "protective"}, "status-effect"],
+    [{sceneBoundary: {status: "cut", reason: "setting-shift", previousId: 10, entryId: 11}}, "status-effect"],
+    [{sceneBoundary: {status: "none", reason: "none", previousId: 10, entryId: null}}, "scene-boundary-evidence"],
+  ]) assert.deepEqual(await run(extra), rejectedTransition({...row, ...extra}, reason));
+});
+
 test("retains verified starts and their evidence when an in-prefix context ID is also named as an anchor", async () => {
   const reason = "start-context-anchor";
   assert.ok(LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(reason));

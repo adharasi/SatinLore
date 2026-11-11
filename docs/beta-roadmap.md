@@ -209,6 +209,8 @@ V21 uses exact, independently corroborated scope evidence to advance a buildup a
 
 V22 adds a bounded founder recheck for a rejected primary anchor, releases stale optional check reservations and clarifies enacted scene-entry evidence. It also corrects the profile when a verified continuation belongs to the same established onset. Fixed-response replay corrects `a20-18:15` in both recorded runs. Compare the original matched and repeat panels with the V21 receipts, and compare short versus previously reviewed wider inputs on the same target. Keep compiler-only replay and live response variation separate. [V22 evaluation](nocturne-beat-protocol-shadow.md#v22-anchor-recovery-scene-entry-and-context-experiments)
 
+V23 evaluates corroborated setting cuts in founder shadow. The 41-work evaluation separates full local compiler and recognition passes from live results on exact previously approved clips. Edition pins and frozen anchors remain in the denominators when an excerpt is unavailable. [V23 evaluation](nocturne-beat-protocol-shadow.md#v23-corroborated-setting-cuts-and-the-41-work-evaluation)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
