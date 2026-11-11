@@ -514,3 +514,7 @@ A disputed supporting connector can use an unused cue check to establish continu
 An independently verified release can select a target-local Taper when an effect-free typed interruption has removed an otherwise corroborated decay. Require the exact adjacent verified support and current release. This path uses no additional provider request and creates no beat or carry. The separate interruption release path still requires an existing open beat.
 
 Measure provider recognition, applied event, exact phase, cue and waveform independently. Replay accepted answers through both compilers when requests and evidence match. Keep newly required answers visible and use labeled counterfactuals for conditional behavior. Match protected controls, previously reviewed short and wider arms, and true setting shifts before assessing any wider adoption.
+
+## V29 setting disagreement after focused verification
+
+The setting check also applies when a strictly quiet discovery contrasts with an exact primary and typed setting cut, the independent entry reports viewpoint-only, and the focused same-episode response repeats the exact cut. Ground the earlier and current situation before the disputed outcome becomes context for the next target. A confirmed continuing situation preserves continuity. A verified change keeps the cut. Missing proof clears carry as unresolved continuity. Both setting paths share one optional request per clip, with the same reviewed prefix and the same budget.

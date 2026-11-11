@@ -261,6 +261,18 @@ function hasViewpointConflict(row, id) {
     entry?.status === "none" && entry.reason === "viewpoint-only" && action?.status === "none" && action.frame === "noncurrent";
 }
 
+function focusedSettingConflict(row, id) {
+  if (!sameEpisodeCutCandidate(row, id) || !strictQuietNegative(row.discovery) ||
+      row.transitionVerification.sceneBoundary.reason !== "setting-shift" || row.cueRecoveryReason !== "same-episode-boundary" ||
+      row.sceneEntryVerification?.sceneEntry.reason !== "viewpoint-only") return false;
+  const {previousId} = row.transitionVerification.sceneBoundary;
+  const focused = row.cueRecovery;
+  const exactPair = fact => fact.evidenceIds.length === 2 && fact.evidenceIds[0] === previousId && fact.evidenceIds[1] === id;
+  return exactPair(row.primaryPrefix) && focused?.status === "verified" && focused.frame === "current" &&
+    focused.narrativePhase === "quiet" && focused.action === "none" && focused.transition === "scene-cut" && focused.fact === "cut" &&
+    focused.priorAnchor === null && exactPair(focused);
+}
+
 function followsDisputedStart(decisions, blocked, id, runId, primary, typed) {
   const prior = decisions.get(id - 1);
   if (!freshEnactedStart(primary, id) || blocked.has(id - 1) || prior?.window?.runId !== runId) return false;
@@ -1030,6 +1042,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   }
   const telemetry = [], supportingIds = new Set(), pendingPinned = new Map();
   let cueChecksStarted = 0, primaryAnchorRepairsStarted = 0, sameEpisodeCheckStarted = false;
+  let settingSituationStarted = false;
   let lastPotentialRestartClosure = -1, singleVerificationRun = false;
   const refusedRuns = new Set();
   const refusedDiagnosticRuns = new Map([...Object.keys(diagnosticLanes), "continuation-repair", "interruption-release", "sustain-connector"]
@@ -1362,6 +1375,44 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       row[statusKey] = verdict?.[factKey].status ?? status;
     }
   }
+  function comparisonPathEligible(job, id, earlierId, firstId, causal, closedPredecessor = null) {
+    return earlierId >= causal.sceneBoundaryId && earlierId >= firstId && !index.units.slice(earlierId, id).some(unit => {
+      const prior = decisions.get(unit.id);
+      const effect = prior?.effectiveAnnotation ?? prior?.annotation;
+      // The immediately preceding neutralization still closes playback. Its
+      // exact current unit can supply the comparison text for a new scene.
+      const quietPredecessor = unit.id === id - 1 && closedPredecessor === unit.id && exactCurrentCue(effect, unit.id) &&
+        effect.transition === "uncertain-continuity" && effect.fact === "neutralize" && effect.narrativePhase === "quiet" &&
+        effect.action === "none" && effect.priorAnchor === null && effect.evidenceIds.length === 1;
+      return blocked.has(unit.id) || unit.structuralBoundary || prior?.window?.runId !== job.runId ||
+        (!quietPredecessor && (recoveryBarriers.has(effect?.transition) || recoveryBlockingFacts.has(effect?.fact)));
+    });
+  }
+  async function adjudicateSettingSituation(job, row, id, previousId, pathEligible) {
+    if (settingSituationStarted) row.sceneSituationVerificationStatus = "confirmation-limit";
+    else {
+      settingSituationStarted = true;
+      await applyDiagnosticJobs("scene-situation", [{...job, id: `scene-situation:${id}`}]);
+    }
+    const situation = row.sceneSituationVerification?.sceneSituation;
+    const grounded = situation?.earlierId != null && situation.earlierId <= previousId && pathEligible(situation.earlierId);
+    if (grounded && situation.status === "changed") {
+      row.independentBoundaryStatus = "corroborated";
+      return true;
+    }
+    const quiet = strictQuietNegative(row.annotation) ? row.annotation : row.discovery;
+    if (grounded && situation.status === "same") {
+      row.effectiveAnnotation = quiet;
+      row.independentBoundaryStatus = "setting-continuity";
+      row.transitionFlag = "scene-boundary-same-setting";
+    } else {
+      row.effectiveAnnotation = {...quiet, status: "verified", transition: "uncertain-continuity",
+        fact: "neutralize", evidenceIds: [previousId, id]};
+      row.independentBoundaryStatus = "setting-context-unresolved";
+      row.transitionFlag = "scene-boundary-setting-context-unresolved";
+    }
+    return false;
+  }
   async function confirmIndependentEntry(job, row, id) {
     const firstId = inputFor(job).units[0].id;
     if (firstId === id) {
@@ -1381,18 +1432,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         "confirmation-deferred" : "first-entry-unproved";
       return false;
     }
-    const pathEligible = earlierId => earlierId >= causal.sceneBoundaryId && earlierId >= firstId &&
-      !index.units.slice(earlierId, id).some(unit => {
-        const prior = decisions.get(unit.id);
-        const effect = prior?.effectiveAnnotation ?? prior?.annotation;
-        // The immediately preceding neutralization still closes playback. Its
-        // exact current unit can supply the comparison text for a new scene.
-        const quietPredecessor = unit.id === id - 1 && entry.previousId === unit.id && exactCurrentCue(effect, unit.id) &&
-          effect.transition === "uncertain-continuity" && effect.fact === "neutralize" && effect.narrativePhase === "quiet" &&
-          effect.action === "none" && effect.priorAnchor === null && effect.evidenceIds.length === 1;
-        return blocked.has(unit.id) || unit.structuralBoundary || prior?.window?.runId !== job.runId ||
-          (!quietPredecessor && (recoveryBarriers.has(effect?.transition) || recoveryBlockingFacts.has(effect?.fact)));
-      });
+    const pathEligible = earlierId => comparisonPathEligible(job, id, earlierId, firstId, causal, entry.previousId);
     if (!pathEligible(entry.previousId)) {
       row.independentBoundaryStatus = "path-ineligible";
       return false;
@@ -1406,23 +1446,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       const {reason, previousId, entryId} = boundary;
       // Two boundary votes can share the same unsupported inference about place.
       if (verifySettingSituation && reason === "setting-shift" && row.transitionVerification.sceneBoundary.status === "uncertain" &&
-          strictQuietNegative(row.primaryPrefix) && strictQuietNegative(row.discovery)) {
-        await applyDiagnosticJobs("scene-situation", [{...job, id: `scene-situation:${id}`}]);
-        const situation = row.sceneSituationVerification?.sceneSituation;
-        const grounded = situation?.earlierId != null && situation.earlierId <= previousId && pathEligible(situation.earlierId);
-        if (grounded && situation.status === "same") {
-          row.independentBoundaryStatus = "setting-continuity";
-          row.transitionFlag = "scene-boundary-same-setting";
-          return true;
-        }
-        if (!grounded || situation.status !== "changed") {
-          row.effectiveAnnotation = {...row.annotation, status: "verified", transition: "uncertain-continuity",
-            fact: "neutralize", evidenceIds: [previousId, entryId]};
-          row.independentBoundaryStatus = "setting-context-unresolved";
-          row.transitionFlag = "scene-boundary-setting-context-unresolved";
-          return true;
-        }
-      }
+          strictQuietNegative(row.primaryPrefix) && strictQuietNegative(row.discovery) &&
+          !await adjudicateSettingSituation(job, row, id, previousId, pathEligible)) return true;
       const confirmed = {...row.transitionVerification, sceneBoundary: {status: "cut", reason, previousId, entryId}};
       const merged = mergeTransitionVerdict(row.annotation, confirmed, row.discovery,
         decisions.get(id - 1)?.effectiveAnnotation, requireSceneBoundary);
@@ -1542,6 +1567,16 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           }
           await applyPrefixJobs([check]);
           const reviewed = decisions.get(id);
+          if (verifySettingSituation && !invalidated(entryJob) && focusedSettingConflict(reviewed, id)) {
+            const {previousId} = reviewed.transitionVerification.sceneBoundary;
+            const firstId = inputFor(entryJob).units[0].id;
+            const causal = attest({runId: entryJob.runId, firstId, target: id});
+            const pathEligible = earlierId => comparisonPathEligible(entryJob, id, earlierId, firstId, causal);
+            if (pathEligible(previousId) && !causal.restartBoundary &&
+                [reviewed.primaryPrefix, reviewed.cueRecovery].every(fact => !causal.protectedScopes.has(fact.scopeId))) {
+              await adjudicateSettingSituation(entryJob, reviewed, id, previousId, pathEligible);
+            }
+          }
           if (reviewed.discovery?.status === "candidate" && reviewed.cueRecoveryReason === "same-episode-boundary" &&
               reviewed.effectiveAnnotation?.transition === "scene-cut") reviewed.sceneEntryArbitration = "viewpoint-conflict";
         } else await applyPrefixJobs(jobs);

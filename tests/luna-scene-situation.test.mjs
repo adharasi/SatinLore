@@ -136,3 +136,107 @@ test("setting grounding leaves typed material cuts and preceding protection in f
   assert.equal(protectedRun.run.units[target].readerCue, false);
   assert.ok(!protectedRun.requests.some(({mode}) => mode === "scene-situation"));
 });
+
+const viewpointOnly = {status: "none", reason: "viewpoint-only", previousId: null, changeId: null, entryId: null};
+const exactCut = {...neutral(target), status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [1, target]};
+
+async function focusedSettingRun({targetText = viewpoint, situation = same, entry = viewpointOnly, proof = exactCut,
+  verifySettingSituation = true, protectedPrior = false, followingDispute = false, prefixUnits = 3} = {}) {
+  const nextId = target + 1;
+  const text = `${earlierText} ${targetText} They waited for the signal.`;
+  const index = buildWholeStoryIndex(text);
+  const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
+    purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: index.units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const requests = [];
+  const provider = Object.assign(async request => {
+    requests.push(request);
+    const [id] = request.targetIds;
+    if (request.mode === "scene-entry") return {status: "ok", usage, facts: [{unitId: id, sceneEntry: id === target ? entry :
+      {...firstEntry, previousId: target, entryId: id, changeId: id}}]};
+    if (request.mode === "scene-boundary") return {status: "ok", usage, facts: [{unitId: id,
+      sceneBoundary: {...boundary, previousId: target, entryId: id, changeId: id}}]};
+    if (request.mode === "scene-situation") return {status: "ok", usage, facts: [{unitId: id, sceneSituation: situation}]};
+    if (request.mode === "cue-check") return {status: "ok", usage, facts: [proof]};
+    if (request.mode === "local-action") return {status: "ok", usage, facts: [{unitId: id, localAction: {status: "none",
+      frame: "noncurrent", action: "none", phase: "quiet", contrast: "noncurrent", targetId: null, contextId: null}}]};
+    return {status: "ok", usage, facts: request.targetIds.map(unitId => {
+      const cue = neutral(unitId);
+      if (request.mode === "transition") return {...cue, depiction: "unknown", narrativePhase: "unknown", action: "unknown",
+        sceneBoundary: unitId === target ? cut : unresolvedBoundary};
+      if (request.mode === "discovery") return cue;
+      if (unitId === target) return exactCut;
+      if (unitId === 0) return {...cue, status: "verified", transition: protectedPrior ? "hard-stop" : "onset",
+        fact: protectedPrior ? "protective" : "none", depiction: "romantic", narrativePhase: protectedPrior ? "quiet" : "onset",
+        action: protectedPrior ? "none" : "contact", scopeId: 0, evidenceIds: [0]};
+      return cue;
+    })};
+  }, {sceneBoundaryProtocol: true});
+  const transitions = followingDispute ? [target, nextId] : [target];
+  const run = await runLunaProtocolShadow({id: "focused-setting-study", text, grant, now: () => 1, provider, prefixUnits,
+    verificationTargets: [0, 1, target, nextId], transitionTargets: transitions, verifyTransitions: true,
+    sceneEntryVerificationTargets: transitions, localActionVerificationTargets: [target], sceneEntryArbitration: true,
+    boundaryEntryConfirmation: true, verifySettingSituation, sameEpisodeArbitration: true, maxCueChecks: 1, negativeStride: 0});
+  return {run, requests};
+}
+
+test("a focused repeated setting cut is adjudicated before the following target receives context", async () => {
+  const legacy = await focusedSettingRun({verifySettingSituation: false});
+  const continuity = await focusedSettingRun();
+  const trueMove = await focusedSettingRun({targetText: relocation, situation: {...changed, earlierId: 1}});
+  const unresolved = await focusedSettingRun({situation: uncertain});
+  assert.equal(legacy.run.units[target].pattern, "Reset");
+  for (const {requests} of [continuity, trueMove, unresolved]) {
+    const entryIndex = requests.findIndex(({mode}) => mode === "scene-entry");
+    const focusedIndex = requests.findIndex(({focus}) => focus === "episode-boundary");
+    const situationIndex = requests.findIndex(({mode}) => mode === "scene-situation");
+    const successorIndex = requests.findIndex(({mode, targetIds}) => mode === "verify" && targetIds[0] === target + 1);
+    assert.ok(entryIndex < focusedIndex && focusedIndex < situationIndex && situationIndex < successorIndex);
+    assert.deepEqual(requests[situationIndex], {...requests[entryIndex], mode: "scene-situation"});
+    assert.ok(!requests.some(({mode}) => mode === "scene-boundary"));
+    assert.equal(requests.filter(({mode}) => mode === "local-action").length, 1);
+  }
+  const held = continuity.run.units[target];
+  assert.equal(held.appliedTransition, "none");
+  assert.equal(held.independentBoundaryStatus, "setting-continuity");
+  assert.equal(held.readerCue, false);
+  assert.equal(held.sceneId, continuity.run.units[1].sceneId);
+  const entered = trueMove.run.units[target];
+  assert.equal(entered.appliedTransition, "scene-cut");
+  assert.equal(entered.pattern, "Reset");
+  assert.equal(entered.independentBoundaryStatus, "corroborated");
+  assert.equal(entered.sceneEntryArbitration, "viewpoint-conflict");
+  const pause = unresolved.run.units[target];
+  assert.equal(pause.pattern, "Baseline");
+  assert.equal(pause.appliedTransition, "uncertain-continuity");
+  assert.equal(pause.beatId, null);
+  assert.equal(pause.sceneId, unresolved.run.units[1].sceneId);
+  assert.equal(pause.readerCue, false);
+  const successor = ({requests}) => requests.find(({mode, targetIds}) => mode === "verify" && targetIds[0] === target + 1);
+  assert.ok(successor(continuity).attested?.some(({unitId}) => unitId === 0));
+  assert.equal(successor(legacy).attested, undefined);
+  assert.equal(successor(unresolved).attested, undefined);
+});
+
+test("two eligible routes share one setting proof and later unproved carry is cleared", async () => {
+  const {run, requests} = await focusedSettingRun({followingDispute: true});
+  assert.equal(requests.filter(({mode}) => mode === "scene-situation").length, 1);
+  assert.equal(run.units[target].independentBoundaryStatus, "setting-continuity");
+  assert.equal(run.units[target + 1].sceneSituationVerificationStatus, "confirmation-limit");
+  assert.equal(run.units[target + 1].appliedTransition, "uncertain-continuity");
+  assert.equal(run.units[target + 1].pattern, "Baseline");
+});
+
+test("legacy adjudication preserves stops, already verified entry and inexact focused cut evidence", async () => {
+  for (const options of [{protectedPrior: true}, {entry: firstEntry}, {proof: {...exactCut, evidenceIds: [0, target]}}]) {
+    const {run, requests} = await focusedSettingRun(options);
+    assert.ok(!requests.some(({mode}) => mode === "scene-situation"));
+    assert.equal(run.units[target].pattern, "Reset");
+    assert.equal(run.units[target].readerCue, false);
+    if (options.protectedPrior) assert.equal(run.units[0].pattern, "Stop");
+  }
+  const clipped = await focusedSettingRun({prefixUnits: 2, situation: changed});
+  assert.equal(clipped.run.units[target].sceneSituationVerificationStatus, "invalid-response");
+  assert.equal(clipped.run.units[target].pattern, "Baseline");
+  assert.equal(clipped.run.units[target].readerCue, false);
+});
