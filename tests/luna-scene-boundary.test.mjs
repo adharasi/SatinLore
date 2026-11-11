@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
+import {createLunaShadowBudget, runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
 import {projectTypedTransition, startsAtSceneEntry} from "../scripts/lib/luna-transition-verification.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "../scripts/lib/whole-story-context-planning.mjs";
 
@@ -20,11 +20,14 @@ const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown
   action: "unknown", sceneBoundary});
 
 async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, focusAnswer, prefixUnits = 24,
-  boundaryVerificationTargets, boundaryAnswer, priorCue = onset(1), priorTyped = typed(priorCue), observed = []} = {}) {
+  boundaryVerificationTargets, boundaryAnswer, localActionVerificationTargets, localActionAnswer, transitionAnswer, budget,
+  priorCue = onset(1), priorTyped = typed(priorCue), observed = []} = {}) {
   const provider = Object.assign(async request => {
     observed.push(request);
     const {mode, targetIds} = request;
     if (mode === "scene-boundary") return boundaryAnswer(targetIds[0]);
+    if (mode === "local-action") return localActionAnswer(targetIds[0]);
+    if (mode === "transition" && targetIds[0] === 2 && transitionAnswer) return transitionAnswer;
     if (mode === "transition" && targetIds[0] === 2 && boundary === null) return {status: "invalid-response"};
     return {status: "ok", usage: {inputTokens: 120, outputTokens: 40}, facts: targetIds.map(id => {
       const local = id === 1 ? priorCue : id === 2 ? cue(id) : neutral(id);
@@ -37,9 +40,10 @@ async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoun
       return local;
     })};
   }, {sceneBoundaryProtocol: true});
-  return runLunaProtocolShadow({id: "scene-boundary", text, grant, now: () => 1, provider, prefixUnits,
+  return runLunaProtocolShadow({id: "scene-boundary", text, grant, now: () => 1, provider, prefixUnits, budget,
     verificationTargets: [1, 2, 3], transitionTargets: [1, 2, 3], verifyTransitions: true, negativeStride: 0,
-    verifyContinuityBoundary: Boolean(focusAnswer), maxCueChecks: Number(Boolean(focusAnswer)), boundaryVerificationTargets});
+    verifyContinuityBoundary: Boolean(focusAnswer), maxCueChecks: Number(Boolean(focusAnswer)),
+    boundaryVerificationTargets, localActionVerificationTargets});
 }
 
 test("does not apply a primary target-only cut without independent proof", async () => {
@@ -213,4 +217,64 @@ test("scene-only refusal and invalid evidence stay in the diagnostic lane", asyn
   assert.deepEqual(badProof.summary.attempts.find(row => row.mode === "scene-boundary").rejectedFacts,
     [{id: 2, reason: "scene-boundary-evidence"}]);
   await assert.rejects(study({boundaryVerificationTargets: [0]}), /pinned transition target/u);
+});
+
+const localAction = {status: "verified", frame: "current", action: "contact", phase: "onset", contrast: "enacted",
+  targetId: 2, contextId: 1};
+const localActionAnswer = unitId => ({status: "ok", usage: {inputTokens: 1, outputTokens: 1}, facts: [{unitId, localAction}]});
+
+test("local action is blinded, after controls, and cannot change playback", async () => {
+  const observed = [], baselineRequests = [];
+  const baseline = await study({observed: baselineRequests});
+  const measured = await study({observed, localActionVerificationTargets: [2], localActionAnswer});
+  const sent = observed.at(-1);
+  const matched = baselineRequests.find(request => request.mode === "transition" && request.targetIds[0] === 2);
+  assert.deepEqual(observed.slice(0, -1), baselineRequests);
+  assert.deepEqual(sent, {mode: "local-action", units: matched.units, targetIds: matched.targetIds});
+  const {localActionVerification, localActionVerificationStatus, ...control} = measured.units[2];
+  assert.deepEqual(control, baseline.units[2]);
+  assert.deepEqual(localActionVerification, {id: 2, unitId: 2, localAction});
+  assert.equal(localActionVerificationStatus, "verified");
+  assert.equal(measured.units[2].appliedTransition, "scene-cut");
+  const attempt = measured.summary.attempts.find(row => row.mode === "local-action");
+  assert.deepEqual({targetIds: attempt.targetIds, contextIds: attempt.contextIds, attestedIds: attempt.attestedIds, status: attempt.status},
+    {targetIds: [2], contextIds: [0, 1], attestedIds: [], status: "returned"});
+
+  const exhausted = await study({budget: createLunaShadowBudget({maxAttempts: baselineRequests.length}),
+    localActionVerificationTargets: [2], localActionAnswer});
+  assert.equal(exhausted.units[2].localActionVerificationStatus, "budget-deferred");
+  assert.equal(exhausted.units[2].appliedTransition, baseline.units[2].appliedTransition);
+  assert.equal(exhausted.summary.attempts.find(row => row.mode === "local-action").attempted, undefined);
+  await assert.rejects(study({localActionVerificationTargets: [0]}), /pinned transition target/u);
+  await assert.rejects(study({localActionVerificationTargets: [2, 2]}), /unique pinned transition target/u);
+});
+
+test("local action rejects invalid evidence and isolates refusal from hard stops", async () => {
+  const stop = typed({...primaryCut(2), transition: "hard-stop", fact: "protective"});
+  const {units, summary} = await study({boundary: stop, localActionVerificationTargets: [2, 3],
+    localActionAnswer: () => ({status: "refused", usage: {inputTokens: 1, outputTokens: 1}})});
+  assert.equal(units[2].appliedTransition, "hard-stop");
+  assert.equal(units[2].pattern, "Stop");
+  assert.equal(units[2].localActionVerificationStatus, "provider-refused");
+  assert.equal(units[3].localActionVerificationStatus, "refusal-dependent");
+  assert.equal(summary.attempts.filter(row => row.mode === "local-action" && row.attempted).length, 1);
+
+  const invalid = await study({prefixUnits: 2, localActionVerificationTargets: [2],
+    localActionAnswer: unitId => ({status: "ok", facts: [{unitId, localAction: {...localAction, contextId: 0}}]})});
+  assert.equal(invalid.units[2].localActionVerificationStatus, "invalid-response");
+  assert.deepEqual(invalid.summary.attempts.find(row => row.mode === "local-action").rejectedFacts,
+    [{id: 2, reason: "local-action-evidence"}]);
+});
+
+test("typed rejection carries only allowlisted status-effect diagnostics", async () => {
+  const detail = {status: "uncertain", frame: "current", transition: "ease", fact: "ease", hasScope: true,
+    hasPriorAnchor: false, citesTarget: true, evidenceCount: 1};
+  for (const [submitted, expected] of [[detail, detail], [{...detail, comment: text}, undefined],
+    [{...detail, status: text}, undefined]]) {
+    const transitionAnswer = {status: "invalid-response", targetFailures: [{unitId: 2, reason: "status-effect", detail: submitted}]};
+    const {summary} = await study({transitionAnswer});
+    const attempt = summary.attempts.find(row => row.mode === "transition" && row.targetIds[0] === 2);
+    assert.deepEqual(attempt.rejectedFacts, [{id: 2, reason: "status-effect", ...(expected ? {detail: expected} : {})}]);
+    assert.equal(JSON.stringify(attempt).includes(text), false);
+  }
 });

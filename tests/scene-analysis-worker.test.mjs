@@ -134,9 +134,9 @@ function neutralProtocolUpstream(_url, options) {
   const body = JSON.parse(options.body);
   const { targetIds, units } = JSON.parse(body.input);
   const transitionOnly = body.text.format.name === "nocturne_luna_transition_v2";
-  const boundaryOnly = body.text.format.name === "nocturne_luna_scene_boundary_v1";
-  const facts = targetIds.map(unitId => boundaryOnly ? {unitId, sceneBoundary: {status: "cut", reason: "setting-shift",
-    previousId: units[0].id, entryId: unitId, changeId: unitId, contrast: "material-change"}} :
+  const localActionOnly = body.text.format.name === "nocturne_luna_local_action_v1";
+  const facts = targetIds.map(unitId => localActionOnly ? {unitId, localAction: {status: "verified", frame: "current",
+    action: "anticipation", phase: "build", contrast: "charged-reaction", targetId: unitId, contextId: units[0].id}} :
     ({ unitId, status: "neutral", frame: "current", transition: "none",
     fact: "none", scopeId: null, priorAnchor: null, evidenceIds: [],
     ...(transitionOnly ? {sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null}} :
@@ -935,13 +935,18 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.equal(result.units[1].transitionVerification.unitId, 33);
   assert.deepEqual(result.units[1].transitionVerification.sceneBoundary,
     {status: "none", reason: "none", previousId: null, entryId: null});
-  assert.equal(result.units[1].boundaryVerification.unitId, 33);
-  assert.deepEqual(result.units[1].boundaryVerification.sceneBoundary,
-    {status: "cut", reason: "setting-shift", previousId: 32, entryId: 33, changeId: 33, contrast: "material-change"});
+  assert.equal(result.units[1].localActionVerification.unitId, 33);
+  assert.equal(result.units[1].localActionVerificationStatus, "verified");
+  assert.deepEqual(result.units[1].localActionVerification.localAction,
+    {status: "verified", frame: "current", action: "anticipation", phase: "build", contrast: "charged-reaction", targetId: 33, contextId: 32});
   assert.equal(result.units[1].appliedTransition, "none");
-  const isolated = f.calls.map(({options}) => JSON.parse(options.body))
-    .find(call => call.text.format.name === "nocturne_luna_scene_boundary_v1");
-  assert.deepEqual(Object.keys(JSON.parse(isolated.input)).sort(), ["targetIds", "units"]);
+  const bodies = f.calls.map(({options}) => JSON.parse(options.body));
+  const isolated = bodies.find(call => call.text.format.name === "nocturne_luna_local_action_v1");
+  const typed = bodies.find(call => call.text.format.name === "nocturne_luna_transition_v2");
+  const isolatedInput = JSON.parse(isolated.input);
+  assert.deepEqual(Object.keys(isolatedInput).sort(), ["targetIds", "units"]);
+  assert.deepEqual(isolatedInput.units, JSON.parse(typed.input).units);
+  assert.equal(bodies.some(call => call.text.format.name === "nocturne_luna_scene_boundary_v1"), false);
   assert.ok(f.calls.every(({url, options}) => url === studyProvider && options.redirect === "manual" && options.headers.Authorization === `Bearer ${KEY}`));
   const sent = f.calls.flatMap(({options}) => JSON.parse(JSON.parse(options.body).input).units.map(row => row.text));
   assert.ok(sent.every(text => clip.units.some(unit => unit.text === text)));

@@ -441,6 +441,34 @@ test("a lower session ceiling clamps a gentle cue instead of rounding it away", 
   assert.equal(feel.desired({base: 1, ceiling: 1, scene, manualZero: true}), 0);
 });
 
+test("verified simulator tapers preserve background at a saturated cap and respect user controls", () => {
+  const feel = new ReadingFeel({rhythm: "scene"});
+  feel.configure({mode: "continuous", background: 1, preferred: 1});
+  const scene = {phase: "recover", quiet: false, verifiedRelease: true};
+  const taper = {base: 2, ceiling: 1, scene, simulatorStagePatterns: true};
+  assert.equal(feel.desired(taper), 1);
+  assert.equal(feel.desired({...taper, now: 4000}), 1);
+  assert.equal(feel.desired({...taper, scene: {phase: "recover", quiet: false}}), 0);
+  assert.equal(feel.desired({...taper, simulatorStagePatterns: false}), 0);
+  const correction = {...taper, base: 1, now: 4000};
+  assert.equal(feel.desired({...correction, scene: {...scene, manual: true}}),
+    feel.desired({...correction, scene: {phase: "recover", quiet: false, manual: true}}));
+  assert.equal(feel.desired({...taper, scene: {...scene, endedMovements: ["vibrate"]}, movement: "vibrate"}), 0);
+  assert.equal(feel.desired({...taper, scene: {phase: "quiet", quiet: true}, base: 0}), 0);
+  for (const deliberateZero of [{manualZero: true}, {ceiling: 0}, {strength: 0}, {levelAdjustment: -1}]) {
+    assert.equal(feel.desired({...taper, ...deliberateZero}), 0);
+  }
+  feel.hold(0);
+  assert.equal(feel.desired(taper), 0);
+  feel.reset();
+  feel.configure({gain: 0});
+  assert.equal(feel.desired(taper), 0);
+  feel.configure({gain: 1, quietEdging: true});
+  assert.equal(feel.desired(taper), 0);
+  feel.configure({mode: "story", quietEdging: false});
+  assert.equal(feel.desired(taper), 0);
+});
+
 test("simulator cue contrast uses one calibrated step and respects controls and rhythm", () => {
   const feel = new ReadingFeel({rhythm: "scene"});
   feel.configure({mode: "continuous", background: 1, preferred: 3, maximum: 10});

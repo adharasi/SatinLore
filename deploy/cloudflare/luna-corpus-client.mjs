@@ -3,7 +3,7 @@ import { LUNA_PROTOCOL_RUBRIC_VERSION } from "../../scripts/lib/luna-protocol-pr
 export const LUNA_CORPUS_PAGE = `<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SatinLore founder Luna corpus review</title>
 <main><h1>SatinLore founder Luna corpus review</h1>
-<p>Luna rubric ${LUNA_PROTOCOL_RUBRIC_VERSION.split("-").at(-1)} with a blinded scene-boundary comparison.</p>
+<p>Luna rubric ${LUNA_PROTOCOL_RUBRIC_VERSION.split("-").at(-1)} with a blinded local-action comparison.</p>
 <p>Open a private review packet. The file is read in this browser. Review every sentence in a clip before approving it, including the sentences supplied as context.</p>
 <p>Sealing sends clip fingerprints. Running sends the selected excerpts to the private Worker and OpenAI. One sealed run has a $3 estimated spend cap. Checkpoints include labels and evidence IDs for offline replay.</p>
 <p><label>Review packet <input id="packet" type="file" accept=".json,application/json"></label></p>
@@ -24,9 +24,10 @@ const workId = /^[a-z][a-z0-9-]{0,47}$/u;
 const returned = new Set(["completed", "provider-refused", "provider-unavailable", "spend-cap", "timed-out"]);
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
 const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus",
-  "boundaryVerificationStatus", "cueRecoveryStatus"];
+  "boundaryVerificationStatus", "localActionVerificationStatus", "cueRecoveryStatus"];
 const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
 const replayBoundaryKeys = ["status", "reason", "previousId", "entryId"];
+const replayLocalActionKeys = ["status", "frame", "action", "phase", "contrast", "targetId", "contextId"];
 const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery"];
 const encoder = new TextEncoder();
 const natural = n => Number.isSafeInteger(n) && n >= 0;
@@ -249,6 +250,10 @@ function replayUnit(row) {
   if (row.boundaryVerification?.sceneBoundary) {
     result.boundaryVerification = {...fields(row.boundaryVerification, ["id", "unitId"]),
       sceneBoundary: fields(row.boundaryVerification.sceneBoundary, [...replayBoundaryKeys, "changeId", "contrast"])};
+  }
+  if (row.localActionVerification?.localAction) {
+    result.localActionVerification = {...fields(row.localActionVerification, ["id", "unitId"]),
+      localAction: fields(row.localActionVerification.localAction, replayLocalActionKeys)};
   }
   return result;
 }

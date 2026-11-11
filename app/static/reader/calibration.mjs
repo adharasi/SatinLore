@@ -76,7 +76,7 @@ export function normalizeSceneProfiles(profiles, length) {
         movements?.some(id => endedMovements?.includes(id))) {
       throw new RangeError("Use supported scene movements.");
     }
-    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape, currentCue, simulatorSceneId} = profile;
+    const {phase, sceneId, manual, pattern, peakPreset, automaticPeak, edging, shape, currentCue, simulatorSceneId, verifiedRelease} = profile;
     if (phase !== undefined && !scenePhases.includes(phase) ||
         sceneId != null && (!Number.isInteger(sceneId) || sceneId < 1) ||
         manual !== undefined && typeof manual !== "boolean" ||
@@ -86,7 +86,8 @@ export function normalizeSceneProfiles(profiles, length) {
         edging !== undefined && (edging !== true || profile.quiet || (phase !== "build" && phase !== "sustain")) ||
         shape !== undefined && (profile.quiet || !["build", "sustain"].includes(phase) || !sceneShapes.includes(shape)) ||
         currentCue !== undefined && (currentCue !== true || profile.quiet || !["build", "sustain", "peak"].includes(phase)) ||
-        simulatorSceneId !== undefined && (currentCue !== true || !Number.isInteger(simulatorSceneId) || simulatorSceneId < 1)) throw new RangeError("Use a supported scene stage.");
+        simulatorSceneId !== undefined && (currentCue !== true || !Number.isInteger(simulatorSceneId) || simulatorSceneId < 1) ||
+        verifiedRelease !== undefined && (verifiedRelease !== true || profile.quiet || manual || phase !== "recover")) throw new RangeError("Use a supported scene stage.");
     return {rhythm: profile.rhythm, quiet: profile.quiet, ...(movements === undefined ? {} : {movements: [...movements]}),
       ...(endedMovements === undefined ? {} : {endedMovements: [...endedMovements]}),
       ...(pattern === undefined ? {} : {pattern}),
@@ -95,6 +96,7 @@ export function normalizeSceneProfiles(profiles, length) {
       ...(edging === undefined ? {} : {edging}),
       ...(shape === undefined ? {} : {shape}),
       ...(currentCue === undefined ? {} : {currentCue}),
+      ...(verifiedRelease === undefined ? {} : {verifiedRelease}),
       ...(simulatorSceneId === undefined ? {} : {simulatorSceneId}),
       ...(phase === undefined ? {} : {phase, sceneId: sceneId ?? null, manual: manual ?? false})};
   });
@@ -212,6 +214,10 @@ export class ReadingFeel {
     // Keep a verified build perceptible while its rising stages quantize to
     // background. Other waveforms retain their deliberate low steps.
     const backgroundLevel = Math.max(minimum, background);
+    // At a ceiling that already equals or falls below the continuous background,
+    // a verified local taper cannot express its contrast without an artificial dip.
+    if (simulatorStagePatterns && mode === "continuous" && !quietEdging && scene?.verifiedRelease === true &&
+        !scene.quiet && !scene.manual && strength >= 1 && this.settings.gain >= 1 && ceiling <= backgroundLevel) return adjust(ceiling);
     const unmodulated = Math.max(minimum, Math.floor(amplitude));
     const collapsed = target === backgroundLevel && (unmodulated === backgroundLevel || stage === stagePatterns.build);
     const contrast = simulatorStagePatterns && mode === "continuous" && !quietEdging && scene?.currentCue === true &&

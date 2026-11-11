@@ -415,6 +415,7 @@ function diagnosticWork(fixture, run) {
         mismatches: [...appliedMismatch(gold.cue, reader.cue, false, "reader-cue"),
           ...appliedMismatch(gold.transition, applied.transition, "none", "transition")]},
       compiler: {pattern: row.pattern, phase: row.phase, decision: row.trace.decision,
+        ...(row.verifiedRelease ? {verifiedRelease: true} : {}),
         appliedTransition: row.appliedTransition ?? null, evidenceIds: validIds(row.evidenceIds, size),
         continuityGuard: row.continuityGuard === "elapsed-time-gap" ? row.continuityGuard : null,
         beatAnchor: compilerAnchor(row.beatId, run.id, "beat", gold.id + 1),

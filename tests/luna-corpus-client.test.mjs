@@ -31,9 +31,12 @@ function shardResult(clip) {
   return {
     schema: 1, runId, clipId: clip.id, clipDigest: sha256(JSON.stringify(clip)), storyId: clip.storyId,
     sourceSha256: clip.sourceSha256, editionDigest: clip.editionDigest, status: "completed",
-    rubricVersion: "v18", model: "test-luna", units: [{id: unit.id, unitSha256: unit.digest, status: "neutral",
+    rubricVersion: "v19", model: "test-luna", units: [{id: unit.id, unitSha256: unit.digest, status: "neutral",
       boundaryVerificationStatus: "cut", boundaryVerification: {unitId: unit.id, sceneBoundary: {status: "cut", reason: "time-jump",
         previousId: clip.units[0].id, entryId: unit.id, changeId: unit.id, contrast: "material-change"}},
+      localActionVerificationStatus: "verified", localActionVerification: {unitId: unit.id,
+        localAction: {status: "verified", frame: "current", action: "anticipation", phase: "build", contrast: "charged-reaction",
+          targetId: unit.id, contextId: clip.units[0].id}},
       transitionVerification: {unitId: unit.id, transition: "none", status: "neutral", sceneBoundary: {
         status: "cut", reason: "time-jump", previousId: clip.units[0].id, entryId: unit.id,
       }}}],
@@ -151,6 +154,10 @@ test("the corpus page previews exact context locally and seals only fingerprints
     {status: "cut", reason: "time-jump", previousId: 9, entryId: 10});
   assert.deepEqual(exported.replayClips[0].units[0].boundaryVerification,
     {unitId: 10, sceneBoundary: {status: "cut", reason: "time-jump", previousId: 9, entryId: 10, changeId: 10, contrast: "material-change"}});
+  assert.equal(exported.replayClips[0].units[0].localActionVerificationStatus, "verified");
+  assert.deepEqual(exported.replayClips[0].units[0].localActionVerification,
+    {unitId: 10, localAction: {status: "verified", frame: "current", action: "anticipation", phase: "build", contrast: "charged-reaction",
+      targetId: 10, contextId: 9}});
   for (const clip of reviewPacket.clips) for (const unit of clip.units) {
     assert.ok(!download.includes(unit.text));
     for (const retained of page.storage.values()) assert.ok(!retained.includes(unit.text));

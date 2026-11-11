@@ -1325,3 +1325,48 @@ test("a cue recheck cannot override a separately verified stop or depend on futu
   assert.equal(run.units[2].pattern, "Stop");
   assert.equal(run.units[2].cueRecoveryStatus, "not-needed");
 });
+
+test("post-return releases use only exact current-frame evidence and create no anchor", async () => {
+  const cases = [
+    {patterns: ["Taper", "Taper"]},
+    {scope: 0, patterns: ["Baseline", "Baseline"]},
+    {followupCitesRelease: false, patterns: ["Taper", "Baseline"]},
+    {blockedIds: [1], patterns: ["Baseline", "Baseline"]},
+    {blockedIds: [2], patterns: ["Stop", "Baseline"]},
+    {typedFirst: "none", patterns: ["Baseline", "Baseline"]},
+    {typedFirst: "unresolved", patterns: ["Baseline", "Baseline"]},
+  ];
+  for (const {patterns, scope = 1, followupCitesRelease = true, blockedIds = [], typedFirst = "interruption"} of cases) {
+    const noBoundary = {status: "none", reason: "none", previousId: null, entryId: null};
+    const input = fixture("They remembered their dance. She thought of the dance tonight. He paused to put down his coat. She let go of his hand. The street lamps came on.");
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return id === 2 && typedFirst === "interruption" ?
+        typedTransition(id, {transition: "interruption", fact: "none", sceneBoundary: noBoundary}) :
+        typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: [], sceneBoundary: typedFirst === "unresolved" ? {status: "uncertain", reason: "insufficient-prefix",
+          previousId: null, entryId: null} : noBoundary});
+      if (id === 0) return active(id, mode, {narrativePhase: "build", ...(mode === "discovery" ? {} : {frame: "remembered", fact: "none"})});
+      if (id === 1) return active(id, mode, {narrativePhase: "build"});
+      if (id === 2) return active(id, mode, {narrativePhase: "ease", action: "release", fact: "ease", transition: "interruption",
+        scopeId: scope, priorAnchor: 1, evidenceIds: [0, 1, 2]});
+      if (id === 3) return active(id, mode, {narrativePhase: "ease", action: "release", fact: "ease",
+        scopeId: scope, priorAnchor: 1, evidenceIds: followupCitesRelease ? [1, 2, 3] : [1, 3]});
+      return neutral(id);
+    });
+    const run = await runLunaProtocolShadow({...input, provider, verificationTargets: [2, 3], maxVerification: 2,
+      verifyTransitions: true, maxTransitionVerification: 2, transitionTargets: [2, 3], maxSupportingVerification: 2, blockedIds});
+    assert.deepEqual(run.units.slice(2).map(row => row.pattern), [...patterns, "Baseline"],
+      JSON.stringify({scope, followupCitesRelease, blockedIds, typedFirst}));
+    assert.equal(run.units[2].cue, false);
+    assert.equal(run.units[3].cue, false);
+    assert.equal(run.units[2].beatId, null);
+    assert.equal(run.units[3].beatId, null);
+    assert.equal(run.units[2].verifiedRelease === true, patterns[0] === "Taper");
+    assert.equal(run.units[3].verifiedRelease === true, patterns[1] === "Taper");
+    assert.equal(run.units[4].beatId, null);
+    if (patterns[0] === "Taper") {
+      assert.equal(run.units[2].trace.decision, "Local taper");
+      assert.deepEqual(run.units[2].trace.evidence, [1, 2]);
+      assert.deepEqual(run.units[2].primaryPrefix.evidenceIds, [0, 1, 2]);
+    }
+  }
+});

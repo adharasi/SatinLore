@@ -18,6 +18,60 @@ const success = (facts, usage = null, returnedModel = LUNA_PROTOCOL_MODEL) => ({
 const targetFailure = (unitId, reason) => ({unitId, reason});
 const rejected = targetFailures => ({...failure("invalid-response", "output-schema"), targetFailures});
 const partial = (facts, targetFailures) => ({...success(facts), status: "partial", targetFailures});
+const rejectedTransition = (row, reason) => {
+  const failure = targetFailure(row.unitId, reason);
+  if (reason === "status-effect") failure.detail = {status: row.status, frame: row.frame, transition: row.transition,
+    fact: row.fact, hasScope: row.scopeId !== null, hasPriorAnchor: row.priorAnchor !== null,
+    citesTarget: row.evidenceIds.includes(row.unitId), evidenceCount: row.evidenceIds.length};
+  return rejected([failure]);
+};
+
+test("local action check sends only the blind prefix and separates local action from phase", async () => {
+  const supplied = {mode: "local-action", units, targetIds: [12]};
+  const localAction = {status: "verified", frame: "current", action: "contact", phase: "recover", contrast: "enacted",
+    targetId: 12, contextId: 11};
+  const row = {unitId: 12, localAction};
+  let calls = 0;
+  const run = provider(async (_url, {body}) => {
+    calls++;
+    const sent = JSON.parse(body);
+    assert.deepEqual(JSON.parse(sent.input), {units, targetIds: [12]});
+    assert.equal(sent.text.format.name, "nocturne_luna_local_action_v1");
+    const schema = sent.text.format.schema.properties.facts.items;
+    assert.deepEqual(schema.required, ["unitId", "localAction"]);
+    assert.equal(schema.properties.localAction.additionalProperties, false);
+    assert.match(sent.instructions, /what the target itself adds/u);
+    assert.match(sent.instructions, /Never quote/u);
+    return response([row]);
+  });
+  assert.deepEqual(await run({...supplied, priorVerdict: fact(12), candidates: [fact(12)]}), success([row]));
+  const invalidRequest = failure("invalid-request", "request-shape");
+  assert.deepEqual(await run({...supplied, targetIds: [11]}), invalidRequest);
+  assert.deepEqual(await run({...supplied, attested: [{unitId: 9, scopeId: 9, frame: "current", action: "contact", narrativePhase: "onset"}]}),
+    invalidRequest);
+  assert.equal(calls, 1);
+
+  for (const [extra, reason] of [
+    [{targetId: 11}, "local-action-evidence"], [{contextId: 12}, "local-action-evidence"],
+    [{contextId: 9}, "local-action-evidence"], [{contextId: 13}, "local-action-evidence"],
+    [{action: "continuation", contrast: "same-action", contextId: null}, "local-action-evidence"],
+    [{frame: "noncurrent"}, "local-action-shape"], [{action: "release"}, "local-action-shape"],
+    [{phase: "quiet"}, "local-action-shape"], [{comment: units[0].text}, "local-action-shape"],
+  ]) {
+    const invalid = provider(async () => response([{...row, localAction: {...localAction, ...extra}}]));
+    assert.deepEqual(await invalid(supplied), rejected([targetFailure(12, reason)]));
+  }
+  for (const verdict of [
+    {...localAction, phase: "unknown", contextId: null},
+    {status: "none", frame: "noncurrent", action: "none", phase: "quiet", contrast: "noncurrent", targetId: null, contextId: null},
+    {status: "uncertain", frame: "current", action: "unknown", phase: "unknown", contrast: "insufficient-prefix",
+      targetId: null, contextId: null},
+  ]) {
+    const verified = {...row, localAction: verdict};
+    const run = provider(async () => response([verified]));
+    assert.deepEqual(await run(supplied), success([verified]));
+  }
+});
 
 test("scene-only verification sends a blind causal prefix and validates evidence roles", async () => {
   const supplied = {mode: "scene-boundary", units, targetIds: [12]};
@@ -426,7 +480,7 @@ test("keeps hard stops, interruptions, declined restarts and ordinary stops dist
   ];
   for (const [row, reason] of invalid) {
     const run = provider(async () => response([row]));
-    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
+    assert.deepEqual(await run(transitionRequest), rejectedTransition(row, reason));
   }
 });
 
@@ -456,8 +510,9 @@ test("canonicalizes only benign no-event metadata after validating the response 
     [{evidenceIds: [5, 11]}, "attested-evidence"], [{evidenceIds: [10, 12]}, "evidence-id"],
     [{evidenceIds: [11, 10]}, "evidence-id"], [{untyped: units[0].text}, "row-shape"],
   ]) {
-    const run = provider(async () => response([{...neutral, ...extra}]));
-    assert.deepEqual(await run(transitionRequest), rejected([targetFailure(11, reason)]));
+    const row = {...neutral, ...extra};
+    const run = provider(async () => response([row]));
+    assert.deepEqual(await run(transitionRequest), rejectedTransition(row, reason));
   }
 });
 

@@ -58,6 +58,7 @@ function project(work, pin, isolated) {
     previousBeat = beat;
     return {level, playbackGate, profile: {phase, quiet: hard.has(pattern), rhythm: "steady", sceneId: beat === null ? null : beat + 1,
       ...(rendererPattern ? {pattern: rendererPattern} : {}), ...(phase === "peak" ? {peakPreset: DEFAULT_EXPERIENCE.peakPattern} : {}),
+      ...(!isolated && row.compiler.verifiedRelease === true && pattern === "Taper" ? {verifiedRelease: true} : {}),
       ...(currentCue ? {currentCue: true, simulatorSceneId: beat + 1} : {})}};
   });
 }

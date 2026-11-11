@@ -199,6 +199,8 @@ V18 adds a blinded scene-only arm to the founder comparison and a local taper fo
 
 Paid v18 improves exact applied transitions to 121/148 and falls to 15/59 expected active profiles. The follow-up restores two active profiles on the same facts and improves exact profiles to 91/148. The standalone boundary arm found the same four cuts as the typed control and added extra claims and uncertainty. Context completion, active profile recall and low-cap calibration are the next qualification priorities. [V18 evidence and follow-up](nocturne-beat-protocol-shadow.md#v18-scene-only-comparison-and-local-taper)
 
+V19 compares blinded local action against the primary and typed passes on unchanged sealed clips. The compiler replay on all 148 recorded v18 targets improves exact profiles from 91 to 93 and expected active profiles from 17/59 to 19/59, with two extra active profiles and 121/148 exact applied events in both. The targeted live comparison and expanded-prefix pairs address separate recognition and coverage hypotheses. New natural holdout and physical qualification are pending. [V19 evidence and evaluation](nocturne-beat-protocol-shadow.md#v19-local-action-diagnosis-and-verified-release)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

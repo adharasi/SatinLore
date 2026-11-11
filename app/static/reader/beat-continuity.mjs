@@ -121,7 +121,7 @@ export function planStory(story, units) {
     let mark = boundary || scope;
     validateFacts(id, [boundary, scope, neutral, ease, low]);
     const lowProfile = low && Object.hasOwn(low, "profile") ? low.profile : "Undertone";
-    if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile))) {
+    if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile) && !(low.localOnly && lowProfile === "Taper"))) {
       throw new RangeError("Independent low evidence must name a low profile at its evidence unit.");
     }
     const confirmsProvisional = scope?.confirmsProvisional === true && scope.knownAt === id && scope.priorAnchor != null &&
@@ -175,12 +175,14 @@ export function planStory(story, units) {
       rationale = boundary.reason;
       const replacement = pattern === "Baseline" || pattern === "Taper" ? pattern : prior ? "Taper" : "Baseline";
       Object.assign(result, {pattern: replacement, block: prior?.id ?? null, reason: rationale});
+      if (replacement === "Taper" && boundary.verifiedRelease) result.verifiedRelease = true;
     } else if (low?.localOnly && !barrier && !spanEnd && !beat && !parked) {
-      decision = "Local recovery";
+      decision = lowProfile === "Taper" ? "Local taper" : "Local recovery";
       rationale = low.reason;
       mark = low;
       floorWords = words;
       Object.assign(result, {pattern: lowProfile, block: null, reason: rationale});
+      if (lowProfile === "Taper") result.verifiedRelease = true;
     } else if (low && !low.localOnly && (!barrier || boundary.kind === "cut")) {
       const retained = scopedTo(beat, scope) || beat?.anchors.has(low.priorAnchor);
       if (!retained) {

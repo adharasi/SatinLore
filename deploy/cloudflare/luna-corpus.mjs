@@ -67,13 +67,16 @@ function mapResult(result, first) {
     ...(Object.hasOwn(row, "changeId") ? {changeId: coordinate(row.changeId)} : {})});
   const evidence = row => row && {...row, unitId: coordinate(row.unitId), id: coordinate(row.id),
     scopeId: coordinate(row.scopeId), priorAnchor: coordinate(row.priorAnchor), evidenceIds: coordinates(row.evidenceIds),
-    ...(row.sceneBoundary ? {sceneBoundary: boundary(row.sceneBoundary)} : {})};
+    ...(row.sceneBoundary ? {sceneBoundary: boundary(row.sceneBoundary)} : {}),
+    ...(row.localAction ? {localAction: {...row.localAction, targetId: coordinate(row.localAction.targetId),
+      contextId: coordinate(row.localAction.contextId)}} : {})};
   return {
     units: result.units.map(row => ({...evidence(row), knownAt: coordinate(row.knownAt), labelKnownAt: coordinate(row.labelKnownAt),
       labelEvidenceIds: coordinates(row.labelEvidenceIds), transitionEvidenceIds: coordinates(row.transitionEvidenceIds),
       beatId: named(row.beatId), sceneId: named(row.sceneId), discovery: evidence(row.discovery),
       primaryPrefix: evidence(row.primaryPrefix), transitionVerification: evidence(row.transitionVerification),
-      boundaryVerification: evidence(row.boundaryVerification), cueRecovery: evidence(row.cueRecovery),
+      boundaryVerification: evidence(row.boundaryVerification), localActionVerification: evidence(row.localActionVerification),
+      cueRecovery: evidence(row.cueRecovery),
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
         evidence: coordinates(row.trace.evidence)}})),
     summary: {...result.summary, nativeVerification: result.summary.nativeVerification.map(row => ({...row, id: coordinate(row.id)})),
@@ -161,7 +164,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
     result = await runLunaProtocolShadow({id: clip.storyId, text, sourceSha256: clip.sourceSha256, grant, provider, budget,
       signal: execution, limits: CLIP_LIMITS, prefixUnits: MAX_UNITS, maxVerification: targets.length,
       verificationTargets: targets, verifyTransitions: true, maxTransitionVerification: targets.length,
-      transitionTargets: targets, boundaryVerificationTargets: targets, maxCueChecks, maxSupportingVerification,
+      transitionTargets: targets, localActionVerificationTargets: targets, maxCueChecks, maxSupportingVerification,
       verifyContinuityBoundary: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
