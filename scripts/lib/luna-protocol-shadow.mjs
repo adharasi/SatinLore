@@ -658,6 +658,40 @@ function corroboratesSustain(row, cue, typed, anchor, id, prior) {
     romanticDepictions.has(cue.depiction) && verifiesLocalSustain(row, id, prior) && noTypedEffect;
 }
 
+function corroboratesRootedOpener(row, cue, previous, id) {
+  const root = id - 1;
+  const proposal = row.discovery;
+  // The discovery scope names the independently checked quiet root. Only
+  // the opener itself attests the enacted action and the new beat anchor.
+  return row.effectiveAnnotation === cue && cue === row.primaryPrefix && cue.scopeId === id && cue.action === "contact" &&
+    cue.transition === "onset" && cue.narrativePhase === "onset" && cue.fact === "none" && cue.priorAnchor === null &&
+    romanticDepictions.has(cue.depiction) && cue.evidenceIds.length === 2 && cue.evidenceIds[0] === root &&
+    proposal?.scopeId === root && proposal.evidenceIds.length === 1 && proposal.evidenceIds[0] === id &&
+    romanticDepictions.has(proposal.depiction) && previous?.prefixVerified && previous.window?.runId === row.window?.runId &&
+    strictQuietNegative(previous.effectiveAnnotation);
+}
+
+function corroboratesRootedSustain(index, decisions, blocked, row, cue, id, prior) {
+  const opening = decisions.get(prior);
+  const proposal = row.discovery;
+  const entry = row.sceneEntryVerification?.sceneEntry;
+  const root = prior - 1;
+  const exactContinuation = fact => fact?.scopeId === root && fact.priorAnchor === prior && fact.action === "continuation" &&
+    fact.narrativePhase === "sustain" && fact.transition === "none" && fact.fact === "continue" &&
+    romanticDepictions.has(fact.depiction) && fact.evidenceIds.length === 2 && fact.evidenceIds[0] === prior && fact.evidenceIds[1] === id;
+  if (opening?.playbackDisposition !== "supporting-rooted-onset" || opening.window?.runId !== row.window?.runId ||
+      id - prior < 1 || id - prior > 2 || cue !== row.primaryPrefix || row.cueRecovery?.status === "neutral" ||
+      !exactContinuation(cue) || !currentCueAt(proposal, id, "candidate") || !exactContinuation(proposal) ||
+      !typedQuietWithoutBoundary(row.transitionVerification) || !verifiesLocalSustain(row, id, prior) ||
+      entry?.status !== "none" || !["same-episode", "ordinary-interruption"].includes(entry.reason)) return false;
+  if (id === prior + 1) return true;
+  const connector = decisions.get(id - 1);
+  return !blocked.has(id - 1) && !index.units[id - 1].structuralBoundary && words(index.units[id - 1].text) <= 16 &&
+    connector?.window?.runId === row.window?.runId &&
+    (!connector.transitionVerification || typedQuietWithoutBoundary(connector.transitionVerification)) &&
+    strictQuietNegative(connector.effectiveAnnotation ?? connector.annotation ?? connector.discovery);
+}
+
 function corroboratesSustainScope(index, decisions, blocked, row, cue, id, prior) {
   const root = cue.scopeId;
   const proposal = row.discovery;
@@ -784,13 +818,17 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const contextCut = effectVerified && verifiedContextCut(fact, unit.id);
     const cut = unit.structuralBoundary || contextCut || frameChange || scopeChange && !restartBoundary;
     const proposal = result?.discovery;
-    const corroboratedSeed = auxiliary && ownCueEvidence && current && !protective && !neutralize && !cut && !beatEnd && !restartBoundary &&
-      proposal?.status === "candidate" && proposal.frame === "current" && proposal.scopeId != null && proposal.scopeId === rawCue.scopeId &&
+    const seedEligible = auxiliary && ownCueEvidence && current && !protective && !neutralize && !cut && !beatEnd && !restartBoundary &&
+      proposal?.status === "candidate" && proposal.frame === "current" && proposal.scopeId != null &&
       proposal.evidenceIds.includes(unit.id) && proposal.evidenceIds.every(id => id <= unit.id) &&
       rawCue.evidenceIds.every(id => id >= previousEvidenceBarrier) &&
-      ["action", "narrativePhase", "transition", "fact"].every(key => proposal[key] === rawCue[key]) &&
+      ["action", "narrativePhase", "transition", "fact"].every(key => proposal[key] === rawCue[key]);
+    const rootedSeed = seedEligible && lastAnchor === null && unit.id - 1 > previousEvidenceBarrier && !blocked.has(unit.id - 1) &&
+      corroboratesRootedOpener(result, rawCue, previous, unit.id);
+    const corroboratedSeed = rootedSeed || seedEligible && proposal.scopeId === rawCue.scopeId &&
       (enactedStart && rawCue.transition === "onset" && rawCue.narrativePhase === "onset" && rawCue.fact === "none" ||
         rawCue.action === "anticipation" && rawCue.narrativePhase === "build" && rawCue.transition === "none" && rawCue.fact === "low");
+    if (rootedSeed) result.playbackDisposition = "supporting-rooted-onset";
     const supporting = auxiliary && !corroboratedSeed;
     const provisionalSeed = corroboratedSeed && rawCue.action === "anticipation" && rawCue.evidenceIds.length === 1;
     // A typed cut can replace the primary fact, but its earlier link still cannot cross the cut.
@@ -932,7 +970,8 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     }
     if (!auxiliary && !quietBoundary && !cut && !restartBoundary && clear && ownCueEvidence && kind === "continue" &&
         !linked && prior === lastAnchor && anchors.get(prior) === prior &&
-        corroboratesSustainScope(index, decisions, blocked, result, rawCue, unit.id, prior)) {
+        (corroboratesSustainScope(index, decisions, blocked, result, rawCue, unit.id, prior) ||
+          corroboratesRootedSustain(index, decisions, blocked, result, rawCue, unit.id, prior))) {
       result.localActionApplication = "sustain-scope-profile";
     }
     const repairedSustain = !auxiliary && !quietBoundary && !cut && !restartBoundary && exactLink && shortSustainLink &&

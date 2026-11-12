@@ -28,12 +28,13 @@ const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verifi
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
   "independentBoundaryStatus", "sceneSituationVerificationStatus", "sceneOldPlaceVerificationStatus",
   "sceneArrivalVerificationStatus", "scenePlaceRecoveryStatus", "sustainConnectorVerificationStatus",
-  "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus"];
+  "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus", "playbackDisposition", "localActionApplication"];
 const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
 const replayBoundaryKeys = ["status", "reason", "previousId", "entryId"];
 const replayLocalActionKeys = ["status", "frame", "action", "phase", "contrast", "targetId", "contextId"];
 const replaySituationKeys = ["status", "earlierId", "currentId", "earlierBasis", "currentBasis"];
 const replayPlaceKeys = ["status", "earlierId", "currentId"];
+const replayTraceKeys = ["beat", "scene", "decision", "knownAt", "evidence", "holdWords", "fadeWords", "floorWords", "wordOffset"];
 const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery",
   "interruptionContinuationVerification", "interruptionReleaseVerification", "sustainConnectorVerification"];
 const encoder = new TextEncoder();
@@ -257,6 +258,7 @@ function fields(row, keys) {
 
 function replayUnit(row) {
   const result = fields(row, replayUnitKeys);
+  if (row.trace) result.trace = fields(row.trace, replayTraceKeys);
   for (const stage of replayFactStages) if (row[stage]) result[stage] = fields(row[stage], replayFactKeys);
   if (row.transitionVerification?.sceneBoundary) {
     result.transitionVerification.sceneBoundary = fields(row.transitionVerification.sceneBoundary, replayBoundaryKeys);

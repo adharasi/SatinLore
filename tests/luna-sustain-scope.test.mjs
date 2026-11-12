@@ -18,7 +18,7 @@ const stop = unitId => ({...neutral(unitId), status: "verified", transition: "ha
 
 function run({opening = onset, openingProposal = {...onset, status: "candidate"}, continuation = sustain, proposal = sustainProposal,
   localVote = local, sceneEntry = entry, targetBoundary = noBoundary, connectorVote = neutral(2), rootVote = neutral(0),
-  connector = "The lights dimmed.", blockedIds = [], supporting = true, requests = []} = {}) {
+  connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = []} = {}) {
   const text = `Mira waited by the door. Lee took her hand. ${connector} Lee kept holding her hand. Someone knocked.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
@@ -40,7 +40,7 @@ function run({opening = onset, openingProposal = {...onset, status: "candidate"}
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "sustain-scope", text, grant, now: () => 1, provider, blockedIds, negativeStride: 0,
     verificationTargets: [3, 4], transitionTargets: [3, 4], verifyTransitions: true,
-    maxVerification: 2, maxTransitionVerification: 2, maxSupportingVerification: supporting ? 1 : 0,
+    maxVerification: 2, maxTransitionVerification: 2, maxSupportingVerification: Number(supporting),
     localActionVerificationTargets: localVote ? [3] : [], sceneEntryVerificationTargets: [3]});
 }
 
@@ -95,4 +95,59 @@ test("a genuine boundary or protective stop outranks otherwise matching local su
   const priorStop = await run({opening: stop(1)});
   assert.equal(priorStop.units[1].pattern, "Stop");
   assert.equal(priorStop.units[3].localActionApplication, undefined);
+});
+
+const rootedContinuation = {...sustain, evidenceIds: [1, 3]};
+const rooted = {
+  openingProposal: {...onset, status: "candidate", scopeId: 0, evidenceIds: [1]},
+  continuation: rootedContinuation, proposal: {...rootedContinuation, status: "candidate"},
+  sceneEntry: {...entry, reason: "ordinary-interruption"}, supporting: 2,
+};
+
+test("exact quiet root and onset independently establish the supporting opener before a local sustain", async () => {
+  const requests = [];
+  const candidate = await run({...rooted, requests});
+  const withoutLocalVote = await run({...rooted, localVote: null});
+  const start = candidate.units[1];
+  assert.equal(start.pattern, "Onset rise");
+  assert.equal(start.playbackDisposition, "supporting-rooted-onset");
+  assert.equal(start.cue, false);
+  assert.equal(start.readerCue, false);
+  assert.equal(start.trace.knownAt, 1);
+  assert.deepEqual(start, withoutLocalVote.units[1]);
+  const request = requests.find(request => request.mode === "verify" && request.targetIds[0] === 1);
+  assert.deepEqual(request.units.map(unit => unit.id), [0, 1]);
+
+  const row = candidate.units[3];
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.localActionApplication, "sustain-scope-profile");
+  assert.equal(row.scopeId, 0);
+  assert.equal(row.priorAnchor, 1);
+  assert.equal(row.phase, "sustain");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.trace.knownAt, 3);
+  assert.deepEqual(row.trace.evidence, [1, 3]);
+  assert.equal(withoutLocalVote.units[3].pattern, "Onset rise");
+  for (const field of ["beat", "scene", "holdWords", "fadeWords", "floorWords"]) {
+    assert.equal(row.trace[field], withoutLocalVote.units[3].trace[field]);
+  }
+  assert.deepEqual(candidate.units[4], withoutLocalVote.units[4]);
+});
+
+test("rooted support requires an exact quiet premise and holds no authority across a boundary", async () => {
+  for (const options of [{supporting: 1}, {rootVote: {...neutral(0), frame: "reported"}}, {rootVote: stop(0)},
+    {rootVote: {...neutral(0), evidenceIds: [0]}}, {opening: {...onset, evidenceIds: [1]}},
+    {openingProposal: {...rooted.openingProposal, evidenceIds: [0, 1]}}, {blockedIds: [0]}]) {
+    const {units} = await run({...rooted, ...options});
+    assert.notEqual(units[1].playbackDisposition, "supporting-rooted-onset", JSON.stringify(options));
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+  }
+  for (const options of [{connectorVote: stop(2)}, {blockedIds: [2]}, {targetBoundary: timeCut},
+    {continuation: stop(3)}, {localVote: {...local, contextId: 2}},
+    {connector: "While they stood there the people nearest the windows drew the heavy curtains slowly closed for the night."}]) {
+    const {units} = await run({...rooted, ...options});
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+  }
 });

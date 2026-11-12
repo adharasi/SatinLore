@@ -223,6 +223,8 @@ V32 can check the earlier place and exact arrival independently after an uncerta
 
 V33 can nominate setting proof from a quiet neutral discovery when the independent evidence establishes the current frame. It also qualifies quiet objective cuts against the exact first-entry verdict before applying Reset. [V33 evaluation](nocturne-beat-protocol-shadow.md#v33-quiet-discovery-and-objective-boundaries)
 
+V34 reconciles the scene root and beat opener when two exact readings agree on the onset itself. It selects a sustained waveform only on an independently confirmed continuation of that held beat. [V34 evaluation](nocturne-beat-protocol-shadow.md#v34-verify-the-beat-opener-before-selecting-sustain)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

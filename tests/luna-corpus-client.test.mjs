@@ -257,6 +257,8 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
   const context = first.units[0];
   const unexpectedText = "Raw material is outside the replay schema.";
   const fact = {id: context.id, status: "verified", action: "anticipation", evidenceIds: [context.id]};
+  const trace = {beat: "library-one:beat:9", scene: "library-one:scene:9", decision: "Start onset", knownAt: context.id,
+    evidence: [context.id], holdWords: 32, fadeWords: 48, floorWords: 0, wordOffset: 0};
   const support = {mode: "verify", supportingPrefix: true, attempted: true, targetIds: [context.id], status: "returned"};
   const targetId = first.targetIds[0];
   const rejectedAction = {mode: "local-action", attempted: true, targetIds: [targetId], status: "invalid-response",
@@ -265,6 +267,7 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
   const initial = corpusPage({onShard: async ({clip}) => {
     const response = shardResult(clip);
     response.units.unshift({id: context.id, unitSha256: context.digest, text: unexpectedText,
+      playbackDisposition: "supporting-rooted-onset", trace: {...trace, reason: unexpectedText},
       primaryPrefix: {...fact, note: unexpectedText}});
     response.summary.attempts.unshift(support, rejectedAction);
     return Response.json(response);
@@ -286,7 +289,8 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
   assert.deepEqual(replayClips[0].attempts[0], support);
   assert.deepEqual(replayClips[0].attempts[1], rejectedAction);
   assert.deepEqual(works[0].summary.attempts[1], rejectedAction);
-  assert.deepEqual(replayClips[0].units[0], {id: context.id, unitSha256: context.digest, primaryPrefix: fact});
+  assert.deepEqual(replayClips[0].units[0], {id: context.id, unitSha256: context.digest, primaryPrefix: fact,
+    playbackDisposition: "supporting-rooted-onset", trace});
   assert.ok(!download.includes(unexpectedText));
 });
 
