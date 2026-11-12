@@ -696,13 +696,20 @@ function corroboratesSustainScope(index, decisions, blocked, row, cue, id, prior
   const root = cue.scopeId;
   const proposal = row.discovery;
   const entry = row.sceneEntryVerification?.sceneEntry;
+  const citesRoot = cue.evidenceIds.length === 3 && cue.evidenceIds[0] === root &&
+    cue.evidenceIds[1] === prior && cue.evidenceIds[2] === id;
+  // The opener can supply the root citation when both current passes explicitly
+  // continue its action with the same exact opener-target evidence.
+  const sameContinuation = cue.fact === "continue" && cue.priorAnchor === prior &&
+    cue.evidenceIds.length === 2 && cue.evidenceIds[0] === prior && cue.evidenceIds[1] === id &&
+    proposal?.fact === "continue" && proposal.priorAnchor === prior;
   // The wider scope citation can describe the context for an onset. It does not
   // authorize new carry or an alias for other targets.
   if (root !== prior - 1 || id - prior < 1 || id - prior > 2 || cue !== row.primaryPrefix ||
       row.cueRecovery?.status === "neutral" || cue.action !== "continuation" || cue.narrativePhase !== "sustain" ||
-      cue.transition !== "none" || !romanticDepictions.has(cue.depiction) || cue.evidenceIds.length !== 3 ||
-      cue.evidenceIds[0] !== root || cue.evidenceIds[1] !== prior || cue.evidenceIds[2] !== id ||
-      !typedQuietWithoutBoundary(row.transitionVerification) || entry?.status !== "none" || entry.reason !== "same-episode" ||
+      cue.transition !== "none" || !romanticDepictions.has(cue.depiction) || !(citesRoot || sameContinuation) ||
+      !typedQuietWithoutBoundary(row.transitionVerification) || entry?.status !== "none" ||
+      !(entry.reason === "same-episode" || sameContinuation && entry.reason === "ordinary-interruption") ||
       !verifiesLocalSustain(row, id, prior) || !currentCueAt(proposal, id, "candidate") ||
       proposal.scopeId !== prior || proposal.action !== "continuation" || proposal.narrativePhase !== "sustain" ||
       proposal.transition !== "none" || !romanticDepictions.has(proposal.depiction) ||

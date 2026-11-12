@@ -18,7 +18,7 @@ const stop = unitId => ({...neutral(unitId), status: "verified", transition: "ha
 
 function run({opening = onset, openingProposal = {...onset, status: "candidate"}, continuation = sustain, proposal = sustainProposal,
   localVote = local, sceneEntry = entry, targetBoundary = noBoundary, connectorVote = neutral(2), rootVote = neutral(0),
-  connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = []} = {}) {
+  connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = [], targetTransition = {}} = {}) {
   const text = `Mira waited by the door. Lee took her hand. ${connector} Lee kept holding her hand. Someone knocked.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
@@ -30,7 +30,7 @@ function run({opening = onset, openingProposal = {...onset, status: "candidate"}
       if (mode === "scene-entry") return {unitId: id, sceneEntry};
       if (mode === "local-action") return {unitId: id, localAction: localVote};
       if (mode === "transition") return {...neutral(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
-        sceneBoundary: id === 3 ? targetBoundary : noBoundary};
+        ...(id === 3 ? targetTransition : {}), sceneBoundary: id === 3 ? targetBoundary : noBoundary};
       if (id === 0) return rootVote;
       if (id === 1) return mode === "discovery" ? openingProposal : opening;
       if (id === 2) return connectorVote;
@@ -98,6 +98,49 @@ test("a genuine boundary or protective stop outranks otherwise matching local su
 });
 
 const rootedContinuation = {...sustain, evidenceIds: [1, 3]};
+
+const exactScopedContinuation = {
+  continuation: rootedContinuation, proposal: {...rootedContinuation, status: "candidate", scopeId: 1},
+  sceneEntry: {...entry, reason: "ordinary-interruption"},
+};
+
+test("same action evidence lets an independently attested opener supply the earlier scene citation", async () => {
+  const requests = [], controlRequests = [];
+  const candidate = await run({...exactScopedContinuation, requests});
+  const control = await run({...exactScopedContinuation, localVote: {...local, contextId: 2}, requests: controlRequests});
+  const row = candidate.units[3];
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.localActionApplication, "sustain-scope-profile");
+  assert.equal(row.phase, "sustain");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.scopeId, 0);
+  assert.equal(row.priorAnchor, 1);
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.trace.knownAt, 3);
+  assert.deepEqual(row.trace.evidence, [1, 3]);
+  assert.equal(control.units[3].pattern, "Onset rise");
+  for (const field of ["beat", "scene", "holdWords", "fadeWords", "floorWords"]) {
+    assert.equal(row.trace[field], control.units[3].trace[field]);
+  }
+  assert.deepEqual(candidate.units.slice(0, 3), control.units.slice(0, 3));
+  assert.deepEqual(candidate.units[4], control.units[4]);
+  assert.deepEqual(requests, controlRequests);
+});
+
+test("an interruption without both exact continuation votes cannot select a sustain waveform", async () => {
+  for (const options of [{continuation: neutral(3)}, {proposal: {...sustainProposal, scopeId: 1}},
+    {proposal: {...exactScopedContinuation.proposal, fact: "neutralize", transition: "uncertain-continuity"}},
+    {opening: {...onset, evidenceIds: [1]}}, {localVote: null}, {targetBoundary: timeCut},
+    {continuation: stop(3)}, {connectorVote: stop(2)}, {blockedIds: [2]},
+    {targetTransition: {status: "verified", transition: "uncertain-continuity", fact: "neutralize", evidenceIds: [3]}},
+    {connector: `${"The people near the windows drew the curtains slowly closed for the night ".repeat(4).trim()}.`}]) {
+    const {units} = await run({...exactScopedContinuation, ...options});
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+    assert.notEqual(units[3].localActionApplication, "sustain-scope-profile", JSON.stringify(options));
+  }
+});
+
 const rooted = {
   openingProposal: {...onset, status: "candidate", scopeId: 0, evidenceIds: [1]},
   continuation: rootedContinuation, proposal: {...rootedContinuation, status: "candidate"},
