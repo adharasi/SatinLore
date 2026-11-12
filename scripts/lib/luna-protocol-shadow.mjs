@@ -81,10 +81,10 @@ function exactTypedStart(fact, id) {
     fact.evidenceIds.includes(id);
 }
 
-const quietNegative = fact => fact?.status === "neutral" && fact.frame === "current" &&
+const quietNegative = (fact, frame = "current") => fact?.status === "neutral" && fact.frame === frame &&
   fact.narrativePhase === "quiet" && fact.action === "none" && fact.transition === "none" && fact.fact === "none" &&
   fact.scopeId === null && fact.priorAnchor === null;
-const strictQuietNegative = fact => quietNegative(fact) && fact.evidenceIds.length === 0;
+const strictQuietNegative = (fact, frame) => quietNegative(fact, frame) && fact.evidenceIds.length === 0;
 
 function typedQuietWithoutBoundary(typed) {
   return typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.fact === "none" &&
@@ -274,9 +274,34 @@ function quietSettingBoundary(row, id) {
     effect.evidenceIds.includes(boundary.previousId) ? boundary : null;
 }
 
+function quietObjectiveBoundary(row, id) {
+  const effect = row.effectiveAnnotation;
+  const boundary = row.transitionVerification?.sceneBoundary;
+  if (row.sceneEntryArbitration === "independently-confirmed-cut" || effect?.transition !== "scene-cut" ||
+      effect.fact !== "cut" || !exactCurrentCue(effect, id) || !["quiet", "unknown"].includes(effect.narrativePhase) ||
+      !["none", "unknown"].includes(effect.action)) return null;
+  return boundary?.status === "cut" && boundary.reason === "objective-shift" && boundary.entryId === id &&
+    effect.evidenceIds.includes(boundary.previousId) ? boundary : null;
+}
+
+function quietBoundaryFallback(id, previousId, same, typed) {
+  const quiet = {unitId: id, id, status: "neutral", frame: "current", depiction: "neutral", narrativePhase: "quiet",
+    action: "none", transition: "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: []};
+  // Keep an independently verified local activity stop when the scene comparison fails.
+  if (typed?.transition === "non-romantic-activity-stop" && exactCurrentCue(typed, id)) {
+    return {...quiet, status: "verified", transition: typed.transition, fact: same ? "none" : "neutralize",
+      evidenceIds: same ? typed.evidenceIds : [previousId, id]};
+  }
+  return same ? quiet : {...quiet, status: "verified", transition: "uncertain-continuity", fact: "neutralize",
+    evidenceIds: [previousId, id]};
+}
+
 function quietSettingDispute(row, id) {
-  const {cueRecovery: focused, transitionVerification: typed} = row;
+  const {cueRecovery: focused, transitionVerification: typed, discovery} = row;
   const boundary = typed?.sceneBoundary;
+  // Discovery can nominate a quiet check without establishing a current frame.
+  const quietDiscovery = discovery?.depiction === "neutral" &&
+    (strictQuietNegative(discovery) || strictQuietNegative(discovery, "neutral"));
   // A focused neutral answer may cite the current unit without adopting either predecessor.
   return row.prefixVerified && row.cueRecoveryReason === "continuity-boundary" &&
     row.cueRecoveryCorrection === "continuity-cut-veto" && row.transitionFlag === "transition-conflict" &&
@@ -284,7 +309,7 @@ function quietSettingDispute(row, id) {
     focused.depiction === "neutral" && (focused.evidenceIds.length === 0 ||
       focused.evidenceIds.length === 1 && focused.evidenceIds[0] === id) &&
     strictQuietNegative(row.primaryPrefix) && row.primaryPrefix.depiction === "neutral" &&
-    strictQuietNegative(row.discovery) && row.discovery.depiction === "neutral" &&
+    quietDiscovery &&
     typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.fact === "none" &&
     typed.scopeId === null && typed.priorAnchor === null && typed.evidenceIds.length === 0 &&
     boundary?.status === "cut" && boundary.reason === "setting-shift" && boundary.entryId === id &&
@@ -1531,19 +1556,30 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     row.independentBoundaryStatus = same ? "setting-continuity" : "setting-context-unresolved";
     // Without an applied cut there is no reset or carry change to undo.
     if (!appliedBoundary) return;
-    const quiet = {unitId: id, id, status: "neutral", frame: "current", depiction: "neutral", narrativePhase: "quiet",
-      action: "none", transition: "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: []};
-    const typed = row.transitionVerification;
-    // A setting dispute cannot remove an independent, exact local activity stop.
-    if (typed?.transition === "non-romantic-activity-stop" && exactCurrentCue(typed, id)) {
-      row.effectiveAnnotation = {...quiet, status: "verified", transition: typed.transition, fact: same ? "none" : "neutralize",
-        evidenceIds: same ? typed.evidenceIds : [previousId, id]};
-    } else row.effectiveAnnotation = same ? quiet : {...quiet, status: "verified", transition: "uncertain-continuity",
-      fact: "neutralize", evidenceIds: [previousId, id]};
+    row.effectiveAnnotation = quietBoundaryFallback(id, previousId, same, row.transitionVerification);
     if (["independently-confirmed-cut", "corroborated-setting-cut"].includes(row.sceneEntryArbitration)) {
       delete row.sceneEntryArbitration;
     }
     row.transitionFlag = same ? "scene-boundary-same-setting" : "scene-boundary-setting-context-unresolved";
+  }
+  function adjudicateQuietObjective(job, row, id, boundary) {
+    if (!job || invalidated(job)) return;
+    const {previousId} = boundary;
+    const entry = row.sceneEntryVerification?.sceneEntry;
+    const firstId = inputFor(job).units[0].id;
+    const causal = attest({runId: job.runId, firstId, target: id});
+    const pathEligible = earlierId => comparisonPathEligible(job, id, earlierId, firstId, causal, previousId);
+    if (entry?.status === "cut" && entry.reason === "material-objective" && entry.changeId === id && entry.entryId === id &&
+        !causal.restartBoundary && !causal.protectedScopes.has(row.transitionVerification.scopeId) &&
+        pathEligible(previousId) && pathEligible(entry.previousId)) {
+      row.independentBoundaryStatus = "objective-corroborated";
+      row.transitionFlag = "scene-boundary-objective-corroborated";
+      return;
+    }
+    const same = sameEpisodeNoCut(entry);
+    row.effectiveAnnotation = quietBoundaryFallback(id, previousId, same, row.transitionVerification);
+    row.independentBoundaryStatus = same ? "objective-continuity" : "objective-context-unresolved";
+    row.transitionFlag = same ? "scene-boundary-objective-continuity" : "scene-boundary-objective-context-unresolved";
   }
   async function confirmIndependentEntry(job, row, id) {
     const firstId = inputFor(job).units[0].id;
@@ -1739,6 +1775,16 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         if (verifySettingSituation) {
           const settingJob = entryJob ?? jobs.find(job => job.id.startsWith("transition:"));
           await adjudicateQuietSetting(settingJob, row, id);
+        }
+        const objective = earlyEntry && boundaryEntryConfirmation && quietObjectiveBoundary(row, id);
+        if (objective) {
+          // Resolve the scheduled entry before the provisional cut can affect its successor.
+          if (entryJobs.has(id) && !invalidated(entryJob)) {
+            await applyDiagnosticJobs("scene-entry", [entryJob], true);
+            entryJobs.delete(id);
+          }
+          const objectiveJob = entryJob ?? jobs.find(job => job.id.startsWith("transition:"));
+          adjudicateQuietObjective(objectiveJob, row, id, objective);
         }
       }
       if (earlyEntry) diagnosticJobs["scene-entry"] = [...entryJobs.values()];

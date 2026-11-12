@@ -221,6 +221,8 @@ V31 allows the same proof to resolve a quiet setting cut when two checks agree o
 
 V32 can check the earlier place and exact arrival independently after an uncertain joint answer. A separate local waveform decision supports a held beat when the earlier opener and independent continuation evidence agree. Compare provider variation across repeated exact clips and preserve boundaries and protective controls. [V32 evaluation](nocturne-beat-protocol-shadow.md#v32-separate-place-evidence-and-local-continuation)
 
+V33 can nominate setting proof from a quiet neutral discovery when the independent evidence establishes the current frame. It also qualifies quiet objective cuts against the exact first-entry verdict before applying Reset. [V33 evaluation](nocturne-beat-protocol-shadow.md#v33-quiet-discovery-and-objective-boundaries)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

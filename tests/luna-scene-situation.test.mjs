@@ -92,7 +92,7 @@ test("split place questions isolate old place from arrival on the provider wire"
 async function settingRun({targetText = viewpoint, situation = same, situationFailure, typedBoundary = unresolvedBoundary,
   priorStop = false, targetStop = false, localActivityStop = false, includeSceneEntry = true, entry = firstEntry,
   includeSuccessor = false, focusedQuiet = false, focusedTargetOnly = true, verifySettingSituation = true, budget,
-  oldWitness = uncertainPlace, arrivalWitness = uncertainPlace, oldWitnessFailure, arrivalWitnessFailure} = {}) {
+  oldWitness = uncertainPlace, arrivalWitness = uncertainPlace, oldWitnessFailure, arrivalWitnessFailure, discoveryReading} = {}) {
   const text = `${earlierText} ${targetText}${includeSuccessor ? " They started the next task." : ""}`;
   const index = buildWholeStoryIndex(text);
   const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
@@ -119,6 +119,7 @@ async function settingRun({targetText = viewpoint, situation = same, situationFa
       if (id === 1 && priorStop || id === target && targetStop) {
         return {...cue, status, transition: "hard-stop", fact: "protective", evidenceIds: [id]};
       }
+      if (id === target && request.mode === "discovery" && discoveryReading) return {...cue, ...discoveryReading};
       if (id === 1) return {...cue, status, depiction: "romantic", narrativePhase: "build", action: "anticipation",
         fact: "low", scopeId: 0, evidenceIds: [0, 1]};
       return cue;
@@ -272,6 +273,29 @@ test("a focused neutral target citation can ask for place proof when both settin
   const protective = await settingRun({...samePredecessor, targetStop: true, situation: changed});
   assert.equal(protective.run.units[target].pattern, "Stop");
   assert.ok(!protective.requests.some(({mode}) => mode === "scene-situation"));
+});
+
+test("only an exact quiet discovery can nominate setting proof with a neutral frame", async () => {
+  const options = {...acceptedSettingCandidate, focusedTargetOnly: true, discoveryReading: {frame: "neutral"}};
+  const unresolved = await settingRun(options);
+  assert.equal(unresolved.run.units[target].discovery.frame, "neutral");
+  assert.equal(unresolved.run.units[target].cueRecoveryCorrection, "continuity-cut-veto");
+  assert.equal(unresolved.run.units[target].sceneSituationVerificationStatus, "uncertain");
+  assert.equal(unresolved.run.units[target].appliedTransition, "none");
+
+  const grounded = await settingRun({...options, oldWitness: oldPlace, arrivalWitness: distinctArrival});
+  assert.equal(grounded.run.units[target].scenePlaceRecoveryStatus, "changed");
+  assert.equal(grounded.run.units[target].appliedTransition, "scene-cut");
+  assert.deepEqual(grounded.run.units[target].transitionEvidenceIds, [0, target]);
+  assert.equal(grounded.run.units[target].readerCue, false);
+
+  for (const discoveryReading of [{frame: "remembered"}, {frame: "reported"}, {frame: "uncertain"},
+    {frame: "neutral", status: "uncertain", action: "unknown", narrativePhase: "unknown", transition: "unknown"},
+    {frame: "neutral", depiction: "romantic"}, {frame: "neutral", evidenceIds: [target]}]) {
+    const {run, requests} = await settingRun({...options, discoveryReading, situation: changed});
+    assert.ok(!requests.some(({mode}) => mode === "scene-situation"));
+    assert.notEqual(run.units[target].appliedTransition, "scene-cut");
+  }
 });
 
 test("two setting checks with different predecessors require independent proof of the shared arrival", async () => {
