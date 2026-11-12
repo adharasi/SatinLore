@@ -72,6 +72,8 @@ function mapResult(result, first) {
     ...(row.sceneEntry ? {sceneEntry: boundary(row.sceneEntry)} : {}),
     ...(row.sceneSituation ? {sceneSituation: {...row.sceneSituation, earlierId: coordinate(row.sceneSituation.earlierId),
       currentId: coordinate(row.sceneSituation.currentId)}} : {}),
+    ...(row.scenePlace ? {scenePlace: {...row.scenePlace, earlierId: coordinate(row.scenePlace.earlierId),
+      currentId: coordinate(row.scenePlace.currentId)}} : {}),
     ...(row.localAction ? {localAction: {...row.localAction, targetId: coordinate(row.localAction.targetId),
       contextId: coordinate(row.localAction.contextId)}} : {})};
   return {
@@ -82,6 +84,7 @@ function mapResult(result, first) {
       boundaryVerification: evidence(row.boundaryVerification), localActionVerification: evidence(row.localActionVerification),
       sceneEntryVerification: evidence(row.sceneEntryVerification), cueRecovery: evidence(row.cueRecovery),
       sceneSituationVerification: evidence(row.sceneSituationVerification),
+      sceneOldPlaceVerification: evidence(row.sceneOldPlaceVerification), sceneArrivalVerification: evidence(row.sceneArrivalVerification),
       sustainConnectorVerification: evidence(row.sustainConnectorVerification),
       interruptionContinuationVerification: evidence(row.interruptionContinuationVerification),
       interruptionReleaseVerification: evidence(row.interruptionReleaseVerification),
@@ -155,8 +158,9 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const maxSupportingVerification = Math.min(2, index.units.length - targets.length);
   const maxBoundaryEntryConfirmations = 1;
   const maxSettingSituationVerifications = 1;
+  const maxSettingPlaceWitnesses = 2;
   const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification + MAX_PRIMARY_ANCHOR_REPAIRS +
-    maxBoundaryEntryConfirmations + maxSettingSituationVerifications;
+    maxBoundaryEntryConfirmations + maxSettingSituationVerifications + maxSettingPlaceWitnesses;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
   try {

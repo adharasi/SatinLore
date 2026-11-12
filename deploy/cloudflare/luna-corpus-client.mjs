@@ -26,12 +26,14 @@ const returned = new Set(["completed", "provider-refused", "provider-unavailable
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
 const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus",
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
-  "independentBoundaryStatus", "sceneSituationVerificationStatus", "sustainConnectorVerificationStatus",
+  "independentBoundaryStatus", "sceneSituationVerificationStatus", "sceneOldPlaceVerificationStatus",
+  "sceneArrivalVerificationStatus", "scenePlaceRecoveryStatus", "sustainConnectorVerificationStatus",
   "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus"];
 const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
 const replayBoundaryKeys = ["status", "reason", "previousId", "entryId"];
 const replayLocalActionKeys = ["status", "frame", "action", "phase", "contrast", "targetId", "contextId"];
 const replaySituationKeys = ["status", "earlierId", "currentId", "earlierBasis", "currentBasis"];
+const replayPlaceKeys = ["status", "earlierId", "currentId"];
 const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery",
   "interruptionContinuationVerification", "interruptionReleaseVerification", "sustainConnectorVerification"];
 const encoder = new TextEncoder();
@@ -274,6 +276,9 @@ function replayUnit(row) {
   if (row.sceneSituationVerification?.sceneSituation) {
     result.sceneSituationVerification = {...fields(row.sceneSituationVerification, ["id", "unitId"]),
       sceneSituation: fields(row.sceneSituationVerification.sceneSituation, replaySituationKeys)};
+  }
+  for (const stage of ["sceneOldPlaceVerification", "sceneArrivalVerification"]) if (row[stage]?.scenePlace) {
+    result[stage] = {...fields(row[stage], ["id", "unitId"]), scenePlace: fields(row[stage].scenePlace, replayPlaceKeys)};
   }
   return result;
 }

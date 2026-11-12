@@ -973,7 +973,7 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.equal(f.calls.length, 6);
 });
 
-test("the Luna corpus Worker grounds a concordant setting cut and maps its evidence coordinates", {timeout: 30000}, async t => {
+for (const split of [false, true]) test(`the Luna corpus Worker maps ${split ? "separate" : "joint"} setting evidence`, {timeout: 30000}, async t => {
   const {reviewedSpend} = await studyBudget(t);
   const f = fixture({spend: reviewedSpend, provider: async (url, options) => {
     const requestBody = JSON.parse(options.body);
@@ -994,8 +994,15 @@ test("the Luna corpus Worker grounds a concordant setting cut and maps its evide
         facts[0].sceneEntry = {status: "cut", reason: "material-setting", previousId: earlierId, changeId: unitId, entryId: unitId};
         break;
       case "nocturne_luna_scene_situation_v1":
-        facts[0] = {unitId, sceneSituation: {status: "changed", earlierId, currentId: unitId,
+        facts[0] = {unitId, sceneSituation: split ? {status: "uncertain", earlierId: null, currentId: null,
+          earlierBasis: "unresolved", currentBasis: "unresolved"} : {status: "changed", earlierId, currentId: unitId,
           earlierBasis: "established-place", currentBasis: "distinct-place"}};
+        break;
+      case "nocturne_luna_scene_old_place_v1":
+        facts[0] = {unitId, scenePlace: {status: "established", earlierId, currentId: null}};
+        break;
+      case "nocturne_luna_scene_arrival_v1":
+        facts[0] = {unitId, scenePlace: {status: "distinct", earlierId, currentId: unitId}};
         break;
     }
     answer.text = JSON.stringify({facts});
@@ -1013,16 +1020,33 @@ test("the Luna corpus Worker grounds a concordant setting cut and maps its evide
   assert.deepEqual(proof[0].contextIds, [32]);
   assert.deepEqual(proof[0].targetIds, [33]);
   assert.equal(proof[0].status, "returned");
-  assert.equal(result.externalCalls, 6);
+  assert.equal(result.externalCalls, split ? 8 : 6);
   assert.equal(result.hostedSpend.settled, true);
   assert.equal(result.units[1].appliedTransition, "scene-cut");
-  assert.equal(result.units[1].sceneSituationVerificationStatus, "changed");
-  assert.deepEqual(result.units[1].sceneSituationVerification.sceneSituation, {status: "changed", earlierId: 32, currentId: 33,
-    earlierBasis: "established-place", currentBasis: "distinct-place"});
   const calls = f.calls.map(({options}) => JSON.parse(options.body));
   const sent = calls.find(call => call.text.format.name === "nocturne_luna_scene_situation_v1");
   const firstEntry = calls.find(call => call.text.format.name === "nocturne_luna_scene_entry_v1");
-  assert.deepEqual(JSON.parse(sent.input), JSON.parse(firstEntry.input));
+  const fullPrefix = JSON.parse(sent.input);
+  assert.deepEqual(fullPrefix, JSON.parse(firstEntry.input));
+  const oldPlace = calls.find(call => call.text.format.name === "nocturne_luna_scene_old_place_v1");
+  const arrival = calls.find(call => call.text.format.name === "nocturne_luna_scene_arrival_v1");
+  const row = result.units[1];
+  if (!split) {
+    assert.equal(row.sceneSituationVerificationStatus, "changed");
+    assert.deepEqual(row.sceneSituationVerification.sceneSituation, {status: "changed", earlierId: 32, currentId: 33,
+      earlierBasis: "established-place", currentBasis: "distinct-place"});
+    assert.equal(oldPlace, undefined);
+    assert.equal(arrival, undefined);
+    return;
+  }
+  assert.equal(row.sceneSituationVerificationStatus, "uncertain");
+  assert.equal(row.scenePlaceRecoveryStatus, "changed");
+  assert.deepEqual(row.sceneOldPlaceVerification.scenePlace, {status: "established", earlierId: 32, currentId: null});
+  assert.deepEqual(row.sceneArrivalVerification.scenePlace, {status: "distinct", earlierId: 32, currentId: 33});
+  assert.deepEqual(row.transitionEvidenceIds, [32, 33]);
+  assert.deepEqual(JSON.parse(oldPlace.input), {...fullPrefix, units: fullPrefix.units.slice(0, -1)});
+  assert.deepEqual(JSON.parse(arrival.input), fullPrefix);
+  assert.ok(calls.indexOf(sent) < calls.indexOf(oldPlace) && calls.indexOf(oldPlace) < calls.indexOf(arrival));
 });
 
 test("a Luna corpus refusal halts the approved run without replaying another clip", {timeout: 30000}, async t => {

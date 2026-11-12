@@ -18,6 +18,10 @@ const firstEntry = {status: "cut", reason: "material-setting", previousId: 1, ch
 const boundary = {...cut, changeId: target, contrast: "material-change"};
 const neutral = unitId => ({unitId, status: "neutral", frame: "current", depiction: "neutral", narrativePhase: "quiet",
   action: "none", transition: "none", fact: "none", scopeId: null, evidenceIds: [], priorAnchor: null});
+const oldPlace = {status: "established", earlierId: 0, currentId: null};
+const distinctArrival = {status: "distinct", earlierId: 0, currentId: target};
+const uncertainPlace = {status: "uncertain", earlierId: null, currentId: null};
+const placeModes = new Set(["scene-old-place", "scene-arrival"]);
 
 test("scene-situation compares the exact prefix blind and accepts only enumerated evidence on both sides", async () => {
   const units = buildWholeStoryIndex(`${earlierText} ${relocation}`).units.map(({id, text}) => ({id, text}));
@@ -50,9 +54,45 @@ test("scene-situation compares the exact prefix blind and accepts only enumerate
   }
 });
 
+test("split place questions isolate old place from arrival on the provider wire", async () => {
+  const units = buildWholeStoryIndex(`${earlierText} ${relocation}`).units.map(({id, text}) => ({id, text}));
+  const request = {units, targetIds: [target], priorVerdict: cut};
+  let scenePlace = oldPlace;
+  let sent;
+  const provider = createLunaProtocolProvider({apiKey: "neutral-fixture", fetchImpl: async (_url, {body}) => {
+    sent = JSON.parse(body);
+    return Response.json({model: LUNA_PROTOCOL_MODEL, status: "completed", output: [
+      {type: "message", role: "assistant", content: [{type: "output_text", text: JSON.stringify({facts: [{unitId: target, scenePlace}]})}]},
+    ]});
+  }});
+  assert.deepEqual((await provider({...request, mode: "scene-old-place"})).facts, [{unitId: target, scenePlace: oldPlace}]);
+  assert.deepEqual(JSON.parse(sent.input), {units: units.slice(0, -1), targetIds: [target]});
+  assert.equal(sent.text.format.name, "nocturne_luna_scene_old_place_v1");
+  assert.equal(sent.store, false);
+  scenePlace = distinctArrival;
+  assert.deepEqual((await provider({...request, mode: "scene-arrival", earlierPlace: oldPlace})).facts,
+    [{unitId: target, scenePlace: distinctArrival}]);
+  assert.deepEqual(JSON.parse(sent.input), {units, targetIds: [target]});
+  assert.equal(sent.text.format.name, "nocturne_luna_scene_arrival_v1");
+  assert.match(sent.instructions, /compressed journey/u);
+  for (const [mode, verdict, reason] of [["scene-old-place", distinctArrival, "scene-place-shape"],
+    ["scene-old-place", {...oldPlace, currentId: target}, "scene-place-evidence"],
+    ["scene-old-place", {...oldPlace, earlierId: target}, "scene-place-evidence"],
+    ["scene-arrival", oldPlace, "scene-place-shape"],
+    ["scene-arrival", {...distinctArrival, currentId: 1}, "scene-place-evidence"],
+    ["scene-arrival", {...distinctArrival, earlierId: target}, "scene-place-evidence"],
+    ["scene-arrival", {...uncertainPlace, earlierId: 0}, "scene-place-evidence"]]) {
+    scenePlace = verdict;
+    const response = await provider({...request, mode});
+    assert.equal(response.status, "invalid-response");
+    assert.deepEqual(response.targetFailures, [{unitId: target, reason}]);
+  }
+});
+
 async function settingRun({targetText = viewpoint, situation = same, situationFailure, typedBoundary = unresolvedBoundary,
   priorStop = false, targetStop = false, localActivityStop = false, includeSceneEntry = true, entry = firstEntry,
-  includeSuccessor = false, focusedQuiet = false, verifySettingSituation = true, budget} = {}) {
+  includeSuccessor = false, focusedQuiet = false, focusedTargetOnly = true, verifySettingSituation = true, budget,
+  oldWitness = uncertainPlace, arrivalWitness = uncertainPlace, oldWitnessFailure, arrivalWitnessFailure} = {}) {
   const text = `${earlierText} ${targetText}${includeSuccessor ? " They started the next task." : ""}`;
   const index = buildWholeStoryIndex(text);
   const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
@@ -65,9 +105,13 @@ async function settingRun({targetText = viewpoint, situation = same, situationFa
     if (request.mode === "scene-boundary") return {status: "ok", usage, facts: [{unitId: target, sceneBoundary: boundary}]};
     if (request.mode === "scene-situation") return situationFailure ? {status: situationFailure, usage} :
       {status: "ok", usage, facts: [{unitId: target, sceneSituation: situation}]};
+    if (placeModes.has(request.mode)) {
+      const [failure, scenePlace] = request.mode === "scene-old-place" ? [oldWitnessFailure, oldWitness] : [arrivalWitnessFailure, arrivalWitness];
+      return failure ? {status: failure, usage} : {status: "ok", usage, facts: [{unitId: target, scenePlace}]};
+    }
     return {status: "ok", usage, facts: request.targetIds.map(id => {
       const cue = neutral(id);
-      if (focusedQuiet && request.mode === "cue-check" && id === target) return {...cue, evidenceIds: [id]};
+      if (focusedQuiet && request.mode === "cue-check" && id === target) return focusedTargetOnly ? {...cue, evidenceIds: [id]} : cue;
       if (request.mode === "transition") return {...cue, depiction: "unknown", narrativePhase: "unknown", action: "unknown",
         sceneBoundary: typedBoundary, ...(localActivityStop ? {status: "verified", transition: "non-romantic-activity-stop",
           evidenceIds: [id]} : {})};
@@ -154,6 +198,81 @@ test("time and protective cuts have independent authority, as does a local activ
 
 const viewpointOnly = {status: "none", reason: "viewpoint-only", previousId: null, changeId: null, entryId: null};
 const exactCut = {...neutral(target), status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [1, target]};
+
+const acceptedSettingCandidate = {typedBoundary: cut, includeSuccessor: true, focusedQuiet: true, focusedTargetOnly: false,
+  situation: uncertain, targetText: relocation};
+
+test("uncertain joint proof can recover a setting cut using exact independent witnesses", async () => {
+  const {run, requests} = await settingRun({...acceptedSettingCandidate, oldWitness: oldPlace, arrivalWitness: distinctArrival});
+  const row = run.units[target];
+  assert.equal(row.sceneSituationVerificationStatus, "uncertain");
+  assert.equal(row.sceneOldPlaceVerificationStatus, "established");
+  assert.equal(row.sceneArrivalVerificationStatus, "distinct");
+  assert.equal(row.scenePlaceRecoveryStatus, "changed");
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.equal(row.pattern, "Reset");
+  assert.equal(row.readerCue, false);
+  assert.deepEqual(row.trace.evidence, [0, target]);
+  assert.deepEqual(row.transitionEvidenceIds, [0, target]);
+  assert.equal(row.transitionVerification.sceneBoundary.previousId, 1);
+  const joint = requests.find(({mode}) => mode === "scene-situation");
+  const checks = requests.filter(({mode}) => placeModes.has(mode));
+  assert.deepEqual(checks, [{...joint, mode: "scene-old-place"}, {...joint, mode: "scene-arrival"}]);
+  const successor = requests.find(({mode, targetIds}) => mode === "verify" && targetIds[0] === target + 1);
+  assert.ok(requests.indexOf(joint) < requests.indexOf(checks[0]) && requests.indexOf(checks[1]) < requests.indexOf(successor));
+});
+
+test("joint uncertainty with split disagreement or failure leaves existing safety and carry decisions intact", async () => {
+  const budget = createLunaShadowBudget();
+  const reserve = budget.reserveSupporting;
+  budget.reserveSupporting = (body, ...args) => JSON.parse(body).mode === "scene-arrival" ? null : reserve(body, ...args);
+  for (const [controls, expected, calls] of [
+    [{}, "old-uncertain", 1],
+    [{oldWitness: {...oldPlace, earlierId: target}}, "old-invalid-response", 1],
+    [{oldWitness: oldPlace, arrivalWitness: {...distinctArrival, earlierId: 1}}, "witness-disagreement", 2],
+    [{oldWitness: oldPlace, arrivalWitnessFailure: "transient"}, "arrival-transient", 2],
+    [{oldWitness: oldPlace, budget}, "arrival-budget-deferred", 1],
+  ]) {
+    const {run, requests} = await settingRun({...acceptedSettingCandidate, ...controls});
+    const row = run.units[target];
+    assert.equal(row.scenePlaceRecoveryStatus, expected);
+    assert.equal(row.appliedTransition, "uncertain-continuity");
+    assert.equal(row.pattern, "Baseline");
+    assert.equal(requests.filter(({mode}) => placeModes.has(mode)).length, calls);
+  }
+  const samePlace = await settingRun({...acceptedSettingCandidate, targetText: viewpoint, oldWitness: oldPlace,
+    arrivalWitness: {...distinctArrival, status: "same"}});
+  assert.equal(samePlace.run.units[target].scenePlaceRecoveryStatus, "same");
+  assert.equal(samePlace.run.units[target].appliedTransition, "none");
+  assert.equal(samePlace.run.units[target].sceneId, samePlace.run.units[1].sceneId);
+  for (const controls of [{entry: viewpointOnly}, {typedBoundary: {...cut, reason: "time-jump"}},
+    {priorStop: true}, {targetStop: true}, {localActivityStop: true}, {situationFailure: "refused"}, {situation: changed}]) {
+    const {requests} = await settingRun({...acceptedSettingCandidate, ...controls});
+    assert.ok(!requests.some(({mode}) => placeModes.has(mode)));
+  }
+  const refused = await settingRun({...acceptedSettingCandidate, oldWitnessFailure: "refused"});
+  assert.equal(refused.run.summary.attempts.find(({mode}) => mode === "scene-old-place").status, "provider-refused");
+  assert.equal(refused.requests.at(-1).mode, "scene-old-place");
+});
+
+test("a focused neutral target citation can ask for place proof when both setting votes cite the same predecessor", async () => {
+  const samePredecessor = {...acceptedSettingCandidate, focusedTargetOnly: true};
+  const grounded = await settingRun({...samePredecessor, situation: changed});
+  assert.equal(grounded.run.units[target].cueRecoveryCorrection, "continuity-cut-veto");
+  assert.equal(grounded.run.units[target].appliedTransition, "scene-cut");
+  assert.deepEqual(grounded.run.units[target].transitionEvidenceIds, [0, target]);
+  assert.equal(grounded.requests.filter(({mode}) => mode === "scene-situation").length, 1);
+  for (const options of [{}, {situationFailure: "transient"}]) {
+    const {run, requests} = await settingRun({...samePredecessor, ...options});
+    assert.equal(requests.filter(({mode}) => mode === "scene-situation").length, 1);
+    assert.equal(run.units[target].appliedTransition, "none");
+    assert.equal(run.units[target].sceneId, run.units[1].sceneId);
+    assert.equal(run.units[target].independentBoundaryStatus, "setting-context-unresolved");
+  }
+  const protective = await settingRun({...samePredecessor, targetStop: true, situation: changed});
+  assert.equal(protective.run.units[target].pattern, "Stop");
+  assert.ok(!protective.requests.some(({mode}) => mode === "scene-situation"));
+});
 
 test("two setting checks with different predecessors require independent proof of the shared arrival", async () => {
   const split = {typedBoundary: cut, entry: {...firstEntry, previousId: 0}, includeSuccessor: true, focusedQuiet: true};
