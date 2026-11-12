@@ -973,7 +973,7 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.equal(f.calls.length, 6);
 });
 
-test("the Luna corpus Worker funds one exact setting proof and maps its evidence coordinates", {timeout: 30000}, async t => {
+test("the Luna corpus Worker grounds a concordant setting cut and maps its evidence coordinates", {timeout: 30000}, async t => {
   const {reviewedSpend} = await studyBudget(t);
   const f = fixture({spend: reviewedSpend, provider: async (url, options) => {
     const requestBody = JSON.parse(options.body);
@@ -984,15 +984,14 @@ test("the Luna corpus Worker funds one exact setting proof and maps its evidence
     const answer = reply.output[0].content[0];
     const {facts} = JSON.parse(answer.text);
     switch (requestBody.text.format.name) {
+      case "nocturne_luna_verify_v1":
+        Object.assign(facts[0], {status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [earlierId, unitId]});
+        break;
       case "nocturne_luna_transition_v2":
-        facts[0].sceneBoundary = {status: "uncertain", reason: "unclear", previousId: null, entryId: null};
+        facts[0].sceneBoundary = {status: "cut", reason: "setting-shift", previousId: earlierId, entryId: unitId};
         break;
       case "nocturne_luna_scene_entry_v1":
         facts[0].sceneEntry = {status: "cut", reason: "material-setting", previousId: earlierId, changeId: unitId, entryId: unitId};
-        break;
-      case "nocturne_luna_scene_boundary_v1":
-        facts[0].sceneBoundary = {status: "cut", reason: "setting-shift", contrast: "material-change",
-          previousId: earlierId, changeId: unitId, entryId: unitId};
         break;
       case "nocturne_luna_scene_situation_v1":
         facts[0] = {unitId, sceneSituation: {status: "changed", earlierId, currentId: unitId,
@@ -1014,7 +1013,7 @@ test("the Luna corpus Worker funds one exact setting proof and maps its evidence
   assert.deepEqual(proof[0].contextIds, [32]);
   assert.deepEqual(proof[0].targetIds, [33]);
   assert.equal(proof[0].status, "returned");
-  assert.equal(result.externalCalls, 7);
+  assert.equal(result.externalCalls, 6);
   assert.equal(result.hostedSpend.settled, true);
   assert.equal(result.units[1].appliedTransition, "scene-cut");
   assert.equal(result.units[1].sceneSituationVerificationStatus, "changed");

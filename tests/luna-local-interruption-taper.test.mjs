@@ -11,9 +11,12 @@ const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown
 const release = {status: "verified", frame: "current", action: "release", phase: "ease",
   contrast: "softening", targetId: 2, contextId: null};
 const interruption = {status: "none", reason: "ordinary-interruption", previousId: null, changeId: null, entryId: null};
+const verifiedSupport = scopeId => ({...neutral(1), status: "verified", depiction: "romantic", narrativePhase: "build",
+  action: "anticipation", fact: "low", scopeId, evidenceIds: [1]});
 
 async function run({typedEvidence = [1, 2], local = release, sceneEntry = interruption, supporting = true, supportFact,
-  sceneBoundary = noBoundary, blockedIds = [], newParagraph = false, action = "release"} = {}) {
+  sceneBoundary = noBoundary, blockedIds = [], newParagraph = false, action = "release", primaryScope = 0,
+  primaryEvidence = [1, 2], discoveryEnding = false} = {}) {
   const text = "They waited by the door. She watched him with quiet anticipation." +
     (newParagraph ? "\n\n" : " ") + "She softened as someone knocked. They heard another knock.";
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
@@ -29,7 +32,9 @@ async function run({typedEvidence = [1, 2], local = release, sceneEntry = interr
       if (id === 1) return mode === "verify" && supportFact ? supportFact :
         {...neutral(id), status, depiction: "romantic", narrativePhase: "build", action: "anticipation", fact: "low", evidenceIds: [id]};
       if (id === 2) return {...neutral(id), status, depiction: "romantic", narrativePhase: "ease", action,
-        transition: "interruption", fact: "beat-end", scopeId: 0, evidenceIds: mode === "discovery" ? [id] : [1, id]};
+        transition: mode === "discovery" && discoveryEnding ? "beat-end" : "interruption", fact: "beat-end",
+        scopeId: mode === "discovery" && discoveryEnding ? null : primaryScope,
+        evidenceIds: mode === "discovery" ? [id] : primaryEvidence};
       return neutral(id);
     }),
   }), {sceneBoundaryProtocol: true});
@@ -81,4 +86,34 @@ test("local interruption taper preserves verified scene cuts and protective gate
   const blocked = await run({blockedIds: [2]});
   assert.equal(blocked.units[2].pattern, "Stop");
   assert.equal(blocked.units[2].localActionApplication, undefined);
+});
+
+test("a target-only interruption can taper locally with separately verified adjacent same-scope support", async () => {
+  const exact = {primaryEvidence: [2], typedEvidence: [2], discoveryEnding: true, supportFact: verifiedSupport(0)};
+  const {units} = await run(exact);
+  assert.equal(units[2].pattern, "Taper");
+  assert.equal(units[2].appliedTransition, "interruption");
+  assert.deepEqual(units[2].primaryPrefix.evidenceIds, [2]);
+  assert.deepEqual(units[2].transitionVerification.evidenceIds, [2]);
+  assert.deepEqual(units[2].trace.evidence, [1, 2]);
+  assert.equal(units[2].phase, "ease");
+  assert.equal(units[2].cue, false);
+  assert.equal(units[2].readerCue, false);
+  assert.equal(units[2].beatId, null);
+  assert.equal(units[3].pattern, "Baseline");
+  assert.equal(units[3].beatId, null);
+
+  for (const options of [{supportFact: verifiedSupport(1)}, {primaryScope: null, supportFact: verifiedSupport(null)},
+    {discoveryEnding: false}, {local: {...release, contrast: "softening", action: "none"}},
+    {newParagraph: true}, {blockedIds: [1]}]) {
+    const negative = await run({...exact, ...options});
+    assert.equal(negative.units[2].pattern, "Baseline", JSON.stringify(options));
+    assert.equal(negative.units[2].verifiedRelease, undefined);
+  }
+  const cut = await run({...exact, sceneBoundary: {status: "cut", reason: "time-jump", previousId: 1, entryId: 2}});
+  assert.equal(cut.units[2].pattern, "Reset");
+  assert.equal(cut.units[2].verifiedRelease, undefined);
+  const blocked = await run({...exact, blockedIds: [2]});
+  assert.equal(blocked.units[2].pattern, "Stop");
+  assert.equal(blocked.units[2].verifiedRelease, undefined);
 });

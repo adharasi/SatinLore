@@ -518,3 +518,11 @@ Measure provider recognition, applied event, exact phase, cue and waveform indep
 ## V29 setting disagreement after focused verification
 
 The setting check also applies when a strictly quiet discovery contrasts with an exact primary and typed setting cut, the independent entry reports viewpoint-only, and the focused same-episode response repeats the exact cut. Ground the earlier and current situation before the disputed outcome becomes context for the next target. A confirmed continuing situation preserves continuity. A verified change keeps the cut. Missing proof clears carry as unresolved continuity. Both setting paths share one optional request per clip, with the same reviewed prefix and the same budget.
+
+## V30 common grounding for quiet setting cuts
+
+The founder runner checks accepted quiet setting cuts after prefix arbitration and before the next target receives any earlier-state evidence. The same setting question applies to typed and independently confirmed cuts, including when the existing votes agree. The question receives only the reviewed causal prefix. Grounded distinct places preserve Reset. Grounded continuity preserves eligible carry. Missing, unusable or unavailable grounding closes carry as unresolved continuity. One setting request per clip shares the existing approved spend and source bounds.
+
+The local release rule also accepts two independently verified, adjacent facts when the primary interruption and typed interruption each cite only the target. The preceding support must verify anticipation in the same known scope. The target must have exact release, softening and ordinary-interruption evidence. This selects a local Taper without creating carry, a cue or a new beat. An explicit stop keeps priority.
+
+Qualify the rule on the known viewpoint example, compact real moves, missing earlier context and separate time-cut and stop controls. Score the cut and waveform separately. Report any setting request absent from the archive as missing evidence in a fixed-response comparison. Fresh responses can demonstrate use of the new route but need their own provider-variation accounting.

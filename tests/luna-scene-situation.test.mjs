@@ -51,7 +51,7 @@ test("scene-situation compares the exact prefix blind and accepts only enumerate
 });
 
 async function settingRun({targetText = viewpoint, situation = same, situationFailure, typedBoundary = unresolvedBoundary,
-  priorStop = false, verifySettingSituation = true, budget} = {}) {
+  priorStop = false, targetStop = false, localActivityStop = false, includeSceneEntry = true, verifySettingSituation = true, budget} = {}) {
   const text = `${earlierText} ${targetText}`;
   const index = buildWholeStoryIndex(text);
   const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
@@ -67,16 +67,20 @@ async function settingRun({targetText = viewpoint, situation = same, situationFa
     return {status: "ok", usage, facts: request.targetIds.map(id => {
       const cue = neutral(id);
       if (request.mode === "transition") return {...cue, depiction: "unknown", narrativePhase: "unknown", action: "unknown",
-        sceneBoundary: typedBoundary};
+        sceneBoundary: typedBoundary, ...(localActivityStop ? {status: "verified", transition: "non-romantic-activity-stop",
+          evidenceIds: [id]} : {})};
       const status = request.mode === "discovery" ? "candidate" : "verified";
-      if (id === 1 && priorStop) return {...cue, status, transition: "hard-stop", fact: "protective", evidenceIds: [id]};
+      if (id === 1 && priorStop || id === target && targetStop) {
+        return {...cue, status, transition: "hard-stop", fact: "protective", evidenceIds: [id]};
+      }
       if (id === 1) return {...cue, status, depiction: "romantic", narrativePhase: "build", action: "anticipation",
         fact: "low", scopeId: 0, evidenceIds: [0, 1]};
       return cue;
     })};
   }, {sceneBoundaryProtocol: true});
   const run = await runLunaProtocolShadow({id: "grounded-setting-study", text, grant, now: () => 1, provider, budget,
-    verificationTargets: [0, 1, target], transitionTargets: [target], verifyTransitions: true, sceneEntryVerificationTargets: [target],
+    verificationTargets: [0, 1, target], transitionTargets: [target], verifyTransitions: true,
+    sceneEntryVerificationTargets: includeSceneEntry ? [target] : [],
     sceneEntryArbitration: true, boundaryEntryConfirmation: true, verifySettingSituation, negativeStride: 0});
   return {run, requests};
 }
@@ -127,21 +131,29 @@ test("unavailable, uncertain, malformed and deferred setting proof clear carry w
   }
 });
 
-test("setting grounding leaves typed material cuts and preceding protection in force", async () => {
-  const typed = await settingRun({typedBoundary: cut});
-  assert.equal(typed.run.units[target].pattern, "Reset");
-  assert.ok(!typed.requests.some(({mode}) => mode === "scene-situation"));
+test("time and protective cuts have independent authority, as does a local activity stop", async () => {
+  const time = await settingRun({typedBoundary: {...cut, reason: "time-jump"}});
+  assert.equal(time.run.units[target].pattern, "Reset");
+  assert.ok(!time.requests.some(({mode}) => mode === "scene-situation"));
+  const targetStop = await settingRun({typedBoundary: cut, targetStop: true});
+  assert.equal(targetStop.run.units[target].pattern, "Stop");
+  assert.ok(!targetStop.requests.some(({mode}) => mode === "scene-situation"));
   const protectedRun = await settingRun({priorStop: true});
   assert.equal(protectedRun.run.units[1].pattern, "Stop");
   assert.equal(protectedRun.run.units[target].readerCue, false);
   assert.ok(!protectedRun.requests.some(({mode}) => mode === "scene-situation"));
+  const ordinary = await settingRun({typedBoundary: cut, localActivityStop: true, situation: uncertain});
+  assert.equal(ordinary.run.units[target].sceneSituationVerificationStatus, "uncertain");
+  assert.equal(ordinary.run.units[target].appliedTransition, "non-romantic-activity-stop");
+  assert.equal(ordinary.run.units[target].pattern, "Baseline");
+  assert.equal(ordinary.run.units[target].beatId, null);
 });
 
 const viewpointOnly = {status: "none", reason: "viewpoint-only", previousId: null, changeId: null, entryId: null};
 const exactCut = {...neutral(target), status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [1, target]};
 
 async function focusedSettingRun({targetText = viewpoint, situation = same, entry = viewpointOnly, proof = exactCut,
-  verifySettingSituation = true, protectedPrior = false, followingDispute = false, prefixUnits = 3} = {}) {
+  verifySettingSituation = true, protectedPrior = false, followingDispute = false, discoveryCut = false, prefixUnits = 3} = {}) {
   const nextId = target + 1;
   const text = `${earlierText} ${targetText} They waited for the signal.`;
   const index = buildWholeStoryIndex(text);
@@ -164,7 +176,8 @@ async function focusedSettingRun({targetText = viewpoint, situation = same, entr
       const cue = neutral(unitId);
       if (request.mode === "transition") return {...cue, depiction: "unknown", narrativePhase: "unknown", action: "unknown",
         sceneBoundary: unitId === target ? cut : unresolvedBoundary};
-      if (request.mode === "discovery") return cue;
+      if (request.mode === "discovery") return discoveryCut && unitId === target ?
+        {...exactCut, status: "candidate", scopeId: target} : cue;
       if (unitId === target) return exactCut;
       if (unitId === 0) return {...cue, status: "verified", transition: protectedPrior ? "hard-stop" : "onset",
         fact: protectedPrior ? "protective" : "none", depiction: "romantic", narrativePhase: protectedPrior ? "quiet" : "onset",
@@ -227,14 +240,36 @@ test("two eligible routes share one setting proof and later unproved carry is cl
   assert.equal(run.units[target + 1].pattern, "Baseline");
 });
 
-test("legacy adjudication preserves stops, already verified entry and inexact focused cut evidence", async () => {
-  for (const options of [{protectedPrior: true}, {entry: firstEntry}, {proof: {...exactCut, evidenceIds: [0, target]}}]) {
+test("quiet setting proof is required when all votes agree and when no entry or focused diagnostic exists", async () => {
+  for (const options of [{entry: firstEntry}, {entry: firstEntry, discoveryCut: true},
+    {proof: {...exactCut, evidenceIds: [0, target]}}]) {
     const {run, requests} = await focusedSettingRun(options);
-    assert.ok(!requests.some(({mode}) => mode === "scene-situation"));
-    assert.equal(run.units[target].pattern, "Reset");
+    assert.equal(requests.filter(({mode}) => mode === "scene-situation").length, 1);
+    assert.equal(run.units[target].transitionVerification.sceneBoundary.status, "cut");
+    assert.equal(run.units[target].appliedTransition, "none");
     assert.equal(run.units[target].readerCue, false);
-    if (options.protectedPrior) assert.equal(run.units[0].pattern, "Stop");
+    const situationIndex = requests.findIndex(({mode}) => mode === "scene-situation");
+    const successorIndex = requests.findIndex(({mode, targetIds}) => mode === "verify" && targetIds[0] === target + 1);
+    assert.ok(situationIndex < successorIndex);
   }
+  const move = await focusedSettingRun({entry: firstEntry, targetText: relocation, situation: changed});
+  assert.equal(move.run.units[target].pattern, "Reset");
+  assert.equal(move.run.units[target].sceneSituationVerificationStatus, "changed");
+  const typedOnly = await settingRun({typedBoundary: cut, includeSceneEntry: false, situation: uncertain});
+  assert.equal(typedOnly.run.units[target].pattern, "Baseline");
+  assert.equal(typedOnly.run.units[target].appliedTransition, "uncertain-continuity");
+  assert.deepEqual(typedOnly.requests.filter(({mode}) => mode === "scene-situation"),
+    [{...typedOnly.requests.find(({mode, targetIds}) => mode === "transition" && targetIds[0] === target),
+      mode: "scene-situation"}]);
+});
+
+test("setting proof cannot cross a protected boundary or cite a clipped earlier situation", async () => {
+  const protectedRun = await focusedSettingRun({protectedPrior: true});
+  assert.ok(!protectedRun.requests.some(({mode}) => mode === "scene-situation"));
+  assert.equal(protectedRun.run.units[0].pattern, "Stop");
+  assert.equal(protectedRun.run.units[target].pattern, "Baseline");
+  assert.equal(protectedRun.run.units[target].sceneSituationVerificationStatus, "path-ineligible");
+  assert.equal(protectedRun.run.units[target].readerCue, false);
   const clipped = await focusedSettingRun({prefixUnits: 2, situation: changed});
   assert.equal(clipped.run.units[target].sceneSituationVerificationStatus, "invalid-response");
   assert.equal(clipped.run.units[target].pattern, "Baseline");

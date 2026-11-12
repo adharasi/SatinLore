@@ -215,6 +215,8 @@ V24 separates independently checked same-episode boundaries, verified cue design
 
 V25 evaluates independently confirmed boundaries, exact interruption releases and recovery cue designation. Earlier-state and broader context experiments must retain exact reviewed source boundaries and report every unavailable reference. [V25 evaluation](nocturne-beat-protocol-shadow.md#v25-boundary-confirmation-and-verified-release)
 
+V30 gives the founder runner one grounding requirement for accepted quiet setting cuts. This covers the concordant false Reset found in V29. Qualify a grounded natural setting cut, the viewpoint control and explicit stops before using the result as broader release evidence. [V30 evaluation](nocturne-beat-protocol-shadow.md#v30-common-grounding-for-quiet-setting-cuts)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
