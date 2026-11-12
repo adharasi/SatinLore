@@ -1215,6 +1215,50 @@ test("adjacent exact buildup accumulates only within its open paragraph and decl
   }
 });
 
+test("an exact reciprocal response advances quiet romantic context without adding an enacted cue", async () => {
+  const cases = [
+    {pattern: "Gradual build"},
+    {localContext: 0, pattern: "Undertone"},
+    {previousDepiction: "neutral", pattern: "Undertone"},
+    {previousFrame: "reported", pattern: "Baseline"},
+    {discoveryScope: 1, pattern: "Undertone"},
+    {paragraphBreak: true, pattern: "Undertone"},
+    {blocked: true, pattern: "Baseline"},
+    {stop: true, pattern: "Stop"},
+  ];
+  for (const {localContext = 1, previousDepiction = "romantic", previousFrame = "current", discoveryScope = 0,
+    paragraphBreak, blocked, stop, pattern} of cases) {
+    const input = fixture(`The doors opened. June smiled in invitation.${paragraphBreak ? "\n\n" : " "}Lee returned the smile.`);
+    const provider = Object.assign(fake((id, mode) => {
+      if (id === 1) return {...neutral(id), depiction: previousDepiction, frame: previousFrame};
+      if (id !== 2) return neutral(id);
+      if (mode === "local-action") return {unitId: id, localAction: {status: "verified", frame: "current", action: "anticipation",
+        phase: "build", contrast: "reciprocal-buildup", targetId: id, contextId: localContext}};
+      if (mode === "scene-entry") return {unitId: id, sceneEntry: {status: "none", reason: "ordinary-interruption",
+        previousId: null, changeId: null, entryId: null}};
+      if (mode === "transition") return typedTransition(id, {status: stop ? "verified" : "neutral", transition: stop ? "hard-stop" : "none",
+        fact: stop ? "protective" : "none", evidenceIds: stop ? [id] : [],
+        sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null}});
+      return active(id, mode, {depiction: mode === "discovery" ? "romantic" : "neutral", narrativePhase: "build",
+        scopeId: mode === "discovery" ? discoveryScope : 0, evidenceIds: [1, 2]});
+    }), {sceneBoundaryProtocol: true});
+    const result = await runLunaProtocolShadow({...input, provider, verificationTargets: [2], maxVerification: 1,
+      verifyTransitions: true, transitionTargets: [2], maxTransitionVerification: 1, localActionVerificationTargets: [2],
+      sceneEntryVerificationTargets: [2], blockedIds: blocked ? [1] : []});
+    const [, prompt, response] = result.units;
+    assert.equal(prompt.pattern, blocked ? "Stop" : "Baseline");
+    assert.equal(response.pattern, pattern, JSON.stringify({localContext, previousDepiction, previousFrame, discoveryScope, paragraphBreak, blocked, stop}));
+    assert.equal(response.cue, false);
+    if (pattern === "Gradual build") {
+      assert.equal(response.phase, "build");
+      assert.equal(response.appliedTransition, "none");
+      assert.equal(response.readerCue, true);
+      assert.deepEqual(response.trace.evidence, [1, 2]);
+      assert.equal(response.knownAt, 2);
+    }
+  }
+});
+
 test("an independently linked build lets auxiliary evidence renew only an open low envelope", async () => {
   const source = "The music began and both friends smiled. June looked forward to the dance. " +
     "She expected that sharing the dance would be pleasant and kept thinking of that quiet moment while the musicians continued playing for the people gathering in the room. " +
@@ -1422,6 +1466,46 @@ test("an exact frame entry survives typed silence, and a mixed return waits for 
     assert.equal(run.units[2].pattern, "Baseline");
     assert.equal(run.units[3].transitionVerification.transition, "none");
     assert.equal(run.units[3].appliedTransition, "present-return");
+  }
+});
+
+test("an exact blind earlier-frame check rejects an unsupported mixed return before the actual return", async () => {
+  const text = "Jo imagined a trip. The imagined train crossed a bridge. Jo lingered in the imagined garden. Back in the room, she closed the notebook.";
+  const noBoundary = {status: "none", reason: "none", previousId: null, entryId: null};
+  for (const control of ["confirmed", "different-frame", "no-target", "material-cut"]) {
+    const calls = [];
+    const provider = fake((id, mode) => {
+      if (mode === "transition") return typedTransition(id, {fact: "cut", frame: id === 2 ? "mixed" : "current",
+        transition: "present-return", evidenceIds: id === 2 ? [0, 2] : [2, 3],
+        sceneBoundary: id === 2 && control !== "material-cut" ? noBoundary :
+          {status: "cut", reason: "setting-shift", previousId: id - 1, entryId: id}});
+      if (id === 0) return active(id, mode, {fact: "cut", frame: "imagined", action: "none", narrativePhase: "quiet",
+        transition: "imagined-entry", scopeId: 0});
+      if (id === 1) return {...neutral(id), frame: "imagined"};
+      if (id === 2 && mode === "cue-check") return {...neutral(id), frame: control === "different-frame" ? "remembered" : "imagined",
+        evidenceIds: control === "no-target" ? [] : [id]};
+      if (id === 2 && mode !== "discovery") return {...neutral(id), frame: "imagined"};
+      if (id === 2 || id === 3 && mode !== "discovery") return active(id, mode, {fact: "cut", action: "none",
+        narrativePhase: "quiet", transition: "present-return", scopeId: id === 2 ? null : 0,
+        evidenceIds: id === 2 ? [2] : [0, 3]});
+      return neutral(id);
+    }, request => calls.push(request));
+    provider.sceneBoundaryProtocol = true;
+    const run = await runLunaProtocolShadow({...fixture(text), provider, verificationTargets: [0, 2, 3], verifyTransitions: true,
+      maxTransitionVerification: 2, transitionTargets: [2, 3], verifyContinuityBoundary: true, maxCueChecks: 1});
+    const [first, next] = run.units.slice(2);
+    assert.equal(first.primaryPrefix.frame, "imagined");
+    assert.equal(first.transitionVerification.transition, "present-return");
+    assert.equal(first.appliedTransition, control === "confirmed" ? "none" : "present-return", control);
+    assert.equal(first.pattern, control === "confirmed" ? "Baseline" : "Reset", control);
+    assert.equal(first.cueRecoveryCorrection, control === "confirmed" ? "continuity-frame-veto" : undefined);
+    assert.equal(next.appliedTransition, "present-return");
+    assert.equal(next.pattern, "Reset");
+    if (control === "confirmed") assert.equal(first.sceneId, run.units[0].sceneId);
+    assert.notEqual(next.sceneId, first.sceneId);
+    const blind = calls.filter(({mode}) => mode === "cue-check");
+    assert.equal(blind.length, 1);
+    assert.equal(blind[0].units.at(-1).id, 2);
   }
 });
 

@@ -20,7 +20,8 @@ const noBoundary = {status: "none", reason: "none", previousId: null, entryId: n
 const stop = unitId => ({...neutral(unitId), status: "verified", transition: "hard-stop", fact: "protective", evidenceIds: [unitId]});
 
 function run({entry = uncertain, boundary = objective, verifiedPrior = neutral(1), primary = cut, localStop = false,
-  unavailable = false, arbitrate = true, requests = []} = {}) {
+  unavailable = false, arbitrate = true, requests = [], discovery = {...cut, status: "candidate"},
+  localTyped, boundaryReply, blockedIds = []} = {}) {
   const provider = Object.assign(async request => {
     requests.push(request);
     const {mode, targetIds} = request;
@@ -29,18 +30,19 @@ function run({entry = uncertain, boundary = objective, verifiedPrior = neutral(1
     return {status: "ok", usage, facts: targetIds.map(id => {
       if (mode === "scene-entry") return {unitId: id, sceneEntry: entry};
       if (mode === "scene-boundary") return {unitId: id,
-        sceneBoundary: {...objective, previousId: entry.previousId, changeId: 2, contrast: "material-change"}};
+        sceneBoundary: boundaryReply ?? {...objective, previousId: entry.previousId, changeId: 2, contrast: "material-change"}};
       if (mode === "transition") return {...neutral(id), depiction: "unknown", action: "unknown", narrativePhase: "unknown",
-        ...(localStop ? {status: "verified", transition: "non-romantic-activity-stop", evidenceIds: [id]} : {}), sceneBoundary: boundary};
+        ...(localStop ? {status: "verified", transition: "non-romantic-activity-stop", evidenceIds: [id]} : {}),
+        ...localTyped, sceneBoundary: boundary};
       if (id === 0) return mode === "discovery" ? {...onset, status: "candidate"} : onset;
       if (id === 1) return verifiedPrior;
-      if (id === 2) return mode === "discovery" ? {...cut, status: "candidate"} : primary;
+      if (id === 2) return mode === "discovery" ? discovery : primary;
       return neutral(id);
     })};
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "objective-entry", text, grant, now: () => 1, provider, negativeStride: 0, prefixUnits: 3,
     verificationTargets: [0, 1, 2, 3], maxVerification: 4, transitionTargets: [2], maxTransitionVerification: 1,
-    verifyTransitions: true, sceneEntryArbitration: arbitrate, boundaryEntryConfirmation: arbitrate,
+    verifyTransitions: true, sceneEntryArbitration: arbitrate, boundaryEntryConfirmation: arbitrate, blockedIds,
     sceneEntryVerificationTargets: [2]});
 }
 
@@ -62,6 +64,52 @@ test("a correlated quiet objective cut requires the existing first-entry check b
   assert.deepEqual(checks, [{mode: "scene-entry", units: units.slice(0, 3).map(({id, text}) => ({id, text})), targetIds: [2]}]);
   assert.ok(requests.indexOf(checks[0]) < requests.findIndex(({mode, targetIds}) => mode === "verify" && targetIds[0] === 3));
   assert.equal(requests.find(({mode, targetIds}) => mode === "verify" && targetIds[0] === 3).attested, undefined);
+});
+
+const exactOldScopeAccent = {...neutral(2), status: "verified", depiction: "suggestive", narrativePhase: "sustain",
+  action: "change", transition: "accent", fact: "low", scopeId: 0, evidenceIds: [2]};
+const exactOldScopeDiscovery = {...onset, unitId: 2, status: "candidate", evidenceIds: [2]};
+const exactTypedOnset = {status: "verified", transition: "onset", evidenceIds: [2]};
+const objectiveAgainstLocal = {entry: {...material, previousId: 1}, boundary: noBoundary,
+  primary: exactOldScopeAccent, discovery: exactOldScopeDiscovery, localTyped: exactTypedOnset};
+
+test("an independently corroborated objective entry takes precedence over an old-scope accent and local onset", async () => {
+  const requests = [];
+  const result = await run({...objectiveAgainstLocal, requests});
+  const row = result.units[2];
+  assert.equal(row.primaryPrefix.transition, "accent");
+  assert.equal(row.transitionVerification.transition, "onset");
+  assert.equal(row.sceneEntryVerification.sceneEntry.reason, "material-objective");
+  assert.equal(row.boundaryVerification.sceneBoundary.reason, "objective-shift");
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.equal(row.pattern, "Reset");
+  assert.equal(row.readerCue, false);
+  assert.notEqual(row.sceneId, result.units[1].sceneId);
+  assert.equal(row.sceneId, result.units[3].sceneId);
+  assert.deepEqual(row.trace.evidence, [1, 2]);
+  const checks = requests.filter(({mode}) => ["scene-entry", "scene-boundary"].includes(mode));
+  assert.deepEqual(checks.map(({mode}) => mode), ["scene-entry", "scene-boundary"]);
+  assert.deepEqual(checks[0].units, checks[1].units);
+  assert.deepEqual(checks[1].targetIds, [2]);
+  assert.equal(checks[1].attested, undefined);
+  assert.ok(requests.indexOf(checks[1]) < requests.findIndex(({mode, targetIds}) => mode === "verify" && targetIds[0] === 3));
+});
+
+test("a local onset cannot nominate an objective cut without an exact entry and matching independent boundary", async () => {
+  const disagree = {...objective, previousId: 0, changeId: 2, contrast: "material-change"};
+  for (const control of [{entry: uncertain}, {entry: {...material, reason: "material-time"}},
+    {entry: {...material, changeId: 1}}, {boundaryReply: disagree}, {unavailable: true},
+    {discovery: {...exactOldScopeDiscovery, scopeId: 1}}, {localTyped: {...exactTypedOnset, evidenceIds: [1, 2]}}]) {
+    const requests = [];
+    const result = await run({...objectiveAgainstLocal, ...control, requests});
+    assert.equal(result.units[2].appliedTransition, "accent");
+    assert.equal(result.units[2].pattern, "Undertone");
+    assert.equal(requests.some(({mode}) => mode === "scene-boundary"), Boolean(control.boundaryReply));
+  }
+  const protectedTarget = await run({...objectiveAgainstLocal, primary: stop(2)});
+  assert.equal(protectedTarget.units[2].pattern, "Stop");
+  const protectedPath = await run({...objectiveAgainstLocal, blockedIds: [1]});
+  assert.notEqual(protectedPath.units[2].appliedTransition, "scene-cut");
 });
 
 test("independent exact objective entry preserves Reset and ordinary interruption preserves eligible carry", async () => {

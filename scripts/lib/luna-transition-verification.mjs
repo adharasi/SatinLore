@@ -91,13 +91,25 @@ export function continuityDispute(primary, typed, discovery, id, localAnchors) {
   return null;
 }
 
-export function resolveContinuityDispute(dispute, verdict, id) {
+export function resolveContinuityDispute(dispute, verdict, id, primary) {
+  const cut = dispute?.cut;
+  const quietEarlierFrame = fact => fact?.status === "neutral" && earlierFrames.has(fact.frame) &&
+    fact.transition === "none" && fact.fact === "none" && fact.action === "none" && fact.narrativePhase === "quiet" &&
+    fact.priorAnchor === null;
+  // A mixed return is disputed when both prefix readers place this exact unit
+  // in the same earlier frame. The blind check supplies the target citation.
+  if (cut?.transition === "present-return" && cut.frame === "mixed" && cut.sceneBoundary?.status === "none" &&
+      cut.evidenceIds.some(evidence => evidence < id) &&
+      quietEarlierFrame(primary) && quietEarlierFrame(verdict) && primary.frame === verdict.frame &&
+      primary.scopeId === verdict.scopeId && verdict.evidenceIds.length === 1 && verdict.evidenceIds[0] === id) {
+    return "continuity-frame-veto";
+  }
   if (dispute?.cut?.transition === "scene-cut" && dispute.cut.sceneBoundary?.status === "cut" &&
       verdict?.status === "neutral" && verdict.transition === "none" &&
       ["current", "neutral"].includes(verdict.frame)) return "continuity-cut-veto";
   if (!dispute || verdict?.status !== "verified" || !verdict.evidenceIds.includes(id)) return undefined;
   if (verdict.transition === "hard-stop" || verdict.transition === "declined-restart") return "continuity-stop";
-  const {cut, anchors} = dispute;
+  const {anchors} = dispute;
   // The check corroborates a change of subject but places it within an older
   // scope. That contradicts a scene entry whose new objective must start here.
   if (cut?.sceneBoundary?.reason === "objective-shift" && verdict.transition === "scene-cut" &&

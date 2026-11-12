@@ -93,7 +93,8 @@ test("split place questions isolate old place from arrival on the provider wire"
 async function settingRun({targetText = viewpoint, situation = same, situationFailure, typedBoundary = unresolvedBoundary,
   priorStop = false, targetStop = false, quietPrior = false, localActivityStop = false, includeSceneEntry = true, entry = firstEntry, entryFailure,
   includeSuccessor = false, focusedQuiet = false, focusedTargetOnly = true, verifySettingSituation = true, budget,
-  oldWitness = uncertainPlace, arrivalWitness = uncertainPlace, oldWitnessFailure, arrivalWitnessFailure, discoveryReading} = {}) {
+  oldWitness = uncertainPlace, arrivalWitness = uncertainPlace, oldWitnessFailure, arrivalWitnessFailure, discoveryReading,
+  boundaryWitness = boundary} = {}) {
   const text = `${earlierText} ${targetText}${includeSuccessor ? " They started the next task." : ""}`;
   const index = buildWholeStoryIndex(text);
   const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
@@ -104,7 +105,7 @@ async function settingRun({targetText = viewpoint, situation = same, situationFa
     requests.push(request);
     if (request.mode === "scene-entry") return entryFailure ? {status: entryFailure, usage} :
       {status: "ok", usage, facts: [{unitId: target, sceneEntry: entry}]};
-    if (request.mode === "scene-boundary") return {status: "ok", usage, facts: [{unitId: target, sceneBoundary: boundary}]};
+    if (request.mode === "scene-boundary") return {status: "ok", usage, facts: [{unitId: target, sceneBoundary: boundaryWitness}]};
     if (request.mode === "scene-situation") return situationFailure ? {status: situationFailure, usage} :
       {status: "ok", usage, facts: [{unitId: target, sceneSituation: situation}]};
     if (placeModes.has(request.mode)) {
@@ -367,6 +368,41 @@ test("invalid first-entry evidence can nominate two exact place witnesses for a 
   }
 });
 
+test("a valid first entry can nominate exact place witnesses when the other lanes are quiet", async () => {
+  const options = {typedBoundary: noBoundary, entry: {...firstEntry, previousId: 0},
+    boundaryWitness: {...noBoundary, changeId: null, contrast: "routine-movement"}, targetText: relocation,
+    includeSuccessor: true, oldWitness: oldPlace, arrivalWitness: distinctArrival};
+  const accepted = await settingRun(options);
+  const row = accepted.run.units[target];
+  assert.equal(row.sceneEntryVerificationStatus, "cut");
+  assert.equal(row.transitionVerification.status, "neutral");
+  assert.equal(row.scenePlaceRecoveryStatus, "changed");
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.deepEqual(row.transitionEvidenceIds, [0, target]);
+  assert.equal(row.pattern, "Reset");
+  assert.equal(row.readerCue, false);
+  assert.equal(accepted.run.units[target + 1].sceneId, row.sceneId);
+  const entry = accepted.requests.find(({mode}) => mode === "scene-entry");
+  const places = accepted.requests.filter(({mode}) => placeModes.has(mode));
+  assert.deepEqual(places, [{...entry, mode: "scene-old-place"}, {...entry, mode: "scene-arrival"}]);
+  const successor = accepted.requests.findIndex(({mode, targetIds}) => mode === "verify" && targetIds[0] === target + 1);
+  assert.ok(accepted.requests.indexOf(places[1]) < successor);
+  assert.ok(!accepted.requests.some(({mode}) => mode === "scene-situation"));
+
+  for (const [control, placeStatus] of [[{oldWitness: uncertainPlace}, "old-uncertain"],
+    [{arrivalWitness: {...distinctArrival, status: "same"}}, "same"],
+    [{arrivalWitness: {...distinctArrival, earlierId: 1}}, "witness-disagreement"],
+    [{arrivalWitnessFailure: "transient"}, "arrival-transient"], [{entry: viewpointOnly}, undefined],
+    [{priorStop: true}, undefined], [{targetStop: true}, undefined],
+    [{boundaryWitness: {...boundary, reason: "time-jump"}}, undefined],
+    [{boundaryWitness: {...boundary, reason: "objective-shift"}}, undefined]]) {
+    const result = await settingRun({...options, ...control});
+    assert.equal(result.run.units[target].scenePlaceRecoveryStatus, placeStatus);
+    assert.notEqual(result.run.units[target].appliedTransition, "scene-cut");
+    if (!placeStatus) assert.ok(!result.requests.some(({mode}) => placeModes.has(mode)));
+  }
+});
+
 test("only an exact quiet discovery can nominate setting proof with a neutral frame", async () => {
   const options = {...acceptedSettingCandidate, focusedTargetOnly: true, discoveryReading: {frame: "neutral"}};
   const unresolved = await settingRun(options);
@@ -428,7 +464,8 @@ test("two setting checks with different predecessors require independent proof o
 
 async function focusedSettingRun({targetText = viewpoint, situation = same, entry = viewpointOnly, proof = exactCut,
   verifySettingSituation = true, protectedPrior = false, followingDispute = false, discoveryCut = false, prefixUnits = 3,
-  rootedPrimary = false, oldWitness = uncertainPlace, arrivalWitness = uncertainPlace} = {}) {
+  rootedPrimary = false, localPrimaryScope = null, heldAdjacent = false,
+  oldWitness = uncertainPlace, arrivalWitness = uncertainPlace} = {}) {
   const nextId = target + 1;
   const text = `${earlierText} ${targetText} They waited for the signal.`;
   const index = buildWholeStoryIndex(text);
@@ -455,10 +492,13 @@ async function focusedSettingRun({targetText = viewpoint, situation = same, entr
         sceneBoundary: unitId === target ? cut : unresolvedBoundary};
       if (request.mode === "discovery") return discoveryCut && unitId === target ?
         {...exactCut, status: "candidate", scopeId: target} : cue;
-      if (unitId === target) return rootedPrimary ? {...exactCut, scopeId: 0, evidenceIds: [0, 1, target]} : exactCut;
+      if (unitId === target) return rootedPrimary ? {...exactCut, scopeId: 0, evidenceIds: [0, 1, target]} :
+        {...exactCut, scopeId: localPrimaryScope};
       if (unitId === 0) return {...cue, status: "verified", transition: protectedPrior ? "hard-stop" : "onset",
         fact: protectedPrior ? "protective" : "none", depiction: "romantic", narrativePhase: protectedPrior ? "quiet" : "onset",
         action: protectedPrior ? "none" : "contact", scopeId: 0, evidenceIds: [0]};
+      if (unitId === 1 && heldAdjacent) return {...cue, status: "verified", depiction: "romantic", narrativePhase: "build",
+        action: "anticipation", fact: "low", scopeId: 0, evidenceIds: [1]};
       return cue;
     })};
   }, {sceneBoundaryProtocol: true});
@@ -496,6 +536,34 @@ test("rooted quiet cut votes can preserve held same-place continuity after an un
   for (const control of [{rootedPrimary: false}, {discoveryCut: false}, {protectedPrior: true}]) {
     const result = await focusedSettingRun({...options, ...control});
     assert.ok(!result.requests.some(({mode}) => placeModes.has(mode)));
+  }
+});
+
+test("both adjacent viewpoint scopes can corroborate the existing place after a focused cut echo", async () => {
+  for (const [discoveryCut, localPrimaryScope, focusedScope, prefixUnits, earlierId] of [
+    [true, target, target, 3, 0], [false, target, null, 2, 1], [false, target - 1, null, 3, 0],
+  ]) {
+    const options = {discoveryCut, localPrimaryScope, heldAdjacent: true, prefixUnits, situation: uncertain,
+      proof: {...exactCut, scopeId: focusedScope}, oldWitness: {...oldPlace, earlierId},
+      arrivalWitness: {...distinctArrival, earlierId, status: "same"}};
+    const accepted = await focusedSettingRun(options);
+    const row = accepted.run.units[target];
+    assert.equal(row.sceneEntryVerification.sceneEntry.reason, "viewpoint-only");
+    assert.equal(row.scenePlaceRecoveryStatus, "same");
+    assert.equal(row.appliedTransition, "none");
+    assert.equal(row.independentBoundaryStatus, "setting-continuity");
+    assert.equal(row.sceneId, accepted.run.units[target - 1].sceneId);
+    assert.equal(row.beatId, accepted.run.units[target - 1].beatId);
+    assert.ok(row.trace.holdWords > 0);
+    const joint = accepted.requests.find(({mode}) => mode === "scene-situation");
+    assert.deepEqual(accepted.requests.filter(({mode}) => placeModes.has(mode)),
+      [{...joint, mode: "scene-old-place"}, {...joint, mode: "scene-arrival"}]);
+    const move = await focusedSettingRun({...options, targetText: relocation, arrivalWitness: {...options.arrivalWitness, status: "distinct"}});
+    assert.equal(move.run.units[target].appliedTransition, "scene-cut");
+    assert.equal(move.run.units[target].pattern, "Reset");
+    const unresolved = await focusedSettingRun({...options, arrivalWitness: uncertainPlace});
+    assert.equal(unresolved.run.units[target].appliedTransition, "uncertain-continuity");
+    assert.equal(unresolved.run.units[target].pattern, "Baseline");
   }
 });
 

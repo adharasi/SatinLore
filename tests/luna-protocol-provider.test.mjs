@@ -41,6 +41,8 @@ test("local action check sends only the blind prefix and separates local action 
     assert.deepEqual(schema.required, ["unitId", "localAction"]);
     assert.equal(schema.properties.localAction.additionalProperties, false);
     assert.match(sent.instructions, /what the target itself adds/u);
+    assert.match(sent.instructions, /verified continuation uses sustain, peak, ease, recover or unknown/u);
+    assert.match(sent.instructions, /Use frame noncurrent only with contrast noncurrent/u);
     assert.match(sent.instructions, /Never quote/u);
     return response([row]);
   });
@@ -68,12 +70,16 @@ test("local action check sends only the blind prefix and separates local action 
     const invalid = provider(async () => response([{...row, localAction: {...localAction, ...extra}}]));
     assert.deepEqual(await invalid(supplied), rejected([{...targetFailure(12, "local-action-evidence"), detail}]));
   }
-  for (const [extra, reason] of [
-    [{frame: "noncurrent"}, "local-action-shape"], [{action: "release"}, "local-action-shape"],
-    [{phase: "quiet"}, "local-action-shape"], [{comment: units[0].text}, "local-action-shape"],
-  ]) {
+  for (const extra of [{frame: "noncurrent"}, {action: "release"}, {phase: "quiet"}]) {
+    const verdict = {...localAction, ...extra};
+    const {status, frame, action, phase, contrast} = verdict;
+    const invalid = provider(async () => response([{...row, localAction: verdict}]));
+    assert.deepEqual(await invalid(supplied), rejected([{...targetFailure(12, "local-action-shape"),
+      detail: {status, frame, action, phase, contrast}}]));
+  }
+  for (const extra of [{comment: units[0].text}, {frame: units[0].text}]) {
     const invalid = provider(async () => response([{...row, localAction: {...localAction, ...extra}}]));
-    assert.deepEqual(await invalid(supplied), rejected([targetFailure(12, reason)]));
+    assert.deepEqual(await invalid(supplied), rejected([targetFailure(12, "local-action-shape")]));
   }
   for (const verdict of [
     {...localAction, phase: "unknown", contextId: null},
@@ -108,7 +114,8 @@ test("a no-action verdict may discard only an exact redundant target citation", 
     assert.deepEqual(await run(extra), rejected([{...targetFailure(12, "local-action-evidence"),
       detail: {status: "none", action: "none", targetEvidence, contextEvidence}}]));
   }
-  assert.deepEqual(await run({action: "contact"}), rejected([targetFailure(12, "local-action-shape")]));
+  assert.deepEqual(await run({action: "contact"}), rejected([{...targetFailure(12, "local-action-shape"),
+    detail: {status: "none", frame: "current", action: "contact", phase: "quiet", contrast: "neutral"}}]));
 });
 
 test("scene-only verification sends a blind causal prefix and validates evidence roles", async () => {

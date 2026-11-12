@@ -584,3 +584,13 @@ A quiet setting-cut disagreement can use the existing split place checks after e
 An apparent time jump at an independently ordinary interruption can nominate the existing blind release check if the preceding current action is exact and the current isolated action is quiet. A new fade requires current release proof and the same established, unexpired hold. A supported cut, hard stop, elapsed interval or noncurrent frame keeps priority. A release proposal that cites the older beat opener may inherit the immediately verified fade when the current discovery and isolated evidence establish no new release.
 
 Record the reported and applied events separately. Compare saved answers against both compiler versions to attribute output changes. Separate new proof availability, controlled qualification and fresh-model disagreement. The direct-cue reference remains an independent adjudication question when all current action evidence supports release only.
+
+## V40 resolve setting, objective and frame disagreements
+
+An exact first-entry setting result can nominate independent old-place and arrival checks when current primary, discovery and typed evidence is quiet. A rooted or target-scoped viewpoint disagreement can use the same exact witnesses after an uncertain joint comparison. A verified distinct arrival requires both witnesses to ground the same eligible prior coordinate. A verified same place preserves any live beat and its clock. Existing refusal, spend and evidence gates apply.
+
+A material objective first-entry finding that competes with exact current onset and an old-scope accent can nominate a blind scene-boundary check. An exact corroborated objective cut starts the new scene at the target and clears active playback there. A mixed-frame return can be deferred when exact current evidence still places the target in the earlier noncurrent frame. Use an independent continuation check on that target if the primary has no citation. A genuinely grounded subsequent return retains priority.
+
+Two same-scope prefix readings and an exact isolated reciprocal buildup can support Gradual build for the current unit. Preserve scene, cue and event decisions. Independently review prior beat evidence, expiry and waveform fit when phase and event already agree. The isolated local-action prompt spells out compatible field combinations. A rejected shape can record the five allowlisted enum fields without retaining source text or submitted IDs.
+
+Grade fixed-answer changes, hypothetical corroboration and naturally returned proof as separate evidence. Keep frozen waveform and cue disagreements visible after correcting a boundary.
