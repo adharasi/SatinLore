@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v38";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v39";
 const controlRubricVersion = "nocturne-luna-protocol-v17";
 const boundaryRubricVersion = "nocturne-luna-protocol-v18";
 const localActionRubricVersion = "nocturne-luna-protocol-v19";
@@ -444,26 +444,44 @@ export function lunaProtocolLocalActionViolation(row, target, raw) {
   return targetId !== null || contextId !== null ? "local-action-evidence" : null;
 }
 
-const localActionEvidenceRelations = ["missing", "exact-target", "earlier-prefix", "outside-prefix", "after-target", "invalid-id"];
+const evidenceRelations = ["missing", "exact-target", "earlier-prefix", "outside-prefix", "after-target", "invalid-id"];
+
+function evidenceRelation(id, target, raw) {
+  if (id === null) return "missing";
+  if (!whole(id)) return "invalid-id";
+  if (id > target) return "after-target";
+  if (!raw(id)) return "outside-prefix";
+  return id === target ? "exact-target" : "earlier-prefix";
+}
 
 export function sanitizeLunaLocalActionEvidenceDetail(detail) {
   if (!exact(detail, ["status", "action", "targetEvidence", "contextEvidence"])) return undefined;
   const {status, action, targetEvidence, contextEvidence} = detail;
   if (!localActionFields.status.enum.includes(status) || !localActionFields.action.enum.includes(action) ||
-      !localActionEvidenceRelations.includes(targetEvidence) || !localActionEvidenceRelations.includes(contextEvidence)) return undefined;
+      !evidenceRelations.includes(targetEvidence) || !evidenceRelations.includes(contextEvidence)) return undefined;
   return {status, action, targetEvidence, contextEvidence};
 }
 
 export function lunaProtocolLocalActionEvidenceDetail(row, target, raw) {
   const {status, action, targetId, contextId} = row.localAction;
-  const relationship = id => {
-    if (id === null) return "missing";
-    if (!whole(id)) return "invalid-id";
-    if (id > target) return "after-target";
-    if (!raw(id)) return "outside-prefix";
-    return id === target ? "exact-target" : "earlier-prefix";
-  };
-  return sanitizeLunaLocalActionEvidenceDetail({status, action, targetEvidence: relationship(targetId), contextEvidence: relationship(contextId)});
+  return sanitizeLunaLocalActionEvidenceDetail({status, action,
+    targetEvidence: evidenceRelation(targetId, target, raw), contextEvidence: evidenceRelation(contextId, target, raw)});
+}
+
+export function sanitizeLunaSceneEntryEvidenceDetail(detail) {
+  if (!exact(detail, ["status", "reason", "previousEvidence", "changeEvidence", "entryEvidence", "inOrder"])) return undefined;
+  const {status, reason, previousEvidence, changeEvidence, entryEvidence, inOrder} = detail;
+  if (!sceneEntryFields.status.enum.includes(status) || !entryReasons[status].includes(reason) ||
+      ![previousEvidence, changeEvidence, entryEvidence].every(value => evidenceRelations.includes(value)) ||
+      ![true, false, null].includes(inOrder)) return undefined;
+  return {status, reason, previousEvidence, changeEvidence, entryEvidence, inOrder};
+}
+
+export function lunaProtocolSceneEntryEvidenceDetail(row, target, raw) {
+  const {status, reason, previousId, changeId, entryId} = row.sceneEntry;
+  return sanitizeLunaSceneEntryEvidenceDetail({status, reason, previousEvidence: evidenceRelation(previousId, target, raw),
+    changeEvidence: evidenceRelation(changeId, target, raw), entryEvidence: evidenceRelation(entryId, target, raw),
+    inOrder: [previousId, changeId, entryId].every(whole) ? previousId < changeId && changeId <= entryId : null});
 }
 
 export function sanitizeLunaStatusEffectDetail(detail) {
@@ -631,7 +649,8 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
     }
     if (reason) {
       const detail = mode === "transition" && reason === "status-effect" ? transitionStatusEffectDetail(submitted) :
-        mode === "local-action" && reason === "local-action-evidence" ? lunaProtocolLocalActionEvidenceDetail(submitted, unitId, raw) : undefined;
+        mode === "local-action" && reason === "local-action-evidence" ? lunaProtocolLocalActionEvidenceDetail(submitted, unitId, raw) :
+          mode === "scene-entry" && reason === "scene-entry-evidence" ? lunaProtocolSceneEntryEvidenceDetail(submitted, unitId, raw) : undefined;
       targetFailures.push({unitId, reason, ...(detail ? {detail} : {})});
     }
     else {

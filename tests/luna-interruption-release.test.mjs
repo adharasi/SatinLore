@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {planStory} from "../app/static/reader/beat-continuity.mjs";
 import {createLunaProtocolProvider, LUNA_PROTOCOL_MODEL} from "../scripts/lib/luna-protocol-provider.mjs";
 import {runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "../scripts/lib/whole-story-context-planning.mjs";
@@ -201,4 +202,109 @@ test("the provider accepts an independent release prefix and rejects an attached
   assert.equal((await provider({...request, focus: "continuation-repair", units: sourceUnits.slice(1, 5), attested: [
     {unitId: 0, scopeId: 0, frame: "current", action: "contact", narrativePhase: "sustain"}]})).status, "invalid-request");
   assert.equal(calls, 1);
+});
+
+const heldOpener = {...onset, scopeId: 1};
+const independentRelease = {...release, action: "release"};
+const disputedTime = {...cut, reason: "time-jump"};
+const currentNoAction = {status: "none", frame: "current", action: "none", phase: "quiet", contrast: "ordinary-contact",
+  targetId: null, contextId: null};
+
+function runDisputedTime({observed = [], target = neutral(4), targetEntry = noEntry, targetLocal = currentNoAction,
+  previousLocal = 1, targetBoundary = disputedTime, answer = independentRelease, maxCueChecks = 2, blockedIds = [],
+  targetText = "A falling glass startled them and their steps slowed."} = {}) {
+  const text = `The last dance began. Mira took Lee's hand. They crossed the floor. Lee drew Mira closer. ${targetText} The quartet kept playing.`;
+  const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    if (request.focus === "interruption-release" && !answer) return {status: "transient", usage};
+    const facts = request.targetIds.map(id => {
+      if (request.mode === "cue-check") return request.focus === "interruption-release" ? answer : neutral(id);
+      if (request.mode === "scene-entry") return {unitId: id, sceneEntry: id === 4 ? targetEntry : noEntry};
+      if (request.mode === "local-action") return {unitId: id, localAction: id === 4 ? targetLocal : {
+        status: "verified", frame: "current", action: "continuation", phase: "sustain", contrast: "same-action",
+        targetId: id, contextId: previousLocal}};
+      if (request.mode === "transition") return {...neutral(id), depiction: "unknown", action: "unknown", narrativePhase: "unknown",
+        sceneBoundary: id === 4 ? targetBoundary : noBoundary};
+      if (id === 4 && request.mode === "discovery") return {...oldScope, status: "candidate", scopeId: null};
+      if (id === 4) return target;
+      const local = id === 1 ? heldOpener : id === 3 ? continuation : neutral(id);
+      return request.mode === "discovery" && local.status === "verified" ?
+        {...local, status: "candidate", scopeId: 1} : local;
+    });
+    return {status: "ok", usage, facts};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "disputed-time-release", text, grant, now: () => 1, provider, blockedIds,
+    verificationTargets: [3, 4], maxVerification: 2, maxSupportingVerification: 2,
+    transitionTargets: [3, 4], maxTransitionVerification: 2, verifyTransitions: true, verifyContinuityBoundary: true,
+    localActionVerificationTargets: [3, 4], sceneEntryVerificationTargets: [3, 4], negativeStride: 0,
+    maxCueChecks, interruptionReleaseArbitration: true});
+}
+
+test("a raw time vote can be adjudicated as release when the exact local continuation left a held beat", async () => {
+  const observed = [], candidate = await runDisputedTime({observed});
+  const control = await runDisputedTime({answer: neutral(4)});
+  const previous = candidate.units[3], row = candidate.units[4];
+  assert.equal(previous.localActionApplication, "sustain-scope-profile");
+  assert.equal(previous.trace.decision, "Select local sustain");
+  assert.equal(row.transitionVerification.sceneBoundary.reason, "time-jump");
+  assert.equal(row.interruptionReleaseVerificationStatus, "verified");
+  assert.equal(row.interruptionReleaseApplication, "interruption-taper");
+  assert.equal(row.appliedTransition, "interruption");
+  assert.equal(row.pattern, "Taper");
+  assert.equal(row.phase, "ease");
+  assert.equal(row.knownAt, 4);
+  assert.deepEqual(row.interruptionReleaseVerification.evidenceIds, [3, 4]);
+  assert.deepEqual(row.evidenceIds, [1, 3, 4]);
+  assert.equal(row.beatId, previous.beatId);
+  assert.equal(row.sceneId, previous.sceneId);
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.deepEqual(candidate.units.slice(0, 4), control.units.slice(0, 4));
+  assert.equal(control.units[4].trace.decision, "Carry beat");
+  assert.deepEqual(observed.filter(request => request.focus === "interruption-release"), [
+    {mode: "cue-check", units: sourceUnits.slice(0, 5), targetIds: [4], focus: "interruption-release"},
+  ]);
+});
+
+test("a disputed time vote needs exact current release proof and respects blocks and actual time changes", async () => {
+  for (const answer of [null, neutral(4), release, {...independentRelease, scopeId: 2},
+    {...independentRelease, evidenceIds: [1, 4]}, {...independentRelease, priorAnchor: null}]) {
+    const result = await runDisputedTime({answer});
+    assert.equal(result.units[4].interruptionReleaseApplication, undefined);
+    assert.equal(result.units[4].trace.decision, "Carry beat");
+  }
+  for (const options of [{previousLocal: 0}, {targetText: "Several hours later they stopped to talk."},
+    {target: stop}, {blockedIds: [4]}, {targetLocal: {...currentNoAction, frame: "noncurrent", contrast: "noncurrent"}},
+    {targetEntry: {status: "cut", reason: "material-time", previousId: 3, entryId: 4, changeId: 4}}]) {
+    const observed = [], result = await runDisputedTime({...options, observed});
+    assert.equal(observed.some(request => request.focus === "interruption-release"), false);
+    assert.equal(result.units[4].interruptionReleaseApplication, undefined);
+  }
+  const stopped = await runDisputedTime({answer: stop});
+  assert.equal(stopped.units[4].interruptionReleaseVerificationStatus, "protective-override");
+  assert.equal(stopped.units[4].appliedTransition, "hard-stop");
+  assert.equal(stopped.units[4].pattern, "Stop");
+  const exhausted = await runDisputedTime({maxCueChecks: 1});
+  assert.equal(exhausted.units[4].interruptionReleaseVerificationStatus, "budget-deferred");
+  assert.equal(exhausted.units[4].trace.decision, "Carry beat");
+});
+
+test("the disputed interruption proof cannot re-open an expired hold", () => {
+  const row = (id, pattern, words) => ({id, words, paragraph: 0,
+    profile: {id, pattern, gate: "No blocking event recorded"}});
+  const target = row(2, "Baseline", 2);
+  const ease = {kind: "ease", knownAt: 2, evidence: [1, 2], reason: "Exact interruption",
+    requiresOpenAnchor: 0, requiresUnexpiredHold: true};
+  const compile = (quietWords, evidence) => planStory("interruption", [
+    row(0, "Sustain wave", 3), row(1, "Baseline", quietWords), {...target, ease: evidence},
+  ])[2];
+  const [confirmed, trace] = compile(31, ease);
+  assert.equal(confirmed.verifiedInterruptionRelease, true);
+  assert.equal(confirmed.pattern, "Taper");
+  assert.equal(trace.knownAt, 2);
+  assert.deepEqual(compile(32, ease), compile(32, null));
+  assert.deepEqual(compile(48, ease), compile(48, null));
 });

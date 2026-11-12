@@ -337,6 +337,36 @@ test("a focused neutral target citation can ask for place proof when both settin
   assert.ok(!protective.requests.some(({mode}) => mode === "scene-situation"));
 });
 
+test("invalid first-entry evidence can nominate two exact place witnesses for a quiet disputed arrival", async () => {
+  const options = {...acceptedSettingCandidate, focusedTargetOnly: true, entryFailure: "invalid-response", quietPrior: true};
+  const accepted = await settingRun({...options, oldWitness: oldPlace, arrivalWitness: distinctArrival});
+  const row = accepted.run.units[target];
+  assert.equal(row.sceneEntryVerificationStatus, "invalid-response");
+  assert.equal(row.scenePlaceRecoveryStatus, "changed");
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.deepEqual(row.transitionEvidenceIds, [0, target]);
+  assert.equal(row.pattern, "Reset");
+  assert.equal(row.readerCue, false);
+  assert.equal(accepted.run.units[target + 1].sceneId, row.sceneId);
+  const entry = accepted.requests.find(({mode}) => mode === "scene-entry");
+  const places = accepted.requests.filter(({mode}) => placeModes.has(mode));
+  assert.deepEqual(places, [{...entry, mode: "scene-old-place"}, {...entry, mode: "scene-arrival"}]);
+  assert.ok(!accepted.requests.some(({mode}) => mode === "scene-situation"));
+  assert.ok(accepted.requests.indexOf(places[1]) < accepted.requests.findIndex(({mode, targetIds}) =>
+    mode === "verify" && targetIds[0] === target + 1));
+  for (const [control, placeStatus] of [[{oldWitness: oldPlace, arrivalWitness: {...distinctArrival, status: "same"}}, "same"],
+    [{oldWitness: oldPlace, arrivalWitness: {...distinctArrival, earlierId: 1}}, "witness-disagreement"],
+    [{oldWitness: oldPlace, arrivalWitnessFailure: "transient"}, "arrival-transient"],
+    [{}, "old-uncertain"], [{entryFailure: "transient"}, undefined], [{entryFailure: "refused"}, undefined]]) {
+    const result = await settingRun({...options, ...control});
+    const rejected = result.run.units[target];
+    assert.equal(rejected.scenePlaceRecoveryStatus, placeStatus);
+    assert.notEqual(rejected.appliedTransition, "scene-cut");
+    assert.equal(rejected.sceneId, result.run.units[target - 1].sceneId);
+    if (!placeStatus) assert.ok(!result.requests.some(({mode}) => placeModes.has(mode)));
+  }
+});
+
 test("only an exact quiet discovery can nominate setting proof with a neutral frame", async () => {
   const options = {...acceptedSettingCandidate, focusedTargetOnly: true, discoveryReading: {frame: "neutral"}};
   const unresolved = await settingRun(options);
@@ -397,7 +427,8 @@ test("two setting checks with different predecessors require independent proof o
 });
 
 async function focusedSettingRun({targetText = viewpoint, situation = same, entry = viewpointOnly, proof = exactCut,
-  verifySettingSituation = true, protectedPrior = false, followingDispute = false, discoveryCut = false, prefixUnits = 3} = {}) {
+  verifySettingSituation = true, protectedPrior = false, followingDispute = false, discoveryCut = false, prefixUnits = 3,
+  rootedPrimary = false, oldWitness = uncertainPlace, arrivalWitness = uncertainPlace} = {}) {
   const nextId = target + 1;
   const text = `${earlierText} ${targetText} They waited for the signal.`;
   const index = buildWholeStoryIndex(text);
@@ -413,6 +444,8 @@ async function focusedSettingRun({targetText = viewpoint, situation = same, entr
     if (request.mode === "scene-boundary") return {status: "ok", usage, facts: [{unitId: id,
       sceneBoundary: {...boundary, previousId: target, entryId: id, changeId: id}}]};
     if (request.mode === "scene-situation") return {status: "ok", usage, facts: [{unitId: id, sceneSituation: situation}]};
+    if (placeModes.has(request.mode)) return {status: "ok", usage, facts: [{unitId: id,
+      scenePlace: request.mode === "scene-old-place" ? oldWitness : arrivalWitness}]};
     if (request.mode === "cue-check") return {status: "ok", usage, facts: [proof]};
     if (request.mode === "local-action") return {status: "ok", usage, facts: [{unitId: id, localAction: {status: "none",
       frame: "noncurrent", action: "none", phase: "quiet", contrast: "noncurrent", targetId: null, contextId: null}}]};
@@ -422,7 +455,7 @@ async function focusedSettingRun({targetText = viewpoint, situation = same, entr
         sceneBoundary: unitId === target ? cut : unresolvedBoundary};
       if (request.mode === "discovery") return discoveryCut && unitId === target ?
         {...exactCut, status: "candidate", scopeId: target} : cue;
-      if (unitId === target) return exactCut;
+      if (unitId === target) return rootedPrimary ? {...exactCut, scopeId: 0, evidenceIds: [0, 1, target]} : exactCut;
       if (unitId === 0) return {...cue, status: "verified", transition: protectedPrior ? "hard-stop" : "onset",
         fact: protectedPrior ? "protective" : "none", depiction: "romantic", narrativePhase: protectedPrior ? "quiet" : "onset",
         action: protectedPrior ? "none" : "contact", scopeId: 0, evidenceIds: [0]};
@@ -436,6 +469,35 @@ async function focusedSettingRun({targetText = viewpoint, situation = same, entr
     boundaryEntryConfirmation: true, verifySettingSituation, sameEpisodeArbitration: true, maxCueChecks: 1, negativeStride: 0});
   return {run, requests};
 }
+
+test("rooted quiet cut votes can preserve held same-place continuity after an uncertain comparison", async () => {
+  const options = {rootedPrimary: true, discoveryCut: true, situation: uncertain, oldWitness: oldPlace};
+  const accepted = await focusedSettingRun({...options, arrivalWitness: {...distinctArrival, status: "same"}});
+  const row = accepted.run.units[target];
+  assert.equal(row.sceneSituationVerificationStatus, "uncertain");
+  assert.equal(row.sceneEntryVerification.sceneEntry.reason, "viewpoint-only");
+  assert.equal(row.scenePlaceRecoveryStatus, "same");
+  assert.equal(row.independentBoundaryStatus, "setting-continuity");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.readerCue, false);
+  assert.equal(row.sceneId, accepted.run.units[target - 1].sceneId);
+  assert.equal(row.beatId, accepted.run.units[target - 1].beatId);
+  assert.ok(row.trace.holdWords > 0);
+  const joint = accepted.requests.find(({mode}) => mode === "scene-situation");
+  const places = accepted.requests.filter(({mode}) => placeModes.has(mode));
+  assert.deepEqual(places, [{...joint, mode: "scene-old-place"}, {...joint, mode: "scene-arrival"}]);
+  const move = await focusedSettingRun({...options, targetText: relocation, arrivalWitness: distinctArrival});
+  assert.equal(move.run.units[target].appliedTransition, "scene-cut");
+  assert.equal(move.run.units[target].pattern, "Reset");
+  const unresolved = await focusedSettingRun(options);
+  assert.equal(unresolved.run.units[target].scenePlaceRecoveryStatus, "arrival-uncertain");
+  assert.equal(unresolved.run.units[target].appliedTransition, "uncertain-continuity");
+  assert.equal(unresolved.run.units[target].pattern, "Baseline");
+  for (const control of [{rootedPrimary: false}, {discoveryCut: false}, {protectedPrior: true}]) {
+    const result = await focusedSettingRun({...options, ...control});
+    assert.ok(!result.requests.some(({mode}) => placeModes.has(mode)));
+  }
+});
 
 test("a focused repeated setting cut is adjudicated before the following target receives context", async () => {
   const legacy = await focusedSettingRun({verifySettingSituation: false});

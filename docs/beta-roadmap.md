@@ -233,6 +233,8 @@ V37 covers exact alternate opener and continuation readings and retains the evid
 
 V38 can independently check the quiet root of a dual-cited onset, verify continuation when discovery is quiet, and resolve a phase-only release descriptor on an inherited fade. [V38 evaluation](nocturne-beat-protocol-shadow.md#v38-verify-quiet-context-and-exact-continuation-independently)
 
+V39 adds independent old-place and arrival evidence for narrow setting disagreements, a local release check after a disputed interruption, and coordinate diagnostics for rejected first-entry answers. Qualify the applied event, playback profile and prior-beat clock independently. [V39 evaluation](nocturne-beat-protocol-shadow.md#v39-independent-place-and-release-evidence)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

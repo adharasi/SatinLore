@@ -118,7 +118,8 @@ export function planStory(story, units) {
     const requestedEase = availableFact(unit.ease);
     const releaseAnchor = requestedEase?.requiresOpenAnchor;
     const ease = releaseAnchor == null || beat?.established && !beat.provisional && !beat.quiet && !beat.released &&
-      beat.anchors.has(releaseAnchor) ? requestedEase : null;
+      beat.anchors.has(releaseAnchor) && (!requestedEase.requiresUnexpiredHold ||
+        !beat.easing && cursor - beat.supportEnd < ESTABLISHED_HOLD_WORDS) ? requestedEase : null;
     const low = availableFact(unit.low);
     const spanEnd = boundary?.kind === "span-end";
     const barrier = boundary && !spanEnd;

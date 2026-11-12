@@ -68,7 +68,11 @@ test("first-entry coordinates and status are validated before facts leave the pr
     const answer = await provider({mode: "scene-entry", units: sourceUnits, targetIds: [3]});
     if (expected) {
       assert.equal(answer.status, "invalid-response");
-      assert.deepEqual(answer.targetFailures, [{unitId: 3, reason: expected}]);
+      const [rejected] = answer.targetFailures;
+      assert.equal(answer.targetFailures.length, 1);
+      assert.equal(rejected.unitId, 3);
+      assert.equal(rejected.reason, expected);
+      assert.equal(rejected.detail?.status, expected === "scene-entry-evidence" ? sceneEntry.status : undefined);
       assert.equal(JSON.stringify(answer).includes(sourceUnits[0].text), false);
     } else {
       assert.deepEqual(answer.facts, [{unitId: 3, sceneEntry}]);
@@ -94,6 +98,25 @@ function run({sceneEntryVerificationTargets = [], verdict = id => result(id, id 
   return runLunaProtocolShadow({id: "first-entry", text, grant, now: () => 1, provider, budget, negativeStride: 0,
     verificationTargets: transitionTargets, transitionTargets, verifyTransitions: true, sceneEntryVerificationTargets});
 }
+
+test("a rejected entry exports coordinate relationships without rejected IDs or text", async () => {
+  const misordered = {...firstEntry, previousId: 0, changeId: 0, entryId: 2};
+  const detail = {status: "cut", reason: "material-time", previousEvidence: "earlier-prefix",
+    changeEvidence: "earlier-prefix", entryEvidence: "after-target", inOrder: false};
+  const provider = createLunaProtocolProvider({apiKey: "neutral-fixture",
+    fetchImpl: async () => response([{unitId: 1, sceneEntry: misordered}])});
+  const answer = await provider({mode: "scene-entry", units: sourceUnits.slice(0, 2), targetIds: [1]});
+  const rejected = {unitId: 1, reason: "scene-entry-evidence", detail};
+  assert.deepEqual(answer.targetFailures, [rejected]);
+  for (const [verdict, expected] of [[result(1, misordered), detail], [answer, detail],
+    [{...answer, targetFailures: [{...rejected, detail: {...detail, note: sourceUnits[0].text}}]}, undefined]]) {
+    const replay = await run({sceneEntryVerificationTargets: [1], verdict: () => verdict});
+    const attempt = replay.summary.attempts.find(row => row.mode === "scene-entry");
+    assert.equal(attempt.status, "invalid-response");
+    assert.deepEqual(attempt.rejectedFacts, [{id: 1, reason: "scene-entry-evidence", ...(expected ? {detail: expected} : {})}]);
+    assert.equal(replay.units[1].sceneEntryVerification, undefined);
+  }
+});
 
 test("entry and its adjacent already-entered control retain independent verdicts without playback authority", async () => {
   const controlRequests = [], observed = [];
@@ -123,7 +146,8 @@ test("first-entry calls obey approved spans, budget and diagnostic refusal", asy
   assert.deepEqual(observed.find(row => row.mode === "scene-entry").units.map(({id}) => id), [2]);
   assert.equal(resultWithGap.units[2].sceneEntryVerificationStatus, "invalid-response");
   assert.deepEqual(resultWithGap.summary.attempts.find(row => row.mode === "scene-entry").rejectedFacts,
-    [{id: 2, reason: "scene-entry-evidence"}]);
+    [{id: 2, reason: "scene-entry-evidence", detail: {status: "none", reason: "already-entered",
+    previousEvidence: "outside-prefix", changeEvidence: "outside-prefix", entryEvidence: "outside-prefix", inOrder: true}}]);
   assert.equal(JSON.stringify(resultWithGap).includes(sourceUnits[1].text), false);
 
   const baselineRequests = [];

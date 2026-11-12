@@ -195,3 +195,69 @@ test("a repeated romantic release needs a specific independent depiction-only ne
     assert.notEqual(result.units[2].playbackDisposition, "inherited-release");
   }
 });
+
+const earlierBuild = {...opening, unitId: 1, action: "anticipation", narrativePhase: "build", transition: "none",
+  fact: "low", evidenceIds: [1]};
+const precedingRelease = {...release, unitId: 2, evidenceIds: [2], priorAnchor: null};
+const rootedEase = {...precedingRelease, unitId: 3, transition: "ease", scopeId: 1, evidenceIds: [1, 2, 3], priorAnchor: 1};
+const isolatedQuiet = {...localNeutral, frame: "current", contrast: "neutral"};
+const scopedQuietDiscovery = {...quiet(3), scopeId: 0, evidenceIds: [3]};
+
+function runOldRoot({observed = [], target = rootedEase, targetLocal = isolatedQuiet, earlier = precedingRelease,
+  earlierLocal = localRelease(2, 1), discovery = scopedQuietDiscovery, blockedIds = []} = {}) {
+  const text = "The quartet played. Mira watched Lee. They slowed their steps in time with the music. The lights dimmed. A door creaked.";
+  const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const facts = request.targetIds.map(id => {
+      if (request.mode === "scene-entry") return {unitId: id, sceneEntry: ordinaryInterruption};
+      if (request.mode === "local-action") return {unitId: id, localAction: id === 2 ? earlierLocal : targetLocal};
+      if (request.mode === "transition") return {...quiet(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
+        ...(id === 2 ? {status: "verified", transition: "interruption", evidenceIds: [2]} : {}), sceneBoundary: noBoundary};
+      if (id === 3) return request.mode === "discovery" ? discovery : target;
+      const primary = id === 1 ? earlierBuild : id === 2 ? earlier : quiet(id);
+      return request.mode === "discovery" && primary.status === "verified" ? {...primary, status: "candidate"} : primary;
+    });
+    return {status: "ok", usage, facts};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "rooted-release-inheritance", text, grant, now: () => 1, provider, blockedIds,
+    verificationTargets: units.map(({id}) => id), transitionTargets: [2, 3], verifyTransitions: true,
+    localActionVerificationTargets: [2, 3], sceneEntryVerificationTargets: [2, 3], negativeStride: 0});
+}
+
+test("an older beat root cannot re-date the independently checked release on the adjacent quiet unit", async () => {
+  const observed = [], controlRequests = [];
+  const candidate = await runOldRoot({observed});
+  const control = await runOldRoot({targetLocal: localRelease(3, 2), observed: controlRequests});
+  const row = candidate.units[3], newRelease = control.units[3];
+  assert.equal(row.primaryPrefix.action, "release");
+  assert.deepEqual(row.primaryPrefix.evidenceIds, [1, 2, 3]);
+  assert.equal(row.playbackDisposition, "inherited-release");
+  assert.equal(row.pattern, "Taper");
+  assert.equal(row.phase, "quiet");
+  assert.equal(row.knownAt, 2);
+  assert.deepEqual(row.evidenceIds, [1, 2]);
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(newRelease.phase, "ease");
+  assert.equal(newRelease.knownAt, 3);
+  for (const field of ["beat", "scene", "holdWords", "fadeWords", "floorWords", "wordOffset"]) {
+    assert.equal(row.trace[field], newRelease.trace[field]);
+  }
+  assert.deepEqual(candidate.units.slice(0, 3), control.units.slice(0, 3));
+  assert.deepEqual(observed, controlRequests);
+});
+
+test("old-root release inheritance requires each exact link and a current quiet target", async () => {
+  for (const options of [{targetLocal: localNeutral}, {targetLocal: null}, {earlierLocal: localRelease(2, 0)},
+    {target: {...rootedEase, evidenceIds: [1, 3]}}, {discovery: {...scopedQuietDiscovery, scopeId: 1}},
+    {earlier: {...precedingRelease, scopeId: 1}}]) {
+    const {units: compared} = await runOldRoot(options);
+    assert.notEqual(compared[3].playbackDisposition, "inherited-release");
+  }
+  const blocked = await runOldRoot({blockedIds: [3]});
+  assert.equal(blocked.units[3].pattern, "Stop");
+});
