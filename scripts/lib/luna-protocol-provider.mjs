@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v35";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v36";
 const controlRubricVersion = "nocturne-luna-protocol-v17";
 const boundaryRubricVersion = "nocturne-luna-protocol-v18";
 const localActionRubricVersion = "nocturne-luna-protocol-v19";

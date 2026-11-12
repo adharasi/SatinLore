@@ -973,7 +973,9 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.equal(f.calls.length, 6);
 });
 
-for (const split of [false, true]) test(`the Luna corpus Worker maps ${split ? "separate" : "joint"} setting evidence`, {timeout: 30000}, async t => {
+for (const check of ["joint", "separate", "activity stop and"]) test(`the Luna corpus Worker maps ${check} setting evidence`, {timeout: 30000}, async t => {
+  const split = check === "separate";
+  const activityStop = check === "activity stop and";
   const {reviewedSpend} = await studyBudget(t);
   const f = fixture({spend: reviewedSpend, provider: async (url, options) => {
     const requestBody = JSON.parse(options.body);
@@ -985,10 +987,11 @@ for (const split of [false, true]) test(`the Luna corpus Worker maps ${split ? "
     const {facts} = JSON.parse(answer.text);
     switch (requestBody.text.format.name) {
       case "nocturne_luna_verify_v1":
-        Object.assign(facts[0], {status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [earlierId, unitId]});
+        if (!activityStop) Object.assign(facts[0], {status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [earlierId, unitId]});
         break;
       case "nocturne_luna_transition_v2":
-        facts[0].sceneBoundary = {status: "cut", reason: "setting-shift", previousId: earlierId, entryId: unitId};
+        if (activityStop) Object.assign(facts[0], {status: "verified", transition: "non-romantic-activity-stop", evidenceIds: [unitId]});
+        else facts[0].sceneBoundary = {status: "cut", reason: "setting-shift", previousId: earlierId, entryId: unitId};
         break;
       case "nocturne_luna_scene_entry_v1":
         facts[0].sceneEntry = {status: "cut", reason: "material-setting", previousId: earlierId, changeId: unitId, entryId: unitId};
@@ -1031,6 +1034,11 @@ for (const split of [false, true]) test(`the Luna corpus Worker maps ${split ? "
   const oldPlace = calls.find(call => call.text.format.name === "nocturne_luna_scene_old_place_v1");
   const arrival = calls.find(call => call.text.format.name === "nocturne_luna_scene_arrival_v1");
   const row = result.units[1];
+  if (activityStop) {
+    assert.equal(row.transitionVerification.transition, "non-romantic-activity-stop");
+    assert.deepEqual(row.transitionVerification.evidenceIds, [33]);
+    assert.deepEqual(row.transitionEvidenceIds, [32, 33]);
+  }
   if (!split) {
     assert.equal(row.sceneSituationVerificationStatus, "changed");
     assert.deepEqual(row.sceneSituationVerification.sceneSituation, {status: "changed", earlierId: 32, currentId: 33,

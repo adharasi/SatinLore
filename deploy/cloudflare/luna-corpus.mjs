@@ -87,6 +87,7 @@ function mapResult(result, first) {
       sceneOldPlaceVerification: evidence(row.sceneOldPlaceVerification), sceneArrivalVerification: evidence(row.sceneArrivalVerification),
       sustainConnectorVerification: evidence(row.sustainConnectorVerification),
       interruptionContinuationVerification: evidence(row.interruptionContinuationVerification),
+      uncertainContinuationVerification: evidence(row.uncertainContinuationVerification),
       interruptionReleaseVerification: evidence(row.interruptionReleaseVerification),
       trace: {...row.trace, beat: named(row.trace.beat), scene: named(row.trace.scene), knownAt: coordinate(row.trace.knownAt),
         evidence: coordinates(row.trace.evidence)}})),
@@ -183,6 +184,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       maxCueChecks, maxSupportingVerification, maxPrimaryAnchorRepairs: MAX_PRIMARY_ANCHOR_REPAIRS,
       verifyContinuityBoundary: true, releaseUnusedRestartReservation: true, sceneEntryArbitration: true,
       sameEpisodeArbitration: true, boundaryEntryConfirmation: true, interruptionReleaseArbitration: true,
+      uncertainContinuationArbitration: true,
       verifySettingSituation: true, sustainConnectorVerification: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();

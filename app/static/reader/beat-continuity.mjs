@@ -113,6 +113,8 @@ export function planStory(story, units) {
     const boundary = availableFact(unit.boundary);
     const scope = availableFact(unit.scope);
     const neutral = availableFact(unit.neutral);
+    const holdConfirmation = availableFact(unit.holdConfirmation);
+    const inheritedRelease = availableFact(unit.inheritedRelease);
     const requestedEase = availableFact(unit.ease);
     const releaseAnchor = requestedEase?.requiresOpenAnchor;
     const ease = releaseAnchor == null || beat?.established && !beat.provisional && !beat.quiet && !beat.released &&
@@ -122,7 +124,7 @@ export function planStory(story, units) {
     const barrier = boundary && !spanEnd;
     if (barrier && boundary.kind === "cut") scene = `${story}:scene:${id}`;
     let mark = boundary || scope;
-    validateFacts(id, [boundary, scope, neutral, requestedEase, low]);
+    validateFacts(id, [boundary, scope, neutral, requestedEase, low, holdConfirmation, inheritedRelease]);
     const lowProfile = low && Object.hasOwn(low, "profile") ? low.profile : "Undertone";
     if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile) && !(low.localOnly && lowProfile === "Taper"))) {
       throw new RangeError("Independent low evidence must name a low profile at its evidence unit.");
@@ -161,6 +163,10 @@ export function planStory(story, units) {
     const renewsOpenBeat = low?.requiresBeat && pattern === "Baseline" && !barrier && !spanEnd && !ease &&
       beat?.established && !beat.quiet && !beat.provisional && !beat.released &&
       beat.anchors.has(low.priorAnchor) && cursor - beat.supportEnd < ESTABLISHED_HOLD_WORDS;
+    const confirmsHeldBeat = holdConfirmation && neutral && pattern === "Baseline" && !boundary && !scope && !ease && !low &&
+      beat?.established && !beat.quiet && !beat.provisional && !beat.easing && !beat.released &&
+      holdConfirmation.knownAt === id && beat.anchor === holdConfirmation.priorAnchor &&
+      Math.max(0, cursor - beat.supportEnd) < ESTABLISHED_HOLD_WORDS;
     if (protective || HARD_PROFILES.has(pattern)) {
       decision = protective ? "Eligibility gate" : pattern;
       traceBeat = null;
@@ -168,6 +174,13 @@ export function planStory(story, units) {
       decision = "Manual zero";
       rationale = "User zero overrides continuity.";
       Object.assign(result, {pattern: "Baseline", block: null, reason: rationale});
+    } else if (confirmsHeldBeat) {
+      decision = "Resolve held continuity";
+      rationale = holdConfirmation.reason;
+      mark = holdConfirmation;
+      holdWords = ESTABLISHED_HOLD_WORDS - Math.max(0, cursor - beat.supportEnd);
+      fadeWords = holdWords + FADE_WORDS;
+      Object.assign(result, {pattern: "Sustain wave", reason: rationale});
     } else if (neutral) {
       beat = parked = traceBeat = null;
       lastBarrier = id;
@@ -182,6 +195,16 @@ export function planStory(story, units) {
       const replacement = pattern === "Baseline" || pattern === "Taper" ? pattern : prior ? "Taper" : "Baseline";
       Object.assign(result, {pattern: replacement, block: prior?.id ?? null, reason: rationale});
       if (replacement === "Taper" && boundary.verifiedRelease) result.verifiedRelease = true;
+    } else if (inheritedRelease && !boundary && !ease && pattern === "Baseline" &&
+        beat?.easing && beat.released && !beat.quiet && beat.profile === "Taper" && beat.releaseEnd > cursor &&
+        plan.at(-1)?.[1].decision === "Ease" && plan.at(-1)[1].beat === beat.id &&
+        plan.at(-1)[1].knownAt === inheritedRelease.knownAt) {
+      decision = "Inherit release fade";
+      rationale = inheritedRelease.reason;
+      mark = inheritedRelease;
+      fadeWords = beat.releaseEnd - cursor;
+      floorWords = fadeWords;
+      Object.assign(result, {pattern: "Taper", reason: rationale});
     } else if (low?.localOnly && !barrier && !spanEnd && !beat && !parked) {
       decision = lowProfile === "Taper" ? "Local taper" : "Local recovery";
       rationale = low.reason;

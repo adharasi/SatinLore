@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {planStory} from "../app/static/reader/beat-continuity.mjs";
 import {runLunaProtocolShadow} from "../scripts/lib/luna-protocol-shadow.mjs";
 import {buildWholeStoryIndex, WHOLE_STORY_GRANT_PURPOSE} from "../scripts/lib/whole-story-context-planning.mjs";
 
@@ -18,7 +19,8 @@ const stop = unitId => ({...neutral(unitId), status: "verified", transition: "ha
 
 function run({opening = onset, openingProposal = {...onset, status: "candidate"}, continuation = sustain, proposal = sustainProposal,
   localVote = local, sceneEntry = entry, targetBoundary = noBoundary, connectorVote = neutral(2), rootVote = neutral(0),
-  connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = [], targetTransition = {}} = {}) {
+  connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = [], targetTransition = {},
+  uncertainContinuationArbitration = false, maxCueChecks = 0, confirmation = null, confirmationFailure = null} = {}) {
   const text = `Mira waited by the door. Lee took her hand. ${connector} Lee kept holding her hand. Someone knocked.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
@@ -26,7 +28,9 @@ function run({opening = onset, openingProposal = {...onset, status: "candidate"}
   const provider = Object.assign(async request => {
     requests.push(request);
     const {mode, targetIds} = request;
+    if (request.focus === "continuation-repair" && confirmationFailure) return {status: confirmationFailure};
     return {status: "ok", usage: {inputTokens: 100, outputTokens: 20}, facts: targetIds.map(id => {
+      if (request.focus === "continuation-repair") return confirmation ?? neutral(id);
       if (mode === "scene-entry") return {unitId: id, sceneEntry};
       if (mode === "local-action") return {unitId: id, localAction: localVote};
       if (mode === "transition") return {...neutral(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
@@ -41,7 +45,8 @@ function run({opening = onset, openingProposal = {...onset, status: "candidate"}
   return runLunaProtocolShadow({id: "sustain-scope", text, grant, now: () => 1, provider, blockedIds, negativeStride: 0,
     verificationTargets: [3, 4], transitionTargets: [3, 4], verifyTransitions: true,
     maxVerification: 2, maxTransitionVerification: 2, maxSupportingVerification: Number(supporting),
-    localActionVerificationTargets: localVote ? [3] : [], sceneEntryVerificationTargets: [3]});
+    localActionVerificationTargets: localVote ? [3] : [], sceneEntryVerificationTargets: [3],
+    uncertainContinuationArbitration, maxCueChecks});
 }
 
 test("exact continuation with different scope citations selects sustain on the existing held beat only", async () => {
@@ -192,5 +197,101 @@ test("rooted support requires an exact quiet premise and holds no authority acro
     {connector: "While they stood there the people nearest the windows drew the heavy curtains slowly closed for the night."}]) {
     const {units} = await run({...rooted, ...options});
     assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+  }
+});
+
+const uncertainTransition = {status: "verified", transition: "uncertain-continuity", fact: "neutralize", evidenceIds: [3]};
+const uncertaintyFixture = {
+  continuation: rootedContinuation, proposal: {...neutral(3), status: "candidate", depiction: "romantic",
+    narrativePhase: "sustain", action: "contact", scopeId: 1, evidenceIds: [3]},
+  openingProposal: {...onset, status: "candidate", evidenceIds: [1]}, sceneEntry: {...entry, reason: "ordinary-interruption"},
+  targetTransition: uncertainTransition, uncertainContinuationArbitration: true, maxCueChecks: 1,
+  confirmation: {...rootedContinuation, scopeId: 1},
+};
+
+test("an exact blind continuation can resolve typed uncertainty without renewing or inventing a cue", async () => {
+  const requests = [], controlRequests = [];
+  const candidate = await run({...uncertaintyFixture, requests});
+  const control = await run({...uncertaintyFixture, uncertainContinuationArbitration: false, requests: controlRequests});
+  const noUncertainty = await run({...uncertaintyFixture, targetTransition: {}, continuation: neutral(3), proposal: neutral(3)});
+  const row = candidate.units[3];
+  assert.equal(control.units[3].pattern, "Baseline");
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.phase, "sustain");
+  assert.equal(row.appliedTransition, "none");
+  assert.deepEqual(row.transitionVerification, control.units[3].transitionVerification);
+  assert.deepEqual(row.primaryPrefix, control.units[3].primaryPrefix);
+  assert.deepEqual(row.transitionEvidenceIds, [1, 3]);
+  assert.equal(row.uncertainContinuationVerificationStatus, "verified");
+  assert.equal(row.localActionApplication, "sustain-uncertainty-profile");
+  assert.equal(row.trace.decision, "Resolve held continuity");
+  assert.equal(row.trace.knownAt, 3);
+  assert.deepEqual(row.trace.evidence, [1, 3]);
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.trace.floorWords, 0);
+  for (const field of ["beat", "scene", "holdWords", "fadeWords"]) {
+    assert.equal(row.trace[field], noUncertainty.units[3].trace[field]);
+  }
+  assert.deepEqual(candidate.units.slice(0, 3), control.units.slice(0, 3));
+  assert.deepEqual(candidate.units[4].trace, noUncertainty.units[4].trace);
+  assert.deepEqual(requests.slice(0, -1), controlRequests);
+  const request = requests.at(-1);
+  assert.equal(request.mode, "cue-check");
+  assert.equal(request.focus, "continuation-repair");
+  assert.deepEqual(request.targetIds, [3]);
+  assert.deepEqual(request.units.map(unit => unit.id), [0, 1, 2, 3]);
+  assert.equal(request.attested, undefined);
+  const attempt = candidate.summary.attempts.at(-1);
+  assert.equal(attempt.cueCheckReason, "uncertain-continuation");
+  assert.equal(attempt.status, "returned");
+});
+
+test("continuity uncertainty stays conservative on missing, conflicting or invalid proof", async () => {
+  for (const [options, status] of [[{confirmation: null}, "unconfirmed"],
+    [{confirmation: {...uncertaintyFixture.confirmation, scopeId: 2}}, "invalid-response"],
+    [{confirmation: {...uncertaintyFixture.confirmation, evidenceIds: [1, 3, 4]}}, "invalid-response"],
+    [{confirmationFailure: "transient"}, "transient"], [{confirmationFailure: "refused"}, "provider-refused"],
+    [{maxCueChecks: 0}, "budget-deferred"]]) {
+    const {units} = await run({...uncertaintyFixture, ...options});
+    assert.equal(units[3].uncertainContinuationVerificationStatus, status, JSON.stringify(options));
+    assert.equal(units[3].pattern, "Baseline");
+    assert.equal(units[3].appliedTransition, "uncertain-continuity");
+    assert.equal(units[3].localActionApplication, undefined);
+    assert.equal(units[4].pattern, "Baseline");
+  }
+});
+
+test("uncertainty confirmation cannot be requested across a real boundary or missing causal evidence", async () => {
+  for (const options of [{targetBoundary: timeCut}, {continuation: stop(3)}, {connectorVote: stop(2)},
+    {opening: stop(1)}, {blockedIds: [2]}, {rootVote: {...neutral(0), frame: "reported"}},
+    {opening: {...onset, evidenceIds: [1]}}, {localVote: {...local, contextId: 2}},
+    {proposal: neutral(3)}, {targetTransition: {...uncertainTransition, evidenceIds: [1, 3]}},
+    {sceneEntry: {...entry, reason: "routine-movement"}},
+    {connector: "Several minutes later the lights dimmed."}, {connector: "They stopped to listen."},
+    {connector: "While they stood there the people nearest the windows drew the heavy curtains slowly closed for the night."}]) {
+    const requests = [];
+    const {units} = await run({...uncertaintyFixture, ...options, requests});
+    assert.equal(units[3].uncertainContinuationVerificationStatus, undefined, JSON.stringify(options));
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+    assert.ok(requests.every(request => request.focus !== "continuation-repair"), JSON.stringify(options));
+  }
+  const {units} = await run({...uncertaintyFixture, confirmation: stop(3)});
+  assert.equal(units[3].uncertainContinuationVerificationStatus, "protective-override");
+  assert.equal(units[3].pattern, "Stop");
+  assert.equal(units[3].appliedTransition, "hard-stop");
+  assert.equal(units[4].pattern, "Baseline");
+});
+
+test("the compiler cannot use an exact confirmation to restore an expired or manually zeroed beat", () => {
+  const unit = (id, pattern, words) => ({id, words, profile: {id, pattern, gate: "No blocking event recorded"}});
+  const confirmed = {...unit(2, "Baseline", 2), neutral: {knownAt: 2, evidence: [2]},
+    holdConfirmation: {kind: "continue", knownAt: 2, evidence: [0, 2], priorAnchor: 0}};
+  const opening = unit(0, "Onset rise", 2);
+  for (const [middle, target] of [[unit(1, "Baseline", 32), confirmed],
+    [unit(1, "Baseline", 1), {...confirmed, manualZero: true}], [unit(1, "Reset", 1), confirmed]]) {
+    const [, , [profile, trace]] = planStory("held", [opening, middle, target]);
+    assert.equal(profile.pattern, "Baseline");
+    assert.notEqual(trace.decision, "Resolve held continuity");
   }
 });

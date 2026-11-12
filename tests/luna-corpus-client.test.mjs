@@ -261,11 +261,15 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
     evidence: [context.id], holdWords: 32, fadeWords: 48, floorWords: 0, wordOffset: 0};
   const support = {mode: "verify", supportingPrefix: true, attempted: true, targetIds: [context.id], status: "returned"};
   const targetId = first.targetIds[0];
+  const continuation = {id: targetId, status: "verified", action: "continuation", evidenceIds: [context.id, targetId],
+    priorAnchor: context.id};
   const rejectedAction = {mode: "local-action", attempted: true, targetIds: [targetId], status: "invalid-response",
     rejectedFacts: [{id: targetId, reason: "local-action-evidence", detail: {status: "verified", action: "continuation",
       targetEvidence: "exact-target", contextEvidence: "missing"}}]};
   const initial = corpusPage({onShard: async ({clip}) => {
     const response = shardResult(clip);
+    Object.assign(response.units[0], {uncertainContinuationVerification: continuation,
+      uncertainContinuationVerificationStatus: "verified", localActionApplication: "sustain-uncertainty-profile"});
     response.units.unshift({id: context.id, unitSha256: context.digest, text: unexpectedText,
       playbackDisposition: "supporting-rooted-onset", trace: {...trace, reason: unexpectedText},
       primaryPrefix: {...fact, note: unexpectedText}});
@@ -291,6 +295,9 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
   assert.deepEqual(works[0].summary.attempts[1], rejectedAction);
   assert.deepEqual(replayClips[0].units[0], {id: context.id, unitSha256: context.digest, primaryPrefix: fact,
     playbackDisposition: "supporting-rooted-onset", trace});
+  assert.deepEqual(replayClips[0].units[1].uncertainContinuationVerification, continuation);
+  assert.equal(replayClips[0].units[1].uncertainContinuationVerificationStatus, "verified");
+  assert.equal(replayClips[0].units[1].localActionApplication, "sustain-uncertainty-profile");
   assert.ok(!download.includes(unexpectedText));
 });
 

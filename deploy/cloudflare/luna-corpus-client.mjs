@@ -28,7 +28,8 @@ const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verifi
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
   "independentBoundaryStatus", "sceneSituationVerificationStatus", "sceneOldPlaceVerificationStatus",
   "sceneArrivalVerificationStatus", "scenePlaceRecoveryStatus", "sustainConnectorVerificationStatus",
-  "interruptionContinuationVerificationStatus", "interruptionReleaseVerificationStatus", "playbackDisposition", "localActionApplication"];
+  "interruptionContinuationVerificationStatus", "uncertainContinuationVerificationStatus", "interruptionReleaseVerificationStatus",
+  "playbackDisposition", "localActionApplication"];
 const replayFactKeys = ["id", "unitId", "depiction", "frame", "narrativePhase", "action", "transition", "fact", "status", "scopeId", "evidenceIds", "priorAnchor"];
 const replayBoundaryKeys = ["status", "reason", "previousId", "entryId"];
 const replayLocalActionKeys = ["status", "frame", "action", "phase", "contrast", "targetId", "contextId"];
@@ -36,7 +37,7 @@ const replaySituationKeys = ["status", "earlierId", "currentId", "earlierBasis",
 const replayPlaceKeys = ["status", "earlierId", "currentId"];
 const replayTraceKeys = ["beat", "scene", "decision", "knownAt", "evidence", "holdWords", "fadeWords", "floorWords", "wordOffset"];
 const replayFactStages = ["discovery", "primaryPrefix", "transitionVerification", "cueRecovery",
-  "interruptionContinuationVerification", "interruptionReleaseVerification", "sustainConnectorVerification"];
+  "interruptionContinuationVerification", "uncertainContinuationVerification", "interruptionReleaseVerification", "sustainConnectorVerification"];
 const encoder = new TextEncoder();
 const natural = n => Number.isSafeInteger(n) && n >= 0;
 let packet, packetDigest, state, busy = false, pausing = false;
