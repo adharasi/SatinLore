@@ -57,6 +57,26 @@ test("matches the Python v6 profile and trace through hold, fade, parking and an
   }
 });
 
+test("buildup renewal requires the current unexpired beat and respects stop and manual zero", () => {
+  const renewal = (knownAt, priorAnchor) => fact(knownAt, {kind: "low", profile: "Gradual build", requiresBeat: true,
+    priorAnchor, evidence: [priorAnchor, knownAt]});
+  const cases = [
+    [[row(0, "Onset rise"), row(1, "Baseline", {low: renewal(1, 0)})], "Gradual build", "Renew buildup"],
+    [[row(0, "Baseline"), row(1, "Baseline", {low: renewal(1, 0)})], "Baseline", "Local profile"],
+    [[row(0, "Onset rise"), row(1, "Baseline", {words: 32}), row(2, "Baseline", {low: renewal(2, 0)})], "Taper", "Fade beat"],
+    [[row(0, "Onset rise"), row(1, "Baseline", {manualZero: true, low: renewal(1, 0)})], "Baseline", "Manual zero"],
+    [[row(0, "Onset rise"), row(1, "Stop", {low: renewal(1, 0)})], "Stop", "Stop"],
+    [[row(0, "Onset rise"), row(1, "Baseline", {boundary: fact(1, {kind: "cut"}), low: renewal(1, 0)})],
+      "Baseline", "Scene cut"],
+  ];
+  for (const [inputs, pattern, decision] of cases) {
+    const [profile, trace] = planStory("TEST", inputs).at(-1);
+    assert.equal(profile.pattern, pattern);
+    assert.equal(trace.decision, decision);
+    if (decision === "Renew buildup") assert.equal(trace.beat, "TEST:beat:0");
+  }
+});
+
 test("cuts and protective decisions discard earlier anchors even when the evidence cites them", () => {
   const cases = [
     [{boundary: fact(1, {kind: "cut"}), low: fact(1)}, "Independent low after cut", "TEST:beat:1", "TEST:scene:1"],

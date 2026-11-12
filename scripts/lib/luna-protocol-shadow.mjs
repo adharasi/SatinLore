@@ -11,7 +11,7 @@ import {LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS
   lunaProtocolBoundaryOnlyViolation, lunaProtocolLocalActionEvidenceDetail, lunaProtocolLocalActionShapeDetail,
   lunaProtocolLocalActionViolation, lunaProtocolSceneBoundaryViolation,
   lunaProtocolSceneEntryEvidenceDetail, lunaProtocolSceneEntryViolation, lunaProtocolScenePlaceViolation, lunaProtocolSceneSituationViolation,
-  lunaProtocolTransitionViolation, sanitizeLunaLocalActionEvidenceDetail, sanitizeLunaLocalActionShapeDetail,
+  lunaProtocolStatusEffectDetail, lunaProtocolTransitionViolation, sanitizeLunaLocalActionEvidenceDetail, sanitizeLunaLocalActionShapeDetail,
   sanitizeLunaSceneEntryEvidenceDetail, sanitizeLunaStatusEffectDetail}
   from "./luna-protocol-provider.mjs";
 
@@ -840,6 +840,45 @@ function corroboratesReciprocalBuild(row, cue, typed, context, id) {
     local.action === "anticipation" && local.phase === "build" && local.contrast === "reciprocal-buildup";
 }
 
+function corroboratesHeldBuildSupport(row, cue, previous, id, decisions, blocked, index, barrier) {
+  const openerId = id - 1, root = cue.scopeId;
+  const proposal = row.discovery, opening = previous?.primaryPrefix, openingProposal = previous?.discovery;
+  const openingEffect = previous?.effectiveAnnotation;
+  const local = localDirectAction(previous, openerId);
+  const entry = previous?.sceneEntryVerification?.sceneEntry;
+  const singleton = (fact, target) => fact.evidenceIds.length === 1 && fact.evidenceIds[0] === target;
+  const exactBuild = fact => fact.frame === "current" && romanticDepictions.has(fact.depiction) &&
+    fact.action === "anticipation" && fact.narrativePhase === "build" && fact.transition === "none" &&
+    fact.fact === "low" && fact.priorAnchor === null && singleton(fact, id);
+  // The support passes agree on what happens here. One scopes it to the
+  // enacted opener, the other to the quiet prefix cited by that same opener.
+  if (root == null || root <= barrier || root >= openerId || !exactBuild(row.effectiveAnnotation) ||
+      cue !== row.primaryPrefix || !exactBuild(cue) || proposal?.status !== "candidate" ||
+      proposal.scopeId !== openerId || proposal.depiction !== cue.depiction || !exactBuild(proposal) ||
+      row.transitionVerification && !typedQuietWithoutBoundary(row.transitionVerification) ||
+      !previous?.window || previous.window.runId !== row.window?.runId || previous.annotation !== opening ||
+      !previous.prefixVerified || !exactCurrentCue(opening, openerId) || !exactCurrentCue(openingEffect, openerId) ||
+      openingEffect.fact !== "low" || openingEffect.transition !== "none" || openingEffect.scopeId !== null ||
+      opening.scopeId !== null ||
+      opening.priorAnchor !== null || opening.transition !== "none" || opening.fact !== "low" ||
+      opening.action !== "contact" || opening.narrativePhase !== "build" || opening.depiction !== cue.depiction ||
+      !currentCueAt(openingProposal, openerId, "candidate") || openingProposal.scopeId !== openerId ||
+      openingProposal.depiction !== cue.depiction || openingProposal.action !== "contact" ||
+      openingProposal.narrativePhase !== "onset" || openingProposal.transition !== "onset" ||
+      openingProposal.fact !== "none" || openingProposal.priorAnchor !== null || !singleton(openingProposal, openerId) ||
+      local?.action !== "contact" || local.phase !== "onset" || local.contextId !== openerId - 1 ||
+      !typedQuietWithoutBoundary(previous.transitionVerification) || entry?.status !== "none" ||
+      entry.reason !== "same-episode" || opening.evidenceIds.length !== openerId - root + 1 ||
+      !opening.evidenceIds.every((evidence, offset) => evidence === root + offset)) return false;
+  return opening.evidenceIds.slice(0, -1).every(unitId => {
+    const context = decisions.get(unitId);
+    const fact = context?.effectiveAnnotation ?? context?.annotation ?? context?.discovery;
+    return context?.window?.runId === row.window?.runId && !blocked.has(unitId) && !index.units[unitId].structuralBoundary &&
+      strictQuietNegative(context.discovery) && strictQuietNegative(fact) &&
+      (!context.transitionVerification || typedQuietWithoutBoundary(context.transitionVerification));
+  });
+}
+
 function verifiesLocalSustain(row, id, prior) {
   const local = row.localActionVerification?.localAction;
   return local?.status === "verified" && local.frame === "current" && local.action === "continuation" &&
@@ -901,7 +940,7 @@ function uncertainContinuationCandidate(row, id, index, decisions, blocked, supp
   return {priorId, scope: inverseRooted ? root : primary.scopeId};
 }
 
-function quietDiscoveryContinuationCandidate(row, id, index, decisions, blocked, supportingIds) {
+function scopedDiscoveryContinuationCandidate(row, id, index, decisions, blocked, supportingIds) {
   const {primaryPrefix: primary, effectiveAnnotation: effect, discovery, transitionVerification: typed} = row;
   const priorId = primary?.priorAnchor;
   const rootId = priorId - 1;
@@ -914,24 +953,37 @@ function quietDiscoveryContinuationCandidate(row, id, index, decisions, blocked,
       !verifiesLocalSustain(row, id, priorId) || !typedQuietWithoutBoundary(typed) ||
       effect?.frame !== "current" || effect.transition !== "none" || effect.fact !== "continue" ||
       effect.priorAnchor !== priorId || effect.scopeId !== rootId ||
-      entry?.status !== "none" || entry.reason !== "ordinary-interruption" ||
-      !strictQuietNegative(discovery) || !romanticDepictions.has(discovery.depiction)) return null;
+      entry?.status !== "none" || !romanticDepictions.has(discovery?.depiction)) return null;
 
-  // A quiet discovery can abstain on the action. Only an independently
-  // checked quiet root and the exact onset can nominate this separate check.
+  const quiet = entry.reason === "ordinary-interruption" && strictQuietNegative(discovery);
+  const disputed = entry.reason === "same-episode" && discovery.status === "candidate" &&
+    discovery.frame === "current" && discovery.narrativePhase === "quiet" && discovery.action === "none" &&
+    discovery.transition === "uncertain-continuity" && discovery.fact === "neutralize" &&
+    discovery.scopeId === priorId && discovery.priorAnchor === null && discovery.evidenceIds.length === 2 &&
+    discovery.evidenceIds[0] === priorId && discovery.evidenceIds[1] === id;
+  if (!quiet && !disputed) return null;
+
+  // The discovery disagreement is about the exact linked action, so the
+  // blind check can adjudicate it without adopting either scope or reopening
+  // an earlier beat. The quiet abstention keeps its verified-root requirement.
   const opening = decisions.get(priorId);
   const root = decisions.get(rootId);
   const anchor = opening?.primaryPrefix;
-  const sameScopeOpener = root?.prefixVerified && strictQuietNegative(root.effectiveAnnotation) &&
+  const sameScopeOpener = (disputed || root?.prefixVerified && strictQuietNegative(root.effectiveAnnotation)) &&
     corroboratesDualCitedOpener(opening, anchor, root, priorId, priorId, priorId);
-  if (!sameScopeOpener && !corroboratesDualCitedRootedOpener(opening, anchor, root, priorId)) return null;
+  if (!sameScopeOpener && !(quiet && corroboratesDualCitedRootedOpener(opening, anchor, root, priorId))) return null;
   for (let unitId = rootId; unitId <= id; unitId++) {
     const unit = index.units[unitId];
     const context = decisions.get(unitId);
     if (!unit || blocked.has(unitId) || unit.structuralBoundary || context?.window?.runId !== row.window.runId) return null;
     if (unitId === priorId) continue;
-    const quiet = unitId === id ? discovery : context.effectiveAnnotation ?? context.annotation ?? context.discovery;
-    if (!strictQuietNegative(quiet) || possibleRestartClosure(unit, quiet) || elapsedContinuityGap(unit, quiet, quiet, priorId) ||
+    if (unitId === id && disputed) {
+      if (possibleRestartClosure(unit, discovery) || elapsedContinuityGap(unit, typed, typed, priorId)) return null;
+      continue;
+    }
+    const quietContext = unitId === id ? discovery : context.effectiveAnnotation ?? context.annotation ?? context.discovery;
+    if (!strictQuietNegative(quietContext) || possibleRestartClosure(unit, quietContext) ||
+        elapsedContinuityGap(unit, quietContext, quietContext, priorId) ||
         unitId !== id && context.transitionVerification && !typedQuietWithoutBoundary(context.transitionVerification) ||
         unitId === priorId + 1 && unitId !== id && (words(unit.text) > 16 || !strictQuietNegative(context.discovery))) return null;
   }
@@ -1327,6 +1379,9 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
       rawCue.priorAnchor === null && rawCue.evidenceIds.length === 1 &&
       currentCueAt(proposal, unit.id, "candidate") && proposal.scopeId === null && proposal.priorAnchor === null &&
       proposal.evidenceIds.length === 1 && ["action", "narrativePhase", "transition", "fact", "depiction"].every(key => proposal[key] === rawCue[key]);
+    const supportsHeldBuild = supporting && !cut && !restartBoundary && hasLow &&
+      lastAnchor === priorId && anchors.get(priorId) === priorId &&
+      corroboratesHeldBuildSupport(result, rawCue, previous, unit.id, decisions, blocked, index, previousEvidenceBarrier);
     priorBuildLink = independentlyLinkedBuild ? {id: unit.id, scopeId} : null;
     const connectorRow = exactLink && unit.id - prior === 2 ? previous : null;
     const connectorFact = connectorRow?.effectiveAnnotation ?? connectorRow?.annotation;
@@ -1344,7 +1399,7 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
         !linked && prior === lastAnchor && anchors.get(prior) === prior &&
         (corroboratesSustainScope(index, decisions, blocked, result, rawCue, unit.id, prior) ||
           corroboratesRootedSustain(index, decisions, blocked, result, rawCue, unit.id, prior) ||
-          result.quietDiscoveryContinuation && confirmedContinuation)) {
+          result.scopedDiscoveryContinuation && confirmedContinuation)) {
       result.localActionApplication = "sustain-scope-profile";
     }
     const repairedSustain = !auxiliary && !quietBoundary && !cut && !restartBoundary && exactLink && shortSustainLink &&
@@ -1399,6 +1454,8 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
         [priorId, unit.id]), profile: "Taper", localOnly: true} :
       recoveryAfterEnd ? {...mark("low", "Exact current contact supports local recovery after a verified beat end.",
       [previousEvidenceBarrier, unit.id]), profile: "Recovery", localOnly: true} :
+      supportsHeldBuild ? {...mark("low", "Matching buildup evidence renews the independently verified open beat.", [priorId, unit.id]),
+        profile: "Gradual build", priorAnchor: priorId, requiresBeat: true} :
       supportsVerifiedBuild ? {...mark("low", "Verified support renews the low envelope of an open buildup.", [priorId, unit.id]),
         profile: "Undertone", priorAnchor: priorId, requiresBeat: true} :
       !supporting && !quietBoundary && (hasLow && !buildProgress || supportLinked && !linkedSustain) ?
@@ -1809,7 +1866,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         const rejections = new Map(failureRows.map(row => [row.unitId, row.reason]));
         const details = new Map();
         for (const {unitId, reason, detail} of failureRows) {
-          const safe = mode === "transition" && reason === "status-effect" ? sanitizeLunaStatusEffectDetail(detail) :
+          const safe = reason === "status-effect" && (mode === "discovery" || mode === "transition") ?
+            sanitizeLunaStatusEffectDetail(detail, mode === "discovery") :
             mode === "local-action" && reason === "local-action-evidence" ? sanitizeLunaLocalActionEvidenceDetail(detail) :
               mode === "local-action" && reason === "local-action-shape" ? sanitizeLunaLocalActionShapeDetail(detail) :
                 mode === "scene-entry" && reason === "scene-entry-evidence" ? sanitizeLunaSceneEntryEvidenceDetail(detail) : undefined;
@@ -1843,7 +1901,10 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
           const reason = providerReason ?? (fact ? factViolation(fact, submitted, id, mode, attested, requireSceneBoundary) : "missing-target");
           if (reason) {
             rejections.set(id, reason);
-            if (!providerReason && mode === "local-action" && reason === "local-action-evidence") {
+            if (!providerReason && mode === "discovery" && reason === "status-effect") {
+              const detail = lunaProtocolStatusEffectDetail(fact, true);
+              if (detail) details.set(id, {reason, detail});
+            } else if (!providerReason && mode === "local-action" && reason === "local-action-evidence") {
               details.set(id, {reason, detail: lunaProtocolLocalActionEvidenceDetail(fact, id, proofId => submitted.has(proofId))});
             } else if (!providerReason && mode === "local-action" && reason === "local-action-shape") {
               const detail = lunaProtocolLocalActionShapeDetail(fact);
@@ -2338,14 +2399,14 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     }
     if (uncertainContinuationArbitration) for (const id of sceneEntryTargets) {
       const row = decisions.get(id);
-      const quietCandidate = quietDiscoveryContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
-      const candidate = quietCandidate ?? uncertainContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
+      const scopedCandidate = scopedDiscoveryContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
+      const candidate = scopedCandidate ?? uncertainContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
       if (!candidate) continue;
       const job = prefixJob(row.window, id, index, prefixUnits, "cue-check");
-      if (!job.contextIds.includes(candidate.priorId) || quietCandidate && !job.contextIds.includes(quietCandidate.rootId)) continue;
+      if (!job.contextIds.includes(candidate.priorId) || scopedCandidate && !job.contextIds.includes(scopedCandidate.rootId)) continue;
       const [{result, status}] = await execute([{...job, id: `${job.id}:uncertain-continuation`}], "uncertain-continuation");
       const verdict = status === "returned" ? result.annotations[0] : undefined;
-      if (quietCandidate) row.quietDiscoveryContinuation = true;
+      if (scopedCandidate) row.scopedDiscoveryContinuation = true;
       row.uncertainContinuationVerification = verdict;
       row.uncertainContinuationVerificationStatus = verdict ?
         verifiedContinuationRepair(verdict, candidate, id) ? "verified" : "unconfirmed" : status;

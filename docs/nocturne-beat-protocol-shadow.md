@@ -594,3 +594,13 @@ A material objective first-entry finding that competes with exact current onset 
 Two same-scope prefix readings and an exact isolated reciprocal buildup can support Gradual build for the current unit. Preserve scene, cue and event decisions. Independently review prior beat evidence, expiry and waveform fit when phase and event already agree. The isolated local-action prompt spells out compatible field combinations. A rejected shape can record the five allowlisted enum fields without retaining source text or submitted IDs.
 
 Grade fixed-answer changes, hypothetical corroboration and naturally returned proof as separate evidence. Keep frozen waveform and cue disagreements visible after correcting a boundary.
+
+## V41 verify continuation and support on an open beat
+
+The discovery pass can flag a continuity disagreement while primary and independent local action agree on the same exact current continuation. An eligible same-episode link can nominate the existing blind continuation check. It uses the cleared prefix through the target. A verified matching answer may select Sustain wave on the existing open beat without refreshing its hold, fade or cue. Unsupported, expired, noncurrent, protective or structurally closed state stays under the existing gates.
+
+A supporting buildup can renew an established, unexpired beat when its discovery and verification identify the exact target and use the two independently grounded scope origins. Require a verified local opener, quiet cleared root and intermediate context, exact current support, no boundary and the same compiled beat. The support can advance Gradual build from its own evidence time without creating a new beat or direct cue. Missing, contradictory or blocked lineage supplies no renewal.
+
+Discovery instructions distinguish a supported continuity proposal from an inconclusive classification. A status-effect rejection retains validated labels and scope/evidence relationship flags. Rejected facts provide no playback authority. A missing discovery unit can still break the causal chain. Recover the earlier action or beat support independently and verify the clock before restoring a held waveform.
+
+Use the same accepted replies for compiler attribution, supplied exact answers for controlled proof and fresh receipts for provider evidence. Grade reference differences in cut output, local action and held waveform independently.

@@ -1,8 +1,8 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v40";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v41";
 const controlRubricVersion = "nocturne-luna-protocol-v17";
 const boundaryRubricVersion = "nocturne-luna-protocol-v18";
-const localActionRubricVersion = LUNA_PROTOCOL_RUBRIC_VERSION;
+const localActionRubricVersion = "nocturne-luna-protocol-v40";
 export const LUNA_PROTOCOL_LIMITS = Object.freeze({
   maxUnits: 256, maxTargets: 192, maxVerifyUnits: 32, maxUnitBytes: 24_000,
   maxSourceBytes: 128_000, maxBodyBytes: 192_000, maxEvidenceIds: 8, maxAttested: 16,
@@ -177,7 +177,10 @@ const instructions = [
   targetBuildup,
 ].join(" ");
 const modeInstructions = {
-  discovery: "This is discovery. You may use supplied later context to recognize a candidate. Use candidate for supported positive, boundary or protective proposals. Use neutral for no proposal, uncertain for inadequate evidence, or abstain when you cannot assess the target. Discovery does not authorize playback.",
+  discovery: [
+    "This is discovery. You may use supplied later context to recognize a candidate. Use candidate for supported positive, boundary or protective proposals. Discovery does not authorize playback.",
+    "Use candidate with uncertain-continuity, neutralize and exact target evidence when the text establishes a break in continuity of the prior beat. When the evidence is inconclusive, use uncertain or abstain with fact none, action and transition none or unknown, and priorAnchor null. Use neutral for a clear absence of a proposal.",
+  ].join(" "),
   verify: "This is independent causal verification of one target. The supplied prefix ends at that target. Use only supplied evidence available by that target. No candidate label is supplied. Use verified for supported cue, connector, boundary or protective evidence. Otherwise return neutral, uncertain or abstain. Earlier text establishes context. Cite the target itself when it adds a current cue. Do not project a later action or ending from anticipation alone.",
   "cue-check": [
     "Independently verify whether the target itself contains a cue or boundary. The causal prefix ends at the target. No candidate or previous judgment is supplied. Every verified row must cite the target. Earlier units can establish who is involved and what happened before, but they cannot supply a cue missing from the target.",
@@ -500,21 +503,25 @@ export function lunaProtocolSceneEntryEvidenceDetail(row, target, raw) {
     inOrder: [previousId, changeId, entryId].every(whole) ? previousId < changeId && changeId <= entryId : null});
 }
 
-export function sanitizeLunaStatusEffectDetail(detail) {
+export function sanitizeLunaStatusEffectDetail(detail, discovery = false) {
   const keys = ["status", "frame", "transition", "fact", "hasScope", "hasPriorAnchor", "citesTarget", "evidenceCount"];
+  if (discovery) keys.push("action", "narrativePhase");
   if (!exact(detail, keys)) return undefined;
-  const {status, frame, transition, fact, hasScope, hasPriorAnchor, citesTarget, evidenceCount} = detail;
+  const {status, frame, transition, fact, hasScope, hasPriorAnchor, citesTarget, evidenceCount, action, narrativePhase} = detail;
   if (!LUNA_PROTOCOL_ENUMS.status.includes(status) || !LUNA_PROTOCOL_ENUMS.frame.includes(frame) ||
       !LUNA_PROTOCOL_ENUMS.transition.includes(transition) || !LUNA_PROTOCOL_ENUMS.fact.includes(fact) ||
       ![hasScope, hasPriorAnchor, citesTarget].every(value => typeof value === "boolean") ||
-      !whole(evidenceCount) || evidenceCount > LUNA_PROTOCOL_LIMITS.maxEvidenceIds) return undefined;
-  return {status, frame, transition, fact, hasScope, hasPriorAnchor, citesTarget, evidenceCount};
+      !whole(evidenceCount) || evidenceCount > LUNA_PROTOCOL_LIMITS.maxEvidenceIds ||
+      discovery && (!LUNA_PROTOCOL_ENUMS.action.includes(action) || !LUNA_PROTOCOL_ENUMS.narrativePhase.includes(narrativePhase))) return undefined;
+  return {status, frame, transition, fact, hasScope, hasPriorAnchor, citesTarget, evidenceCount,
+    ...(discovery ? {action, narrativePhase} : {})};
 }
 
-function transitionStatusEffectDetail(row) {
-  const {status, frame, transition, fact, scopeId, priorAnchor, evidenceIds, unitId} = row;
+export function lunaProtocolStatusEffectDetail(row, discovery = false) {
+  const {status, frame, transition, fact, scopeId, priorAnchor, evidenceIds, unitId, action, narrativePhase} = row;
   return sanitizeLunaStatusEffectDetail({status, frame, transition, fact, hasScope: scopeId !== null,
-    hasPriorAnchor: priorAnchor !== null, citesTarget: evidenceIds.includes(unitId), evidenceCount: evidenceIds.length});
+    hasPriorAnchor: priorAnchor !== null, citesTarget: evidenceIds.includes(unitId), evidenceCount: evidenceIds.length,
+    ...(discovery ? {action, narrativePhase} : {})}, discovery);
 }
 
 function canonicalTransition(row, raw) {
@@ -664,7 +671,8 @@ function checkedFacts(value, {mode, units, targetIds, attested}) {
       } else reason = lunaProtocolCueViolation(row, mode);
     }
     if (reason) {
-      const detail = mode === "transition" && reason === "status-effect" ? transitionStatusEffectDetail(submitted) :
+      const detail = reason === "status-effect" && (mode === "discovery" || mode === "transition") ?
+        lunaProtocolStatusEffectDetail(submitted, mode === "discovery") :
         mode === "local-action" && reason === "local-action-evidence" ? lunaProtocolLocalActionEvidenceDetail(submitted, unitId, raw) :
           mode === "local-action" && reason === "local-action-shape" ? lunaProtocolLocalActionShapeDetail(submitted) :
             mode === "scene-entry" && reason === "scene-entry-evidence" ? lunaProtocolSceneEntryEvidenceDetail(submitted, unitId, raw) : undefined;

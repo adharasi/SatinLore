@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createLunaProtocolProvider, LUNA_PROTOCOL_ENUMS, LUNA_PROTOCOL_FAILURE_REASONS, LUNA_PROTOCOL_LIMITS, LUNA_PROTOCOL_MODEL,
-  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolInputOverhead, lunaProtocolOutputTokens}
+  LUNA_PROTOCOL_TARGET_FAILURES, LUNA_PROTOCOL_TARGET_NORMALIZATIONS, lunaProtocolInputOverhead, lunaProtocolOutputTokens,
+  sanitizeLunaStatusEffectDetail}
   from "../scripts/lib/luna-protocol-provider.mjs";
 
 const units = [{id: 10, text: "June noticed Lee watching her."}, {id: 11, text: "She smiled."}, {id: 12, text: "The clock chimed."}];
@@ -660,8 +661,33 @@ test("accepts only validated discovery rows and diagnoses requested targets with
     [{status: "uncertain"}, "status-effect"], [{fact: "cut", evidenceIds: [10], priorAnchor: null}, "target-evidence"],
     [{fact: "low", evidenceIds: []}, "target-evidence"], [{depiction: units[0].text}, "row-enum"]]) {
     const run = provider(async () => response([{...row, ...extra}, tail]));
-    assert.deepEqual(await run(request()), partial([tail], [targetFailure(11, reason)]));
+    const failure = targetFailure(11, reason);
+    if (reason === "status-effect") failure.detail = {status: "uncertain", frame: "current", transition: "none",
+      fact: "continue", hasScope: true, hasPriorAnchor: true, citesTarget: true, evidenceCount: 2,
+      action: "none", narrativePhase: "quiet"};
+    assert.deepEqual(await run(request()), partial([tail], [failure]));
     assert.ok(LUNA_PROTOCOL_TARGET_FAILURES.includes(reason));
+  }
+});
+
+test("discovery distinguishes a supported continuity proposal from an unresolved classification", async () => {
+  const tail = fact(12);
+  const candidate = fact(11, {status: "candidate", transition: "uncertain-continuity", fact: "neutralize", evidenceIds: [11]});
+  const unresolved = fact(11, {status: "uncertain", transition: "unknown", action: "unknown", narrativePhase: "unknown"});
+  const run = proposal => provider(async (_url, {body}) => {
+    const {instructions} = JSON.parse(body);
+    assert.match(instructions, /Use candidate with uncertain-continuity, neutralize and exact target evidence/u);
+    assert.match(instructions, /use uncertain or abstain with fact none/u);
+    return response([proposal, tail]);
+  })(request());
+  assert.deepEqual(await run(candidate), success([candidate, tail]));
+  assert.deepEqual(await run(unresolved), success([unresolved, tail]));
+  const invalid = await run({...candidate, status: "uncertain"});
+  const detail = {status: "uncertain", frame: "current", transition: "uncertain-continuity", fact: "neutralize",
+    hasScope: false, hasPriorAnchor: false, citesTarget: true, evidenceCount: 1, action: "none", narrativePhase: "quiet"};
+  assert.deepEqual(invalid, partial([tail], [{unitId: 11, reason: "status-effect", detail}]));
+  for (const submitted of [{...detail, evidenceIds: [11]}, {...detail, action: units[0].text}, {...detail, note: units[0].text}]) {
+    assert.equal(sanitizeLunaStatusEffectDetail(submitted, true), undefined);
   }
 });
 

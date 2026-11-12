@@ -237,6 +237,8 @@ V39 adds independent old-place and arrival evidence for narrow setting disagreem
 
 V40 lets exact first-entry evidence nominate setting corroboration, checks a material objective when the local verdict reports an onset, and resolves a premature mixed-frame return. Exact reciprocal buildup can select its local waveform on three matching evidence lanes. [V40 evaluation](nocturne-beat-protocol-shadow.md#v40-resolve-setting-objective-and-frame-disagreements)
 
+V41 resolves exact continuation disagreements with the existing blind check and lets corroborated supporting buildup renew a verified open beat. Discovery rejections identify incompatible statuses and effects without recording rejected text or coordinates. [V41 evaluation](nocturne-beat-protocol-shadow.md#v41-verify-continuation-and-support-on-an-open-beat)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

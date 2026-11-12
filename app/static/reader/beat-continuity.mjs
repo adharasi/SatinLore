@@ -127,7 +127,8 @@ export function planStory(story, units) {
     let mark = boundary || scope;
     validateFacts(id, [boundary, scope, neutral, requestedEase, low, holdConfirmation, inheritedRelease]);
     const lowProfile = low && Object.hasOwn(low, "profile") ? low.profile : "Undertone";
-    if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile) && !(low.localOnly && lowProfile === "Taper"))) {
+    const renewsBuild = low?.requiresBeat === true && !low.localOnly && lowProfile === "Gradual build";
+    if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile) && !renewsBuild && !(low.localOnly && lowProfile === "Taper"))) {
       throw new RangeError("Independent low evidence must name a low profile at its evidence unit.");
     }
     const confirmsProvisional = scope?.confirmsProvisional === true && scope.knownAt === id && scope.priorAnchor != null &&
@@ -163,6 +164,7 @@ export function planStory(story, units) {
     const evidence = [];
     const renewsOpenBeat = low?.requiresBeat && pattern === "Baseline" && !barrier && !spanEnd && !ease &&
       beat?.established && !beat.quiet && !beat.provisional && !beat.released &&
+      (!renewsBuild || !beat.easing && beat.anchor === low.priorAnchor) &&
       beat.anchors.has(low.priorAnchor) && cursor - beat.supportEnd < ESTABLISHED_HOLD_WORDS;
     const confirmsHeldBeat = holdConfirmation && neutral && pattern === "Baseline" && !boundary && !scope && !ease && !low &&
       beat?.established && !beat.quiet && !beat.provisional && !beat.easing && !beat.released &&
@@ -237,8 +239,9 @@ export function planStory(story, units) {
       beat.recoveryEnd = beat.easing ? wordEnd : null;
       lastBarrier = null;
       traceBeat = beat;
-      floorWords = words;
-      decision = low.requiresBeat ? "Renew low envelope" : barrier ? "Independent low after cut" : "Independent low cue";
+      floorWords = renewsBuild ? 0 : words;
+      decision = renewsBuild ? "Renew buildup" : low.requiresBeat ? "Renew low envelope" :
+        barrier ? "Independent low after cut" : "Independent low cue";
       rationale = low.reason;
       mark = low;
       if (barrier) citeEvidence(evidence, boundary, id);

@@ -1299,6 +1299,60 @@ test("an independently linked build lets auxiliary evidence renew only an open l
   }
 });
 
+test("exact auxiliary buildup can renew a held beat across corroborated scope assignments", async () => {
+  const source = "The music began. June offered her hand. Lee took it.\n\nThey looked forward to dancing. The doors stayed open.";
+  const cases = [
+    {pattern: "Gradual build"},
+    {supportScope: 1, pattern: "Undertone"},
+    {discoveryScope: 1, pattern: "Undertone"},
+    {differentSupportEvidence: true, pattern: "Undertone"},
+    {noOpenerProof: true, pattern: "Undertone"},
+    {differentFrame: true, pattern: "Baseline"},
+    {blocked: true, pattern: "Baseline"},
+  ];
+  for (const {supportScope = 0, discoveryScope = 2, differentSupportEvidence, noOpenerProof, differentFrame, blocked, pattern} of cases) {
+    const provider = Object.assign(fake((id, mode) => {
+      if (mode === "local-action") {
+        const supported = id === 2 && !noOpenerProof;
+        return {unitId: id, localAction: {status: supported ? "verified" : "none", frame: "current",
+          action: supported ? "contact" : "none", phase: supported ? "onset" : "quiet",
+          contrast: supported ? "enacted" : "neutral", targetId: supported ? id : null, contextId: supported ? 1 : null}};
+      }
+      if (mode === "transition") return typedTransition(id, {status: "neutral", transition: "none", fact: "none", evidenceIds: [],
+        sceneBoundary: {status: "none", reason: "none", previousId: null, entryId: null}});
+      if (mode === "scene-entry") return {unitId: id, sceneEntry: {status: "none", reason: "same-episode",
+        previousId: null, entryId: null, changeId: null}};
+      if (id === 0 && differentFrame) return {...neutral(id), frame: "remembered"};
+      if (id === 2) return active(id, mode, mode === "discovery" ? {action: "contact", fact: "none", transition: "onset",
+        narrativePhase: "onset", scopeId: id} :
+        {action: "contact", narrativePhase: "build", scopeId: null, evidenceIds: [0, 1, id]});
+      if (id === 3) return active(id, mode, {narrativePhase: "build", scopeId: mode === "discovery" ? discoveryScope : supportScope,
+        evidenceIds: mode === "discovery" && differentSupportEvidence ? [2, 3] : [3]});
+      return neutral(id);
+    }), {sceneBoundaryProtocol: true});
+    const run = await runLunaProtocolShadow({...fixture(source), provider, verificationTargets: [2, 4], maxVerification: 2,
+      maxSupportingVerification: 1, verifyTransitions: true, transitionTargets: [2, 4], maxTransitionVerification: 2,
+      localActionVerificationTargets: [2, 4], sceneEntryVerificationTargets: [2, 4], blockedIds: blocked ? [3] : []});
+    const [opening, support, target] = run.units.slice(2);
+    assert.equal(target.pattern, pattern, JSON.stringify({supportScope, discoveryScope, differentSupportEvidence, noOpenerProof,
+      differentFrame, blocked}));
+    assert.equal(target.phase, "quiet");
+    assert.equal(target.appliedTransition, "none");
+    assert.equal(target.cue, false);
+    if (pattern === "Gradual build") {
+      assert.equal(opening.pattern, "Undertone");
+      assert.equal(support.trace.decision, "Renew buildup");
+      assert.deepEqual(support.trace.evidence, [2, 3]);
+      assert.equal(support.cue, false);
+      assert.equal(support.readerCue, false);
+      assert.equal(target.beatId, opening.beatId);
+      assert.equal(target.knownAt, 3);
+      assert.deepEqual(target.trace.evidence, [3]);
+      assert.equal(target.trace.holdWords, 32);
+    } else assert.notEqual(support.trace.decision, "Renew buildup");
+  }
+});
+
 test("exact sustained contact can use a separately verified onset without promoting ordinary continuation", async () => {
   const input = fixture("The doors opened. They took hands. They held hands closely. The music played on.");
   for (const [priorPhase, action, pattern] of [["onset", "contact", "Sustain wave"], ["onset", "continuation", "Undertone"],

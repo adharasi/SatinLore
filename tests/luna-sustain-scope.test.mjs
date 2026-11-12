@@ -20,10 +20,11 @@ const stop = unitId => ({...neutral(unitId), status: "verified", transition: "ha
 function run({opening = onset, openingProposal = {...onset, status: "candidate"}, continuation = sustain, proposal = sustainProposal,
   localVote = local, sceneEntry = entry, targetBoundary = noBoundary, connectorVote = neutral(2), rootVote = neutral(0),
   rootPrimaryVote = rootVote, rootFailure = null,
-  connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = [], targetTransition = {},
+  connector = "The lights dimmed.", target = "Lee kept holding her hand.", blockedIds = [], supporting = 1, requests = [],
+  targetTransition = {},
   uncertainContinuationArbitration = false, maxCueChecks = 0, confirmation = null, confirmationFailure = null,
   verificationTargets = [3, 4]} = {}) {
-  const text = `Mira waited by the door. Lee took her hand. ${connector} Lee kept holding her hand. Someone knocked.`;
+  const text = `Mira waited by the door. Lee took her hand. ${connector} ${target} Someone knocked.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
     spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
@@ -490,6 +491,76 @@ test("a quiet discovery stays conservative when the independent answer is unavai
     [{confirmation: stop(3)}, "protective-override", "Stop"],
   ]) {
     const {units} = await run({...quietDiscoveryFixture, ...options});
+    assert.equal(units[3].uncertainContinuationVerificationStatus, status);
+    assert.equal(units[3].pattern, pattern);
+    assert.notEqual(units[3].localActionApplication, "sustain-scope-profile");
+  }
+});
+
+const disputedDiscoveryFixture = {
+  uncertainContinuationArbitration: true, maxCueChecks: 1, continuation: rootedContinuation,
+  proposal: {...neutral(3), status: "candidate", depiction: "romantic", transition: "uncertain-continuity",
+    fact: "neutralize", scopeId: 1, evidenceIds: [1, 3]},
+  confirmation: {...rootedContinuation, scopeId: 1},
+};
+
+test("a blind current-action confirmation resolves an exact discovery disagreement on the held beat", async () => {
+  const requests = [];
+  const {units, summary} = await run({...disputedDiscoveryFixture, requests});
+  const control = await run({...disputedDiscoveryFixture, confirmation: null});
+  const row = units[3], original = control.units[3];
+  assert.equal(original.pattern, "Onset rise");
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.localActionApplication, "sustain-scope-profile");
+  assert.equal(row.uncertainContinuationVerificationStatus, "verified");
+  assert.equal(row.trace.decision, "Select local sustain");
+  assert.equal(row.trace.knownAt, 3);
+  assert.deepEqual(row.trace.evidence, [1, 3]);
+  for (const key of ["phase", "appliedTransition", "cue", "readerCue", "primaryPrefix", "discovery", "transitionVerification"]) {
+    assert.deepEqual(row[key], original[key]);
+  }
+  for (const key of ["beat", "scene", "holdWords", "fadeWords", "floorWords"]) {
+    assert.equal(row.trace[key], original.trace[key]);
+  }
+  assert.deepEqual(units.slice(0, 3), control.units.slice(0, 3));
+  assert.deepEqual(units[4], control.units[4]);
+  const attempts = summary.attempts.filter(attempt => attempt.cueCheckReason === "uncertain-continuation");
+  assert.equal(attempts.length, 1);
+  assert.deepEqual(attempts[0].contextIds, [0, 1, 2]);
+  assert.deepEqual(attempts[0].targetIds, [3]);
+  const [request] = requests.filter(request => request.focus === "continuation-repair");
+  assert.equal(request.mode, "cue-check");
+  assert.deepEqual(request.units.map(({id}) => id), [0, 1, 2, 3]);
+  assert.deepEqual(request.targetIds, [3]);
+  assert.equal(request.attested, undefined);
+  assert.equal(requests.some(request => request.mode === "verify" && request.targetIds[0] === 0), false);
+});
+
+test("disputed discovery cannot authorize a blind continuation across different scope, frame, elapsed time or boundary", async () => {
+  const {proposal} = disputedDiscoveryFixture;
+  for (const options of [{proposal: {...proposal, evidenceIds: [3]}}, {proposal: {...proposal, scopeId: 0}},
+    {proposal: {...proposal, frame: "reported"}}, {proposal: {...proposal, status: "uncertain"}},
+    {opening: {...onset, evidenceIds: [1]}}, {rootVote: {...neutral(0), frame: "reported"}},
+    {continuation: stop(3)}, {targetBoundary: timeCut}, {targetTransition: uncertainTransition},
+    {target: "Several hours later, Lee kept holding her hand."},
+    {connector: "Several hours later, the lights dimmed."}, {connectorVote: stop(2)}, {blockedIds: [2]},
+    {sceneEntry: {...entry, reason: "routine-movement"}}, {localVote: {...local, contextId: 2}}, {supporting: 0}]) {
+    const requests = [];
+    const {units} = await run({...disputedDiscoveryFixture, ...options, requests});
+    assert.equal(requests.some(request => request.focus === "continuation-repair"), false, JSON.stringify(options));
+    assert.notEqual(units[3].localActionApplication, "sustain-scope-profile", JSON.stringify(options));
+  }
+});
+
+test("a disagreement preserves carry when blind proof is unavailable and preserves zero on a protective answer", async () => {
+  for (const [options, status, pattern] of [
+    [{confirmation: null}, "unconfirmed", "Onset rise"],
+    [{confirmationFailure: "refused"}, "provider-refused", "Onset rise"],
+    [{maxCueChecks: 0}, "budget-deferred", "Onset rise"],
+    [{confirmation: {...disputedDiscoveryFixture.confirmation, scopeId: 2}}, "invalid-response", "Onset rise"],
+    [{confirmation: stop(3)}, "protective-override", "Stop"],
+  ]) {
+    const {units} = await run({...disputedDiscoveryFixture, ...options});
     assert.equal(units[3].uncertainContinuationVerificationStatus, status);
     assert.equal(units[3].pattern, pattern);
     assert.notEqual(units[3].localActionApplication, "sustain-scope-profile");
