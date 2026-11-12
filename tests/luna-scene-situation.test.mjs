@@ -51,8 +51,9 @@ test("scene-situation compares the exact prefix blind and accepts only enumerate
 });
 
 async function settingRun({targetText = viewpoint, situation = same, situationFailure, typedBoundary = unresolvedBoundary,
-  priorStop = false, targetStop = false, localActivityStop = false, includeSceneEntry = true, verifySettingSituation = true, budget} = {}) {
-  const text = `${earlierText} ${targetText}`;
+  priorStop = false, targetStop = false, localActivityStop = false, includeSceneEntry = true, entry = firstEntry,
+  includeSuccessor = false, focusedQuiet = false, verifySettingSituation = true, budget} = {}) {
+  const text = `${earlierText} ${targetText}${includeSuccessor ? " They started the next task." : ""}`;
   const index = buildWholeStoryIndex(text);
   const grant = {editionDigest: index.editionDigest, segmentationVersion: index.segmentationVersion,
     purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
@@ -60,12 +61,13 @@ async function settingRun({targetText = viewpoint, situation = same, situationFa
   const requests = [];
   const provider = Object.assign(async request => {
     requests.push(request);
-    if (request.mode === "scene-entry") return {status: "ok", usage, facts: [{unitId: target, sceneEntry: firstEntry}]};
+    if (request.mode === "scene-entry") return {status: "ok", usage, facts: [{unitId: target, sceneEntry: entry}]};
     if (request.mode === "scene-boundary") return {status: "ok", usage, facts: [{unitId: target, sceneBoundary: boundary}]};
     if (request.mode === "scene-situation") return situationFailure ? {status: situationFailure, usage} :
       {status: "ok", usage, facts: [{unitId: target, sceneSituation: situation}]};
     return {status: "ok", usage, facts: request.targetIds.map(id => {
       const cue = neutral(id);
+      if (focusedQuiet && request.mode === "cue-check" && id === target) return {...cue, evidenceIds: [id]};
       if (request.mode === "transition") return {...cue, depiction: "unknown", narrativePhase: "unknown", action: "unknown",
         sceneBoundary: typedBoundary, ...(localActivityStop ? {status: "verified", transition: "non-romantic-activity-stop",
           evidenceIds: [id]} : {})};
@@ -79,9 +81,10 @@ async function settingRun({targetText = viewpoint, situation = same, situationFa
     })};
   }, {sceneBoundaryProtocol: true});
   const run = await runLunaProtocolShadow({id: "grounded-setting-study", text, grant, now: () => 1, provider, budget,
-    verificationTargets: [0, 1, target], transitionTargets: [target], verifyTransitions: true,
+    verificationTargets: includeSuccessor ? [0, 1, target, target + 1] : [0, 1, target], transitionTargets: [target], verifyTransitions: true,
     sceneEntryVerificationTargets: includeSceneEntry ? [target] : [],
-    sceneEntryArbitration: true, boundaryEntryConfirmation: true, verifySettingSituation, negativeStride: 0});
+    sceneEntryArbitration: true, boundaryEntryConfirmation: true, verifySettingSituation,
+    verifyContinuityBoundary: focusedQuiet, maxCueChecks: focusedQuiet ? 3 : 0, negativeStride: 0});
   return {run, requests};
 }
 
@@ -151,6 +154,42 @@ test("time and protective cuts have independent authority, as does a local activ
 
 const viewpointOnly = {status: "none", reason: "viewpoint-only", previousId: null, changeId: null, entryId: null};
 const exactCut = {...neutral(target), status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [1, target]};
+
+test("two setting checks with different predecessors require independent proof of the shared arrival", async () => {
+  const split = {typedBoundary: cut, entry: {...firstEntry, previousId: 0}, includeSuccessor: true, focusedQuiet: true};
+  const legacy = await settingRun({...split, verifySettingSituation: false});
+  const move = await settingRun({...split, targetText: relocation, situation: changed});
+  const row = move.run.units[target];
+  assert.equal(legacy.run.units[target].appliedTransition, "none");
+  assert.equal(row.sceneSituationVerificationStatus, "changed");
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.equal(row.pattern, "Reset");
+  assert.equal(row.readerCue, false);
+  assert.equal(row.sceneEntryArbitration, "grounded-setting-cut");
+  assert.deepEqual(row.transitionEvidenceIds, [0, target]);
+  assert.equal(row.transitionVerification.sceneBoundary.previousId, 1);
+  assert.deepEqual(row.trace.evidence, [0, target]);
+  assert.notEqual(row.sceneId, move.run.units[1].sceneId);
+  const request = move.requests.find(({mode}) => mode === "scene-situation");
+  const entryRequest = move.requests.find(({mode}) => mode === "scene-entry");
+  assert.deepEqual(request, {...entryRequest, mode: "scene-situation"});
+  const successorIndex = move.requests.findIndex(({mode, targetIds}) => mode === "verify" && targetIds[0] === target + 1);
+  assert.ok(move.requests.indexOf(entryRequest) < move.requests.indexOf(request) && move.requests.indexOf(request) < successorIndex);
+
+  for (const controls of [{situation: {...same, earlierId: 0}}, {situation: uncertain}, {situationFailure: "transient"},
+    {situation: {...changed, earlierId: 1}}]) {
+    const {run, requests} = await settingRun({...split, ...controls});
+    assert.equal(requests.filter(({mode}) => mode === "scene-situation").length, 1);
+    assert.equal(run.units[target].appliedTransition, legacy.run.units[target].appliedTransition);
+    assert.deepEqual(run.units[target].trace, legacy.run.units[target].trace);
+    assert.equal(run.units[target].pattern, legacy.run.units[target].pattern);
+  }
+  for (const controls of [{typedBoundary: unresolvedBoundary, includeSceneEntry: false}, {entry: viewpointOnly},
+    {priorStop: true}, {targetStop: true}, {localActivityStop: true}]) {
+    const {requests} = await settingRun({...split, ...controls});
+    assert.ok(!requests.some(({mode}) => mode === "scene-situation"));
+  }
+});
 
 async function focusedSettingRun({targetText = viewpoint, situation = same, entry = viewpointOnly, proof = exactCut,
   verifySettingSituation = true, protectedPrior = false, followingDispute = false, discoveryCut = false, prefixUnits = 3} = {}) {

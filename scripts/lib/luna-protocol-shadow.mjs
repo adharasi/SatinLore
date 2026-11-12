@@ -271,6 +271,23 @@ function quietSettingBoundary(row, id) {
     effect.evidenceIds.includes(boundary.previousId) ? boundary : null;
 }
 
+function quietSettingDispute(row, id) {
+  const {cueRecovery: focused, transitionVerification: typed} = row;
+  const boundary = typed?.sceneBoundary;
+  // A focused neutral answer may cite the current unit without adopting either predecessor.
+  return row.prefixVerified && row.cueRecoveryReason === "continuity-boundary" &&
+    row.cueRecoveryCorrection === "continuity-cut-veto" && row.transitionFlag === "transition-conflict" &&
+    row.annotation === focused && row.effectiveAnnotation === focused && quietNegative(focused) &&
+    focused.depiction === "neutral" && (focused.evidenceIds.length === 0 ||
+      focused.evidenceIds.length === 1 && focused.evidenceIds[0] === id) &&
+    strictQuietNegative(row.primaryPrefix) && row.primaryPrefix.depiction === "neutral" &&
+    strictQuietNegative(row.discovery) && row.discovery.depiction === "neutral" &&
+    typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.fact === "none" &&
+    typed.scopeId === null && typed.priorAnchor === null && typed.evidenceIds.length === 0 &&
+    boundary?.status === "cut" && boundary.reason === "setting-shift" && boundary.entryId === id &&
+    boundary.previousId >= row.previousSceneBoundaryId ? boundary : null;
+}
+
 function followsDisputedStart(decisions, blocked, id, runId, primary, typed) {
   const prior = decisions.get(id - 1);
   if (!freshEnactedStart(primary, id) || blocked.has(id - 1) || prior?.window?.runId !== runId) return false;
@@ -1399,12 +1416,17 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   }
   async function adjudicateQuietSetting(job, row, id) {
     if (!job || invalidated(job)) return;
-    const boundary = quietSettingBoundary(row, id);
+    const appliedBoundary = quietSettingBoundary(row, id);
+    const boundary = appliedBoundary ?? quietSettingDispute(row, id);
     if (!boundary) return;
-    const {previousId} = boundary;
+    const entry = row.sceneEntryVerification?.sceneEntry;
+    if (!appliedBoundary && (entry?.status !== "cut" || entry.reason !== "material-setting" || entry.changeId !== id ||
+        entry.entryId !== id || entry.previousId === boundary.previousId)) return;
+    // A split comparison must establish the old place at or before both votes.
+    const previousId = appliedBoundary ? boundary.previousId : Math.min(boundary.previousId, entry.previousId);
     const firstId = inputFor(job).units[0].id;
     const causal = attest({runId: job.runId, firstId, target: id});
-    const pathEligible = earlierId => comparisonPathEligible(job, id, earlierId, firstId, causal, previousId);
+    const pathEligible = earlierId => comparisonPathEligible(job, id, earlierId, firstId, causal, appliedBoundary?.previousId);
     if (blocked.has(id) || index.units[id].structuralBoundary || causal.restartBoundary || !pathEligible(previousId) ||
         [row.annotation, row.primaryPrefix, row.cueRecovery, row.transitionVerification].some(
           fact => causal.protectedScopes.has(fact?.scopeId))) row.sceneSituationVerificationStatus = "path-ineligible";
@@ -1416,10 +1438,19 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const situation = row.sceneSituationVerification?.sceneSituation;
     const grounded = situation?.earlierId != null && situation.earlierId <= previousId && pathEligible(situation.earlierId);
     if (grounded && situation.status === "changed") {
+      if (!appliedBoundary) {
+        row.effectiveAnnotation = {...row.effectiveAnnotation, status: "verified", transition: "scene-cut", fact: "cut",
+          scopeId: id, evidenceIds: [situation.earlierId, id]};
+        row.transitionFlag = "scene-boundary-setting-grounded";
+        row.sceneEntryArbitration = "grounded-setting-cut";
+      }
       row.independentBoundaryStatus = "corroborated";
       return;
     }
     const same = grounded && situation.status === "same";
+    row.independentBoundaryStatus = same ? "setting-continuity" : "setting-context-unresolved";
+    // Without an applied cut there is no reset or carry change to undo.
+    if (!appliedBoundary) return;
     const quiet = {unitId: id, id, status: "neutral", frame: "current", depiction: "neutral", narrativePhase: "quiet",
       action: "none", transition: "none", fact: "none", scopeId: null, priorAnchor: null, evidenceIds: []};
     const typed = row.transitionVerification;
@@ -1432,7 +1463,6 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (["independently-confirmed-cut", "corroborated-setting-cut"].includes(row.sceneEntryArbitration)) {
       delete row.sceneEntryArbitration;
     }
-    row.independentBoundaryStatus = same ? "setting-continuity" : "setting-context-unresolved";
     row.transitionFlag = same ? "scene-boundary-same-setting" : "scene-boundary-setting-context-unresolved";
   }
   async function confirmIndependentEntry(job, row, id) {
@@ -1562,7 +1592,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       let independentConfirmationUsed = false;
       async function applyRemainingEntry(entryJob, row, id) {
         if (!entryJobs.has(id) || invalidated(entryJob)) return;
-        if (!disputedSettingEntry(row, id)) {
+        const disputed = disputedSettingEntry(row, id);
+        const settingDispute = verifySettingSituation && quietSettingDispute(row, id);
+        if (!disputed && !settingDispute) {
           if (boundaryEntryConfirmation && !boundaryTargets.has(id) && independentEntryCandidate(row, id)) {
             if (independentConfirmationUsed) row.independentBoundaryStatus = "confirmation-limit";
             else {
@@ -1575,12 +1607,14 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         const previousId = row.transitionVerification.sceneBoundary.previousId;
         const path = index.units.slice(previousId, id + 1);
         if (path.some(unit => blocked.has(unit.id) || unit.structuralBoundary || decisions.get(unit.id)?.window?.runId !== entryJob.runId)) return;
-        const causal = attest({runId: entryJob.runId, firstId: inputFor(entryJob).units[0].id, target: id});
-        if (causal.restartBoundary || causal.protectedScopes.has(row.transitionVerification.scopeId)) return;
+        const firstId = inputFor(entryJob).units[0].id;
+        const causal = attest({runId: entryJob.runId, firstId, target: id});
+        if (causal.restartBoundary || causal.protectedScopes.has(row.transitionVerification.scopeId) ||
+            !disputed && !comparisonPathEligible(entryJob, id, previousId, firstId, causal)) return;
         await applyDiagnosticJobs("scene-entry", [entryJob], true);
         entryJobs.delete(id);
         const entry = row.sceneEntryVerification?.sceneEntry;
-        if (entry?.status !== "cut" || entry.reason !== "material-setting" || entry.previousId !== previousId ||
+        if (!disputed || entry?.status !== "cut" || entry.reason !== "material-setting" || entry.previousId !== previousId ||
             entry.changeId !== id || entry.entryId !== id) return;
         const prior = decisions.get(id - 1)?.effectiveAnnotation;
         const merged = mergeTransitionVerdict(row.annotation, row.transitionVerification, row.discovery, prior, requireSceneBoundary);
@@ -1772,7 +1806,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       ...(sustainConnectorVerificationStatus ? {sustainConnectorVerification: connectorVerification,
         sustainConnectorVerificationStatus} : {}),
       ...(profile.verifiedInterruptionRelease ? {interruptionReleaseApplication: "interruption-taper"} : {}),
-      transitionEvidenceIds: entryArbitration === "independently-confirmed-cut" ? effectiveAnnotation.evidenceIds :
+      transitionEvidenceIds: ["independently-confirmed-cut", "grounded-setting-cut"].includes(entryArbitration) ? effectiveAnnotation.evidenceIds :
         projectTypedTransition(transitionVerification)?.evidenceIds,
       transitionFlag, cueGuard, readerCue: recoveryCue || readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
       cueContractRepaired, cueRecoveryReason, cueRecoveryGuard, cueRecoveryCorrection, continuityGuard,

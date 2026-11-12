@@ -217,6 +217,8 @@ V25 evaluates independently confirmed boundaries, exact interruption releases an
 
 V30 gives the founder runner one grounding requirement for accepted quiet setting cuts. This covers the concordant false Reset found in V29. Qualify a grounded natural setting cut, the viewpoint control and explicit stops before using the result as broader release evidence. [V30 evaluation](nocturne-beat-protocol-shadow.md#v30-common-grounding-for-quiet-setting-cuts)
 
+V31 allows the same proof to resolve a quiet setting cut when two checks agree on the arrival and cite different eligible earlier units. Compare verified change, ambiguous earlier context and continuation while preserving the time and stop controls. [V31 evaluation](nocturne-beat-protocol-shadow.md#v31-grounding-a-shared-arrival-with-different-earlier-references)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
