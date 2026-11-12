@@ -21,8 +21,8 @@ const usage = {inputTokens: 100, outputTokens: 20};
 
 function run({observed = [], later = repeatedEase, laterDiscovery = quiet(2), laterTyped = {frame: "neutral"},
   laterLocal = localNeutral, laterBoundary = noBoundary, earlierLocal = localRelease(1, 0), blockedIds = [],
-  releaseText = "They slowed their steps in time with the music."} = {}) {
-  const text = `Mira took Lee's hand. ${releaseText} The musicians played softly. The lights dimmed.`;
+  releaseText = "They slowed their steps in time with the music.", separator = " "} = {}) {
+  const text = `Mira took Lee's hand. ${releaseText}${separator}The musicians played softly. The lights dimmed.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
     spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
@@ -103,4 +103,49 @@ test("expiry, a verified cut, and a protective stop prevent release inheritance"
   assert.equal(stop.units[2].pattern, "Stop");
   assert.notEqual(stop.units[2].playbackDisposition, "inherited-release");
   assert.equal(stop.units[3].pattern, "Baseline");
+});
+
+const depictedOnly = {...localNeutral, frame: "current", contrast: "depiction-only"};
+
+test("a natural fade keeps its waveform and records the newer verified release coordinate", async () => {
+  const scopedQuiet = {...quiet(2), scopeId: 0};
+  const options = {later: scopedQuiet, laterDiscovery: scopedQuiet, laterTyped: {frame: "current"}, separator: "\n\n"};
+  const candidate = await run({...options, laterLocal: depictedOnly});
+  const control = await run({...options, laterLocal: {...depictedOnly, contrast: "neutral"}});
+  const row = candidate.units[2];
+  assert.equal(row.phase, "quiet");
+  assert.equal(row.pattern, "Taper");
+  assert.equal(row.knownAt, 1);
+  assert.deepEqual(row.evidenceIds, [0, 1]);
+  assert.equal(row.playbackDisposition, "inherited-release");
+  assert.equal(control.units[2].trace.knownAt, 0);
+  assert.equal(control.units[2].trace.decision, "Fade beat");
+  assert.equal(row.trace.floorWords, 0);
+  for (const field of ["beat", "scene", "holdWords", "fadeWords", "floorWords", "wordOffset", "reason"]) {
+    assert.equal(row.trace[field], control.units[2].trace[field]);
+  }
+  assert.deepEqual(candidate.units[3], control.units[3]);
+  const mismatchedScope = await run({...options, laterDiscovery: {...scopedQuiet, scopeId: 1}, laterLocal: depictedOnly});
+  assert.notEqual(mismatchedScope.units[2].playbackDisposition, "inherited-release");
+});
+
+test("a repeated romantic release needs a specific independent depiction-only negative to inherit", async () => {
+  const romanticRepeat = {...repeatedEase, depiction: "romantic", action: "release", scopeId: 0};
+  const options = {later: romanticRepeat, laterTyped: {frame: "current"}};
+  const candidate = await run({...options, laterLocal: depictedOnly});
+  const row = candidate.units[2];
+  assert.equal(row.pattern, "Taper");
+  assert.equal(row.phase, "quiet");
+  assert.equal(row.knownAt, 1);
+  assert.equal(row.trace.fadeWords, 7);
+  assert.equal(row.trace.floorWords, 7);
+  assert.equal(row.playbackDisposition, "inherited-release");
+  assert.equal(row.primaryPrefix.action, "release");
+  for (const control of [{laterLocal: localRelease(2, 1)}, {laterLocal: localNeutral},
+    {laterLocal: {...depictedOnly, contrast: "neutral"}},
+    {laterLocal: depictedOnly, later: {...romanticRepeat, scopeId: 1}},
+    {laterLocal: depictedOnly, laterTyped: {frame: "neutral"}}]) {
+    const result = await run({...options, ...control});
+    assert.notEqual(result.units[2].playbackDisposition, "inherited-release");
+  }
 });

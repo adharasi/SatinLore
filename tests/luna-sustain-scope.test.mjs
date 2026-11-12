@@ -295,3 +295,88 @@ test("the compiler cannot use an exact confirmation to restore an expired or man
     assert.notEqual(trace.decision, "Resolve held continuity");
   }
 });
+
+const recoveryContact = {...neutral(3), status: "verified", depiction: "romantic", narrativePhase: "recover", action: "contact",
+  scopeId: 1, evidenceIds: [1, 3]};
+const exactRecoveryConflict = {...uncertaintyFixture, continuation: recoveryContact,
+  proposal: {...rootedContinuation, status: "candidate", scopeId: 1}};
+const inverseOpening = {opening: {...onset, scopeId: 0}, openingProposal: {...onset, status: "candidate"}};
+
+test("a verified recovery contact can nominate exact continuation on a held inverse-root opener", async () => {
+  const requests = [];
+  const candidate = await run({...exactRecoveryConflict, ...inverseOpening, requests});
+  const noProof = await run({...exactRecoveryConflict, ...inverseOpening, confirmation: null});
+  const canonical = await run(exactRecoveryConflict);
+  const opener = candidate.units[1];
+  const row = candidate.units[3];
+  assert.equal(opener.pattern, "Onset rise");
+  assert.equal(opener.scopeId, 0);
+  assert.equal(opener.playbackDisposition, "supporting-inverse-rooted-onset");
+  assert.equal(opener.cue, false);
+  assert.equal(opener.readerCue, false);
+  assert.deepEqual(opener, noProof.units[1]);
+  assert.equal(noProof.units[3].pattern, "Baseline");
+  assert.equal(noProof.units[3].phase, "recover");
+  assert.equal(noProof.units[3].appliedTransition, "uncertain-continuity");
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.phase, "sustain");
+  assert.equal(row.primaryPrefix.narrativePhase, "recover");
+  assert.equal(row.transitionVerification.transition, "uncertain-continuity");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.localActionApplication, "sustain-uncertainty-profile");
+  assert.equal(row.uncertainContinuationVerificationStatus, "verified");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.deepEqual(row.trace, canonical.units[3].trace);
+  assert.deepEqual(candidate.units[4].trace, canonical.units[4].trace);
+  const proof = requests.at(-1);
+  assert.equal(proof.focus, "continuation-repair");
+  assert.deepEqual(proof.units.map(unit => unit.id), [0, 1, 2, 3]);
+  assert.equal(proof.attested, undefined);
+});
+
+test("inverse root or recovery disagreement cannot use an unsupported onset or continuation", async () => {
+  for (const options of [{rootVote: {...neutral(0), evidenceIds: [0]}}, {rootVote: stop(0)}, {blockedIds: [0]},
+    {opening: {...inverseOpening.opening, evidenceIds: [1]}},
+    {openingProposal: {...inverseOpening.openingProposal, evidenceIds: [1]}},
+    {openingProposal: {...inverseOpening.openingProposal, frame: "reported"}}]) {
+    const requests = [];
+    const {units} = await run({...exactRecoveryConflict, ...inverseOpening, ...options, requests});
+    assert.notEqual(units[1].playbackDisposition, "supporting-inverse-rooted-onset", JSON.stringify(options));
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+    assert.ok(requests.every(request => request.focus !== "continuation-repair"), JSON.stringify(options));
+  }
+  for (const options of [{continuation: {...recoveryContact, evidenceIds: [3]}}, {continuation: neutral(3)},
+    {proposal: uncertaintyFixture.proposal}, {proposal: {...exactRecoveryConflict.proposal, status: "uncertain"}},
+    {localVote: {...local, contextId: 2}}, {targetBoundary: timeCut}, {connectorVote: stop(2)}]) {
+    const requests = [];
+    const {units} = await run({...exactRecoveryConflict, ...inverseOpening, ...options, requests});
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(options));
+    assert.ok(requests.every(request => request.focus !== "continuation-repair"), JSON.stringify(options));
+  }
+});
+
+test("an exact rooted primary link and isolated continuation can support a discovery citation with no typed fact", async () => {
+  const options = {sceneEntry: {...entry, reason: "ordinary-interruption"}};
+  const candidate = await run(options);
+  const control = await run({...options, localVote: {...local, contextId: 2}});
+  const row = candidate.units[3];
+  assert.equal(control.units[3].pattern, "Onset rise");
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.phase, "sustain");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.localActionApplication, "sustain-scope-profile");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.deepEqual(row.trace.evidence, [0, 1, 3]);
+  for (const field of ["beat", "scene", "holdWords", "fadeWords", "floorWords"]) {
+    assert.equal(row.trace[field], control.units[3].trace[field]);
+  }
+  assert.deepEqual(candidate.units[4], control.units[4]);
+  for (const controlOptions of [{continuation: rootedContinuation}, {proposal: {...sustainProposal, action: "contact"}},
+    {proposal: {...sustainProposal, status: "uncertain"}}, {localVote: null},
+    {targetTransition: uncertainTransition}, {targetBoundary: timeCut}, {blockedIds: [2]}]) {
+    const {units} = await run({...options, ...controlOptions});
+    assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(controlOptions));
+  }
+});

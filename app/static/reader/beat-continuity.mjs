@@ -167,6 +167,10 @@ export function planStory(story, units) {
       beat?.established && !beat.quiet && !beat.provisional && !beat.easing && !beat.released &&
       holdConfirmation.knownAt === id && beat.anchor === holdConfirmation.priorAnchor &&
       Math.max(0, cursor - beat.supportEnd) < ESTABLISHED_HOLD_WORDS;
+    const priorTrace = inheritedRelease && plan.at(-1)?.[1];
+    const inheritsOpenRelease = inheritedRelease && !boundary && !ease && pattern === "Baseline" &&
+      beat?.easing && beat.released && !beat.quiet && beat.profile === "Taper" && beat.releaseEnd > cursor &&
+      priorTrace?.decision === "Ease" && priorTrace.beat === beat.id && priorTrace.knownAt === inheritedRelease.knownAt;
     if (protective || HARD_PROFILES.has(pattern)) {
       decision = protective ? "Eligibility gate" : pattern;
       traceBeat = null;
@@ -195,10 +199,7 @@ export function planStory(story, units) {
       const replacement = pattern === "Baseline" || pattern === "Taper" ? pattern : prior ? "Taper" : "Baseline";
       Object.assign(result, {pattern: replacement, block: prior?.id ?? null, reason: rationale});
       if (replacement === "Taper" && boundary.verifiedRelease) result.verifiedRelease = true;
-    } else if (inheritedRelease && !boundary && !ease && pattern === "Baseline" &&
-        beat?.easing && beat.released && !beat.quiet && beat.profile === "Taper" && beat.releaseEnd > cursor &&
-        plan.at(-1)?.[1].decision === "Ease" && plan.at(-1)[1].beat === beat.id &&
-        plan.at(-1)[1].knownAt === inheritedRelease.knownAt) {
+    } else if (inheritsOpenRelease && !inheritedRelease.provenanceOnly) {
       decision = "Inherit release fade";
       rationale = inheritedRelease.reason;
       mark = inheritedRelease;
@@ -376,6 +377,13 @@ export function planStory(story, units) {
       }
     }
 
+    if (inheritsOpenRelease && inheritedRelease.provenanceOnly && decision === "Fade beat" &&
+        traceBeat?.id === priorTrace.beat && traceBeat.anchor < inheritedRelease.knownAt) {
+      // The natural fade has already selected its pattern, duration and floor.
+      // Its newer release provenance must survive the older beat anchor.
+      decision = "Inherit release fade";
+      mark = inheritedRelease;
+    }
     if (!protective && !HARD_PROFILES.has(pattern)) {
       result.block = traceBeat?.id ?? null;
       if (traceBeat) evidence.push(traceBeat.anchor);

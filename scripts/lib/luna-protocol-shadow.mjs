@@ -81,10 +81,10 @@ function exactTypedStart(fact, id) {
     fact.evidenceIds.includes(id);
 }
 
-const quietNegative = (fact, frame = "current") => fact?.status === "neutral" && fact.frame === frame &&
+const quietNegative = (fact, frame = "current", scope = null) => fact?.status === "neutral" && fact.frame === frame &&
   fact.narrativePhase === "quiet" && fact.action === "none" && fact.transition === "none" && fact.fact === "none" &&
-  fact.scopeId === null && fact.priorAnchor === null;
-const strictQuietNegative = (fact, frame) => quietNegative(fact, frame) && fact.evidenceIds.length === 0;
+  fact.scopeId === scope && fact.priorAnchor === null;
+const strictQuietNegative = (fact, frame, scope) => quietNegative(fact, frame, scope) && fact.evidenceIds.length === 0;
 
 function typedQuietWithoutBoundary(typed) {
   return typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" && typed.fact === "none" &&
@@ -544,12 +544,13 @@ function corroboratesLocalInterruptionTaper(row, previous, id) {
     (proposal.scopeId === null || proposal.scopeId === primary.scopeId);
 }
 
-function corroboratesInheritedRelease(row, previous, cue, predecessor, id) {
+function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanceOnly) {
   const prior = id - 1;
   const typed = row.transitionVerification;
   const local = row.localActionVerification?.localAction;
   const earlierTyped = previous?.transitionVerification;
   const earlierLocal = previous?.localActionVerification?.localAction;
+  const discovery = row.discovery;
   const neutralLocal = local?.status === "none" && local.action === "none" && local.phase === "quiet" &&
     local.targetId === null && local.contextId === null &&
     (local.frame === "current" && ["neutral", "depiction-only"].includes(local.contrast) ||
@@ -558,18 +559,32 @@ function corroboratesInheritedRelease(row, previous, cue, predecessor, id) {
     typed.transition === "none" && typed.fact === "none" && typed.scopeId === null && typed.priorAnchor === null &&
     typed.evidenceIds.length === 0 && typed.sceneBoundary?.status === "none";
   const entry = row.sceneEntryVerification?.sceneEntry;
-  return cue === row.primaryPrefix && ["none", "release"].includes(cue.action) && cue.depiction === "neutral" &&
-    cue.narrativePhase === "ease" && cue.fact === "ease" && ["none", "ease"].includes(cue.transition) &&
-    cue.priorAnchor === prior && cue.evidenceIds.length === 2 && cue.evidenceIds[0] === prior && cue.evidenceIds[1] === id &&
-    strictQuietNegative(row.discovery) && neutralLocal && neutralTyped && entry?.status === "none" &&
-    entry.reason === "ordinary-interruption" && previous?.prefixVerified && exactCurrentCue(predecessor, prior) &&
+  if (!cue || cue !== row.primaryPrefix || !neutralLocal || !neutralTyped || entry?.status !== "none" ||
+      entry.reason !== "ordinary-interruption") return null;
+  const verifiedPredecessor = previous?.prefixVerified && exactCurrentCue(predecessor, prior) &&
     predecessor.action === "release" && predecessor.narrativePhase === "ease" && predecessor.transition === "interruption" &&
-    predecessor.fact === "ease" && cue.scopeId != null && [prior, predecessor.scopeId].includes(cue.scopeId) &&
+    predecessor.fact === "ease" &&
     exactCurrentCue(earlierTyped, prior) && earlierTyped.transition === "interruption" && earlierTyped.fact === "none" &&
     earlierTyped.sceneBoundary?.status === "none" && earlierLocal?.status === "verified" && earlierLocal.frame === "current" &&
     earlierLocal.action === "release" && earlierLocal.phase === "ease" && earlierLocal.contrast === "softening" &&
     earlierLocal.targetId === prior && (earlierLocal.contextId === null ||
       earlierLocal.contextId < prior && predecessor.evidenceIds.includes(earlierLocal.contextId));
+  if (!verifiedPredecessor) return null;
+
+  const exactDepictionOnly = local.frame === "current" && local.contrast === "depiction-only" && typed.frame === "current";
+  const inherited = {knownAt: prior, evidence: [prior], reason: "Retain the verified release at the preceding unit."};
+  // Keep an already quiet successor on the normal planner path. It only needs
+  // the earlier release coordinate if the planner actually inherits that fade.
+  if (provenanceOnly) return exactDepictionOnly && strictQuietNegative(cue, "current", cue.scopeId) &&
+    strictQuietNegative(discovery, "current", cue.scopeId) ? {...inherited, provenanceOnly: true} : null;
+
+  const depictionOnlyDisagreement = exactDepictionOnly && cue.depiction === "romantic" && cue.action === "release" &&
+    cue.transition === "none" && cue.scopeId === predecessor.scopeId;
+  return exactCurrentCue(cue, id) && (cue.depiction === "neutral" || depictionOnlyDisagreement) &&
+    ["none", "release"].includes(cue.action) && cue.narrativePhase === "ease" && cue.fact === "ease" &&
+    ["none", "ease"].includes(cue.transition) && cue.priorAnchor === prior && cue.evidenceIds.length === 2 &&
+    cue.evidenceIds[0] === prior && cue.evidenceIds[1] === id && cue.scopeId != null &&
+    [prior, predecessor.scopeId].includes(cue.scopeId) && strictQuietNegative(discovery) ? inherited : null;
 }
 
 function corroboratesIndependentCutCue(row, cue, typed, id) {
@@ -683,12 +698,11 @@ function verifiesLocalSustain(row, id, prior) {
 
 function uncertainContinuationCandidate(row, id, index, decisions, blocked, supportingIds) {
   const {primaryPrefix: primary, effectiveAnnotation: effect, discovery, transitionVerification: typed} = row;
-  const priorId = primary?.priorAnchor;
+  const priorId = primary?.priorAnchor ?? discovery?.priorAnchor;
   const entry = row.sceneEntryVerification?.sceneEntry;
   const exactPair = fact => fact.evidenceIds.length === 2 && fact.evidenceIds[0] === priorId && fact.evidenceIds[1] === id;
   if (!row.window || priorId == null || id - priorId < 1 || id - priorId > 2 || supportingIds.has(id) || !row.prefixVerified ||
-      row.annotation !== primary || !exactCurrentCue(primary, id) || primary.action !== "continuation" ||
-      primary.narrativePhase !== "sustain" || primary.transition !== "none" || primary.fact !== "continue" ||
+      row.annotation !== primary || !exactCurrentCue(primary, id) || primary.transition !== "none" ||
       !exactPair(primary) || !romanticDepictions.has(primary.depiction) || !verifiesLocalSustain(row, id, priorId) ||
       entry?.status !== "none" || !["same-episode", "ordinary-interruption"].includes(entry.reason) ||
       typed?.status !== "verified" || typed.frame !== "current" || typed.transition !== "uncertain-continuity" ||
@@ -697,6 +711,18 @@ function uncertainContinuationCandidate(row, id, index, decisions, blocked, supp
       effect?.transition !== "uncertain-continuity" || effect.fact !== "neutralize" || effect.frame !== "current" ||
       !currentCueAt(discovery, id, "candidate") || discovery.narrativePhase !== "sustain" || discovery.transition !== "none" ||
       !romanticDepictions.has(discovery.depiction)) return null;
+
+  const exactContact = discovery.scopeId === priorId && discovery.action === "contact" && discovery.fact === "none" &&
+    discovery.priorAnchor === null && discovery.evidenceIds.length === 1 && discovery.evidenceIds[0] === id;
+  const exactContinuation = [priorId, primary.scopeId].includes(discovery.scopeId) && discovery.action === "continuation" &&
+    discovery.fact === "continue" && discovery.priorAnchor === priorId && exactPair(discovery);
+  const primaryContinues = primary.action === "continuation" && primary.narrativePhase === "sustain" &&
+    primary.fact === "continue" && primary.priorAnchor === priorId;
+  // A current, anchored recovery reading is compatible with a separate exact
+  // continuation, but it cannot establish continuity without the blind check.
+  const primaryRecoverContact = primary.action === "contact" && primary.narrativePhase === "recover" &&
+    primary.fact === "none" && primary.priorAnchor === null && primary.scopeId === priorId;
+  if (!(primaryContinues && (exactContact || exactContinuation) || primaryRecoverContact && exactContinuation)) return null;
 
   const root = priorId - 1;
   const sameRun = unitId => !blocked.has(unitId) && index.units[unitId] && !index.units[unitId].structuralBoundary &&
@@ -711,9 +737,10 @@ function uncertainContinuationCandidate(row, id, index, decisions, blocked, supp
   const opening = decisions.get(priorId);
   const anchor = opening?.primaryPrefix;
   const proposal = opening?.discovery;
+  const inverseRooted = quietContext(root) && corroboratesInverseRootedOpener(opening, anchor, decisions.get(root), priorId);
   if (!sameRun(id) || possibleRestartClosure(index.units[id], discovery) || !sameRun(priorId) ||
       !opening.prefixVerified || opening.effectiveAnnotation !== anchor ||
-      !freshEnactedStart(anchor, priorId) || anchor.scopeId !== priorId || anchor.transition !== "onset" ||
+      !freshEnactedStart(anchor, priorId) || !(anchor.scopeId === priorId || inverseRooted) || anchor.transition !== "onset" ||
       anchor.narrativePhase !== "onset" || anchor.fact !== "none" || anchor.priorAnchor !== null ||
       !currentCueAt(proposal, priorId, "candidate") || proposal.scopeId !== priorId || proposal.action !== anchor.action ||
       proposal.narrativePhase !== "onset" || proposal.transition !== "onset" || proposal.fact !== "none" ||
@@ -721,11 +748,7 @@ function uncertainContinuationCandidate(row, id, index, decisions, blocked, supp
 
   if (primary.scopeId !== priorId && (primary.scopeId !== root || !quietContext(root) ||
       anchor.evidenceIds.length !== 2 || anchor.evidenceIds[0] !== root || anchor.evidenceIds[1] !== priorId)) return null;
-  const exactContact = discovery.scopeId === priorId && discovery.action === "contact" && discovery.fact === "none" &&
-    discovery.priorAnchor === null && discovery.evidenceIds.length === 1 && discovery.evidenceIds[0] === id;
-  const exactContinuation = [priorId, primary.scopeId].includes(discovery.scopeId) && discovery.action === "continuation" &&
-    discovery.fact === "continue" && discovery.priorAnchor === priorId && exactPair(discovery);
-  return exactContact || exactContinuation ? {priorId, scope: primary.scopeId} : null;
+  return {priorId, scope: inverseRooted ? root : primary.scopeId};
 }
 
 function corroboratesSustain(row, cue, typed, anchor, id, prior) {
@@ -756,6 +779,21 @@ function corroboratesRootedOpener(row, cue, previous, id) {
     proposal?.scopeId === root && proposal.evidenceIds.length === 1 && proposal.evidenceIds[0] === id &&
     romanticDepictions.has(proposal.depiction) && previous?.prefixVerified && previous.window?.runId === row.window?.runId &&
     strictQuietNegative(previous.effectiveAnnotation);
+}
+
+function corroboratesInverseRootedOpener(row, cue, previous, id) {
+  const root = id - 1;
+  const proposal = row?.discovery;
+  const onsetPair = fact => fact.action === "contact" && fact.transition === "onset" && fact.narrativePhase === "onset" &&
+    fact.fact === "none" && fact.priorAnchor === null && romanticDepictions.has(fact.depiction) &&
+    fact.evidenceIds.length === 2 && fact.evidenceIds[0] === root && fact.evidenceIds[1] === id;
+  // The two current onset readings cite identical evidence. A strictly quiet
+  // earlier context allows this local seed without equating the scope IDs.
+  return row?.window && row.prefixVerified && row.effectiveAnnotation === cue && cue === row.primaryPrefix &&
+    exactCurrentCue(cue, id) && cue.scopeId === root && onsetPair(cue) && currentCueAt(proposal, id, "candidate") &&
+    proposal.scopeId === id && onsetPair(proposal) && previous?.window?.runId === row.window.runId &&
+    strictQuietNegative(previous.discovery) && strictQuietNegative(previous.effectiveAnnotation ?? previous.annotation ?? previous.discovery) &&
+    (!previous.transitionVerification || typedQuietWithoutBoundary(previous.transitionVerification));
 }
 
 function corroboratesRootedSustain(index, decisions, blocked, row, cue, id, prior) {
@@ -790,13 +828,17 @@ function corroboratesSustainScope(index, decisions, blocked, row, cue, id, prior
   const sameContinuation = cue.fact === "continue" && cue.priorAnchor === prior &&
     cue.evidenceIds.length === 2 && cue.evidenceIds[0] === prior && cue.evidenceIds[1] === id &&
     proposal?.fact === "continue" && proposal.priorAnchor === prior;
+  // Discovery may cite the same opener and action without asserting a typed
+  // continuation. The primary must supply the complete rooted link in this case.
+  const rootedContinuation = citesRoot && cue.fact === "continue" && cue.priorAnchor === prior &&
+    proposal?.fact === "none" && proposal.priorAnchor === null;
   // The wider scope citation can describe the context for an onset. It does not
   // authorize new carry or an alias for other targets.
   if (root !== prior - 1 || id - prior < 1 || id - prior > 2 || cue !== row.primaryPrefix ||
       row.cueRecovery?.status === "neutral" || cue.action !== "continuation" || cue.narrativePhase !== "sustain" ||
       cue.transition !== "none" || !romanticDepictions.has(cue.depiction) || !(citesRoot || sameContinuation) ||
       !typedQuietWithoutBoundary(row.transitionVerification) || entry?.status !== "none" ||
-      !(entry.reason === "same-episode" || sameContinuation && entry.reason === "ordinary-interruption") ||
+      !(entry.reason === "same-episode" || (sameContinuation || rootedContinuation) && entry.reason === "ordinary-interruption") ||
       !verifiesLocalSustain(row, id, prior) || !currentCueAt(proposal, id, "candidate") ||
       proposal.scopeId !== prior || proposal.action !== "continuation" || proposal.narrativePhase !== "sustain" ||
       proposal.transition !== "none" || !romanticDepictions.has(proposal.depiction) ||
@@ -852,7 +894,7 @@ function verifiedSustainConnector(verdict, prior, connectorId) {
     verdict.evidenceIds[0] === prior && verdict.evidenceIds[1] === connectorId;
 }
 
-function playbackInputs(index, decisions, blocked, supportingIds) {
+function playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
   let restartBoundary = null, lastAnchor = null, lastBarrierWasBeatEnd = false;
   let lastBarrierWasFrameReturn = false, firstLocalFrameRelease = null;
@@ -914,8 +956,11 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const confirmedContinuation = result.uncertainContinuationVerificationStatus === "verified" ?
       result.uncertainContinuationVerification : null;
     const confirmedAnchor = confirmedContinuation?.priorAnchor;
+    const confirmedScope = anchors.get(confirmedAnchor);
+    const heldConfirmationScope = confirmedScope === confirmedAnchor || confirmedScope === confirmedAnchor - 1 &&
+      decisions.get(confirmedAnchor)?.playbackDisposition === "supporting-inverse-rooted-onset";
     const holdConfirmation = confirmedContinuation && neutralize && !elapsedGap && !protective && !cut && !restartBoundary &&
-      !beatEnd && current && lastAnchor === confirmedAnchor && anchors.get(confirmedAnchor) === confirmedAnchor &&
+      !beatEnd && current && lastAnchor === confirmedAnchor && heldConfirmationScope &&
       confirmedAnchor > evidenceBarrierId ? {...mark("continue", "Independent evidence resolves continuity on the held beat.",
         confirmedContinuation.evidenceIds), priorAnchor: confirmedAnchor} : null;
     const proposal = result?.discovery;
@@ -924,12 +969,19 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       proposal.evidenceIds.includes(unit.id) && proposal.evidenceIds.every(id => id <= unit.id) &&
       rawCue.evidenceIds.every(id => id >= previousEvidenceBarrier) &&
       ["action", "narrativePhase", "transition", "fact"].every(key => proposal[key] === rawCue[key]);
-    const rootedSeed = seedEligible && lastAnchor === null && unit.id - 1 > previousEvidenceBarrier && !blocked.has(unit.id - 1) &&
+    const rootSeedEligible = seedEligible && lastAnchor === null && unit.id - 1 > previousEvidenceBarrier && !blocked.has(unit.id - 1);
+    const rootedSeed = rootSeedEligible &&
       corroboratesRootedOpener(result, rawCue, previous, unit.id);
-    const corroboratedSeed = rootedSeed || seedEligible && proposal.scopeId === rawCue.scopeId &&
+    const previousUnit = index.units[unit.id - 1];
+    const inverseRootedSeed = uncertainContinuationArbitration && rootSeedEligible && !previousUnit.structuralBoundary &&
+      corroboratesInverseRootedOpener(result, rawCue, previous, unit.id) &&
+      !possibleRestartClosure(previousUnit, previous.discovery) &&
+      !elapsedContinuityGap(previousUnit, previous.discovery, previous.discovery, unit.id - 2);
+    const corroboratedSeed = rootedSeed || inverseRootedSeed || seedEligible && proposal.scopeId === rawCue.scopeId &&
       (enactedStart && rawCue.transition === "onset" && rawCue.narrativePhase === "onset" && rawCue.fact === "none" ||
         rawCue.action === "anticipation" && rawCue.narrativePhase === "build" && rawCue.transition === "none" && rawCue.fact === "low");
     if (rootedSeed) result.playbackDisposition = "supporting-rooted-onset";
+    if (inverseRootedSeed) result.playbackDisposition = "supporting-inverse-rooted-onset";
     const supporting = auxiliary && !corroboratedSeed;
     const provisionalSeed = corroboratedSeed && rawCue.action === "anticipation" && rawCue.evidenceIds.length === 1;
     // A typed cut can replace the primary fact, but its earlier link still cannot cross the cut.
@@ -993,15 +1045,18 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     const supportLinked = exactLink && supportingAnchors.has(prior);
     if (result && kind === "continue" && !linked) result.playbackDisposition = "unattested-scope";
     else if (result && linked && scopeId !== fact.scopeId) result.playbackDisposition = "continuation-scope-alias";
-    const canEase = !protective && !neutralize && !cut && !restartBoundary && current && ownCueEvidence &&
+    const clearRelease = !protective && !neutralize && !cut && !restartBoundary && current &&
       evidence.every(id => id > previousEvidenceBarrier);
+    const canEase = clearRelease && ownCueEvidence;
     // A quiet target can inherit the verified predecessor's finite release.
     // A new prefix label alone cannot move the effective release clock here.
-    const inheritedRelease = !auxiliary && canEase && !beatEnd && kind === "ease" && ["none", "ease"].includes(transition) &&
-      corroboratesInheritedRelease(result, previous, rawCue, priorFact, unit.id) ?
-      {knownAt: unit.id - 1, evidence: [unit.id - 1], reason: "Retain the verified release at the preceding unit."} : null;
-    if (inheritedRelease) result.appliedTransitionOverride = "none";
-    const localRelease = canEase && !inheritedRelease &&
+    const naturalReleaseFade = current && strictQuietNegative(fact, "current", fact.scopeId);
+    const inheritedRelease = !auxiliary && clearRelease && !beatEnd &&
+      (canEase && kind === "ease" && ["none", "ease"].includes(transition) || naturalReleaseFade) ?
+      inheritedReleaseEvidence(result, previous, rawCue, priorFact, unit.id, naturalReleaseFade) : null;
+    const suppressesLocalEase = inheritedRelease && !inheritedRelease.provenanceOnly;
+    if (suppressesLocalEase) result.appliedTransitionOverride = "none";
+    const localRelease = canEase && !suppressesLocalEase &&
       rawCue.action === "release" && ["ease", "recover"].includes(rawCue.narrativePhase) &&
       ["none", "ease", "recover", "interruption", "span-end", "beat-end"].includes(transition) &&
       (["ease", "span-end", "beat-end"].includes(kind) || transition === "interruption" && rawCue.fact === "span-end");
@@ -1024,7 +1079,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       verifiedInterruptionRelease(result.interruptionReleaseVerification, releaseCandidate, unit.id);
     const ease = confirmedRelease ? {...mark("ease", "Independent evidence verifies an interruption that eases the open beat.",
       result.interruptionReleaseVerification.evidenceIds), requiresOpenAnchor: releaseCandidate.priorId} :
-      !inheritedRelease && (localRelease || clear && (kind === "ease" || transition === "ease" ||
+      !suppressesLocalEase && (localRelease || clear && (kind === "ease" || transition === "ease" ||
       transition === "interruption" && fact.narrativePhase === "ease")) ? mark("ease", "Prefix evidence supports easing.") : null;
     const quietBoundary = protective || neutralize || beatEnd || quietTransitions.has(transition);
     const confirmsProvisional = !auxiliary && !quietBoundary && exactLink && provisionalAnchors.has(prior);
@@ -1139,7 +1194,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       {...mark("low", supportLinked ? "Exact target evidence renews a beat supported by its prefix." :
         "Prefix evidence establishes an independent low cue."), profile: fact.narrativePhase === "recover" ? "Recovery" : "Undertone",
       ...(provisionalSeed ? {provisional: true} : {})} : null;
-    const signal = clear && ownCueEvidence && !quietBoundary && !inheritedRelease && !["continue", "span-end"].includes(kind);
+    const signal = clear && ownCueEvidence && !quietBoundary && !suppressesLocalEase && !["continue", "span-end"].includes(kind);
     const canSignal = !supporting && signal;
     if (canSignal && corroboratedEntry) result.localActionApplication = "scene-entry-onset";
     if (canSignal && !auxiliary && !cut && !restartBoundary && transition === "recover" && kind === "ease" &&
@@ -1200,7 +1255,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
       restartBoundary = null;
     }
     if (pattern !== "Baseline" && pattern !== "Divider") last = pattern;
-    const connector = !frameChange && !neutralize && !protective && !cut && !inheritedRelease &&
+    const connector = !frameChange && !neutralize && !protective && !cut && !suppressesLocalEase &&
       (unit.paragraph === lastParagraph && size <= 12 || /^\s*[“"‘']/u.test(unit.text) && size <= 16);
     lastParagraph = unit.paragraph;
     if (unit.structuralBoundary) {
@@ -1211,7 +1266,7 @@ function playbackInputs(index, decisions, blocked, supportingIds) {
     }
     return {id: unit.id, words: size, paragraph: unit.paragraph,
       profile: {id: unit.id, pattern, block: null,
-        phase_used: pendingRestart || inheritedRelease ? "quiet" : canSignal && rebuild ? "rebuild" : fact?.narrativePhase ?? "unknown",
+        phase_used: pendingRestart || suppressesLocalEase ? "quiet" : canSignal && rebuild ? "rebuild" : fact?.narrativePhase ?? "unknown",
         reason: protective ? "Playback gate blocks automatic activation." : "Compiled from available protocol evidence.",
         gate: protective ? "Blocked" : clearance},
       boundary: closeWithTaper ? {...boundary, verifiedRelease: true,
@@ -2054,7 +2109,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       break;
     }
   }
-  const playback = planStory(id, playbackInputs(index, decisions, blocked, supportingIds));
+  const playback = planStory(id, playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration));
   const units = index.units.map((unit, i) => {
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
@@ -2097,7 +2152,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       localInterruptionTaper || localActionApplication === "scene-entry-onset" ?
       localActionApplication : undefined;
     return {id: unit.id, unitSha256: unit.digest, ...labels, status, playbackStatus: "computed",
-      pattern: sustainProfile ? "Sustain wave" : profile.pattern, phase: profile.phase_used, beatId: trace.beat, sceneId: trace.scene,
+      pattern: sustainProfile ? "Sustain wave" : profile.pattern, phase: uncertaintyResolved ? "sustain" : profile.phase_used,
+      beatId: trace.beat, sceneId: trace.scene,
       ...(profile.verifiedRelease ? {verifiedRelease: true} : {}),
       knownAt: outputTrace.knownAt, evidenceIds: outputTrace.evidence, labelKnownAt: annotation ? unit.id : null,
       labelEvidenceIds: annotation?.evidenceIds ?? [], trace: outputTrace,

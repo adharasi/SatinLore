@@ -229,6 +229,8 @@ V35 accepts the shared exact opener and target link when the earlier scene root 
 
 V36 adds bounded continuity adjudication on an established beat, checks a setting arrival independently from an ordinary activity stop, and preserves fade provenance on a quiet connector. [V36 evaluation](nocturne-beat-protocol-shadow.md#v36-continuity-uncertainty-independent-arrival-and-fade-provenance)
 
+V37 covers exact alternate opener and continuation readings and retains the evidence time of an inherited release. [V37 evaluation](nocturne-beat-protocol-shadow.md#v37-corroborate-exact-continuation-across-alternate-readings)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.
