@@ -444,7 +444,8 @@ function pinnedPrefixQuote(window, verificationContext) {
   return requestQuote(JSON.stringify({mode, units, targetIds, ...(attested.length ? {attested} : {})}), targetIds.length);
 }
 
-function supportingPrefixJobs(pinned, scheduled, index, decisions, proposals, blocked, prefixUnits, limit) {
+function supportingPrefixJobs(pinned, scheduled, index, decisions, proposals, blocked, prefixUnits, limit,
+  verifyQuietOpenerRoot) {
   const candidates = new Map();
   for (const target of pinned) {
     const id = target.targetIds[0], proposed = proposals.get(id)?.fact;
@@ -459,7 +460,16 @@ function supportingPrefixJobs(pinned, scheduled, index, decisions, proposals, bl
       const referenced = proposed?.status === "candidate" && proposed.evidenceIds.includes(id) &&
         (proposed.priorAnchor === prior || proposed.action === "continuation" && proposed.scopeId === prior);
       const cue = cited && fact.frame === "current" && reviewable(fact) && fact.fact !== "continue";
-      const rank = closure ? 3 : referenced ? 2 : cue ? 1 : 0;
+      const openerId = target.contextIds[i + 1];
+      const opener = proposals.get(openerId);
+      // Verify the quiet root at its own prefix. Its nomination can only use
+      // an opener already eligible for supporting verification on this run.
+      const quietRoot = verifyQuietOpenerRoot && openerId === prior + 1 && !scheduled.has(openerId) &&
+        !blocked.has(openerId) && opener?.runId === target.runId && strictQuietNegative(fact) &&
+        !elapsedContinuityGap(index.units[prior], fact, fact, prior - 1) &&
+        currentCueAt(opener.fact, openerId, "candidate") && opener.fact.scopeId === prior &&
+        dualCitedContactOnset(opener.fact, openerId);
+      const rank = closure ? 4 : referenced ? 3 : cue ? 2 : quietRoot ? 1 : 0;
       if (!rank) continue;
       const distance = id - prior, existing = candidates.get(prior);
       if (!existing || rank > existing.rank || rank === existing.rank && distance < existing.distance) {
@@ -577,6 +587,16 @@ function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanc
   // the earlier release coordinate if the planner actually inherits that fade.
   if (provenanceOnly) return exactDepictionOnly && strictQuietNegative(cue, "current", cue.scopeId) &&
     strictQuietNegative(discovery, "current", cue.scopeId) ? {...inherited, provenanceOnly: true} : null;
+
+  if (cue.fact === "none") {
+    // The phase word alone cannot establish another release when the other
+    // readings are quiet and the exact earlier release already owns the fade.
+    return typed.frame === "current" && exactCurrentCue(cue, id) && cue.depiction === "neutral" &&
+      cue.narrativePhase === "ease" && cue.action === "none" && cue.transition === "none" &&
+      cue.priorAnchor === null && cue.scopeId != null && cue.scopeId === predecessor.scopeId &&
+      cue.evidenceIds.length === 2 && cue.evidenceIds[0] === prior && cue.evidenceIds[1] === id &&
+      strictQuietNegative(discovery) ? {...inherited, phaseOnly: true} : null;
+  }
 
   const depictionOnlyDisagreement = exactDepictionOnly && cue.depiction === "romantic" && cue.action === "release" &&
     cue.transition === "none" && cue.scopeId === predecessor.scopeId;
@@ -751,6 +771,43 @@ function uncertainContinuationCandidate(row, id, index, decisions, blocked, supp
   return {priorId, scope: inverseRooted ? root : primary.scopeId};
 }
 
+function quietDiscoveryContinuationCandidate(row, id, index, decisions, blocked, supportingIds) {
+  const {primaryPrefix: primary, effectiveAnnotation: effect, discovery, transitionVerification: typed} = row;
+  const priorId = primary?.priorAnchor;
+  const rootId = priorId - 1;
+  const entry = row.sceneEntryVerification?.sceneEntry;
+  if (!row.window || priorId == null || id - priorId < 1 || id - priorId > 2 || supportingIds.has(id) || !row.prefixVerified ||
+      row.annotation !== primary || row.cueRecovery?.status === "neutral" || !exactCurrentCue(primary, id) ||
+      primary.scopeId !== rootId || primary.action !== "continuation" || primary.narrativePhase !== "sustain" ||
+      primary.transition !== "none" || primary.fact !== "continue" || !romanticDepictions.has(primary.depiction) ||
+      primary.evidenceIds.length !== 2 || primary.evidenceIds[0] !== priorId || primary.evidenceIds[1] !== id ||
+      !verifiesLocalSustain(row, id, priorId) || !typedQuietWithoutBoundary(typed) ||
+      effect?.frame !== "current" || effect.transition !== "none" || effect.fact !== "continue" ||
+      effect.priorAnchor !== priorId || effect.scopeId !== rootId ||
+      entry?.status !== "none" || entry.reason !== "ordinary-interruption" ||
+      !strictQuietNegative(discovery) || !romanticDepictions.has(discovery.depiction)) return null;
+
+  // A quiet discovery can abstain on the action. Only an independently
+  // checked quiet root and the exact onset can nominate this separate check.
+  const opening = decisions.get(priorId);
+  const root = decisions.get(rootId);
+  const anchor = opening?.primaryPrefix;
+  const sameScopeOpener = root?.prefixVerified && strictQuietNegative(root.effectiveAnnotation) &&
+    corroboratesDualCitedOpener(opening, anchor, root, priorId, priorId, priorId);
+  if (!sameScopeOpener && !corroboratesDualCitedRootedOpener(opening, anchor, root, priorId)) return null;
+  for (let unitId = rootId; unitId <= id; unitId++) {
+    const unit = index.units[unitId];
+    const context = decisions.get(unitId);
+    if (!unit || blocked.has(unitId) || unit.structuralBoundary || context?.window?.runId !== row.window.runId) return null;
+    if (unitId === priorId) continue;
+    const quiet = unitId === id ? discovery : context.effectiveAnnotation ?? context.annotation ?? context.discovery;
+    if (!strictQuietNegative(quiet) || possibleRestartClosure(unit, quiet) || elapsedContinuityGap(unit, quiet, quiet, priorId) ||
+        unitId !== id && context.transitionVerification && !typedQuietWithoutBoundary(context.transitionVerification) ||
+        unitId === priorId + 1 && unitId !== id && (words(unit.text) > 16 || !strictQuietNegative(context.discovery))) return null;
+  }
+  return {priorId, scope: rootId, rootId};
+}
+
 function corroboratesSustain(row, cue, typed, anchor, id, prior) {
   const scope = cue.scopeId;
   const evidence = cue.evidenceIds;
@@ -781,19 +838,31 @@ function corroboratesRootedOpener(row, cue, previous, id) {
     strictQuietNegative(previous.effectiveAnnotation);
 }
 
-function corroboratesInverseRootedOpener(row, cue, previous, id) {
-  const root = id - 1;
-  const proposal = row?.discovery;
-  const onsetPair = fact => fact.action === "contact" && fact.transition === "onset" && fact.narrativePhase === "onset" &&
+function dualCitedContactOnset(fact, id) {
+  return fact.action === "contact" && fact.transition === "onset" && fact.narrativePhase === "onset" &&
     fact.fact === "none" && fact.priorAnchor === null && romanticDepictions.has(fact.depiction) &&
-    fact.evidenceIds.length === 2 && fact.evidenceIds[0] === root && fact.evidenceIds[1] === id;
+    fact.evidenceIds.length === 2 && fact.evidenceIds[0] === id - 1 && fact.evidenceIds[1] === id;
+}
+
+function corroboratesDualCitedOpener(row, cue, previous, id, primaryScope, discoveryScope) {
+  const proposal = row?.discovery;
   // The two current onset readings cite identical evidence. A strictly quiet
   // earlier context allows this local seed without equating the scope IDs.
   return row?.window && row.prefixVerified && row.effectiveAnnotation === cue && cue === row.primaryPrefix &&
-    exactCurrentCue(cue, id) && cue.scopeId === root && onsetPair(cue) && currentCueAt(proposal, id, "candidate") &&
-    proposal.scopeId === id && onsetPair(proposal) && previous?.window?.runId === row.window.runId &&
+    exactCurrentCue(cue, id) && cue.scopeId === primaryScope && dualCitedContactOnset(cue, id) &&
+    currentCueAt(proposal, id, "candidate") && proposal.scopeId === discoveryScope && dualCitedContactOnset(proposal, id) &&
+    previous?.window?.runId === row.window.runId &&
     strictQuietNegative(previous.discovery) && strictQuietNegative(previous.effectiveAnnotation ?? previous.annotation ?? previous.discovery) &&
     (!previous.transitionVerification || typedQuietWithoutBoundary(previous.transitionVerification));
+}
+
+function corroboratesInverseRootedOpener(row, cue, previous, id) {
+  return corroboratesDualCitedOpener(row, cue, previous, id, id - 1, id);
+}
+
+function corroboratesDualCitedRootedOpener(row, cue, previous, id) {
+  return previous?.prefixVerified && strictQuietNegative(previous.effectiveAnnotation) &&
+    corroboratesDualCitedOpener(row, cue, previous, id, id, id - 1);
 }
 
 function corroboratesRootedSustain(index, decisions, blocked, row, cue, id, prior) {
@@ -970,13 +1039,13 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
       rawCue.evidenceIds.every(id => id >= previousEvidenceBarrier) &&
       ["action", "narrativePhase", "transition", "fact"].every(key => proposal[key] === rawCue[key]);
     const rootSeedEligible = seedEligible && lastAnchor === null && unit.id - 1 > previousEvidenceBarrier && !blocked.has(unit.id - 1);
-    const rootedSeed = rootSeedEligible &&
-      corroboratesRootedOpener(result, rawCue, previous, unit.id);
     const previousUnit = index.units[unit.id - 1];
-    const inverseRootedSeed = uncertainContinuationArbitration && rootSeedEligible && !previousUnit.structuralBoundary &&
-      corroboratesInverseRootedOpener(result, rawCue, previous, unit.id) &&
-      !possibleRestartClosure(previousUnit, previous.discovery) &&
-      !elapsedContinuityGap(previousUnit, previous.discovery, previous.discovery, unit.id - 2);
+    const dualCitedSeedEligible = uncertainContinuationArbitration && rootSeedEligible && !previousUnit.structuralBoundary &&
+      !possibleRestartClosure(previousUnit, previous?.discovery) &&
+      !elapsedContinuityGap(previousUnit, previous?.discovery, previous?.discovery, unit.id - 2);
+    const rootedSeed = rootSeedEligible && corroboratesRootedOpener(result, rawCue, previous, unit.id) ||
+      dualCitedSeedEligible && corroboratesDualCitedRootedOpener(result, rawCue, previous, unit.id);
+    const inverseRootedSeed = dualCitedSeedEligible && corroboratesInverseRootedOpener(result, rawCue, previous, unit.id);
     const corroboratedSeed = rootedSeed || inverseRootedSeed || seedEligible && proposal.scopeId === rawCue.scopeId &&
       (enactedStart && rawCue.transition === "onset" && rawCue.narrativePhase === "onset" && rawCue.fact === "none" ||
         rawCue.action === "anticipation" && rawCue.narrativePhase === "build" && rawCue.transition === "none" && rawCue.fact === "low");
@@ -1051,10 +1120,11 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
     // A quiet target can inherit the verified predecessor's finite release.
     // A new prefix label alone cannot move the effective release clock here.
     const naturalReleaseFade = current && strictQuietNegative(fact, "current", fact.scopeId);
+    const phaseOnlyEase = canEase && kind === "none" && transition === "none" && fact.narrativePhase === "ease";
     const inheritedRelease = !auxiliary && clearRelease && !beatEnd &&
-      (canEase && kind === "ease" && ["none", "ease"].includes(transition) || naturalReleaseFade) ?
+      (canEase && kind === "ease" && ["none", "ease"].includes(transition) || naturalReleaseFade || phaseOnlyEase) ?
       inheritedReleaseEvidence(result, previous, rawCue, priorFact, unit.id, naturalReleaseFade) : null;
-    const suppressesLocalEase = inheritedRelease && !inheritedRelease.provenanceOnly;
+    const suppressesLocalEase = inheritedRelease && !inheritedRelease.provenanceOnly && !inheritedRelease.phaseOnly;
     if (suppressesLocalEase) result.appliedTransitionOverride = "none";
     const localRelease = canEase && !suppressesLocalEase &&
       rawCue.action === "release" && ["ease", "recover"].includes(rawCue.narrativePhase) &&
@@ -1133,7 +1203,8 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
     if (!auxiliary && !quietBoundary && !cut && !restartBoundary && clear && ownCueEvidence && kind === "continue" &&
         !linked && prior === lastAnchor && anchors.get(prior) === prior &&
         (corroboratesSustainScope(index, decisions, blocked, result, rawCue, unit.id, prior) ||
-          corroboratesRootedSustain(index, decisions, blocked, result, rawCue, unit.id, prior))) {
+          corroboratesRootedSustain(index, decisions, blocked, result, rawCue, unit.id, prior) ||
+          result.quietDiscoveryContinuation && confirmedContinuation)) {
       result.localActionApplication = "sustain-scope-profile";
     }
     const repairedSustain = !auxiliary && !quietBoundary && !cut && !restartBoundary && exactLink && shortSustainLink &&
@@ -1888,7 +1959,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         (window.id.startsWith("verify:") ? nativeTargets : typedTargets).has(window.targetIds[0]));
       for (const window of pinned) pendingPinned.set(window.id, pinnedPrefixQuote(window, verificationContext));
       if (maxSupportingVerification) supporting = supportingPrefixJobs(pinned, new Set(verification.map(window => window.targetIds[0])),
-        index, decisions, proposals, blocked, prefixUnits, maxSupportingVerification);
+        index, decisions, proposals, blocked, prefixUnits, maxSupportingVerification, uncertainContinuationArbitration);
       for (const window of supporting) supportingIds.add(window.targetIds[0]);
     }
     if (maxCueChecks || maxPrimaryAnchorRepairs) {
@@ -2092,12 +2163,14 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     }
     if (uncertainContinuationArbitration) for (const id of sceneEntryTargets) {
       const row = decisions.get(id);
-      const candidate = uncertainContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
+      const quietCandidate = quietDiscoveryContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
+      const candidate = quietCandidate ?? uncertainContinuationCandidate(row, id, index, decisions, blocked, supportingIds);
       if (!candidate) continue;
       const job = prefixJob(row.window, id, index, prefixUnits, "cue-check");
-      if (!job.contextIds.includes(candidate.priorId)) continue;
+      if (!job.contextIds.includes(candidate.priorId) || quietCandidate && !job.contextIds.includes(quietCandidate.rootId)) continue;
       const [{result, status}] = await execute([{...job, id: `${job.id}:uncertain-continuation`}], "uncertain-continuation");
       const verdict = status === "returned" ? result.annotations[0] : undefined;
+      if (quietCandidate) row.quietDiscoveryContinuation = true;
       row.uncertainContinuationVerification = verdict;
       row.uncertainContinuationVerificationStatus = verdict ?
         verifiedContinuationRepair(verdict, candidate, id) ? "verified" : "unconfirmed" : status;

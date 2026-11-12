@@ -168,9 +168,10 @@ export function planStory(story, units) {
       holdConfirmation.knownAt === id && beat.anchor === holdConfirmation.priorAnchor &&
       Math.max(0, cursor - beat.supportEnd) < ESTABLISHED_HOLD_WORDS;
     const priorTrace = inheritedRelease && plan.at(-1)?.[1];
-    const inheritsOpenRelease = inheritedRelease && !boundary && !ease && pattern === "Baseline" &&
+    const sharesOpenRelease = inheritedRelease && !boundary && !ease &&
       beat?.easing && beat.released && !beat.quiet && beat.profile === "Taper" && beat.releaseEnd > cursor &&
       priorTrace?.decision === "Ease" && priorTrace.beat === beat.id && priorTrace.knownAt === inheritedRelease.knownAt;
+    const inheritsOpenRelease = sharesOpenRelease && pattern === "Baseline" && !inheritedRelease.phaseOnly;
     if (protective || HARD_PROFILES.has(pattern)) {
       decision = protective ? "Eligibility gate" : pattern;
       traceBeat = null;
@@ -383,6 +384,12 @@ export function planStory(story, units) {
       // Its newer release provenance must survive the older beat anchor.
       decision = "Inherit release fade";
       mark = inheritedRelease;
+    }
+    if (sharesOpenRelease && inheritedRelease.phaseOnly && pattern === "Taper" && decision === "Ease" && !scope && !low &&
+        traceBeat?.id === priorTrace.beat && traceBeat.anchor === inheritedRelease.knownAt) {
+      // Keep the already compiled output and evidence time. The connector
+      // supplies no new action, so the existing fade can have a quiet phase.
+      result.phase_used = "quiet";
     }
     if (!protective && !HARD_PROFILES.has(pattern)) {
       result.block = traceBeat?.id ?? null;

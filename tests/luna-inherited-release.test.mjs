@@ -19,7 +19,7 @@ const localNeutral = {status: "none", frame: "noncurrent", action: "none", phase
   targetId: null, contextId: null};
 const usage = {inputTokens: 100, outputTokens: 20};
 
-function run({observed = [], later = repeatedEase, laterDiscovery = quiet(2), laterTyped = {frame: "neutral"},
+function run({observed = [], first = opening, later = repeatedEase, laterDiscovery = quiet(2), laterTyped = {frame: "neutral"},
   laterLocal = localNeutral, laterBoundary = noBoundary, earlierLocal = localRelease(1, 0), blockedIds = [],
   releaseText = "They slowed their steps in time with the music.", separator = " "} = {}) {
   const text = `Mira took Lee's hand. ${releaseText}${separator}The musicians played softly. The lights dimmed.`;
@@ -35,7 +35,7 @@ function run({observed = [], later = repeatedEase, laterDiscovery = quiet(2), la
         ...(id === 1 ? {status: "verified", transition: "interruption", evidenceIds: [1]} : id === 2 ? laterTyped : {}),
         sceneBoundary: id === 2 ? laterBoundary : noBoundary};
       if (id === 2) return request.mode === "discovery" ? laterDiscovery : later;
-      const primary = id === 0 ? opening : id === 1 ? release : quiet(id);
+      const primary = id === 0 ? first : id === 1 ? release : quiet(id);
       return request.mode === "discovery" && primary.status === "verified" ? {...primary, status: "candidate"} : primary;
     });
     return {status: "ok", usage, facts};
@@ -106,6 +106,52 @@ test("expiry, a verified cut, and a protective stop prevent release inheritance"
 });
 
 const depictedOnly = {...localNeutral, frame: "current", contrast: "depiction-only"};
+
+const phaseOnly = {...quiet(2), status: "verified", narrativePhase: "ease", scopeId: 0, evidenceIds: [1, 2]};
+const phaseOnlyOptions = {first: quiet(0), later: phaseOnly, laterTyped: {frame: "current"}};
+
+test("a neutral ease descriptor keeps the earlier release waveform and uses a quiet phase", async () => {
+  const observed = [], controlRequests = [];
+  const candidate = await run({...phaseOnlyOptions, observed});
+  const control = await run({...phaseOnlyOptions, laterLocal: null, observed: controlRequests});
+  const [first, earlier, row, after] = candidate.units;
+  const before = control.units[2];
+  assert.equal(earlier.trace.decision, "Ease");
+  assert.equal(earlier.trace.knownAt, 1);
+  assert.equal(earlier.trace.beat, "release-inheritance:beat:1");
+  assert.equal(row.phase, "quiet");
+  assert.equal(before.phase, "ease");
+  assert.equal(row.pattern, "Taper");
+  assert.equal(row.knownAt, 1);
+  assert.equal(row.labelKnownAt, 2);
+  assert.deepEqual(row.labelEvidenceIds, [1, 2]);
+  assert.equal(row.primaryPrefix.narrativePhase, "ease");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.trace.holdWords, 0);
+  assert.equal(row.trace.fadeWords, 7);
+  assert.equal(row.trace.floorWords, 7);
+  assert.deepEqual(row.trace, before.trace);
+  assert.deepEqual([first, earlier, after], [control.units[0], control.units[1], control.units[3]]);
+  assert.deepEqual(observed, controlRequests);
+});
+
+test("a phase-only descriptor requires the exact earlier release and independent quiet readings", async () => {
+  for (const negative of [{first: opening}, {later: {...phaseOnly, scopeId: 1}},
+    {later: {...phaseOnly, evidenceIds: [0, 2]}}, {laterDiscovery: {...quiet(2), frame: "reported"}},
+    {laterLocal: localRelease(2, 1)}, {laterTyped: {frame: "neutral"}}]) {
+    const {units} = await run({...phaseOnlyOptions, ...negative});
+    assert.equal(units[2].phase, "ease");
+  }
+  const cut = await run({...phaseOnlyOptions, laterBoundary: {status: "cut", reason: "time-jump", previousId: 1, entryId: 2}});
+  assert.equal(cut.units[2].pattern, "Reset");
+  const stop = await run({...phaseOnlyOptions, blockedIds: [2]});
+  assert.equal(stop.units[2].pattern, "Stop");
+  const expired = await run({...phaseOnlyOptions,
+    releaseText: "They slowed their steps in time with the music while the musicians continued playing the last piece for the audience."});
+  assert.equal(expired.units[2].phase, "ease");
+});
 
 test("a natural fade keeps its waveform and records the newer verified release coordinate", async () => {
   const scopedQuiet = {...quiet(2), scopeId: 0};

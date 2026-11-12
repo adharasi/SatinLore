@@ -19,8 +19,10 @@ const stop = unitId => ({...neutral(unitId), status: "verified", transition: "ha
 
 function run({opening = onset, openingProposal = {...onset, status: "candidate"}, continuation = sustain, proposal = sustainProposal,
   localVote = local, sceneEntry = entry, targetBoundary = noBoundary, connectorVote = neutral(2), rootVote = neutral(0),
+  rootPrimaryVote = rootVote, rootFailure = null,
   connector = "The lights dimmed.", blockedIds = [], supporting = 1, requests = [], targetTransition = {},
-  uncertainContinuationArbitration = false, maxCueChecks = 0, confirmation = null, confirmationFailure = null} = {}) {
+  uncertainContinuationArbitration = false, maxCueChecks = 0, confirmation = null, confirmationFailure = null,
+  verificationTargets = [3, 4]} = {}) {
   const text = `Mira waited by the door. Lee took her hand. ${connector} Lee kept holding her hand. Someone knocked.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
@@ -29,13 +31,14 @@ function run({opening = onset, openingProposal = {...onset, status: "candidate"}
     requests.push(request);
     const {mode, targetIds} = request;
     if (request.focus === "continuation-repair" && confirmationFailure) return {status: confirmationFailure};
+    if (mode === "verify" && targetIds[0] === 0 && rootFailure) return {status: rootFailure};
     return {status: "ok", usage: {inputTokens: 100, outputTokens: 20}, facts: targetIds.map(id => {
       if (request.focus === "continuation-repair") return confirmation ?? neutral(id);
       if (mode === "scene-entry") return {unitId: id, sceneEntry};
       if (mode === "local-action") return {unitId: id, localAction: localVote};
       if (mode === "transition") return {...neutral(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
         ...(id === 3 ? targetTransition : {}), sceneBoundary: id === 3 ? targetBoundary : noBoundary};
-      if (id === 0) return rootVote;
+      if (id === 0) return mode === "verify" ? rootPrimaryVote : rootVote;
       if (id === 1) return mode === "discovery" ? openingProposal : opening;
       if (id === 2) return connectorVote;
       if (id === 3) return mode === "discovery" ? proposal : continuation;
@@ -43,8 +46,8 @@ function run({opening = onset, openingProposal = {...onset, status: "candidate"}
     })};
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "sustain-scope", text, grant, now: () => 1, provider, blockedIds, negativeStride: 0,
-    verificationTargets: [3, 4], transitionTargets: [3, 4], verifyTransitions: true,
-    maxVerification: 2, maxTransitionVerification: 2, maxSupportingVerification: Number(supporting),
+    verificationTargets, transitionTargets: [3, 4], verifyTransitions: true,
+    maxVerification: verificationTargets.length, maxTransitionVerification: 2, maxSupportingVerification: Number(supporting),
     localActionVerificationTargets: localVote ? [3] : [], sceneEntryVerificationTargets: [3],
     uncertainContinuationArbitration, maxCueChecks});
 }
@@ -378,5 +381,117 @@ test("an exact rooted primary link and isolated continuation can support a disco
     {targetTransition: uncertainTransition}, {targetBoundary: timeCut}, {blockedIds: [2]}]) {
     const {units} = await run({...options, ...controlOptions});
     assert.notEqual(units[3].pattern, "Sustain wave", JSON.stringify(controlOptions));
+  }
+});
+
+const forwardDualOpening = {
+  openingProposal: {...onset, status: "candidate", scopeId: 0},
+  proposal: neutral(3),
+  supporting: 2,
+  uncertainContinuationArbitration: true,
+};
+
+test("a dual-cited forward opener checks the quiet root on its own approved prefix", async () => {
+  const requests = [];
+  const {units, summary} = await run({...forwardDualOpening, requests});
+  const [root, opener, connector] = units;
+  const quietRoot = requests.find(request => request.mode === "verify" && request.targetIds[0] === 0);
+  assert.deepEqual(quietRoot?.units.map(({id}) => id), [0]);
+  assert.equal(quietRoot.attested, undefined);
+  const checks = summary.attempts.filter(row => row.supportingPrefix);
+  assert.deepEqual(checks.map(row => [row.targetIds[0], row.status]), [[0, "returned"], [1, "returned"]]);
+  assert.equal(root.pattern, "Baseline");
+  assert.equal(opener.pattern, "Onset rise");
+  assert.equal(opener.playbackDisposition, "supporting-rooted-onset");
+  assert.equal(opener.discovery.scopeId, 0);
+  assert.equal(opener.primaryPrefix.scopeId, 1);
+  assert.equal(opener.knownAt, 1);
+  assert.equal(opener.cue, false);
+  assert.equal(opener.readerCue, false);
+  assert.equal(connector.beatId, opener.beatId);
+});
+
+test("a dual-cited forward opener requires an available quiet root check and both exact onset votes", async () => {
+  for (const options of [{supporting: 1}, {uncertainContinuationArbitration: false}, {rootFailure: "refused"},
+    {rootPrimaryVote: {...neutral(0), evidenceIds: [0]}}, {rootPrimaryVote: stop(0)}, {blockedIds: [0]},
+    {opening: {...onset, evidenceIds: [1]}}, {openingProposal: {...forwardDualOpening.openingProposal, frame: "reported"}}]) {
+    const {units} = await run({...forwardDualOpening, ...options});
+    assert.notEqual(units[1].playbackDisposition, "supporting-rooted-onset", JSON.stringify(options));
+    assert.equal(units[1].beatId, null, JSON.stringify(options));
+  }
+});
+
+const quietDiscoveryFixture = {...forwardDualOpening, continuation: rootedContinuation,
+  proposal: {...neutral(3), depiction: "romantic"}, sceneEntry: {...entry, reason: "ordinary-interruption"},
+  confirmation: {...rootedContinuation, scopeId: 1}, maxCueChecks: 1};
+
+test("blind exact continuation changes only the held target's waveform after a quiet discovery", async () => {
+  const requests = [];
+  const control = await run({...quietDiscoveryFixture, confirmation: null});
+  const {units} = await run({...quietDiscoveryFixture, requests});
+  const row = units[3];
+  assert.equal(control.units[3].pattern, "Onset rise");
+  assert.equal(row.pattern, "Sustain wave");
+  assert.equal(row.phase, "sustain");
+  assert.equal(row.appliedTransition, "none");
+  assert.equal(row.uncertainContinuationVerificationStatus, "verified");
+  assert.equal(row.localActionApplication, "sustain-scope-profile");
+  assert.equal(row.cue, false);
+  assert.equal(row.readerCue, false);
+  assert.equal(row.trace.decision, "Select local sustain");
+  assert.deepEqual(row.trace.evidence, [1, 3]);
+  assert.deepEqual(row.discovery, control.units[3].discovery);
+  assert.deepEqual(row.primaryPrefix, control.units[3].primaryPrefix);
+  for (const key of ["beat", "scene", "holdWords", "fadeWords", "floorWords"]) {
+    assert.equal(row.trace[key], control.units[3].trace[key]);
+  }
+  assert.deepEqual(units.slice(0, 3), control.units.slice(0, 3));
+  assert.deepEqual(units[4], control.units[4]);
+  const [request] = requests.filter(request => request.focus === "continuation-repair");
+  assert.equal(request.mode, "cue-check");
+  assert.deepEqual(request.units.map(({id}) => id), [0, 1, 2, 3]);
+  assert.deepEqual(request.targetIds, [3]);
+  assert.equal(request.attested, undefined);
+  assert.equal(requests.at(-1), request);
+});
+
+test("a canonical opener with an independently checked root can use the same exact proof", async () => {
+  const {units} = await run({...quietDiscoveryFixture, openingProposal: {...onset, status: "candidate"},
+    verificationTargets: [0, 3, 4], confirmation: rootedContinuation});
+  assert.equal(units[0].prefixVerified, true);
+  assert.equal(units[1].discovery.scopeId, units[1].primaryPrefix.scopeId);
+  assert.equal(units[3].uncertainContinuationVerificationStatus, "verified");
+  assert.equal(units[3].pattern, "Sustain wave");
+  assert.equal(units[3].cue, false);
+  assert.equal(units[3].readerCue, false);
+});
+
+test("a quiet discovery needs exact eligible causal evidence before a continuation check", async () => {
+  const {proposal} = quietDiscoveryFixture;
+  for (const options of [{proposal: {...proposal, evidenceIds: [3]}}, {proposal: {...proposal, depiction: "neutral"}},
+    {proposal: {...proposal, frame: "reported"}}, {proposal: {...proposal, status: "uncertain"}},
+    {continuation: sustain}, {continuation: stop(3)}, {localVote: {...local, contextId: 2}}, {targetBoundary: timeCut},
+    {sceneEntry: entry}, {blockedIds: [2]}, {connectorVote: stop(2)}, {connector: "Several hours later, the lights dimmed."},
+    {supporting: 1}, {rootFailure: "refused"}, {rootPrimaryVote: stop(0)}, {uncertainContinuationArbitration: false},
+    {openingProposal: {...onset, status: "candidate"}}]) {
+    const requests = [];
+    const {units} = await run({...quietDiscoveryFixture, ...options, requests});
+    assert.ok(requests.every(request => request.focus !== "continuation-repair"), JSON.stringify(options));
+    assert.notEqual(units[3].localActionApplication, "sustain-scope-profile", JSON.stringify(options));
+  }
+});
+
+test("a quiet discovery stays conservative when the independent answer is unavailable, conflicting or protective", async () => {
+  for (const [options, status, pattern] of [
+    [{confirmation: null}, "unconfirmed", "Onset rise"],
+    [{confirmationFailure: "refused"}, "provider-refused", "Onset rise"],
+    [{confirmation: {...quietDiscoveryFixture.confirmation, scopeId: 2}}, "invalid-response", "Onset rise"],
+    [{maxCueChecks: 0}, "budget-deferred", "Onset rise"],
+    [{confirmation: stop(3)}, "protective-override", "Stop"],
+  ]) {
+    const {units} = await run({...quietDiscoveryFixture, ...options});
+    assert.equal(units[3].uncertainContinuationVerificationStatus, status);
+    assert.equal(units[3].pattern, pattern);
+    assert.notEqual(units[3].localActionApplication, "sustain-scope-profile");
   }
 });
