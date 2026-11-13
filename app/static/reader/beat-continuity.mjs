@@ -219,7 +219,7 @@ export function planStory(story, units) {
       const replacement = pattern === "Baseline" || pattern === "Taper" ? pattern : prior ? "Taper" : "Baseline";
       Object.assign(result, {pattern: replacement, block: prior?.id ?? null, reason: rationale});
       if (replacement === "Taper" && boundary.verifiedRelease) result.verifiedRelease = true;
-    } else if (inheritsOpenRelease && !inheritedRelease.provenanceOnly) {
+    } else if (inheritsOpenRelease && !inheritedRelease.provenanceOnly && !inheritedRelease.naturalFade) {
       decision = "Inherit release fade";
       rationale = inheritedRelease.reason;
       mark = inheritedRelease;
@@ -265,7 +265,7 @@ export function planStory(story, units) {
     } else {
       const signal = localSignal(unit, source);
       let scoped = scopedTo(beat, scope) && !beat?.provisional;
-      const connector = unit.connector;
+      const connector = unit.connector && (!inheritedRelease?.naturalFade || inheritsOpenRelease);
       const localEase = EASING_PROFILES.has(pattern) && !INHERITED_REASONS.has(source.reason);
       const implicitRecovery = pattern === "Recovery" && scope && scope.priorAnchor == null && !beat;
       const spanRelease = spanEnd && !signal && beat && !beat.quiet;
@@ -398,8 +398,8 @@ export function planStory(story, units) {
       }
     }
 
-    if (inheritsOpenRelease && inheritedRelease.provenanceOnly && decision === "Fade beat" &&
-        traceBeat?.id === priorTrace.beat && traceBeat.anchor < inheritedRelease.knownAt) {
+    if (inheritsOpenRelease && (inheritedRelease.provenanceOnly || inheritedRelease.naturalFade) && decision === "Fade beat" &&
+        traceBeat?.id === priorTrace.beat && (traceBeat.anchor < inheritedRelease.knownAt || inheritedRelease.naturalFade)) {
       // The natural fade has already selected its pattern, duration and floor.
       // Its newer release provenance must survive the older beat anchor.
       decision = "Inherit release fade";

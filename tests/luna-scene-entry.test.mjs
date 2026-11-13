@@ -49,6 +49,27 @@ test("first-entry request is a strict independent causal comparison", async () =
     narrativePhase: "onset"}]})).status, "invalid-request");
 });
 
+test("the focused time witness receives only the exact causal prefix", async () => {
+  let sent, calls = 0;
+  const request = {mode: "scene-entry", focus: "material-time-witness", units: sourceUnits.slice(0, 2), targetIds: [1]};
+  const provider = createLunaProtocolProvider({apiKey: "neutral-fixture", fetchImpl: async (_url, {body}) => {
+    calls++;
+    sent = JSON.parse(body);
+    return response([{unitId: 1, sceneEntry: firstEntry}]);
+  }});
+  assert.deepEqual((await provider({...request, earlierVerdict: typed(neutral(1), typedCut)})).facts,
+    [{unitId: 1, sceneEntry: firstEntry}]);
+  assert.deepEqual(JSON.parse(sent.input), {units: request.units, targetIds: [1]});
+  assert.equal(sent.text.format.name, "nocturne_luna_scene_entry_v1");
+  assert.match(sent.instructions, /material displacement in time/u);
+  assert.match(sent.instructions, /within the same episode is elapsed-continuation/u);
+  assert.equal((await provider({...request, mode: "scene-boundary"})).status, "invalid-request");
+  assert.equal((await provider({...request, units: sourceUnits.slice(1, 2)})).status, "invalid-request");
+  assert.equal((await provider({...request, units: sourceUnits})).status, "invalid-request");
+  assert.equal((await provider({...request, attested: [{unitId: 0}]})).status, "invalid-request");
+  assert.equal(calls, 1);
+});
+
 test("first-entry coordinates and status are validated before facts leave the provider", async () => {
   for (const [sceneEntry, expected] of [[enteredEarlier, null], [noEntry, null], [uncertain, null],
     [{...firstEntry, entryId: 3, changeId: 2, reason: "material-setting"}, null],

@@ -243,6 +243,8 @@ V42 checks two sources of quiet playback gaps. A rejected supporting unit can re
 
 V43 records where unresolved scene-boundary checks reached their available prefix. An interruption response that reports continuation instead of release can nominate one separate blind check when the earlier supporting readings satisfy exact episode and action requirements. [V43 evaluation](nocturne-beat-protocol-shadow.md#v43-diagnose-prefix-limits-and-verify-disputed-support)
 
+V44 tests independent time and place witnesses for unresolved boundaries, and preserves the existing fade when a quiet connector repeats an earlier release. [V44 evaluation](nocturne-beat-protocol-shadow.md#v44-corroborate-material-entry-and-preserve-release-timing)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

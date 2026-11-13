@@ -39,6 +39,9 @@ function shardResult(clip) {
           targetId: unit.id, contextId: clip.units[0].id}},
       sceneEntryVerificationStatus: "cut", sceneEntryVerification: {unitId: unit.id,
         sceneEntry: {status: "cut", reason: "material-time", previousId: clip.units[0].id, changeId: unit.id, entryId: unit.id}},
+      sceneTimeWitnessStatus: "cut", boundaryWitnessStatus: "corroborated",
+      sceneTimeWitness: {unitId: unit.id,
+        sceneEntry: {status: "cut", reason: "material-time", previousId: clip.units[0].id, changeId: unit.id, entryId: unit.id}},
       independentBoundaryStatus: "corroborated", interruptionContinuationVerificationStatus: "verified",
       sceneSituationVerificationStatus: "changed", sceneSituationVerification: {unitId: unit.id,
         sceneSituation: {status: "changed", earlierId: clip.units[0].id, currentId: unit.id,
@@ -196,6 +199,9 @@ test("the corpus page previews exact context locally and seals only fingerprints
     {unitId: 10, localAction: {status: "verified", frame: "current", action: "anticipation", phase: "build", contrast: "charged-reaction",
       targetId: 10, contextId: 9}});
   assert.equal(exported.replayClips[0].units[0].sceneEntryVerificationStatus, "cut");
+  assert.equal(exported.replayClips[0].units[0].sceneTimeWitnessStatus, "cut");
+  assert.equal(exported.replayClips[0].units[0].boundaryWitnessStatus, "corroborated");
+  assert.deepEqual(exported.replayClips[0].units[0].sceneTimeWitness, exported.replayClips[0].units[0].sceneEntryVerification);
   assert.deepEqual(exported.replayClips[0].units[0].sceneEntryVerification,
     {unitId: 10, sceneEntry: {status: "cut", reason: "material-time", previousId: 9, changeId: 10, entryId: 10}});
   assert.equal(exported.replayClips[0].units[0].independentBoundaryStatus, "corroborated");

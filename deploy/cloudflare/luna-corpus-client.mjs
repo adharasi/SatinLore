@@ -26,6 +26,7 @@ const returned = new Set(["completed", "provider-refused", "provider-unavailable
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
 const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus",
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
+  "sceneTimeWitnessStatus", "boundaryWitnessStatus",
   "cueRecoveryReason", "cueRecoveryCorrection",
   "independentBoundaryStatus", "sceneSituationVerificationStatus", "sceneOldPlaceVerificationStatus",
   "sceneArrivalVerificationStatus", "scenePlaceRecoveryStatus", "sustainConnectorVerificationStatus",
@@ -273,9 +274,9 @@ function replayUnit(row) {
     result.localActionVerification = {...fields(row.localActionVerification, ["id", "unitId"]),
       localAction: fields(row.localActionVerification.localAction, replayLocalActionKeys)};
   }
-  if (row.sceneEntryVerification?.sceneEntry) {
-    result.sceneEntryVerification = {...fields(row.sceneEntryVerification, ["id", "unitId"]),
-      sceneEntry: fields(row.sceneEntryVerification.sceneEntry, [...replayBoundaryKeys, "changeId"])};
+  for (const stage of ["sceneEntryVerification", "sceneTimeWitness"]) if (row[stage]?.sceneEntry) {
+    result[stage] = {...fields(row[stage], ["id", "unitId"]),
+      sceneEntry: fields(row[stage].sceneEntry, [...replayBoundaryKeys, "changeId"])};
   }
   if (row.sceneSituationVerification?.sceneSituation) {
     result.sceneSituationVerification = {...fields(row.sceneSituationVerification, ["id", "unitId"]),

@@ -261,3 +261,87 @@ test("old-root release inheritance requires each exact link and a current quiet 
   const blocked = await runOldRoot({blockedIds: [3]});
   assert.equal(blocked.units[3].pattern, "Stop");
 });
+
+function runScopedRepeat({linkedEarlier = false, targetLocal = isolatedQuiet, targetEntry = ordinaryInterruption,
+  priorTyped = true, priorDiscovery = true, blockedIds = [], targetBoundary = noBoundary,
+  releaseText = "They slowed their steps in time with the music.", targetScope = 1, observed = []} = {}) {
+  const text = `The quartet played. Mira watched Lee. ${releaseText} The lights dimmed.\n\nA door creaked.`;
+  const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
+  const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
+    spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
+  const older = linkedEarlier ? {...earlierBuild, evidenceIds: [0, 1]} : {...quiet(1), depiction: "romantic"};
+  const appliedRelease = linkedEarlier ? {...precedingRelease, scopeId: 1, evidenceIds: [1, 2], priorAnchor: 1} :
+    {...precedingRelease, scopeId: 2};
+  const repeated = {...rootedEase, transition: "none", scopeId: targetScope};
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const facts = request.targetIds.map(id => {
+      if (request.mode === "scene-entry") return {unitId: id, sceneEntry: id === 3 ? targetEntry : ordinaryInterruption};
+      if (request.mode === "local-action") return {unitId: id, localAction: id === 2 ?
+        linkedEarlier ? localNeutral : localRelease(2, null) : targetLocal};
+      if (request.mode === "transition") return {...quiet(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
+        ...(id === 2 && priorTyped ? {status: "verified", transition: "interruption", evidenceIds: [2]} : {}),
+        sceneBoundary: id === 3 ? targetBoundary : noBoundary};
+      if (request.mode === "discovery") {
+        if (id === 1 && linkedEarlier) return {...earlierBuild, status: "candidate"};
+        if (id === 2 && priorDiscovery) return {...precedingRelease, status: "candidate"};
+        if (id === 3) return {...quiet(id), scopeId: 0};
+        return quiet(id);
+      }
+      if (id === 1) return older;
+      if (id === 2) return appliedRelease;
+      return id === 3 ? repeated : quiet(id);
+    });
+    return {status: "ok", usage, facts};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "scoped-release-inheritance", text, grant, now: () => 1, provider, blockedIds,
+    verificationTargets: units.map(({id}) => id), transitionTargets: [2, 3], verifyTransitions: true,
+    localActionVerificationTargets: [2, 3], sceneEntryVerificationTargets: [2, 3], negativeStride: 0});
+}
+
+test("the exact preceding interruption owns a repeated release's phase and connector clock", async () => {
+  for (const linkedEarlier of [false, true]) {
+    const observed = [], controlRequests = [];
+    const candidate = await runScopedRepeat({linkedEarlier, observed,
+      targetLocal: linkedEarlier ? depictedOnly : isolatedQuiet,
+      targetEntry: linkedEarlier ? ordinaryInterruption : {...ordinaryInterruption, reason: "same-episode"}});
+    const control = await runScopedRepeat({linkedEarlier, targetLocal: localRelease(3, 2), observed: controlRequests});
+    const [earlier, target, next] = candidate.units.slice(2);
+    assert.equal(target.primaryPrefix.narrativePhase, "ease");
+    assert.equal(target.phase, "quiet");
+    assert.equal(target.pattern, "Taper");
+    assert.equal(target.appliedTransition, "none");
+    assert.equal(target.cue, false);
+    assert.equal(target.readerCue, false);
+    assert.equal(target.trace.decision, "Inherit release fade");
+    assert.equal(target.knownAt, 2);
+    assert.equal(target.labelKnownAt, 3);
+    assert.equal(target.trace.beat, earlier.trace.beat);
+    assert.equal(target.trace.holdWords, 0);
+    assert.equal(target.trace.fadeWords, 7);
+    assert.equal(target.trace.floorWords, 31);
+    assert.equal(control.units[3].phase, "ease");
+    assert.equal(control.units[3].knownAt, 3);
+    assert.equal(control.units[3].trace.floorWords, 7);
+    assert.deepEqual(candidate.units.slice(0, 3), control.units.slice(0, 3));
+    assert.deepEqual(next, control.units[4]);
+    assert.deepEqual(observed, controlRequests);
+  }
+});
+
+test("a scoped release repeat cannot cross expiry, a cut, or protection", async () => {
+  for (const options of [{targetScope: 0}, {priorDiscovery: false}, {priorTyped: false},
+    {targetEntry: {...ordinaryInterruption, reason: "viewpoint-only"}}, {targetLocal: localRelease(3, 2)}]) {
+    const {units} = await runScopedRepeat(options);
+    assert.notEqual(units[3].trace.decision, "Inherit release fade");
+  }
+  const expired = await runScopedRepeat({
+    releaseText: "They slowed their steps in time with the music while the musicians continued playing the last piece for the audience."});
+  assert.equal(expired.units[3].pattern, "Baseline");
+  assert.equal(expired.units[3].trace.fadeWords, 0);
+  assert.equal(expired.units[3].trace.floorWords, 0);
+  const cut = await runScopedRepeat({targetBoundary: {status: "cut", reason: "time-jump", previousId: 2, entryId: 3}});
+  assert.equal(cut.units[3].pattern, "Reset");
+  const stop = await runScopedRepeat({blockedIds: [3]});
+  assert.equal(stop.units[3].pattern, "Stop");
+});

@@ -403,6 +403,44 @@ test("a valid first entry can nominate exact place witnesses when the other lane
   }
 });
 
+test("different old-setting coordinates at the same material entry require exact place witnesses", async () => {
+  const options = {typedBoundary: noBoundary, entry: {...firstEntry, previousId: 0}, boundaryWitness: boundary,
+    targetText: relocation, includeSuccessor: true, oldWitness: oldPlace, arrivalWitness: distinctArrival};
+  const accepted = await settingRun(options);
+  const row = accepted.run.units[target];
+  assert.equal(row.sceneEntryVerification.sceneEntry.previousId, 0);
+  assert.equal(row.boundaryVerification.sceneBoundary.previousId, 1);
+  assert.equal(row.scenePlaceRecoveryStatus, "changed");
+  assert.deepEqual(row.transitionEvidenceIds, [0, target]);
+  assert.equal(row.appliedTransition, "scene-cut");
+  assert.equal(row.pattern, "Reset");
+  assert.equal(row.readerCue, false);
+  assert.equal(accepted.run.units[target + 1].sceneId, row.sceneId);
+  const entry = accepted.requests.find(({mode}) => mode === "scene-entry");
+  const places = accepted.requests.filter(({mode}) => placeModes.has(mode));
+  assert.deepEqual(places, [{...entry, mode: "scene-old-place"}, {...entry, mode: "scene-arrival"}]);
+  assert.ok(accepted.requests.indexOf(places[1]) < accepted.requests.findIndex(({mode, targetIds}) =>
+    mode === "verify" && targetIds[0] === target + 1));
+  assert.ok(!accepted.requests.some(({mode}) => mode === "scene-situation"));
+  for (const [control, placeStatus] of [
+    [{oldWitness: {...oldPlace, earlierId: 1}}, "old-path-ineligible"],
+    [{oldWitness: uncertainPlace}, "old-uncertain"],
+    [{arrivalWitness: {...distinctArrival, earlierId: 1}}, "witness-disagreement"],
+    [{arrivalWitness: {...distinctArrival, status: "same"}}, "same"],
+    [{arrivalWitnessFailure: "transient"}, "arrival-transient"],
+    [{entry: viewpointOnly}, undefined],
+    [{boundaryWitness: {...boundary, reason: "time-jump"}}, undefined],
+    [{priorStop: true}, undefined],
+    [{targetStop: true}, undefined],
+  ]) {
+    const result = await settingRun({...options, ...control});
+    const negative = result.run.units[target];
+    assert.equal(negative.scenePlaceRecoveryStatus, placeStatus);
+    assert.notEqual(negative.appliedTransition, "scene-cut");
+    if (!placeStatus) assert.ok(!result.requests.some(({mode}) => placeModes.has(mode)));
+  }
+});
+
 test("only an exact quiet discovery can nominate setting proof with a neutral frame", async () => {
   const options = {...acceptedSettingCandidate, focusedTargetOnly: true, discoveryReading: {frame: "neutral"}};
   const unresolved = await settingRun(options);
