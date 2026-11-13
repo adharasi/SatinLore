@@ -94,6 +94,7 @@ function mapResult(result, first) {
     summary: {...result.summary, nativeVerification: result.summary.nativeVerification.map(row => ({...row, id: coordinate(row.id)})),
       supportingVerification: result.summary.supportingVerification?.map(row => ({...row, id: coordinate(row.id)})),
       attempts: result.summary.attempts.map(row => ({...row, targetIds: coordinates(row.targetIds), contextIds: coordinates(row.contextIds),
+        ...(first > 0 && row.boundaryContextLimit === "input-start" ? {boundaryContextLimit: "sealed-selection-start"} : {}),
         attestedIds: coordinates(row.attestedIds), rejectedFacts: row.rejectedFacts?.map(item => ({...item, id: coordinate(item.id)})),
         normalizedFacts: row.normalizedFacts?.map(item => ({...item, id: coordinate(item.id)}))}))},
   };
@@ -160,7 +161,9 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
   const maxBoundaryEntryConfirmations = 1;
   const maxSettingSituationVerifications = 1;
   const maxSettingPlaceWitnesses = 2;
+  const maxAuxiliaryDisagreementChecks = 1;
   const maxAttempts = 1 + 4 * targets.length + maxCueChecks + maxSupportingVerification + MAX_PRIMARY_ANCHOR_REPAIRS +
+    maxAuxiliaryDisagreementChecks +
     maxBoundaryEntryConfirmations + maxSettingSituationVerifications + maxSettingPlaceWitnesses;
   const budget = createLunaShadowBudget({maxAttempts, maxSourceBytes: 160_000, maxMicros: reservation.shardCapMicros});
   let externalCalls = 0, terminal, result;
@@ -184,7 +187,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       maxCueChecks, maxSupportingVerification, maxPrimaryAnchorRepairs: MAX_PRIMARY_ANCHOR_REPAIRS,
       verifyContinuityBoundary: true, releaseUnusedRestartReservation: true, sceneEntryArbitration: true,
       sameEpisodeArbitration: true, boundaryEntryConfirmation: true, interruptionReleaseArbitration: true,
-      uncertainContinuationArbitration: true,
+      uncertainContinuationArbitration: true, verifyAuxiliaryDisagreement: true,
       verifySettingSituation: true, sustainConnectorVerification: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();

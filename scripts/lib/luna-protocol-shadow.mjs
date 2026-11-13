@@ -44,7 +44,7 @@ const cueCheckFocus = {"opening-buildup": "buildup", "romantic-context": "buildu
   "primary-anchor-repair": "anchor-repair", "same-episode-boundary": "episode-boundary",
   "continuation-repair": "continuation-repair", "uncertain-continuation": "continuation-repair", "interruption-release": "interruption-release",
   "sustain-connector": "episode-boundary", "discovery-gap-support": "buildup",
-  "auxiliary-continuation": "continuation-repair"};
+  "auxiliary-continuation": "continuation-repair", "auxiliary-continuation-disagreement": "continuation-repair"};
 const startTransitions = new Set(["onset", "restart"]);
 const diagnosticLanes = {
   "scene-boundary": {verdictKey: "boundaryVerification", statusKey: "boundaryVerificationStatus", factKey: "sceneBoundary"},
@@ -1184,7 +1184,28 @@ function verifiedSustainConnector(verdict, prior, connectorId) {
     verdict.evidenceIds[0] === prior && verdict.evidenceIds[1] === connectorId;
 }
 
-function auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds, id) {
+function disputedAuxiliaryContinuation(row, opening, accent, openingProposal, accentProposal, priorId, supportId, id) {
+  const vote = row.interruptionReleaseVerification;
+  const scope = priorId - 1;
+  const root = scope - 1;
+  const matches = (fact, phase, action, transition, effect, scopeId, evidenceIds) =>
+    fact.narrativePhase === phase && fact.action === action && fact.transition === transition && fact.fact === effect &&
+    fact.scopeId === scopeId && fact.priorAnchor === null && fact.evidenceIds.length === evidenceIds.length &&
+    evidenceIds.every((coordinate, offset) => fact.evidenceIds[offset] === coordinate);
+  if (root < 0 || row.interruptionReleaseVerificationStatus !== "unconfirmed" ||
+      !exactCurrentCue(vote, id) || vote.depiction !== "neutral" ||
+      vote.narrativePhase !== "sustain" || vote.action !== "continuation" || vote.transition !== "none" || vote.fact !== "continue" ||
+      vote.scopeId !== scope || vote.priorAnchor !== supportId || vote.evidenceIds.length !== 4 ||
+      ![scope, priorId, supportId, id].every((coordinate, offset) => vote.evidenceIds[offset] === coordinate) ||
+      ![opening, accent, openingProposal, accentProposal].every(fact => romanticDepictions.has(fact.depiction)) ||
+      !matches(opening, "build", "contact", "none", "low", root, [scope, priorId]) ||
+      !matches(accent, "onset", "contact", "onset", "none", scope, [scope, priorId, supportId]) ||
+      !matches(openingProposal, "onset", "contact", "onset", "none", scope, [priorId]) ||
+      !matches(accentProposal, "sustain", "change", "accent", "none", scope, [supportId])) return null;
+  return {priorId, supportId, scope, root, openingScope: root};
+}
+
+function auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds, id, allowDisagreement) {
   const row = decisions.get(id), priorId = id - 2, supportId = id - 1;
   if (id < 3 || supportingIds.has(id) || !supportingIds.has(priorId) || !supportingIds.has(supportId) ||
       !row?.window || !row.prefixVerified || !strictQuietNegative(row.primaryPrefix) ||
@@ -1198,22 +1219,27 @@ function auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds
   const opener = decisions.get(priorId), support = decisions.get(supportId);
   const opening = opener.primaryPrefix, accent = support.primaryPrefix;
   const openingProposal = opener.discovery, accentProposal = support.discovery;
+  if (!opener.prefixVerified || !support.prefixVerified || !exactCurrentCue(opening, priorId) ||
+      !exactCurrentCue(accent, supportId) || !currentCueAt(openingProposal, priorId, "candidate") ||
+      !currentCueAt(accentProposal, supportId, "candidate")) return null;
+  const disputed = allowDisagreement &&
+    disputedAuxiliaryContinuation(row, opening, accent, openingProposal, accentProposal, priorId, supportId, id);
   const scope = opening?.scopeId;
-  if (scope == null || scope >= priorId || priorId - scope > 2 || !opener.prefixVerified || !support.prefixVerified ||
-      !exactCurrentCue(opening, priorId) || opening.action !== "contact" || opening.narrativePhase !== "onset" ||
+  if (!disputed && (scope == null || scope >= priorId || priorId - scope > 2 ||
+      opening.action !== "contact" || opening.narrativePhase !== "onset" ||
       opening.transition !== "onset" || opening.fact !== "none" || opening.priorAnchor !== null ||
       !romanticDepictions.has(opening.depiction) || opening.evidenceIds.length !== priorId - scope + 1 ||
       !opening.evidenceIds.every((evidence, offset) => evidence === scope + offset) ||
-      !currentCueAt(openingProposal, priorId, "candidate") || openingProposal.action !== "contact" ||
+      openingProposal.action !== "contact" ||
       openingProposal.narrativePhase !== "onset" || openingProposal.transition !== "onset" || openingProposal.fact !== "none" ||
       openingProposal.scopeId !== priorId || openingProposal.priorAnchor !== null || openingProposal.evidenceIds.length !== 1 ||
-      !exactCurrentCue(accent, supportId) || accent.action !== "change" || accent.narrativePhase !== "build" ||
+      accent.action !== "change" || accent.narrativePhase !== "build" ||
       accent.transition !== "accent" || accent.fact !== "low" || accent.scopeId !== scope || accent.priorAnchor !== null ||
       accent.evidenceIds.length !== 2 || accent.evidenceIds[0] !== priorId ||
-      !currentCueAt(accentProposal, supportId, "candidate") || accentProposal.action !== "change" ||
+      accentProposal.action !== "change" ||
       accentProposal.narrativePhase !== "sustain" || accentProposal.transition !== "accent" || accentProposal.fact !== "none" ||
       accentProposal.scopeId !== priorId || accentProposal.priorAnchor !== null || accentProposal.evidenceIds.length !== 1 ||
-      [openingProposal, accent, accentProposal].some(cue => cue.depiction !== opening.depiction)) return null;
+      [openingProposal, accent, accentProposal].some(cue => cue.depiction !== opening.depiction))) return null;
 
   // The blind check resolves the differing scope and phase of the supporting action.
   for (let coordinate = scope; coordinate <= id; coordinate++) {
@@ -1227,7 +1253,7 @@ function auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds
     if (coordinate < priorId && !strictQuietNegative(effect) ||
         coordinate === priorId && effect !== opening || coordinate === supportId && effect !== accent) return null;
   }
-  return {priorId, supportId, scope};
+  return disputed || {priorId, supportId, scope, root: scope, openingScope: scope};
 }
 
 function playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration) {
@@ -1606,8 +1632,10 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
     const auxiliaryCarry = result?.auxiliaryContinuation;
     const supportingCarry = auxiliaryCarry && pattern === "Baseline" && !boundary && !scope && !ease && !low &&
       !neutralize && !restartBoundary && lastAnchor === null && auxiliaryCarry.scope > evidenceBarrierId &&
-      [auxiliaryCarry.priorId, auxiliaryCarry.supportId].every(anchor => supportingAnchors.has(anchor) &&
-        anchors.get(anchor) === auxiliaryCarry.scope) ?
+      auxiliaryCarry.root > evidenceBarrierId && !blockedScopes.has(auxiliaryCarry.scope) &&
+      !blockedScopes.has(auxiliaryCarry.openingScope) && supportingAnchors.has(auxiliaryCarry.priorId) &&
+      supportingAnchors.has(auxiliaryCarry.supportId) && anchors.get(auxiliaryCarry.priorId) === auxiliaryCarry.openingScope &&
+      anchors.get(auxiliaryCarry.supportId) === auxiliaryCarry.scope ?
       {priorAnchor: auxiliaryCarry.priorId, knownAt: auxiliaryCarry.supportId,
         evidence: [auxiliaryCarry.priorId, auxiliaryCarry.supportId]} : null;
     const localAnchor = hasLow || signal && (activePhases.has(fact.narrativePhase) || signalProfile === "Undertone");
@@ -1656,6 +1684,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   verifyContinuityBoundary = false, releaseUnusedRestartReservation = false, sceneEntryArbitration = false, sameEpisodeArbitration = false,
   interruptionReleaseArbitration = false, sustainConnectorVerification = false,
   boundaryEntryConfirmation = false, verifySettingSituation = false, uncertainContinuationArbitration = false,
+  verifyAuxiliaryDisagreement = false,
   requireSceneBoundary = verifyTransitions && provider?.sceneBoundaryProtocol === true,
   boundaryVerificationTargets = [], localActionVerificationTargets = [], sceneEntryVerificationTargets = []} = {}) {
   if (typeof id !== "string" || !/^[a-z0-9-]{1,48}$/iu.test(id) || typeof now !== "function" ||
@@ -1670,7 +1699,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       typeof interruptionReleaseArbitration !== "boolean" || typeof sustainConnectorVerification !== "boolean" ||
       typeof boundaryEntryConfirmation !== "boolean" || boundaryEntryConfirmation && !sceneEntryArbitration ||
       typeof verifySettingSituation !== "boolean" || verifySettingSituation && !boundaryEntryConfirmation ||
-      typeof uncertainContinuationArbitration !== "boolean" ||
+      typeof uncertainContinuationArbitration !== "boolean" || typeof verifyAuxiliaryDisagreement !== "boolean" ||
       !Array.isArray(transitionTargets) || (!verifyTransitions && transitionTargets.length > 0) || !Array.isArray(boundaryVerificationTargets) ||
       !Array.isArray(localActionVerificationTargets) || localActionVerificationTargets.length > MAX_LOCAL_ACTION_DIAGNOSTIC_TARGETS ||
       !Array.isArray(sceneEntryVerificationTargets) || sceneEntryVerificationTargets.length > MAX_SCENE_ENTRY_DIAGNOSTIC_TARGETS ||
@@ -1721,7 +1750,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   let lastPotentialRestartClosure = -1, singleVerificationRun = false;
   const refusedRuns = new Set();
   const refusedDiagnosticRuns = new Map([...Object.keys(diagnosticLanes), "continuation-repair", "uncertain-continuation",
-    "interruption-release", "sustain-connector", "discovery-gap-support", "auxiliary-continuation"]
+    "interruption-release", "sustain-connector", "discovery-gap-support", "auxiliary-continuation",
+    "auxiliary-continuation-disagreement"]
     .map(mode => [mode, new Set()]));
   const invalidated = window => refusedRuns.has(window.runId);
   const attest = createCausalAttestationLedger(decisions, blocked, LUNA_PROTOCOL_LIMITS.maxAttested, index.units);
@@ -1823,7 +1853,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const attempts = new Map();
     const independentCueCheck = stage === "interruption-release" || stage === "continuation-repair" ||
       stage === "uncertain-continuation" || stage === "sustain-connector" || stage === "discovery-gap-support" ||
-      stage === "auxiliary-continuation";
+      stage === "auxiliary-continuation" || stage === "auxiliary-continuation-disagreement";
+    const auxiliaryDisagreementCheck = stage === "auxiliary-continuation-disagreement";
     const diagnosticRefusals = refusedDiagnosticRuns.get(stage);
     const skipped = window => invalidated(window) || diagnosticRefusals?.has(window.runId);
     const results = await executeWholeStoryContextPlan({windows}, {signal, maxAttempts: windows.length,
@@ -1857,7 +1888,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         if (independentCueCheck) {
           record.cueCheckReason = stage;
           record.focus = cueCheckFocus[stage];
-          if (cueChecksStarted >= maxCueChecks) return deferPrefixRequest(record, id, "cue-check-limit");
+          if (!auxiliaryDisagreementCheck && cueChecksStarted >= maxCueChecks) return deferPrefixRequest(record, id, "cue-check-limit");
         } else if (mode === "cue-check") {
           const row = decisions.get(id);
           const primary = row.primaryPrefix;
@@ -1931,7 +1962,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         pendingPinned.delete(window.id);
         if (episodeCheck) sameEpisodeCheckStarted = true;
         if (record.cueCheckReason === "primary-anchor-repair") primaryAnchorRepairsStarted++;
-        else if (mode === "cue-check") cueChecksStarted++;
+        else if (mode === "cue-check" && !auxiliaryDisagreementCheck) cueChecksStarted++;
         record.attempted = true;
         record.contextUnits = payload.units.length - window.targetIds.length;
         if (mode !== "discovery") record.attestedIds = attested.map(({unitId}) => unitId);
@@ -2036,8 +2067,23 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         const normalized = (Array.isArray(answer.targetNormalizations) ? answer.targetNormalizations : [])
           .filter(row => acceptedIds.has(row?.unitId) && LUNA_PROTOCOL_TARGET_NORMALIZATIONS.includes(row.reason));
         if (normalized.length) record.normalizedFacts = normalized.map(({unitId, reason}) => ({id: unitId, reason}));
+        const verdict = byTarget.get(id);
+        const typedBoundaryUnresolved = mode === "transition" && verdict?.sceneBoundary?.status === "uncertain" &&
+          !normalized.some(({reason}) => reason === "protective-scene-boundary-unresolved");
+        if (typedBoundaryUnresolved ||
+            mode === "scene-boundary" && verdict?.sceneBoundary?.contrast === "insufficient-prefix" ||
+            mode === "scene-entry" && verdict?.sceneEntry?.reason === "insufficient-prefix") {
+          // Report the mechanical left edge. The typed verdict cannot say
+          // whether more context would resolve the uncertainty.
+          const firstId = payload.units[0].id;
+          const requestedFirst = Math.max(window.runId, id - prefixUnits + 1);
+          record.boundaryContextLimit = firstId > requestedFirst ? "byte-cap" :
+            firstId > window.runId ? "unit-cap" : firstId === 0 ? "input-start" :
+              index.units[firstId - 1].structuralBoundary ? "structural-divider" :
+                approved.has(firstId - 1) ? "planner-run-gap" : "grant-gap";
+        }
         if (mode !== "discovery" && !diagnosticRefusals && !signal.aborted) {
-          storePrefixResult(mode, id, byTarget.get(id), "returned", undefined, record.cueCheckReason);
+          storePrefixResult(mode, id, verdict, "returned", undefined, record.cueCheckReason);
         }
         return {status: "annotated", annotations};
       }});
@@ -2521,17 +2567,20 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       }
       break;
     }
-    if (uncertainContinuationArbitration && cueChecksStarted < maxCueChecks) for (const id of sceneEntryTargets) {
-      const candidate = auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds, id);
+    if (uncertainContinuationArbitration && maxCueChecks > 0) for (const id of sceneEntryTargets) {
+      const candidate = auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds, id, verifyAuxiliaryDisagreement);
       if (!candidate) continue;
-      const {supportId, scope} = candidate;
+      const {supportId, scope, root, openingScope} = candidate;
+      const disputed = openingScope !== scope;
+      if (!disputed && cueChecksStarted >= maxCueChecks) continue;
       const support = decisions.get(supportId);
       const job = prefixJob(support.window, supportId, index, prefixUnits, "cue-check");
-      if (!job.contextIds.includes(scope) || invalidated(job)) continue;
+      if (!job.contextIds.includes(root) || invalidated(job)) continue;
       const localCausal = createCausalAttestationLedger(decisions, blocked, 0, index.units)(
         {runId: job.runId, firstId: inputFor(job).units[0].id, target: supportId});
-      if (localCausal.restartBoundary || localCausal.protectedScopes.has(scope)) continue;
-      const [{result, status}] = await execute([{...job, id: `${job.id}:auxiliary-continuation`}], "auxiliary-continuation");
+      if (localCausal.restartBoundary || localCausal.protectedScopes.has(scope) || localCausal.protectedScopes.has(openingScope)) continue;
+      const stage = disputed ? "auxiliary-continuation-disagreement" : "auxiliary-continuation";
+      const [{result, status}] = await execute([{...job, id: `${job.id}:${stage}`}], stage);
       const verdict = status === "returned" ? result.annotations[0] : undefined;
       support.interruptionContinuationVerification = verdict;
       support.interruptionContinuationVerificationStatus = verdict ? "unconfirmed" : status;

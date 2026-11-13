@@ -15,13 +15,14 @@ const onset = unitId => ({...neutral(unitId), status: "verified", depiction: "ro
   action: "contact", transition: "onset", scopeId: unitId, evidenceIds: [unitId]});
 const primaryCut = unitId => ({...neutral(unitId), status: "verified", transition: "scene-cut", fact: "cut", evidenceIds: [unitId]});
 const noBoundary = {status: "none", reason: "none", previousId: null, entryId: null};
+const uncertainBoundary = {status: "uncertain", reason: "unclear", previousId: null, entryId: null};
 const cut = {status: "cut", reason: "time-jump", previousId: 1, entryId: 2};
 const typed = (row, sceneBoundary = noBoundary) => ({...row, depiction: "unknown", narrativePhase: "unknown",
   action: "unknown", sceneBoundary});
 
 async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoundary, nextTyped, focusAnswer, prefixUnits = 24,
   boundaryVerificationTargets, boundaryAnswer, localActionVerificationTargets, localActionAnswer, transitionAnswer, budget,
-  priorCue = onset(1), priorTyped = typed(priorCue), observed = []} = {}) {
+  reviewGrant = grant, priorCue = onset(1), priorTyped = typed(priorCue), observed = []} = {}) {
   const provider = Object.assign(async request => {
     observed.push(request);
     const {mode, targetIds} = request;
@@ -40,11 +41,48 @@ async function study({cue = neutral, boundary = typed(neutral(2), cut), nextBoun
       return local;
     })};
   }, {sceneBoundaryProtocol: true});
-  return runLunaProtocolShadow({id: "scene-boundary", text, grant, now: () => 1, provider, prefixUnits, budget,
+  return runLunaProtocolShadow({id: "scene-boundary", text, grant: reviewGrant, now: () => 1, provider, prefixUnits, budget,
     verificationTargets: [1, 2, 3], transitionTargets: [1, 2, 3], verifyTransitions: true, negativeStride: 0,
     verifyContinuityBoundary: Boolean(focusAnswer), maxCueChecks: Number(Boolean(focusAnswer)),
     boundaryVerificationTargets, localActionVerificationTargets});
 }
+
+test("boundary abstention reports the actual prefix edge without authorizing new evidence", async () => {
+  const boundary = typed(neutral(2), uncertainBoundary);
+  for (const [options, expected, contextIds] of [[{}, "input-start", [0, 1]],
+    [{prefixUnits: 2}, "unit-cap", [1]], [{reviewGrant: {...grant, spans: grant.spans.slice(1)}}, "grant-gap", [1]]]) {
+    const observed = [], {units, summary} = await study({...options, observed, cue: primaryCut, boundary});
+    const attempt = summary.attempts.find(row => row.mode === "transition" && row.targetIds[0] === 2);
+    assert.equal(attempt.boundaryContextLimit, expected);
+    assert.deepEqual(attempt.contextIds, contextIds);
+    assert.deepEqual(observed.find(row => row.mode === "transition" && row.targetIds[0] === 2).units.map(row => row.id), [...contextIds, 2]);
+    assert.equal(units[2].appliedTransition, "none");
+    assert.equal(units[2].sceneId, units[1].sceneId);
+  }
+  for (const boundary of [null, typed(neutral(2)), typed(neutral(2), cut)]) {
+    const {summary} = await study({boundary});
+    const attempt = summary.attempts.find(row => row.mode === "transition" && row.targetIds[0] === 2);
+    assert.equal(attempt.boundaryContextLimit, undefined);
+  }
+  const stop = {...neutral(2), status: "verified", transition: "hard-stop", fact: "protective", evidenceIds: [2]};
+  const transitionAnswer = {status: "ok", facts: [typed(stop, uncertainBoundary)],
+    targetNormalizations: [{unitId: 2, reason: "protective-scene-boundary-unresolved"}]};
+  const {summary, units} = await study({transitionAnswer});
+  const attempt = summary.attempts.find(row => row.mode === "transition" && row.targetIds[0] === 2);
+  assert.equal(attempt.boundaryContextLimit, undefined);
+  assert.equal(units[2].pattern, "Stop");
+});
+
+test("an independent boundary explicitly reports missing context but not ambiguous change", async () => {
+  for (const contrast of ["insufficient-prefix", "ambiguous-change"]) {
+    const boundaryAnswer = unitId => ({status: "ok", facts: [{unitId,
+      sceneBoundary: {...uncertainBoundary, changeId: null, contrast}}]});
+    const {summary} = await study({boundaryVerificationTargets: [2], boundaryAnswer});
+    const attempt = summary.attempts.find(row => row.mode === "scene-boundary");
+    assert.equal(attempt.status, "returned");
+    assert.equal(attempt.boundaryContextLimit, contrast === "insufficient-prefix" ? "input-start" : undefined);
+  }
+});
 
 test("does not apply a primary target-only cut without independent proof", async () => {
   for (const boundary of [typed(neutral(2)), typed(neutral(2), {...cut, previousId: 2}), null]) {

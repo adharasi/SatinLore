@@ -973,6 +973,38 @@ test("the Luna corpus Worker sends only sealed exact excerpts and maps live rows
   assert.equal(f.calls.length, 6);
 });
 
+test("the Luna corpus Worker reports an unresolved boundary at a sealed selection start", {timeout: 30000}, async t => {
+  const {reviewedSpend} = await studyBudget(t);
+  const f = fixture({spend: reviewedSpend, provider: async (url, options) => {
+    const reply = await neutralProtocolUpstream(url, options).json();
+    const answer = reply.output[0].content[0];
+    const {facts} = JSON.parse(answer.text);
+    const schema = JSON.parse(options.body).text.format.name;
+    if (schema === "nocturne_luna_transition_v2") {
+      facts[0].sceneBoundary = {status: "uncertain", reason: "unclear", previousId: null, entryId: null};
+    } else if (schema === "nocturne_luna_scene_entry_v1") {
+      facts[0].sceneEntry = {status: "uncertain", reason: "insufficient-prefix", previousId: null, changeId: null, entryId: null};
+    }
+    answer.text = JSON.stringify({facts});
+    return Response.json(reply);
+  }});
+  const founder = await token(), env = enableWholeStory(f.env), clip = reviewedClip(), runId = randomUUID();
+  const post = (path, body) => f.worker.fetch(request(founder, {path: `${LUNA_CORPUS_PATH}/${path}`, body}), env);
+  assert.equal((await post("approve", {runId, clips: [{id: clip.id, digest: sha256(JSON.stringify(clip))}], reviewConfirmed: true})).status, 200);
+  const response = await post("shard", {runId, clip});
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.deepEqual(result.summary.attempts.filter(row => row.boundaryContextLimit).map(
+    ({mode, boundaryContextLimit, targetIds, contextIds}) => [mode, boundaryContextLimit, targetIds, contextIds]), [
+    ["transition", "sealed-selection-start", [33], [32]], ["scene-entry", "sealed-selection-start", [33], [32]],
+  ]);
+  assert.equal(result.units[1].appliedTransition, "none");
+  assert.equal(result.units[1].sceneId, result.units[0].sceneId);
+  const sent = f.calls.flatMap(({options}) => JSON.parse(JSON.parse(options.body).input).units.map(row => row.text));
+  assert.ok(sent.every(text => clip.units.some(unit => unit.text === text)));
+  assert.ok(clip.units.every(unit => !JSON.stringify(result).includes(unit.text)));
+});
+
 for (const check of ["joint", "separate", "activity stop and"]) test(`the Luna corpus Worker maps ${check} setting evidence`, {timeout: 30000}, async t => {
   const split = check === "separate";
   const activityStop = check === "activity stop and";

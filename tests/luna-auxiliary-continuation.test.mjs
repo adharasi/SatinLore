@@ -18,7 +18,8 @@ const currentNoAction = {status: "none", frame: "current", action: "none", phase
 const usage = {inputTokens: 100, outputTokens: 20};
 
 function run({observed = [], answer = continuation, enabled = true, blockedIds = [], targetEntry = ordinaryEntry,
-  targetBoundary = noBoundary, targetText = "Someone knocked.", maxCueChecks = 1, priorAccent = accent} = {}) {
+  targetBoundary = noBoundary, targetText = "Someone knocked.", maxCueChecks = 1, priorAccent = accent,
+  disputed = false, verifyAuxiliaryDisagreement = disputed, releaseProof} = {}) {
   const text = `The quartet began. Mira waited near the door. Lee took her hand. Lee drew her closer.\n\n${targetText} The quartet played on.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
@@ -27,6 +28,23 @@ function run({observed = [], answer = continuation, enabled = true, blockedIds =
     observed.push(request);
     if (request.focus === "continuation-repair" && !answer) return {status: "refused", usage};
     const facts = request.targetIds.map(id => {
+      if (disputed) {
+        if (request.focus === "interruption-release" && id === 4) {
+          return releaseProof ?? {...neutral(4), status: "verified", narrativePhase: "sustain", action: "continuation",
+            fact: "continue", scopeId: 1, priorAnchor: 3, evidenceIds: [1, 2, 3, 4]};
+        }
+        if (request.mode === "verify" && id === 2) {
+          return {...onset, narrativePhase: "build", transition: "none", fact: "low", evidenceIds: [1, 2]};
+        }
+        if (request.mode === "verify" && id === 3) return {...onset, unitId: 3, scopeId: 1, evidenceIds: [1, 2, 3]};
+        if (request.mode === "discovery" && id === 2) {
+          return {...onset, status: "candidate", depiction: "suggestive", scopeId: 1, evidenceIds: [2]};
+        }
+        if (request.mode === "discovery" && id === 3) {
+          return {...accent, status: "candidate", depiction: "suggestive", narrativePhase: "sustain",
+            fact: "none", scopeId: 1, evidenceIds: [3]};
+        }
+      }
       if (request.mode === "cue-check") return request.focus === "continuation-repair" ? answer : neutral(id);
       if (request.mode === "scene-entry") return {unitId: id, sceneEntry: id === 4 ? targetEntry : ordinaryEntry};
       if (request.mode === "local-action") return {unitId: id, localAction: currentNoAction};
@@ -42,7 +60,8 @@ function run({observed = [], answer = continuation, enabled = true, blockedIds =
   return runLunaProtocolShadow({id: "auxiliary-continuation", text, grant, now: () => 1, provider, blockedIds,
     verificationTargets: [1, 4], maxVerification: 2, transitionTargets: [1, 4], maxTransitionVerification: 2,
     maxSupportingVerification: 2, negativeStride: 0, verifyTransitions: true, maxCueChecks,
-    sceneEntryVerificationTargets: [4], localActionVerificationTargets: [4], uncertainContinuationArbitration: enabled});
+    sceneEntryVerificationTargets: [4], localActionVerificationTargets: [4], uncertainContinuationArbitration: enabled,
+    interruptionReleaseArbitration: disputed, verifyAuxiliaryDisagreement});
 }
 
 test("a blind continuation proof carries only the quiet native target", async () => {
@@ -99,5 +118,34 @@ test("a first entry, typed cut, elapsed interval, missing support or budget excl
     const observed = [], {units} = await run({...options, observed});
     assert.equal(observed.some(request => request.focus === "continuation-repair"), false, JSON.stringify(options));
     assert.notEqual(units[4].pattern, "Sustain wave");
+  }
+});
+
+test("a failed release check can nominate one blind support check after the cue allowance", async () => {
+  const observed = [];
+  const actual = await run({disputed: true, observed, answer: {...continuation, scopeId: 1}});
+  const focused = observed.filter(request => request.focus);
+  assert.deepEqual(focused.map(({focus, targetIds}) => [focus, targetIds]), [
+    ["interruption-release", [4]], ["continuation-repair", [3]],
+  ]);
+  assert.deepEqual(focused[1].units.map(({id}) => id), [0, 1, 2, 3]);
+  assert.equal(focused[1].attested, undefined);
+  assert.equal(actual.units[4].interruptionReleaseVerificationStatus, "unconfirmed");
+  assert.equal(actual.units[3].interruptionContinuationVerificationStatus, "verified");
+  assert.deepEqual(actual.units.map(row => row.pattern), [
+    "Baseline", "Baseline", "Baseline", "Baseline", "Sustain wave", "Baseline",
+  ]);
+  assert.deepEqual(actual.units[4].trace.evidence, [2, 3]);
+});
+
+test("neutral proof or an unrelated release reply cannot carry disputed supporting actions", async () => {
+  const negative = await run({disputed: true, answer: neutral(3)});
+  assert.equal(negative.units[3].interruptionContinuationVerificationStatus, "unconfirmed");
+  assert.equal(negative.units[4].pattern, "Baseline");
+  for (const options of [{releaseProof: neutral(4)}, {verifyAuxiliaryDisagreement: false}]) {
+    const observed = [];
+    const actual = await run({disputed: true, observed, ...options});
+    assert.equal(observed.some(request => request.focus === "continuation-repair"), false);
+    assert.equal(actual.units[4].pattern, "Baseline");
   }
 });
