@@ -1,5 +1,5 @@
 export const LUNA_PROTOCOL_MODEL = "gpt-6-luna";
-export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v44";
+export const LUNA_PROTOCOL_RUBRIC_VERSION = "nocturne-luna-protocol-v45";
 const controlRubricVersion = "nocturne-luna-protocol-v17";
 const boundaryRubricVersion = "nocturne-luna-protocol-v18";
 const localActionRubricVersion = "nocturne-luna-protocol-v40";
@@ -255,6 +255,8 @@ const sceneArrivalInstructions = [
   "Use distinct only when the target shows actual entry into a physically distinct place that takes over as the active scene. A compressed journey ending in an enacted arrival or disembarkation can establish the new place without naming it. A destination can be identified earlier if the target unambiguously enacts entry into it. The target itself must enact arrival. Continuing the same activity can occur in a distinct place, but looking at another place, preparing to go, speaking about movement, routine movement in the same active scene, a different viewpoint and time or objective changes alone do not qualify.",
   "Independently cite the earlier unit that itself grounds the old active place, not an intervening unit that merely refers to the place or states a destination. For distinct, set earlierId to that unit and currentId to the exact target. Use same with both IDs only when the target positively grounds the same active place. If either coordinate cannot be independently established, use uncertain and both IDs null. Earlier imagined, remembered or reported places do not count. Never quote, describe, continue or repeat the text.",
 ].join(" ");
+const paragraphArrivalFocus = "paragraph-arrival";
+const paragraphArrivalInstructions = " Distinguish a completed journey to a destination from movement within the old place. A past-tense journey that reaches its destination in the target can establish arrival without a separate arrival verb. Movement toward a place, a proposed destination, and ordinary motion within the same active setting do not establish arrival. Independently ground the old place before returning distinct.";
 const attestationInstructions = "The optional attested array contains typed labels independently verified earlier in this cleared run. Each record gives a unitId, scopeId, frame, action and narrativePhase. An attested scopeId names the earlier scope. It is not an evidence citation on its own. An attested unitId can support only an eligible priorAnchor fact for the same scope and frame. Also cite the current target itself and require support there for the claimed connection, easing or ending. Do not infer present action, a new rise, eligibility or uninterrupted continuity from an earlier attestation alone. The current prefix must independently support those decisions. If continuity is unclear, abstain or return uncertain.";
 
 function promptFor(mode, withAttestation, focus) {
@@ -263,7 +265,7 @@ function promptFor(mode, withAttestation, focus) {
   if (mode === "scene-entry") return focus === materialTimeWitnessFocus ? materialTimeWitnessInstructions : sceneEntryInstructions;
   if (mode === "scene-situation") return sceneSituationInstructions;
   if (mode === "scene-old-place") return oldPlaceInstructions;
-  if (mode === "scene-arrival") return sceneArrivalInstructions;
+  if (mode === "scene-arrival") return sceneArrivalInstructions + (focus === paragraphArrivalFocus ? paragraphArrivalInstructions : "");
   const rubric = mode === "transition" ? transitionInstructions : `${instructions} ${modeInstructions[mode]}`;
   return [rubric, withAttestation ? attestationInstructions : null, focus === undefined ? null : cueCheckFocus[focus]]
     .filter(Boolean).join(" ");
@@ -278,7 +280,8 @@ const bytes = value => encoder.encode(value).byteLength;
 const wireEnvelopeBytes = 512;
 export const lunaProtocolInputOverhead = Math.max(...Object.entries(formats).flatMap(([mode, format]) => {
   const focuses = mode === "cue-check" ? [undefined, ...Object.keys(cueCheckFocus)] :
-    mode === "scene-entry" ? [undefined, materialTimeWitnessFocus] : [undefined];
+    mode === "scene-entry" ? [undefined, materialTimeWitnessFocus] :
+    mode === "scene-arrival" ? [undefined, paragraphArrivalFocus] : [undefined];
   return focuses.map(focus => bytes(promptFor(mode, mode !== "discovery", focus)) + bytes(JSON.stringify(format)) + wireEnvelopeBytes);
 }));
 const factKeys = Object.keys(fields);
@@ -313,7 +316,7 @@ export function lunaProtocolOutputTokens(targetCount) {
 function validRequest({mode, units, targetIds, attested = [], focus} = {}) {
   const {maxUnits, maxTargets, maxVerifyUnits, maxUnitBytes, maxSourceBytes, maxAttested} = LUNA_PROTOCOL_LIMITS;
   const validFocus = focus === undefined || mode === "cue-check" && typeof focus === "string" && Object.hasOwn(cueCheckFocus, focus) ||
-    mode === "scene-entry" && focus === materialTimeWitnessFocus;
+    mode === "scene-entry" && focus === materialTimeWitnessFocus || mode === "scene-arrival" && focus === paragraphArrivalFocus;
   if (typeof mode !== "string" || !Object.hasOwn(formats, mode) || !Array.isArray(units) || !units.length || units.length > maxUnits ||
       !Array.isArray(targetIds) || !targetIds.length || targetIds.length > maxTargets || !ordered(targetIds) ||
       !Array.isArray(attested) || attested.length > maxAttested || !validFocus) return false;

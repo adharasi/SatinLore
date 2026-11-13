@@ -117,3 +117,102 @@ test("unscoped discovery may nominate the same exact checks but a grant gap and 
     if (options.primary) assert.equal(units[2].pattern, "Stop");
   }
 });
+
+const dayStory = "Day 5. Ada checked the maps. Lee put away the lantern.\n\nDay 6. They opened the mountain station.";
+const arrivalStory = "June closed the old library. Lee fetched a coat.\n\nThey walked to the bus stop. The driver opened the doors.";
+const timeStory = "June checked the recorder. Lee called the test off.\n\nAt dawn they inspected the equipment. They packed it away.";
+
+async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped = false, typed, entry, focused, arrived = arrival,
+  earlier = oldPlace, observed = [], closed = false, lateCut = false} = {}) {
+  const indexed = buildWholeStoryIndex(text);
+  const scopes = indexed.units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}));
+  const targets = [target, target + 1];
+  const provider = Object.assign(async request => {
+    observed.push(request);
+    const facts = request.targetIds.map(unitId => {
+      const stopFact = (stopped && unitId === target || closed && unitId === target - 1) ?
+        {...stop, unitId, evidenceIds: [unitId]} : null;
+      const ordinaryEnd = text === timeStory && unitId === target - 1 ? {...quiet(unitId), status: "verified",
+        transition: "non-romantic-activity-stop", evidenceIds: [unitId]} : null;
+      if (request.mode === "scene-entry") return {unitId, sceneEntry: unitId === target ? entry ?? noEntry("setup-only") :
+        lateCut ? {...timeWitness, status: "none", reason: "already-entered"} : noEntry("same-episode")};
+      if (request.mode === "scene-old-place") return {unitId, scenePlace: earlier};
+      if (request.mode === "scene-arrival") return {unitId, scenePlace: arrived};
+      if (request.mode === "transition") return {...(stopFact ?? ordinaryEnd ?? quiet(unitId)),
+        depiction: "unknown", action: "unknown", narrativePhase: "unknown",
+        sceneBoundary: unitId === target ? typed ?? noBoundary : lateCut && unitId === target + 1 ?
+          {status: "cut", reason: "time-jump", previousId: target - 1, entryId: unitId} : noBoundary};
+      if (request.mode === "cue-check" && unitId === target && focused) return focused;
+      return stopFact ?? ordinaryEnd ?? {...quiet(unitId), scopeId: unitId === target && text === arrivalStory ? 1 : null};
+    });
+    return {status: "ok", usage: {inputTokens: 100, outputTokens: 30}, facts};
+  }, {sceneBoundaryProtocol: true});
+  return runLunaProtocolShadow({id: "boundary-arbitration", text, grant: {...grant,
+    editionDigest: indexed.editionDigest, spans: scopes.slice(first)}, now: () => 1, provider, blockedIds,
+    verificationTargets: targets, transitionTargets: targets, sceneEntryVerificationTargets: targets,
+    verifyTransitions: true, negativeStride: 0, maxCueChecks: 2, verifyContinuityBoundary: true,
+    sceneEntryArbitration: true, boundaryEntryConfirmation: true, verifySettingSituation: true, verifyBoundaryArbitration: true});
+}
+
+test("a numbered day heading establishes a cut only with an earlier anchored heading in the same narrative", async () => {
+  const wide = await arbitrate(dayStory, {target: 3});
+  assert.equal(wide.units[3].appliedTransition, "scene-cut");
+  assert.equal(wide.units[3].boundaryWitnessStatus, "paired-day-headings");
+  assert.equal(wide.units[3].pattern, "Reset");
+  assert.deepEqual(wide.units[3].transitionEvidenceIds, [0, 2, 3]);
+  assert.equal(wide.units[4].sceneId, wide.units[3].sceneId);
+  assert.notEqual(wide.units[2].sceneId, wide.units[3].sceneId);
+  const short = await arbitrate(dayStory, {target: 3, first: 1});
+  assert.equal(short.units[3].pattern, "Reset");
+  assert.equal(short.units[3].appliedTransition, "uncertain-continuity");
+  assert.equal(short.units[3].sceneId, short.units[2].sceneId);
+  for (const variant of [dayStory.replace("Day 6", "Day 5"), dayStory.replace("Day 6.", "They talked about day 6.")]) {
+    assert.notEqual((await arbitrate(variant, {target: 3})).units[3].pattern, "Reset");
+  }
+  for (const options of [{blockedIds: [0]}, {blockedIds: [2]}, {closed: true}, {stopped: true}]) {
+    assert.notEqual((await arbitrate(dayStory, {...options, target: 3})).units[3].appliedTransition, "scene-cut");
+  }
+  assert.equal((await arbitrate(dayStory, {target: 3, stopped: true})).units[3].pattern, "Stop");
+});
+
+test("a named bus stop can nominate independent arrival proof and cannot suppress a real Stop", async () => {
+  const observed = [], routine = noEntry("routine-movement");
+  const {units} = await arbitrate(arrivalStory, {entry: routine, observed});
+  assert.equal(units[2].appliedTransition, "scene-cut");
+  assert.equal(units[2].pattern, "Reset");
+  assert.equal(units[2].scenePlaceRecoveryStatus, "changed");
+  assert.deepEqual(units[2].transitionEvidenceIds, [0, 2]);
+  const arrivalRequest = observed.find(({mode}) => mode === "scene-arrival");
+  assert.equal(arrivalRequest.focus, "paragraph-arrival");
+  assert.equal(arrivalRequest.attested, undefined);
+  assert.deepEqual(arrivalRequest.units.map(unit => unit.id), [0, 1, 2]);
+  for (const options of [{earlier: noPlace}, {arrived: {...arrival, status: "same"}},
+    {arrived: {...arrival, earlierId: 1}}, {blockedIds: [1]}, {stopped: true}]) {
+    const outcome = await arbitrate(arrivalStory, {entry: routine, ...options});
+    assert.notEqual(outcome.units[2].appliedTransition, "scene-cut");
+    if (options.stopped) assert.equal(outcome.units[2].pattern, "Stop");
+  }
+  const instruction = arrivalStory.replace("They walked to the bus stop.", "They walked to the bus stop and Lee asked June to stop.");
+  assert.notEqual((await arbitrate(instruction)).units[2].appliedTransition, "scene-cut");
+});
+
+test("an ungrounded continuity veto yields to matching exact time evidence before the successor", async () => {
+  const typed = {status: "cut", reason: "time-jump", previousId: 1, entryId: 2};
+  const focused = quiet(2);
+  const observed = [];
+  const {units} = await arbitrate(timeStory, {typed, entry: timeWitness, focused, observed, lateCut: true});
+  assert.equal(units[2].cueRecoveryCorrection, "continuity-cut-veto");
+  assert.equal(units[2].boundaryWitnessStatus, "corroborated-typed-time-cut");
+  assert.equal(units[2].pattern, "Reset");
+  assert.equal(units[2].appliedTransition, "scene-cut");
+  assert.equal(units[3].appliedTransition, "none");
+  assert.equal(units[3].sceneId, units[2].sceneId);
+  assert.ok(observed.findIndex(row => row.mode === "scene-entry" && row.targetIds[0] === 2) <
+    observed.findIndex(row => row.mode === "verify" && row.targetIds[0] === 3));
+  for (const options of [{entry: noEntry("elapsed-continuation")}, {entry: {...timeWitness, previousId: 0}},
+    {blockedIds: [1]}, {focused: {...focused, evidenceIds: [1, 2]}}, {focused: stop}]) {
+    const negative = await arbitrate(timeStory, {typed, entry: timeWitness, focused, ...options});
+    assert.notEqual(negative.units[2].appliedTransition, "scene-cut", JSON.stringify(options));
+    if (options.focused === stop) assert.equal(negative.units[2].pattern, "Stop");
+  }
+});

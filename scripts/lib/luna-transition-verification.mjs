@@ -11,13 +11,14 @@ const pendingContextEffects = new Set(["none", "low", "continue", "ease"]);
 const pendingContextEvents = new Set(["none", "onset", "accent", "ease", "recover"]);
 const elapsedInterval = /^\s*(?:(?:after (?:a while|some time)|some time later|(?:a few|several) (?:minutes|hours) later|(?:minutes|hours) passed)\b|[^“"‘’\n.!?]{0,60}\b(?:stayed|waited|remained|lingered)\b[^“"‘’\n.!?]{0,90}\bfor (?:a while|some time)\b)/iu;
 const voluntaryBoundaryHint = /\b(?:called time|called (?:for )?a (?:break|halt)|asked (?:for (?:a )?break|(?:them|him|her) to stop)|let go|stepped apart|withdrew|declined|refused|would rather|said no|stop(?:ped)?)\b/iu;
+const namedStop = /\b(?:bus|tram|train|rest|pit|truck)\s+stop\b/giu;
 const explicitBoundary = /\b(?:interrupted|ended|put (?:the|their|his|her) (?:letter|note|journal|diary|book) down|set (?:the|their|his|her) (?:letter|note|journal|diary|book) aside|read (?:the|their|his|her|an?) (?:account|letter|note|diary|journal)|read aloud|recounted|recalled|remembered|back in the present|returned to the present|for a while)\b/iu;
 const contextChange = /\b(?:afterwards?|later|previously|then|back|again|apart|pause|waited|stayed|remained|wouldn't|didn't want|break|call|memory|account|old letter|time)\b/iu;
 
 export function transitionPriority(unit, discovery, requested) {
   if (requested) return 100;
   if (discovery?.fact === "protective") return 90;
-  if (voluntaryBoundaryHint.test(unit.text) || explicitBoundary.test(unit.text)) return 80;
+  if (hasVoluntaryBoundaryHint(unit) || explicitBoundary.test(unit.text)) return 80;
   if (discovery && !noEvent.has(discovery.transition)) return 60;
   return contextChange.test(unit.text) ? 20 : 0;
 }
@@ -37,7 +38,11 @@ export function restartCheckPending(boundary, row) {
 }
 
 export function possibleRestartClosure(unit, proposal) {
-  return (restartCheckPending(proposal?.transition) && proposal.fact !== "protective") || voluntaryBoundaryHint.test(unit.text);
+  return (restartCheckPending(proposal?.transition) && proposal.fact !== "protective") || hasVoluntaryBoundaryHint(unit);
+}
+
+function hasVoluntaryBoundaryHint(unit) {
+  return voluntaryBoundaryHint.test(unit.text.replace(namedStop, ""));
 }
 
 export function verifiedContextCut(annotation, id) {
