@@ -271,7 +271,8 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
     Object.assign(response.units[0], {uncertainContinuationVerification: continuation,
       uncertainContinuationVerificationStatus: "verified", localActionApplication: "sustain-uncertainty-profile"});
     response.units.unshift({id: context.id, unitSha256: context.digest, text: unexpectedText,
-      playbackDisposition: "supporting-rooted-onset", trace: {...trace, reason: unexpectedText},
+      playbackDisposition: "supporting-rooted-onset", cueRecoveryReason: "discovery-gap-support",
+      cueRecoveryCorrection: "discovery-gap-support", trace: {...trace, reason: unexpectedText},
       primaryPrefix: {...fact, note: unexpectedText}});
     response.summary.attempts.unshift(support, rejectedAction);
     return Response.json(response);
@@ -294,7 +295,8 @@ test("a saved checkpoint exports source-free supporting labels and rejection dia
   assert.deepEqual(replayClips[0].attempts[1], rejectedAction);
   assert.deepEqual(works[0].summary.attempts[1], rejectedAction);
   assert.deepEqual(replayClips[0].units[0], {id: context.id, unitSha256: context.digest, primaryPrefix: fact,
-    playbackDisposition: "supporting-rooted-onset", trace});
+    playbackDisposition: "supporting-rooted-onset", cueRecoveryReason: "discovery-gap-support",
+    cueRecoveryCorrection: "discovery-gap-support", trace});
   assert.deepEqual(replayClips[0].units[1].uncertainContinuationVerification, continuation);
   assert.equal(replayClips[0].units[1].uncertainContinuationVerificationStatus, "verified");
   assert.equal(replayClips[0].units[1].localActionApplication, "sustain-uncertainty-profile");

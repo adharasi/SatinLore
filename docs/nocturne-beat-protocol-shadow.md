@@ -604,3 +604,11 @@ A supporting buildup can renew an established, unexpired beat when its discovery
 Discovery instructions distinguish a supported continuity proposal from an inconclusive classification. A status-effect rejection retains validated labels and scope/evidence relationship flags. Rejected facts provide no playback authority. A missing discovery unit can still break the causal chain. Recover the earlier action or beat support independently and verify the clock before restoring a held waveform.
 
 Use the same accepted replies for compiler attribution, supplied exact answers for controlled proof and fresh receipts for provider evidence. Grade reference differences in cut output, local action and held waveform independently.
+
+## V42 verify beat support across a quiet gap
+
+A discovery rejection can leave a gap after verified buildup. An optional blind cue check can read the rejected unit when two adjacent buildup readings share a cleared scope and the later one independently verifies a charged reaction. Only exact current buildup with the same scope can renew the existing beat. The compiler still requires the beat to be established, open and within its hold. Keep the discovery rejection and the check result visible. The supporting proof adds no direct cue or transition.
+
+An ordinary interruption can follow a supporting onset and accent that never opened a compiled beat. A blind continuation check can verify the earlier pair when the interruption has independently quiet local evidence and the exact supporting units remain in the same cleared scope. The compiler can carry Sustain wave at the interruption from the end of the verified accent. Its bounded envelope leaves the supporting units and the current cue, phase and applied event as classified. The carry does not establish an open beat for later unchecked units.
+
+Both checks use the existing cue-check allowance and the approved causal prefix. Missing or conflicting proof keeps the previous outcome. Exact protective evidence retains priority. Evaluate the waveform, proof coordinates, evidence age, stop behavior and matching negative controls separately. Use saved responses to measure deterministic changes and fresh receipts to measure provider recognition.

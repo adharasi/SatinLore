@@ -239,6 +239,8 @@ V40 lets exact first-entry evidence nominate setting corroboration, checks a mat
 
 V41 resolves exact continuation disagreements with the existing blind check and lets corroborated supporting buildup renew a verified open beat. Discovery rejections identify incompatible statuses and effects without recording rejected text or coordinates. [V41 evaluation](nocturne-beat-protocol-shadow.md#v41-verify-continuation-and-support-on-an-open-beat)
 
+V42 checks two sources of quiet playback gaps. A rejected supporting unit can renew an open beat only with independently verified current buildup. An ordinary interruption can carry a bounded waveform from independently linked supporting actions. [V42 evaluation](nocturne-beat-protocol-shadow.md#v42-verify-beat-support-across-a-quiet-gap)
+
 ## F6 — software-beta verification
 
 **Gate S2:** the agreed beta journey works against local services and deterministic simulation. Verify empty/loading/success/error/recovery states, text privacy, storage deletion, account isolation, bounded retries and actual feedback outcomes. Report unimplemented or simulated backend operations explicitly. Ask 3–5 representative readers to open/add text, read without review, choose Wide/Full, save by choice, identify state, lower strength/limit, stop and recover; record friction before explaining the interface.

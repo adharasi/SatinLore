@@ -114,6 +114,7 @@ export function planStory(story, units) {
     const scope = availableFact(unit.scope);
     const neutral = availableFact(unit.neutral);
     const holdConfirmation = availableFact(unit.holdConfirmation);
+    const supportingCarry = availableFact(unit.supportingCarry);
     const inheritedRelease = availableFact(unit.inheritedRelease);
     const requestedEase = availableFact(unit.ease);
     const releaseAnchor = requestedEase?.requiresOpenAnchor;
@@ -125,7 +126,7 @@ export function planStory(story, units) {
     const barrier = boundary && !spanEnd;
     if (barrier && boundary.kind === "cut") scene = `${story}:scene:${id}`;
     let mark = boundary || scope;
-    validateFacts(id, [boundary, scope, neutral, requestedEase, low, holdConfirmation, inheritedRelease]);
+    validateFacts(id, [boundary, scope, neutral, requestedEase, low, holdConfirmation, inheritedRelease, supportingCarry]);
     const lowProfile = low && Object.hasOwn(low, "profile") ? low.profile : "Undertone";
     const renewsBuild = low?.requiresBeat === true && !low.localOnly && lowProfile === "Gradual build";
     if (low && (low.knownAt !== id || !LOW_PROFILES.has(lowProfile) && !renewsBuild && !(low.localOnly && lowProfile === "Taper"))) {
@@ -164,12 +165,16 @@ export function planStory(story, units) {
     const evidence = [];
     const renewsOpenBeat = low?.requiresBeat && pattern === "Baseline" && !barrier && !spanEnd && !ease &&
       beat?.established && !beat.quiet && !beat.provisional && !beat.released &&
-      (!renewsBuild || !beat.easing && beat.anchor === low.priorAnchor) &&
+      (!(renewsBuild || low.repairsGap) || !beat.easing && beat.anchor === low.priorAnchor) &&
       beat.anchors.has(low.priorAnchor) && cursor - beat.supportEnd < ESTABLISHED_HOLD_WORDS;
     const confirmsHeldBeat = holdConfirmation && neutral && pattern === "Baseline" && !boundary && !scope && !ease && !low &&
       beat?.established && !beat.quiet && !beat.provisional && !beat.easing && !beat.released &&
       holdConfirmation.knownAt === id && beat.anchor === holdConfirmation.priorAnchor &&
       Math.max(0, cursor - beat.supportEnd) < ESTABLISHED_HOLD_WORDS;
+    const hasSupportingCarry = supportingCarry && pattern === "Baseline" && !beat && !parked &&
+      !boundary && !neutral && !scope && !ease && !low && supportingCarry.knownAt === id - 1 &&
+      supportingCarry.priorAnchor === id - 2 && plan.at(-1)?.[0]?.id === supportingCarry.knownAt &&
+      (lastBarrier === null || supportingCarry.priorAnchor > lastBarrier);
     const priorTrace = inheritedRelease && plan.at(-1)?.[1];
     const sharesOpenRelease = inheritedRelease && !boundary && !ease &&
       beat?.easing && beat.released && !beat.quiet && beat.profile === "Taper" && beat.releaseEnd > cursor &&
@@ -189,7 +194,18 @@ export function planStory(story, units) {
       holdWords = ESTABLISHED_HOLD_WORDS - Math.max(0, cursor - beat.supportEnd);
       fadeWords = holdWords + FADE_WORDS;
       Object.assign(result, {pattern: "Sustain wave", reason: rationale});
-    } else if (neutral) {
+    } else if (hasSupportingCarry) {
+      // The verified preceding unit ended at the current cursor. Expose its
+      // finite carry here without opening a beat for subsequent unchecked units.
+      traceBeat = new Beat(story, supportingCarry.priorAnchor, "Sustain wave", cursor, true, paragraph);
+      traceBeat.attest(supportingCarry.knownAt);
+      decision = "Carry verified supporting beat";
+      rationale = "Independent continuation confirms the preceding supported beat.";
+      mark = supportingCarry;
+      holdWords = ESTABLISHED_HOLD_WORDS;
+      fadeWords = holdWords + FADE_WORDS;
+      Object.assign(result, {pattern: "Sustain wave", reason: rationale});
+    } else if (neutral && !(low?.repairsGap && renewsOpenBeat)) {
       beat = parked = traceBeat = null;
       lastBarrier = id;
       decision = "Neutral context";
@@ -245,7 +261,7 @@ export function planStory(story, units) {
       rationale = low.reason;
       mark = low;
       if (barrier) citeEvidence(evidence, boundary, id);
-      Object.assign(result, {pattern: lowProfile, reason: rationale});
+      Object.assign(result, {pattern: lowProfile, reason: rationale, ...(low.repairsGap ? {phase_used: "build"} : {})});
     } else {
       const signal = localSignal(unit, source);
       let scoped = scopedTo(beat, scope) && !beat?.provisional;

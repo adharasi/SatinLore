@@ -26,6 +26,7 @@ const returned = new Set(["completed", "provider-refused", "provider-unavailable
 const done = new Set([...returned, "unconfirmed", "budget-deferred"]);
 const replayUnitKeys = ["id", "unitSha256", "status", "discoveryStatus", "verificationStatus", "transitionVerificationStatus",
   "boundaryVerificationStatus", "localActionVerificationStatus", "sceneEntryVerificationStatus", "cueRecoveryStatus",
+  "cueRecoveryReason", "cueRecoveryCorrection",
   "independentBoundaryStatus", "sceneSituationVerificationStatus", "sceneOldPlaceVerificationStatus",
   "sceneArrivalVerificationStatus", "scenePlaceRecoveryStatus", "sustainConnectorVerificationStatus",
   "interruptionContinuationVerificationStatus", "uncertainContinuationVerificationStatus", "interruptionReleaseVerificationStatus",
