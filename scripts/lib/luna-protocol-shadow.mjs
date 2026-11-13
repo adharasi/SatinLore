@@ -231,7 +231,8 @@ const boundaryProtection = new Set(["hard-stop", "declined-restart", "chapter-en
 const numberedDay = /^day\s+(\d{1,6})\.?$/iu;
 const arrivalHint = /\b(?:(?:walked|went|drove|rode|ran|travelled|traveled|made it)\s+to|arrived\s+(?:at|in)|reached|(?:stepped|came|pulled)\s+into)\b/iu;
 
-function paragraphBoundaryEvidence(unit, previous, context) {
+function paragraphBoundaryEvidence(unit, context) {
+  const previous = context.at(-1);
   if (!previous || unit.paragraph === previous.paragraph) return null;
   const heading = numberedDay.exec(unit.text.trim());
   if (!heading) return arrivalHint.test(unit.text) ? {reason: "setting-shift"} : null;
@@ -240,7 +241,7 @@ function paragraphBoundaryEvidence(unit, previous, context) {
   if (!priorDay) return {reason: "unresolved-day-heading"};
   // The new heading supplies a clock change only when the same narration
   // supplied an earlier heading followed by an episode in that paragraph.
-  return priorDay && Number(heading[1]) > Number(priorDay[1]) &&
+  return Number(heading[1]) > Number(priorDay[1]) &&
     previous.paragraph === priorHeading.paragraph && previous.id > priorHeading.id ?
     {reason: "time-jump", headingId: priorHeading.id, previousId: previous.id} : null;
 }
@@ -250,9 +251,8 @@ function canCompareParagraphBoundary(row, id) {
     quietNegative(fact, fact.frame, fact.scopeId) && fact.evidenceIds.every(evidence => evidence === id);
   const {primaryPrefix, effectiveAnnotation, transitionVerification: typed, discovery, cueRecovery} = row;
   return row.prefixVerified && quiet(primaryPrefix) && quiet(effectiveAnnotation) && (!cueRecovery || quiet(cueRecovery)) &&
-    typed?.status === "neutral" && typed.frame === "current" && typed.transition === "none" &&
-    ["none", "uncertain"].includes(typed.sceneBoundary?.status) &&
-    !boundaryProtection.has(discovery?.transition) && discovery?.fact !== "protective" && !currentCueAt(discovery, id, "candidate");
+    typed?.status === "neutral" && ["current", "neutral"].includes(typed.frame) && typed.transition === "none" &&
+    ["none", "uncertain"].includes(typed.sceneBoundary?.status) && !currentCueAt(discovery, id, "candidate");
 }
 
 function corroboratedTimeEntry(row, id) {
@@ -751,7 +751,7 @@ function repeatsScopedRelease(row, previous, cue, predecessor, opening, id, evid
   return isolatedRelease || scopedRelease;
 }
 
-function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanceOnly, opening, evidenceBarrier) {
+function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanceOnly, opening, evidenceBarrier, recoverReleaseClock) {
   const prior = id - 1;
   const typed = row.transitionVerification;
   const local = row.localActionVerification?.localAction;
@@ -766,14 +766,21 @@ function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanc
     typed.transition === "none" && typed.fact === "none" && typed.scopeId === null && typed.priorAnchor === null &&
     typed.evidenceIds.length === 0 && typed.sceneBoundary?.status === "none";
   const entry = row.sceneEntryVerification?.sceneEntry;
-  if (!cue || cue !== row.primaryPrefix || !neutralLocal || !neutralTyped || entry?.status !== "none") return null;
+  const repairedQuiet = recoverReleaseClock && cue === row.cueRecovery && row.cueContractRepaired && quietNegative(cue);
+  if (!cue || cue !== row.primaryPrefix && !repairedQuiet || !neutralLocal || !neutralTyped || entry?.status !== "none") return null;
   const inherited = {knownAt: prior, evidence: [prior], reason: "Retain the verified release at the preceding unit."};
   if (local.frame === "current" && typed.frame === "current" &&
       ["ordinary-interruption", "same-episode"].includes(entry.reason) &&
       repeatsScopedRelease(row, previous, cue, predecessor, opening, id, evidenceBarrier)) {
     return {...inherited, naturalFade: true};
   }
-  if (entry.reason !== "ordinary-interruption") return null;
+  const quietConnector = provenanceOnly && recoverReleaseClock && local.frame === "current" && local.contrast === "depiction-only" &&
+    ["ordinary-interruption", "same-episode"].includes(entry.reason) && strictQuietNegative(cue, "current", cue.scopeId) &&
+    strictQuietNegative(discovery, "current", discovery.scopeId) && discovery.depiction === "neutral" &&
+    [null, predecessor?.scopeId].includes(cue.scopeId) &&
+    [null, predecessor?.scopeId, previous?.discovery?.scopeId].includes(discovery.scopeId) &&
+    (discovery.scopeId === null || discovery.scopeId >= evidenceBarrier) && previous?.window?.runId === row.window.runId;
+  if (entry.reason !== "ordinary-interruption" && !quietConnector) return null;
   const anchorId = cue.priorAnchor;
   const anchor = opening?.prefixVerified ? opening.effectiveAnnotation : null;
   // Some current prefix replies cite the still earlier beat root when they
@@ -792,6 +799,7 @@ function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanc
     earlierLocal.targetId === prior && (earlierLocal.contextId === null ||
       earlierLocal.contextId < prior && (predecessor.evidenceIds.includes(earlierLocal.contextId) || citedBeatRoot));
   if (!verifiedPredecessor) return null;
+  if (quietConnector) return {...inherited, provenanceOnly: true};
 
   const exactDepictionOnly = local.frame === "current" && local.contrast === "depiction-only" && typed.frame === "current";
   // Keep an already quiet successor on the normal planner path. It only needs
@@ -1362,7 +1370,7 @@ function auxiliaryContinuationCandidate(index, decisions, blocked, supportingIds
   return disputed || {priorId, supportId, scope, root: scope, openingScope: scope};
 }
 
-function playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration) {
+function playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration, recoverReleaseClock) {
   let recent = [], last = "Baseline", lastFrame = null, lastScope = null, lastParagraph = null, evidenceBarrierId = -1;
   let restartBoundary = null, lastAnchor = null, lastBarrierWasBeatEnd = false;
   let lastBarrierWasFrameReturn = false, firstLocalFrameRelease = null;
@@ -1527,7 +1535,7 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
     const inheritedRelease = !auxiliary && clearRelease && !beatEnd &&
       (canEase && kind === "ease" && ["none", "ease"].includes(transition) || naturalReleaseFade || phaseOnlyEase) ?
       inheritedReleaseEvidence(result, previous, rawCue, priorFact, unit.id, naturalReleaseFade, decisions.get(rawCue?.priorAnchor),
-        previousEvidenceBarrier) : null;
+        previousEvidenceBarrier, recoverReleaseClock) : null;
     const suppressesLocalEase = inheritedRelease && !inheritedRelease.provenanceOnly && !inheritedRelease.phaseOnly;
     if (suppressesLocalEase) result.appliedTransitionOverride = "none";
     const localRelease = canEase && !suppressesLocalEase &&
@@ -1731,7 +1739,8 @@ function playbackInputs(index, decisions, blocked, supportingIds, uncertainConti
       }
     }
     const signalProfile = signal ? rebuild ? "Rebuild rise" : profileFor(fact, recent, last) : "Baseline";
-    let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" : result.boundaryWitnessStatus === "unresolved-day-heading" ? "Reset" :
+    const unresolvedDayHeading = result.unresolvedDayHeading === true;
+    let pattern = unit.structuralBoundary ? "Divider" : protective ? "Stop" : unresolvedDayHeading ? "Reset" :
       closeWithTaper ? "Taper" : !supporting && localRelease ? beatEnd || fact.narrativePhase === "ease" ? "Taper" : "Recovery" :
       linkedSustain ? "Sustain wave" : buildProgress ? "Gradual build" :
       canSignal ? signalProfile : "Baseline";
@@ -1791,7 +1800,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
   verifyContinuityBoundary = false, releaseUnusedRestartReservation = false, sceneEntryArbitration = false, sameEpisodeArbitration = false,
   interruptionReleaseArbitration = false, sustainConnectorVerification = false,
   boundaryEntryConfirmation = false, verifySettingSituation = false, uncertainContinuationArbitration = false,
-  verifyAuxiliaryDisagreement = false, verifyBoundaryWitnesses = false, verifyBoundaryArbitration = false,
+  verifyAuxiliaryDisagreement = false, verifyBoundaryWitnesses = false, verifyBoundaryArbitration = false, recoverReleaseClock = false,
   requireSceneBoundary = verifyTransitions && provider?.sceneBoundaryProtocol === true,
   boundaryVerificationTargets = [], localActionVerificationTargets = [], sceneEntryVerificationTargets = []} = {}) {
   if (typeof id !== "string" || !/^[a-z0-9-]{1,48}$/iu.test(id) || typeof now !== "function" ||
@@ -1809,6 +1818,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       typeof uncertainContinuationArbitration !== "boolean" || typeof verifyAuxiliaryDisagreement !== "boolean" ||
       typeof verifyBoundaryWitnesses !== "boolean" || verifyBoundaryWitnesses && !boundaryEntryConfirmation ||
       typeof verifyBoundaryArbitration !== "boolean" || verifyBoundaryArbitration && !verifySettingSituation ||
+      typeof recoverReleaseClock !== "boolean" ||
       !Array.isArray(transitionTargets) || (!verifyTransitions && transitionTargets.length > 0) || !Array.isArray(boundaryVerificationTargets) ||
       !Array.isArray(localActionVerificationTargets) || localActionVerificationTargets.length > MAX_LOCAL_ACTION_DIAGNOSTIC_TARGETS ||
       !Array.isArray(sceneEntryVerificationTargets) || sceneEntryVerificationTargets.length > MAX_SCENE_ENTRY_DIAGNOSTIC_TARGETS ||
@@ -2225,7 +2235,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       row[statusKey] = verdict?.[factKey].status ?? status;
     }
   }
-  function comparisonPathEligible(job, id, earlierId, firstId, causal, {closedPredecessor = null, ordinaryStop = false} = {}) {
+  function comparisonPathEligible(job, id, earlierId, firstId, causal,
+    {closedPredecessor = null, ordinaryStop = false, currentFrame = false} = {}) {
     return earlierId >= causal.sceneBoundaryId && earlierId >= firstId && !index.units.slice(earlierId, id).some(unit => {
       const prior = decisions.get(unit.id);
       const effect = prior?.effectiveAnnotation ?? prior?.annotation;
@@ -2236,7 +2247,9 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         effect.action === "none" && effect.priorAnchor === null && effect.evidenceIds.length === 1;
       const ordinaryEnding = ordinaryStop && effect?.transition === "non-romantic-activity-stop" &&
         effect.fact === "none" && exactCurrentCue(effect, unit.id);
+      const frame = effect?.frame ?? prior?.discovery?.frame;
       return blocked.has(unit.id) || unit.structuralBoundary || prior?.window?.runId !== job.runId ||
+        (currentFrame && frame != null && !["current", "neutral"].includes(frame)) ||
         (!quietPredecessor && !ordinaryEnding && (recoveryBarriers.has(effect?.transition) || recoveryBlockingFacts.has(effect?.fact)));
     });
   }
@@ -2475,12 +2488,12 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     if (firstId == null) return;
     const typedTime = corroboratedTimeEntry(row, id);
     const paragraph = !typedTime && canCompareParagraphBoundary(row, id) ?
-      paragraphBoundaryEvidence(unit, context.at(-1), context) : null;
+      paragraphBoundaryEvidence(unit, context) : null;
     if (!typedTime && !paragraph || possibleRestartClosure(unit, row.effectiveAnnotation)) return;
     const causal = attest({runId: job.runId, firstId, target: id});
     if (causal.restartBoundary || [row.primaryPrefix, row.transitionVerification, row.discovery, row.cueRecovery].some(
       fact => causal.protectedScopes.has(fact?.scopeId))) return;
-    const eligible = earlierId => comparisonPathEligible(job, id, earlierId, firstId, causal, {ordinaryStop: true});
+    const eligible = earlierId => comparisonPathEligible(job, id, earlierId, firstId, causal, {ordinaryStop: true, currentFrame: true});
     if (typedTime) {
       if (eligible(typedTime.previousId)) {
         applySceneProof(row, id, typedTime.reason, typedTime.previousId, [typedTime.previousId, id], "corroborated-typed-time-cut");
@@ -2494,6 +2507,7 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       if (!eligible(id - 1)) return;
       row.effectiveAnnotation = {...row.effectiveAnnotation, status: "verified", transition: "uncertain-continuity",
         fact: "neutralize", priorAnchor: null, evidenceIds: [id]};
+      row.unresolvedDayHeading = true;
       row.transitionFlag = "scene-boundary-heading-unresolved";
       row.boundaryWitnessStatus = "unresolved-day-heading";
     } else if (!settingSituationStarted && eligible(id - 1)) {
@@ -2870,13 +2884,13 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
       break;
     }
   }
-  const playback = planStory(id, playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration));
+  const playback = planStory(id, playbackInputs(index, decisions, blocked, supportingIds, uncertainContinuationArbitration, recoverReleaseClock));
   const units = index.units.map((unit, i) => {
     const [profile, trace] = playback[i];
     const {status, annotation, effectiveAnnotation, discovery, discoveryStatus, verificationStatus, transitionVerification,
       transitionVerificationStatus, boundaryVerification, boundaryVerificationStatus, localActionVerification, localActionVerificationStatus,
       sceneEntryVerification, sceneEntryVerificationStatus, sceneEntryArbitration: entryArbitration,
-      sceneTimeWitness, sceneTimeWitnessStatus, boundaryWitnessStatus,
+      sceneTimeWitness, sceneTimeWitnessStatus, boundaryWitnessStatus, unresolvedDayHeading,
       sceneSituationVerification, sceneSituationVerificationStatus,
       sceneOldPlaceVerification, sceneOldPlaceVerificationStatus, sceneArrivalVerification, sceneArrivalVerificationStatus,
       scenePlaceRecoveryStatus,
@@ -2946,7 +2960,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         sustainConnectorVerificationStatus} : {}),
       ...(profile.verifiedInterruptionRelease ? {interruptionReleaseApplication: "interruption-taper"} : {}),
       transitionEvidenceIds: uncertaintyResolved ? uncertainContinuationVerification.evidenceIds :
-        ["independently-confirmed-cut", "grounded-setting-cut"].includes(entryArbitration) ? effectiveAnnotation.evidenceIds :
+        ["independently-confirmed-cut", "grounded-setting-cut"].includes(entryArbitration) || unresolvedDayHeading ?
+          effectiveAnnotation.evidenceIds :
         projectTypedTransition(transitionVerification)?.evidenceIds,
       transitionFlag, cueGuard, readerCue: recoveryCue || readerCue, primaryPrefix, primaryFailure, cueRecovery, cueRecoveryStatus, cueRecovered,
       cueContractRepaired, cueRecoveryReason, cueRecoveryGuard,

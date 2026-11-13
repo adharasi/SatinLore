@@ -76,6 +76,11 @@ test("split place questions isolate old place from arrival on the provider wire"
   assert.deepEqual(JSON.parse(sent.input), {units, targetIds: [target]});
   assert.equal(sent.text.format.name, "nocturne_luna_scene_arrival_v1");
   assert.match(sent.instructions, /compressed journey/u);
+  assert.deepEqual((await provider({...request, mode: "scene-arrival", focus: "paragraph-arrival", earlierPlace: oldPlace})).facts,
+    [{unitId: target, scenePlace: distinctArrival}]);
+  assert.deepEqual(JSON.parse(sent.input), {units, targetIds: [target]});
+  assert.match(sent.instructions, /journey that reaches its destination/u);
+  assert.equal((await provider({...request, mode: "scene-old-place", focus: "paragraph-arrival"})).status, "invalid-request");
   for (const [mode, verdict, reason] of [["scene-old-place", distinctArrival, "scene-place-shape"],
     ["scene-old-place", {...oldPlace, currentId: target}, "scene-place-evidence"],
     ["scene-old-place", {...oldPlace, earlierId: target}, "scene-place-evidence"],

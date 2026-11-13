@@ -20,6 +20,7 @@ const localNeutral = {status: "none", frame: "noncurrent", action: "none", phase
 const usage = {inputTokens: 100, outputTokens: 20};
 
 function run({observed = [], first = opening, later = repeatedEase, laterDiscovery = quiet(2), laterTyped = {frame: "neutral"},
+  recoverReleaseClock = false, laterEntry = ordinaryInterruption, repairPrimary = false,
   laterLocal = localNeutral, laterBoundary = noBoundary, earlierLocal = localRelease(1, 0), blockedIds = [],
   releaseText = "They slowed their steps in time with the music.", separator = " "} = {}) {
   const text = `Mira took Lee's hand. ${releaseText}${separator}The musicians played softly. The lights dimmed.`;
@@ -29,7 +30,7 @@ function run({observed = [], first = opening, later = repeatedEase, laterDiscove
   const provider = Object.assign(async request => {
     observed.push(request);
     const facts = request.targetIds.map(id => {
-      if (request.mode === "scene-entry") return {unitId: id, sceneEntry: ordinaryInterruption};
+      if (request.mode === "scene-entry") return {unitId: id, sceneEntry: id === 2 ? laterEntry : ordinaryInterruption};
       if (request.mode === "local-action") return {unitId: id, localAction: id === 1 ? earlierLocal : laterLocal};
       if (request.mode === "transition") return {...quiet(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
         ...(id === 1 ? {status: "verified", transition: "interruption", evidenceIds: [1]} : id === 2 ? laterTyped : {}),
@@ -38,11 +39,15 @@ function run({observed = [], first = opening, later = repeatedEase, laterDiscove
       const primary = id === 0 ? first : id === 1 ? release : quiet(id);
       return request.mode === "discovery" && primary.status === "verified" ? {...primary, status: "candidate"} : primary;
     });
+    if (repairPrimary && request.mode === "verify" && request.targetIds[0] === 2) {
+      return {status: "invalid-response", usage, facts: [], targetFailures: [{unitId: 2, reason: "prior-anchor"}]};
+    }
     return {status: "ok", usage, facts};
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "release-inheritance", text, grant, now: () => 1, provider, blockedIds,
     verificationTargets: units.map(({id}) => id), transitionTargets: [1, 2], verifyTransitions: true,
-    localActionVerificationTargets: [1, 2], sceneEntryVerificationTargets: [1, 2], negativeStride: 0});
+    localActionVerificationTargets: [1, 2], sceneEntryVerificationTargets: [1, 2], negativeStride: 0,
+    maxPrimaryAnchorRepairs: Number(repairPrimary), recoverReleaseClock});
 }
 
 test("a neutral successor retains verified release provenance and its finite fade", async () => {
@@ -173,6 +178,27 @@ test("a natural fade keeps its waveform and records the newer verified release c
   assert.deepEqual(candidate.units[3], control.units[3]);
   const mismatchedScope = await run({...options, laterDiscovery: {...scopedQuiet, scopeId: 1}, laterLocal: depictedOnly});
   assert.notEqual(mismatchedScope.units[2].playbackDisposition, "inherited-release");
+});
+
+test("a verified predecessor supplies the existing fade clock after an independently quiet anchor repair", async () => {
+  const options = {later: quiet(2), laterDiscovery: {...quiet(2), scopeId: 0}, laterTyped: {frame: "current"},
+    laterLocal: depictedOnly, laterEntry: {...ordinaryInterruption, reason: "same-episode"}, separator: "\n\n"};
+  const control = await run(options);
+  const {units} = await run({...options, recoverReleaseClock: true});
+  assert.equal(units[2].pattern, "Taper");
+  assert.equal(units[2].knownAt, 1);
+  assert.equal(units[2].trace.decision, "Inherit release fade");
+  assert.equal(units[2].trace.floorWords, control.units[2].trace.floorWords);
+  assert.equal(units[2].trace.fadeWords, control.units[2].trace.fadeWords);
+  const repaired = await run({...options, recoverReleaseClock: true, repairPrimary: true});
+  assert.equal(repaired.units[2].cueContractRepaired, true);
+  assert.equal(repaired.units[2].knownAt, 1);
+  for (const negative of [{earlierLocal: localNeutral}, {laterLocal: localRelease(2, 1)}, {blockedIds: [2]},
+    {later: {...quiet(2), scopeId: 1}}, {laterDiscovery: {...quiet(2), scopeId: 1}},
+    {laterDiscovery: {...quiet(2), frame: "reported"}}]) {
+    const {units} = await run({...options, recoverReleaseClock: true, ...negative});
+    assert.notEqual(units[2].trace.decision, "Inherit release fade");
+  }
 });
 
 test("a repeated romantic release needs a specific independent depiction-only negative to inherit", async () => {

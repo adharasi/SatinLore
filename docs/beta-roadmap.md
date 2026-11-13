@@ -143,7 +143,7 @@ The shadow verifier now supports a frozen native target roster and independently
 
 The approved beat protocol now has a JavaScript continuity compiler and a founder command-line Luna shadow runner. The compiler reproduced all 17,895 approved profile and trace rows across 41 stories, and the fixed ten-story comparison separates current Loom, archived Luna, and offline fallback. The new live arm needs current exact-range clearance and an authorized provider route before it can be scored. [Runner and qualification](nocturne-beat-protocol-shadow.md)
 
-The founder v45 runner adds exact time-entry arbitration, numbered day-boundary handling and independent place comparison at paragraph openings. The release assessment tracks hard output, event placement, cue recognition and beat timing independently. [V45 discrepancy closure](nocturne-discrepancy-closure.md)
+The founder v46 runner adds exact time-entry arbitration, numbered day-boundary handling, independent place comparison at paragraph openings and release-clock repair. Saved responses reproduce zero simulator target and output at the confirmed dawn transition and both day-heading widths. Wider setting recognition, the remaining waveform discrepancies and the live release gates still need measured evidence. [Discrepancy closure and simulator results](nocturne-discrepancy-closure.md)
 
 Timing review v5 adds a separate restart check behind a closed gate. The full 41-story local rerun reproduced all approved profiles and traces. The independent Loom run matched 19 of 1,250 known direct cues across the same editions. Live corpus recognition and physical-device qualification remain open. [Timing review and 41-story results](nocturne-beat-protocol-shadow.md#timing-review-v5-and-the-41-story-run)
 

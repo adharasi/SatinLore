@@ -190,7 +190,7 @@ export async function handleLunaCorpus(request, env, {config, session, reverify,
       verifyContinuityBoundary: true, releaseUnusedRestartReservation: true, sceneEntryArbitration: true,
       sameEpisodeArbitration: true, boundaryEntryConfirmation: true, interruptionReleaseArbitration: true,
       uncertainContinuationArbitration: true, verifyAuxiliaryDisagreement: true, verifyBoundaryWitnesses: true,
-      verifyBoundaryArbitration: true, verifySettingSituation: true, sustainConnectorVerification: true});
+      verifyBoundaryArbitration: true, recoverReleaseClock: true, verifySettingSituation: true, sustainConnectorVerification: true});
   } catch { /* Preserve the full reservation when execution cannot report its outcome. */ }
   const outcome = budget.snapshot();
   const refused = result?.summary.attempts.some(row => row.status === "provider-refused") === true;

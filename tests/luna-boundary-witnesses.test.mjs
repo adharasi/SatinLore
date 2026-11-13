@@ -122,8 +122,8 @@ const dayStory = "Day 5. Ada checked the maps. Lee put away the lantern.\n\nDay 
 const arrivalStory = "June closed the old library. Lee fetched a coat.\n\nThey walked to the bus stop. The driver opened the doors.";
 const timeStory = "June checked the recorder. Lee called the test off.\n\nAt dawn they inspected the equipment. They packed it away.";
 
-async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped = false, typed, entry, focused, arrived = arrival,
-  earlier = oldPlace, observed = [], closed = false, lateCut = false} = {}) {
+async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped = false, typed, typedFrame = "current", entry, focused, arrived = arrival,
+  earlier = oldPlace, observed = [], closed = false, lateCut = false, precedingFrame = "current"} = {}) {
   const indexed = buildWholeStoryIndex(text);
   const scopes = indexed.units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}));
   const targets = [target, target + 1];
@@ -138,12 +138,13 @@ async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped 
         lateCut ? {...timeWitness, status: "none", reason: "already-entered"} : noEntry("same-episode")};
       if (request.mode === "scene-old-place") return {unitId, scenePlace: earlier};
       if (request.mode === "scene-arrival") return {unitId, scenePlace: arrived};
-      if (request.mode === "transition") return {...(stopFact ?? ordinaryEnd ?? quiet(unitId)),
+      if (request.mode === "transition") return {...(stopFact ?? ordinaryEnd ?? {...quiet(unitId), frame: typedFrame}),
         depiction: "unknown", action: "unknown", narrativePhase: "unknown",
         sceneBoundary: unitId === target ? typed ?? noBoundary : lateCut && unitId === target + 1 ?
           {status: "cut", reason: "time-jump", previousId: target - 1, entryId: unitId} : noBoundary};
       if (request.mode === "cue-check" && unitId === target && focused) return focused;
-      return stopFact ?? ordinaryEnd ?? {...quiet(unitId), scopeId: unitId === target && text === arrivalStory ? 1 : null};
+      return stopFact ?? ordinaryEnd ?? {...quiet(unitId), frame: unitId === target - 1 ? precedingFrame : "current",
+        scopeId: unitId === target && text === arrivalStory ? 1 : null};
     });
     return {status: "ok", usage: {inputTokens: 100, outputTokens: 30}, facts};
   }, {sceneBoundaryProtocol: true});
@@ -162,14 +163,15 @@ test("a numbered day heading establishes a cut only with an earlier anchored hea
   assert.deepEqual(wide.units[3].transitionEvidenceIds, [0, 2, 3]);
   assert.equal(wide.units[4].sceneId, wide.units[3].sceneId);
   assert.notEqual(wide.units[2].sceneId, wide.units[3].sceneId);
-  const short = await arbitrate(dayStory, {target: 3, first: 1});
+  const short = await arbitrate(dayStory, {target: 3, first: 1, typedFrame: "neutral", typed: unclear});
   assert.equal(short.units[3].pattern, "Reset");
   assert.equal(short.units[3].appliedTransition, "uncertain-continuity");
+  assert.deepEqual(short.units[3].transitionEvidenceIds, [3]);
   assert.equal(short.units[3].sceneId, short.units[2].sceneId);
   for (const variant of [dayStory.replace("Day 6", "Day 5"), dayStory.replace("Day 6.", "They talked about day 6.")]) {
     assert.notEqual((await arbitrate(variant, {target: 3})).units[3].pattern, "Reset");
   }
-  for (const options of [{blockedIds: [0]}, {blockedIds: [2]}, {closed: true}, {stopped: true}]) {
+  for (const options of [{blockedIds: [0]}, {blockedIds: [2]}, {closed: true}, {stopped: true}, {precedingFrame: "reported"}]) {
     assert.notEqual((await arbitrate(dayStory, {...options, target: 3})).units[3].appliedTransition, "scene-cut");
   }
   assert.equal((await arbitrate(dayStory, {target: 3, stopped: true})).units[3].pattern, "Stop");
