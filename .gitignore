@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+# Keep local credentials out of Git. Track only the blank environment template.
 .env
 .env.*
 !.env.example

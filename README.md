@@ -52,7 +52,7 @@ python3 run.py
 
 Open <http://127.0.0.1:8000>; Ctrl+C stops the server. Bootstrap installs dependencies into `.venv` using internet access. Select that VS Code interpreter with **Python: Select Interpreter**. Keep the exact configured origin: `localhost` and `127.0.0.1` are not interchangeable for authenticated requests.
 
-For hardware work, follow [the dedicated setup](docs/hardware-check.md). `.env.example` documents process variables; the application does not automatically load `.env` files.
+For hardware work, follow [the dedicated setup](docs/hardware-check.md). [`.env.example`](.env.example) is the copyable template for local settings. The Python app reads process variables. For live Luna CLI commands, see [local OpenAI credentials](docs/nocturne-vscode-handoff.md#local-openai-credentials).
 
 ## Private hosted workspace
 

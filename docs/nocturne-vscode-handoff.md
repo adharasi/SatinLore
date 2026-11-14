@@ -43,6 +43,19 @@ git check-ignore data/nocturne/exact-41-editions-private.json
 
 The ZIP SHA-256 is `fe8d833a8a63c7f16533ff439c721db650b09d93a336334520bed3aed46c7f3c`. The verifier checks the exact edition archive entry, all 41 work and edition pins, the 181 target unit pins and full reader segmentation. It should report 41 works, 17,895 units, 68 dividers and 181 frozen targets. The ZIP manifest pins every file. A different location can be passed with `--editions`. Keep source, annotations containing source, excerpt packets, receipts and credentials outside tracked Git; use IDs, hashes and typed findings in tracked evidence. Use a current, explicit authorisation for the exact clips, destination and spend before any fresh provider dispatch. The prior authorisation covered the completed v46 panels.
 
+### Local OpenAI credentials
+
+The Codex extension uses its own sign-in. The offline compiler, receipt replay and simulator checks need no OpenAI credentials. A direct live Luna CLI run reads the `OPENAI_API_KEY` process variable. You can set it in your shell or copy the blank [`.env.example`](../.env.example) to the repository root as `.env` and fill in your [OpenAI project API key](https://platform.openai.com/api-keys). Leave the Lovense fields blank for Luna and simulator work.
+
+```powershell
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
+code .env
+git check-ignore -v .env
+node --env-file=.env -e "const ready = Boolean(process.env.OPENAI_API_KEY?.trim()); console.log(ready ? 'OpenAI key is set' : 'OpenAI key is missing'); process.exitCode = ready ? 0 : 1"
+```
+
+On macOS or Linux, use `test -e .env || cp .env.example .env` for the copy step. The last command checks presence locally without printing the key or making a provider call. Run the intended Node script with `--env-file=.env` before its path when using the file. An existing shell variable takes precedence. A live shadow run also needs the exact-range `--grants` manifest and the approved budget. The hosted founder benchmark uses the Cloudflare Worker's own secret and works independently of your local `.env`. [Luna CLI and grant options](nocturne-beat-protocol-shadow.md#run-the-comparison) · [Hosted secret setup](../deploy/cloudflare/README.md#enable-nocturne-for-the-private-beta)
+
 ### Reproduce the historical adapter comparison
 
 From the checkout root, run this command after extraction. It reads the full approved labels and the earlier reviewed inputs, and must return the same 17,895 exact profile and trace matches. Results, if requested with output flags, go outside the checkout.
