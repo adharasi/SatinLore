@@ -26,7 +26,31 @@ The approved offline reference matched all 17,895 profiles and 17,895 causal tra
 
 V46 also allows an independently quiet connector to inherit a verified release clock after a quiet repair of a rejected primary anchor. On the first `d2-02:1550` waveform receipt, `knownAt` moved from the beat root at 1548 to the verified release at 1549. The Taper, fade length, floor and all nine command and target traces matched the prior run. The repeat's isolated action did not corroborate the earlier release. That case remains open for fresh evidence.
 
-The `a20-03` short-prefix comparison uses the v42 old-place abstention on unit 11 with the other answers from v44. The older and newer place requests have the same exact prefix. This cross-receipt comparison confirms that dispatching the new witness alone does not recover the earlier venue. The matched live rerun awaits explicit approval for the exact excerpts and spend. The 90% cue recall gate and the author-disjoint holdout remain open.
+The `a20-03` short-prefix comparison uses the v42 old-place abstention on unit 11 with the other answers from v44. The older and newer place requests have the same exact prefix. This cross-receipt comparison confirms that dispatching the new witness alone does not recover the earlier venue.
+
+## V46 live results on 14 November 2026
+
+All 15 approved clip runs completed. GPT-6 Luna returned 26 observations across 17 frozen targets in 154 calls. Estimated usage settled at US$0.061706 with no outstanding reservation. On 24 matched observations, exact profile agreement fell from 9 to 7, applied transitions rose from 15 to 16 and typed transitions rose from 14 to 17. Phase agreement held at 18/24. Exact judged cue agreement rose from 18/21 to 19/21. The four repeated waveform observations produced four different profiles across the repeats.
+
+The exact v46 replay reconstructed all 26 observations. Running v44 on the same fresh answers reproduced all 23 comparable observations with identical scored output. The older code left two place-related requests unused on one clip and needed a boundary response missing from the short day-heading receipt. Among matched frozen Reset observations, positive simulator conditions went from 18/45 in v44 to 15/45 in v46. The new wider setting observation contributed six more positive conditions, yielding 21/54 across all v46 frozen Reset observations. All compiler-recognized hard windows met zero output.
+
+| Target | Fresh v46 result | Follow-up |
+| --- | --- | --- |
+| `a20-04:14` | Short Reset with uncertainty and zero in 9/9. Wide and breadth missed and remained positive in 6/9 and 3/9 conditions respectively. | Accept the quiet heading check when exact typed time evidence supports it and the contrary reading supplies no prior action. Replay both failing receipts and the short control. |
+| `a20-03:12` | Both widths remained positive in 6/9. The wider clip proposed the same entry twice with different predecessors. The joint comparison and blind old-place check remained uncertain. | Compare an earlier-prefix arm starting at unit 2 with the existing 8 and 11 controls. Use the authored opening at unit 0 if a single early unit cannot establish the venue. Check intervening scenes, frames and protective barriers before using the witness. |
+| `a20-17:12` | Applied one scene cut at 12 and stayed at zero in 9/9. Unit 13 retained the scene. V44 produced the same result on these fresh answers. | Keep both live and saved-answer cases in regression and adjudicate the frozen Baseline reference. |
+| `o11-04:224` | Independent entry judged a material objective shift, while typed and local evidence pointed to the old action. Applied Accent and Onset rise with positive output in 6/9. | An exact disagreement can nominate a blind objective comparison. Require agreeing evidence before applying a cut and adjudicate Taper placement separately. |
+| `d2-02:1550` | First arm recorded ease at 1550 despite an independent depiction-only judgment. Repeat compiled Baseline with no open release. | The first arm has an independently verified release at 1549. Preserve its finite fade through a quiet successor. The repeat needs a new recognition test for the missing earlier release. |
+
+The 90% cue recall gate and the author-disjoint holdout remain open. [Release thresholds](release-acceptance.md)
+
+## V47 changes from the live results
+
+The day-heading check accepts quiet romantic depiction when the typed time cut, exact paragraph boundary and otherwise quiet evidence agree. A focused veto with prior evidence, a genuine same-episode ruling, a conflicting predecessor or an intervening barrier retains its existing behavior. The v47 replay of the fresh live answers reduces the wide and breadth day-heading observations to zero in all nine simulator conditions. The wide observation applies a scene cut. The clipped breadth observation clears its beat without establishing a new scene. The short control remains at zero.
+
+A material-entry proposal and an exact old-scope accent can now nominate the existing blind objective confirmation under the same per-clip budget. That nomination does not establish a cut. The two observations in the `o11-04` clip lack the new response in their v46 receipt. Tests cover agreeing objective evidence, conflicting context, missing proof and protection. A fresh v47 measurement remains outstanding.
+
+An exact earlier release with independent local and typed corroboration can retain its playback clock after a rejected discovery anchor and a depiction-only successor. On the first fresh `d2-02` waveform receipt, v47 moves the release clock from 1550 to 1549 and treats the successor as quiet while retaining Taper. The existing fade duration and floor remain seven words. All nine simulator output and target traces agree with v46. The repeat has no independently established open release to inherit and replay still yields Baseline.
 
 ## Remaining issues and closure tests
 

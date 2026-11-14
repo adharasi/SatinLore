@@ -238,7 +238,7 @@ function paragraphBoundaryEvidence(unit, context) {
   if (!heading) return arrivalHint.test(unit.text) ? {reason: "setting-shift"} : null;
   const priorHeading = context.findLast(row => numberedDay.test(row.text.trim()));
   const priorDay = priorHeading && numberedDay.exec(priorHeading.text.trim());
-  if (!priorDay) return {reason: "unresolved-day-heading"};
+  if (!priorDay) return {reason: "unresolved-day-heading", previousId: previous.id};
   // The new heading supplies a clock change only when the same narration
   // supplied an earlier heading followed by an episode in that paragraph.
   return Number(heading[1]) > Number(priorDay[1]) &&
@@ -246,13 +246,22 @@ function paragraphBoundaryEvidence(unit, context) {
     {reason: "time-jump", headingId: priorHeading.id, previousId: previous.id} : null;
 }
 
-function canCompareParagraphBoundary(row, id) {
-  const quiet = fact => fact?.depiction === "neutral" && ["current", "neutral"].includes(fact.frame) &&
-    quietNegative(fact, fact.frame, fact.scopeId) && fact.evidenceIds.every(evidence => evidence === id);
+function canCompareParagraphBoundary(row, id, paragraph) {
   const {primaryPrefix, effectiveAnnotation, transitionVerification: typed, discovery, cueRecovery} = row;
+  const boundary = typed?.sceneBoundary;
+  const entry = row.sceneEntryVerification?.sceneEntry;
+  // A day heading and the typed cut can agree even when the other readers
+  // see setup or elapsed continuation. A clipped heading only clears carry.
+  const headingOverridesVeto = paragraph.reason !== "setting-shift" && boundary?.status === "cut" &&
+    boundary.reason === "time-jump" && boundary.previousId === paragraph.previousId && boundary.entryId === id &&
+    row.cueRecoveryCorrection === "continuity-cut-veto" && row.transitionFlag === "transition-conflict" &&
+    entry?.status === "none" && ["elapsed-continuation", "setup-only"].includes(entry.reason);
+  const quiet = fact => ["current", "neutral"].includes(fact?.frame) &&
+    (fact.depiction === "neutral" || headingOverridesVeto && fact.depiction === "romantic") &&
+    quietNegative(fact, fact.frame, fact.scopeId) && fact.evidenceIds.every(evidence => evidence === id);
   return row.prefixVerified && quiet(primaryPrefix) && quiet(effectiveAnnotation) && (!cueRecovery || quiet(cueRecovery)) &&
     typed?.status === "neutral" && ["current", "neutral"].includes(typed.frame) && typed.transition === "none" &&
-    ["none", "uncertain"].includes(typed.sceneBoundary?.status) && !currentCueAt(discovery, id, "candidate");
+    (["none", "uncertain"].includes(boundary?.status) || headingOverridesVeto) && !currentCueAt(discovery, id, "candidate");
 }
 
 function corroboratedTimeEntry(row, id) {
@@ -368,6 +377,21 @@ function competingObjectiveEntryCandidate(row, id) {
     discovery?.status === "candidate" && discovery.frame === "current" && discovery.transition === "onset" &&
     discovery.fact === "none" && discovery.action === "contact" && discovery.scopeId === primary.scopeId &&
     discovery.priorAnchor === null && discovery.evidenceIds.length === 1 && discovery.evidenceIds[0] === id;
+}
+
+function competingObjectiveCutCandidate(row, id) {
+  const {primaryPrefix: primary, transitionVerification: typed, effectiveAnnotation: effect, discovery} = row;
+  const proposedEntry = fact => fact?.frame === "current" && fact.transition === "scene-cut" && fact.fact === "cut" &&
+    fact.narrativePhase === "onset" && directActions.has(fact.action) && fact.priorAnchor === null &&
+    fact.evidenceIds.length === 2 && fact.evidenceIds[0] === id - 1 && fact.evidenceIds[1] === id;
+  // The typed accent still links the previous objective. Route this conflict
+  // through independent first-entry and boundary checks before any reset.
+  return row.prefixVerified && row.annotation === primary && !row.cueRecovery &&
+    primary?.status === "verified" && proposedEntry(primary) && int(primary.scopeId) && primary.scopeId < id - 1 &&
+    discovery?.status === "candidate" && proposedEntry(discovery) && discovery.scopeId === id && discovery.action === primary.action &&
+    exactCurrentCue(typed, id) && typed.transition === "accent" && typed.fact === "none" && typed.priorAnchor === null &&
+    typed.sceneBoundary?.status === "none" && typed.evidenceIds.length === 2 && typed.evidenceIds[0] === primary.scopeId &&
+    effect?.transition === "accent" && effect.fact === "none";
 }
 
 function agreesOnMaterialEntry(entry, boundary, id) {
@@ -806,6 +830,22 @@ function inheritedReleaseEvidence(row, previous, cue, predecessor, id, provenanc
   // the earlier release coordinate if the planner actually inherits that fade.
   if (provenanceOnly) return exactDepictionOnly && strictQuietNegative(cue, "current", cue.scopeId) &&
     strictQuietNegative(discovery, "current", cue.scopeId) ? {...inherited, provenanceOnly: true} : null;
+
+  // A rejected discovery anchor cannot erase an independently verified
+  // release. The exact repeated link supplies provenance only for its open fade.
+  const repeatedOpenRelease = recoverReleaseClock && previous.discoveryFailure === "prior-anchor" &&
+    earlierLocal.contextId === null && previous.sceneEntryVerification?.sceneEntry?.reason === "ordinary-interruption" &&
+    exactDepictionOnly && exactCurrentCue(cue, id) && cue.depiction === "romantic" && cue.action === "release" &&
+    cue.narrativePhase === "ease" && cue.transition === "ease" && cue.fact === "ease" && anchorId === id - 2 &&
+    cue.scopeId === anchorId && predecessor.scopeId === anchorId && predecessor.priorAnchor === anchorId &&
+    predecessor.evidenceIds.length === 2 && predecessor.evidenceIds[0] === anchorId &&
+    cue.evidenceIds.length === 3 && cue.evidenceIds[0] === anchorId && cue.evidenceIds[1] === prior &&
+    previous.window?.runId === row.window.runId && opening?.window?.runId === row.window.runId &&
+    exactCurrentCue(anchor, anchorId) && anchor.action === "anticipation" && anchor.narrativePhase === "build" && anchor.fact === "low" &&
+    discovery?.scopeId != null && discovery.scopeId >= row.window.runId && discovery.scopeId > evidenceBarrier &&
+    discovery.scopeId <= anchorId && discovery.scopeId === opening.discovery?.scopeId &&
+    strictQuietNegative(discovery, "current", discovery.scopeId) && discovery.depiction === "neutral";
+  if (repeatedOpenRelease) return inherited;
 
   if (cue.fact === "none") {
     // The phase word alone cannot establish another release when the other
@@ -2487,8 +2527,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
     const firstId = context[0]?.id;
     if (firstId == null) return;
     const typedTime = corroboratedTimeEntry(row, id);
-    const paragraph = !typedTime && canCompareParagraphBoundary(row, id) ?
-      paragraphBoundaryEvidence(unit, context) : null;
+    const paragraphEvidence = !typedTime && paragraphBoundaryEvidence(unit, context);
+    const paragraph = paragraphEvidence && canCompareParagraphBoundary(row, id, paragraphEvidence) ? paragraphEvidence : null;
     if (!typedTime && !paragraph || possibleRestartClosure(unit, row.effectiveAnnotation)) return;
     const causal = attest({runId: job.runId, firstId, target: id});
     if (causal.restartBoundary || [row.primaryPrefix, row.transitionVerification, row.discovery, row.cueRecovery].some(
@@ -2616,7 +2656,8 @@ export async function runLunaProtocolShadow({id, text, sourceSha256, grant, prov
         if (!disputed && !settingDispute) {
           if (!boundaryEntryConfirmation || boundaryTargets.has(id)) return;
           const entryCandidate = independentEntryCandidate(row, id);
-          const objectiveCandidate = !entryCandidate && competingObjectiveEntryCandidate(row, id);
+          const objectiveCandidate = !entryCandidate && (competingObjectiveEntryCandidate(row, id) ||
+            verifyBoundaryArbitration && competingObjectiveCutCandidate(row, id));
           if (entryCandidate || objectiveCandidate) {
             if (independentConfirmationUsed) row.independentBoundaryStatus = "confirmation-limit";
             else {

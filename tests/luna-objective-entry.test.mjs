@@ -21,7 +21,7 @@ const stop = unitId => ({...neutral(unitId), status: "verified", transition: "ha
 
 function run({entry = uncertain, boundary = objective, verifiedPrior = neutral(1), primary = cut, localStop = false,
   unavailable = false, arbitrate = true, requests = [], discovery = {...cut, status: "candidate"},
-  localTyped, boundaryReply, blockedIds = []} = {}) {
+  localTyped, boundaryReply, blockedIds = [], verifyBoundaryArbitration = false} = {}) {
   const provider = Object.assign(async request => {
     requests.push(request);
     const {mode, targetIds} = request;
@@ -43,7 +43,7 @@ function run({entry = uncertain, boundary = objective, verifiedPrior = neutral(1
   return runLunaProtocolShadow({id: "objective-entry", text, grant, now: () => 1, provider, negativeStride: 0, prefixUnits: 3,
     verificationTargets: [0, 1, 2, 3], maxVerification: 4, transitionTargets: [2], maxTransitionVerification: 1,
     verifyTransitions: true, sceneEntryArbitration: arbitrate, boundaryEntryConfirmation: arbitrate, blockedIds,
-    sceneEntryVerificationTargets: [2]});
+    sceneEntryVerificationTargets: [2], verifySettingSituation: verifyBoundaryArbitration, verifyBoundaryArbitration});
 }
 
 test("a correlated quiet objective cut requires the existing first-entry check before the next target", async () => {
@@ -110,6 +110,28 @@ test("a local onset cannot nominate an objective cut without an exact entry and 
   assert.equal(protectedTarget.units[2].pattern, "Stop");
   const protectedPath = await run({...objectiveAgainstLocal, blockedIds: [1]});
   assert.notEqual(protectedPath.units[2].appliedTransition, "scene-cut");
+});
+
+test("an old-scope accent and exact cut proposals can nominate a blind objective comparison", async () => {
+  const primary = {...cut, depiction: "suggestive", narrativePhase: "onset", action: "contact", scopeId: 0};
+  const options = {primary, boundary: noBoundary, discovery: {...primary, status: "candidate", scopeId: 2},
+    localTyped: {status: "verified", transition: "accent", evidenceIds: [0, 2]},
+    entry: {...material, previousId: 1}, verifyBoundaryArbitration: true};
+  const requests = [], {units} = await run({...options, requests});
+  assert.equal(units[2].pattern, "Reset");
+  assert.equal(units[2].appliedTransition, "scene-cut");
+  assert.equal(units[3].sceneId, units[2].sceneId);
+  const checks = requests.filter(({mode}) => ["scene-entry", "scene-boundary"].includes(mode));
+  assert.deepEqual(checks.map(({mode}) => mode), ["scene-entry", "scene-boundary"]);
+  assert.deepEqual(checks[1].units, checks[0].units);
+  assert.equal(checks[1].attested, undefined);
+  const sameEpisode = {...noBoundary, changeId: null, contrast: "same-episode"};
+  for (const negative of [{entry: interruption}, {boundaryReply: sameEpisode}, {blockedIds: [1]},
+    {localTyped: {...options.localTyped, evidenceIds: [1, 2]}}]) {
+    const {units} = await run({...options, ...negative});
+    assert.equal(units[2].appliedTransition, "accent");
+  }
+  assert.equal((await run({...options, primary: stop(2)})).units[2].pattern, "Stop");
 });
 
 test("independent exact objective entry preserves Reset and ordinary interruption preserves eligible carry", async () => {

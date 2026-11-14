@@ -122,7 +122,7 @@ const dayStory = "Day 5. Ada checked the maps. Lee put away the lantern.\n\nDay 
 const arrivalStory = "June closed the old library. Lee fetched a coat.\n\nThey walked to the bus stop. The driver opened the doors.";
 const timeStory = "June checked the recorder. Lee called the test off.\n\nAt dawn they inspected the equipment. They packed it away.";
 
-async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped = false, typed, typedFrame = "current", entry, focused, arrived = arrival,
+async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped = false, typed, typedFrame = "current", entry, focused, primary, arrived = arrival,
   earlier = oldPlace, observed = [], closed = false, lateCut = false, precedingFrame = "current"} = {}) {
   const indexed = buildWholeStoryIndex(text);
   const scopes = indexed.units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}));
@@ -143,6 +143,7 @@ async function arbitrate(text, {target = 2, first = 0, blockedIds = [], stopped 
         sceneBoundary: unitId === target ? typed ?? noBoundary : lateCut && unitId === target + 1 ?
           {status: "cut", reason: "time-jump", previousId: target - 1, entryId: unitId} : noBoundary};
       if (request.mode === "cue-check" && unitId === target && focused) return focused;
+      if (request.mode === "verify" && unitId === target && primary && !stopFact) return primary;
       return stopFact ?? ordinaryEnd ?? {...quiet(unitId), frame: unitId === target - 1 ? precedingFrame : "current",
         scopeId: unitId === target && text === arrivalStory ? 1 : null};
     });
@@ -175,6 +176,37 @@ test("a numbered day heading establishes a cut only with an earlier anchored hea
     assert.notEqual((await arbitrate(dayStory, {...options, target: 3})).units[3].appliedTransition, "scene-cut");
   }
   assert.equal((await arbitrate(dayStory, {target: 3, stopped: true})).units[3].pattern, "Stop");
+});
+
+test("paired day headings corroborate an exact typed cut against an uncited continuation veto", async () => {
+  const typed = {status: "cut", reason: "time-jump", previousId: 2, entryId: 3};
+  const primary = {...quiet(3), depiction: "romantic"};
+  const focused = {...primary, evidenceIds: [3]};
+  const options = {target: 3, typed, primary, focused, entry: noEntry("elapsed-continuation")};
+  const {units} = await arbitrate(dayStory, options);
+  assert.equal(units[3].cueRecoveryCorrection, "continuity-cut-veto");
+  assert.equal(units[3].sceneEntryVerification.sceneEntry.reason, "elapsed-continuation");
+  assert.equal(units[3].boundaryWitnessStatus, "paired-day-headings");
+  assert.equal(units[3].appliedTransition, "scene-cut");
+  assert.equal(units[3].pattern, "Reset");
+  assert.deepEqual(units[3].transitionEvidenceIds, [0, 2, 3]);
+  assert.equal(units[4].sceneId, units[3].sceneId);
+  const setupOnly = {...options, focused: quiet(3), entry: noEntry("setup-only")};
+  assert.equal((await arbitrate(dayStory, setupOnly)).units[3].appliedTransition, "scene-cut");
+  const clipped = await arbitrate(dayStory, {...setupOnly, first: 1});
+  assert.equal(clipped.units[3].pattern, "Reset");
+  assert.equal(clipped.units[3].appliedTransition, "uncertain-continuity");
+  assert.deepEqual(clipped.units[3].transitionEvidenceIds, [3]);
+  assert.equal(clipped.units[3].sceneId, clipped.units[2].sceneId);
+  for (const override of [{entry: noEntry("same-episode")}, {focused: {...focused, evidenceIds: [2, 3]}},
+    {typed: {...typed, previousId: 1}}, {precedingFrame: "reported"}]) {
+    const negative = await arbitrate(dayStory, {...options, ...override});
+    assert.notEqual(negative.units[3].appliedTransition, "scene-cut");
+  }
+  for (const variant of [dayStory.replace("Day 6", "Day 5"), dayStory.replace("Day 6.", "They talked about day 6.")]) {
+    assert.notEqual((await arbitrate(variant, options)).units[3].appliedTransition, "scene-cut");
+  }
+  assert.equal((await arbitrate(dayStory, {...options, stopped: true})).units[3].pattern, "Stop");
 });
 
 test("a named bus stop can nominate independent arrival proof and cannot suppress a real Stop", async () => {

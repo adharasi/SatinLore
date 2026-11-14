@@ -230,27 +230,33 @@ const isolatedQuiet = {...localNeutral, frame: "current", contrast: "neutral"};
 const scopedQuietDiscovery = {...quiet(3), scopeId: 0, evidenceIds: [3]};
 
 function runOldRoot({observed = [], target = rootedEase, targetLocal = isolatedQuiet, earlier = precedingRelease,
-  earlierLocal = localRelease(2, 1), discovery = scopedQuietDiscovery, blockedIds = []} = {}) {
-  const text = "The quartet played. Mira watched Lee. They slowed their steps in time with the music. The lights dimmed. A door creaked.";
+  earlierLocal = localRelease(2, 1), discovery = scopedQuietDiscovery, blockedIds = [], sourceBuild = earlierBuild,
+  recoverReleaseClock = false, rejectedReleaseAnchor = false, targetBoundary = noBoundary,
+  releaseText = "They slowed their steps in time with the music."} = {}) {
+  const text = `The quartet played. Mira watched Lee. ${releaseText} The lights dimmed. A door creaked.`;
   const {units, editionDigest, segmentationVersion} = buildWholeStoryIndex(text);
   const grant = {editionDigest, segmentationVersion, purpose: WHOLE_STORY_GRANT_PURPOSE, expiresAt: 2,
     spans: units.map(({id, byteStart, byteEnd, digest}) => ({id, byteStart, byteEnd, digest}))};
   const provider = Object.assign(async request => {
     observed.push(request);
-    const facts = request.targetIds.map(id => {
+    const rejection = rejectedReleaseAnchor && request.mode === "discovery";
+    const facts = request.targetIds.filter(id => !(rejection && id === 2)).map(id => {
       if (request.mode === "scene-entry") return {unitId: id, sceneEntry: ordinaryInterruption};
       if (request.mode === "local-action") return {unitId: id, localAction: id === 2 ? earlierLocal : targetLocal};
       if (request.mode === "transition") return {...quiet(id), depiction: "unknown", narrativePhase: "unknown", action: "unknown",
-        ...(id === 2 ? {status: "verified", transition: "interruption", evidenceIds: [2]} : {}), sceneBoundary: noBoundary};
+        ...(id === 2 ? {status: "verified", transition: "interruption", evidenceIds: [2]} : {}),
+        sceneBoundary: id === 3 ? targetBoundary : noBoundary};
       if (id === 3) return request.mode === "discovery" ? discovery : target;
-      const primary = id === 1 ? earlierBuild : id === 2 ? earlier : quiet(id);
+      if (rejection && id === 1) return {...earlierBuild, status: "candidate"};
+      const primary = id === 1 ? sourceBuild : id === 2 ? earlier : quiet(id);
       return request.mode === "discovery" && primary.status === "verified" ? {...primary, status: "candidate"} : primary;
     });
+    if (rejection) return {status: "partial", usage, facts, targetFailures: [{unitId: 2, reason: "prior-anchor"}]};
     return {status: "ok", usage, facts};
   }, {sceneBoundaryProtocol: true});
   return runLunaProtocolShadow({id: "rooted-release-inheritance", text, grant, now: () => 1, provider, blockedIds,
     verificationTargets: units.map(({id}) => id), transitionTargets: [2, 3], verifyTransitions: true,
-    localActionVerificationTargets: [2, 3], sceneEntryVerificationTargets: [2, 3], negativeStride: 0});
+    localActionVerificationTargets: [2, 3], sceneEntryVerificationTargets: [2, 3], negativeStride: 0, recoverReleaseClock});
 }
 
 test("an older beat root cannot re-date the independently checked release on the adjacent quiet unit", async () => {
@@ -286,6 +292,47 @@ test("old-root release inheritance requires each exact link and a current quiet 
   }
   const blocked = await runOldRoot({blockedIds: [3]});
   assert.equal(blocked.units[3].pattern, "Stop");
+});
+
+const rejectedAnchorRelease = {...precedingRelease, scopeId: 1, priorAnchor: 1, evidenceIds: [1, 2]};
+const rejectedAnchorOptions = {recoverReleaseClock: true, rejectedReleaseAnchor: true, earlier: rejectedAnchorRelease,
+  earlierLocal: localRelease(2, null), targetLocal: depictedOnly, discovery: {...scopedQuietDiscovery, evidenceIds: []},
+  sourceBuild: {...earlierBuild, scopeId: null}};
+
+test("a rejected discovery anchor does not redate the independently verified release", async () => {
+  const candidate = await runOldRoot(rejectedAnchorOptions);
+  const prior = await runOldRoot({...rejectedAnchorOptions, recoverReleaseClock: false});
+  const [releaseUnit, target] = candidate.units.slice(2);
+  const previousTarget = prior.units[3];
+  assert.equal(releaseUnit.discoveryStatus, "invalid-response");
+  assert.equal(releaseUnit.trace.decision, "Ease");
+  assert.equal(target.trace.decision, "Inherit release fade");
+  assert.equal(target.pattern, "Taper");
+  assert.equal(target.phase, "quiet");
+  assert.equal(target.knownAt, 2);
+  assert.equal(target.trace.beat, releaseUnit.trace.beat);
+  assert.equal(target.appliedTransition, "none");
+  assert.equal(previousTarget.knownAt, 3);
+  for (const field of ["scene", "beat", "holdWords", "fadeWords", "floorWords"]) {
+    assert.equal(target.trace[field], previousTarget.trace[field]);
+  }
+});
+
+test("rejected-anchor release inheritance needs matching scope, active fade and independent local proof", async () => {
+  for (const options of [{targetLocal: localRelease(3, null)}, {earlierLocal: null}, {target: {...rootedEase, scopeId: 0}},
+    {discovery: {...quiet(3), scopeId: 1}}, {earlier: {...rejectedAnchorRelease, action: "continuation", fact: "none"}}]) {
+    const {units} = await runOldRoot({...rejectedAnchorOptions, ...options});
+    assert.notEqual(units[3].trace.decision, "Inherit release fade");
+  }
+  const expired = await runOldRoot({...rejectedAnchorOptions,
+    releaseText: "They slowed their steps in time with the music while the musicians continued playing the last piece for the audience."});
+  assert.equal(expired.units[3].pattern, "Baseline");
+  assert.equal(expired.units[3].trace.fadeWords, 0);
+  const cut = await runOldRoot({...rejectedAnchorOptions,
+    targetBoundary: {status: "cut", reason: "time-jump", previousId: 2, entryId: 3}});
+  assert.equal(cut.units[3].pattern, "Reset");
+  const stop = await runOldRoot({...rejectedAnchorOptions, blockedIds: [3]});
+  assert.equal(stop.units[3].pattern, "Stop");
 });
 
 function runScopedRepeat({linkedEarlier = false, targetLocal = isolatedQuiet, targetEntry = ordinaryInterruption,

@@ -638,3 +638,7 @@ Each repair uses the exact approved causal prefix. Verified Stops, protection, f
 ## V46 preserve verified release timing through a quiet repair
 
 A neutral typed frame can leave the numbered-heading comparison eligible. The comparison excludes paths through reported, imagined or remembered events. The release compiler can retain an earlier, independently verified release when the next unit has a quiet primary or an independent quiet repair, quiet discovery in the same episode and no new local action. The planner preserves the existing bounded fade. [Saved-response results](nocturne-discrepancy-closure.md#v46-verification)
+
+## V47 resolve fresh heading and release discrepancies
+
+Exact numbered day headings can corroborate a typed time change when setup or elapsed-continuation readings cite no earlier action. A lone heading can clear output while its boundary remains unresolved. An enacted cut proposal paired with a typed old-scope accent can request independent confirmation of a shared objective change. A rejected discovery anchor can leave a previously verified release available to a depiction-only successor when the exact beat and release evidence agree. [Live run and v47 replay](nocturne-discrepancy-closure.md#v46-live-results-on-14-november-2026)
