@@ -1,0 +1,438 @@
+{
+  "sourceProseIncluded": false,
+  "externalCalls": 0,
+  "baseline": "bdf22efa6d0110b56cde022190fbcdf0a81d271a",
+  "candidate": "dd6ebf80c86790a07fd26efbb73e5d59999458d7",
+  "panels": [
+    {
+      "panel": "breadth-1",
+      "observations": 9,
+      "comparable": 7,
+      "changed": [
+        {
+          "storyId": "a20-04",
+          "id": 14,
+          "fields": {
+            "pattern": {
+              "before": "Undertone",
+              "after": "Reset"
+            },
+            "appliedTransition": {
+              "before": "none",
+              "after": "uncertain-continuity"
+            },
+            "beatId": {
+              "before": "a20-04:beat:13",
+              "after": null
+            },
+            "boundaryWitnessStatus": {
+              "before": null,
+              "after": "unresolved-day-heading"
+            },
+            "knownAt": {
+              "before": 13,
+              "after": null
+            },
+            "trace": {
+              "before": {
+                "scene": "a20-04:scene:10",
+                "beat": "a20-04:beat:13",
+                "decision": "Carry beat",
+                "knownAt": 13,
+                "evidence": [
+                  13
+                ],
+                "holdWords": 32,
+                "fadeWords": 48,
+                "floorWords": 0,
+                "wordOffset": 51,
+                "reason": "Same beat continues through a quiet connector. Keep the existing rhythm."
+              },
+              "after": {
+                "scene": "a20-04:scene:10",
+                "beat": null,
+                "decision": "Reset",
+                "knownAt": null,
+                "evidence": [],
+                "holdWords": 0,
+                "fadeWords": 0,
+                "floorWords": 0,
+                "wordOffset": 51,
+                "reason": "Compiled from available protocol evidence."
+              }
+            }
+          }
+        }
+      ],
+      "beyondReceipts": [
+        {
+          "storyId": "o11-04",
+          "targetIds": [
+            223,
+            224
+          ],
+          "requestDifferences": [
+            {
+              "mode": "scene-boundary",
+              "targetIds": [
+                224
+              ],
+              "contextIds": [
+                220,
+                221,
+                222,
+                223
+              ],
+              "reason": "independent-boundary-not-recorded"
+            }
+          ],
+          "unserved": [],
+          "sameRegeneratedRequests": true
+        }
+      ],
+      "violations": 0,
+      "output": [
+        {
+          "point": "a20-01:13",
+          "conditions": 9,
+          "positiveV46": 3,
+          "positiveV47": 3,
+          "identical": 9
+        },
+        {
+          "point": "a20-03:12",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-03:14",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-04:10",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-04:14",
+          "conditions": 9,
+          "positiveV46": 3,
+          "positiveV47": 0,
+          "identical": 6
+        },
+        {
+          "point": "a20-17:12",
+          "conditions": 9,
+          "positiveV46": 0,
+          "positiveV47": 0,
+          "identical": 9
+        },
+        {
+          "point": "a20-17:13",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        }
+      ]
+    },
+    {
+      "panel": "a20-04-context-short",
+      "observations": 1,
+      "comparable": 1,
+      "changed": [],
+      "beyondReceipts": [],
+      "violations": 0,
+      "output": [
+        {
+          "point": "a20-04:14",
+          "conditions": 9,
+          "positiveV46": 0,
+          "positiveV47": 0,
+          "identical": 9
+        }
+      ]
+    },
+    {
+      "panel": "a20-04-context-wide",
+      "observations": 1,
+      "comparable": 1,
+      "changed": [
+        {
+          "storyId": "a20-04",
+          "id": 14,
+          "fields": {
+            "pattern": {
+              "before": "Baseline",
+              "after": "Reset"
+            },
+            "appliedTransition": {
+              "before": "none",
+              "after": "scene-cut"
+            },
+            "sceneId": {
+              "before": "a20-04:scene:8",
+              "after": "a20-04:scene:14"
+            },
+            "independentBoundaryStatus": {
+              "before": null,
+              "after": "corroborated"
+            },
+            "sceneEntryArbitration": {
+              "before": null,
+              "after": "independently-confirmed-cut"
+            },
+            "boundaryWitnessStatus": {
+              "before": null,
+              "after": "paired-day-headings"
+            },
+            "knownAt": {
+              "before": null,
+              "after": 14
+            },
+            "trace": {
+              "before": {
+                "scene": "a20-04:scene:8",
+                "beat": null,
+                "decision": "Local profile",
+                "knownAt": null,
+                "evidence": [],
+                "holdWords": 0,
+                "fadeWords": 0,
+                "floorWords": 0,
+                "wordOffset": 60,
+                "reason": "Compiled from available protocol evidence."
+              },
+              "after": {
+                "scene": "a20-04:scene:14",
+                "beat": null,
+                "decision": "Reset",
+                "knownAt": 14,
+                "evidence": [
+                  8,
+                  13,
+                  14
+                ],
+                "holdWords": 0,
+                "fadeWords": 0,
+                "floorWords": 0,
+                "wordOffset": 60,
+                "reason": "Compiled from available protocol evidence."
+              }
+            }
+          }
+        }
+      ],
+      "beyondReceipts": [],
+      "violations": 0,
+      "output": [
+        {
+          "point": "a20-04:14",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 0,
+          "identical": 3
+        }
+      ]
+    },
+    {
+      "panel": "setting-controls",
+      "observations": 5,
+      "comparable": 5,
+      "changed": [],
+      "beyondReceipts": [],
+      "violations": 0,
+      "output": [
+        {
+          "point": "a20-01:13",
+          "conditions": 9,
+          "positiveV46": 3,
+          "positiveV47": 3,
+          "identical": 9
+        },
+        {
+          "point": "a20-09:16",
+          "conditions": 9,
+          "positiveV46": 0,
+          "positiveV47": 0,
+          "identical": 9
+        },
+        {
+          "point": "a20-09:17",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-14:8",
+          "conditions": 9,
+          "positiveV46": 0,
+          "positiveV47": 0,
+          "identical": 9
+        },
+        {
+          "point": "a20-14:9",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        }
+      ]
+    },
+    {
+      "panel": "waveform-controls",
+      "observations": 4,
+      "comparable": 4,
+      "changed": [
+        {
+          "storyId": "d2-02",
+          "id": 1550,
+          "fields": {
+            "phase": {
+              "before": "ease",
+              "after": "quiet"
+            },
+            "knownAt": {
+              "before": 1550,
+              "after": 1549
+            },
+            "trace": {
+              "before": {
+                "scene": "d2-02:scene:1545",
+                "beat": "d2-02:beat:1549",
+                "decision": "Ease",
+                "knownAt": 1550,
+                "evidence": [
+                  1548,
+                  1549,
+                  1550
+                ],
+                "holdWords": 0,
+                "fadeWords": 7,
+                "floorWords": 7,
+                "wordOffset": 49,
+                "reason": "Prefix evidence supports easing."
+              },
+              "after": {
+                "scene": "d2-02:scene:1545",
+                "beat": "d2-02:beat:1549",
+                "decision": "Inherit release fade",
+                "knownAt": 1549,
+                "evidence": [
+                  1549
+                ],
+                "holdWords": 0,
+                "fadeWords": 7,
+                "floorWords": 7,
+                "wordOffset": 49,
+                "reason": "Retain the verified release at the preceding unit."
+              }
+            }
+          }
+        }
+      ],
+      "beyondReceipts": [],
+      "violations": 0,
+      "output": [
+        {
+          "point": "d2-02:1549",
+          "conditions": 9,
+          "positiveV46": 3,
+          "positiveV47": 3,
+          "identical": 9
+        },
+        {
+          "point": "d2-02:1550",
+          "conditions": 9,
+          "positiveV46": 3,
+          "positiveV47": 3,
+          "identical": 9
+        },
+        {
+          "point": "a20-18:15",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-18:16",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        }
+      ]
+    },
+    {
+      "panel": "waveform-controls-repeat",
+      "observations": 4,
+      "comparable": 4,
+      "changed": [],
+      "beyondReceipts": [],
+      "violations": 0,
+      "output": [
+        {
+          "point": "d2-02:1549",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "d2-02:1550",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-18:15",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-18:16",
+          "conditions": 9,
+          "positiveV46": 3,
+          "positiveV47": 3,
+          "identical": 9
+        }
+      ]
+    },
+    {
+      "panel": "a20-03-context-wide",
+      "observations": 2,
+      "comparable": 2,
+      "changed": [],
+      "beyondReceipts": [],
+      "violations": 0,
+      "output": [
+        {
+          "point": "a20-03:12",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        },
+        {
+          "point": "a20-03:14",
+          "conditions": 9,
+          "positiveV46": 6,
+          "positiveV47": 6,
+          "identical": 9
+        }
+      ]
+    }
+  ]
+}

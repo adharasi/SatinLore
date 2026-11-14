@@ -35,6 +35,7 @@ def main():
                *(ROOT / "scripts").glob("*.mjs")]
     for path in sorted(modules):
         subprocess.run([node, "--check", str(path)], cwd=ROOT, check=True)
+    subprocess.run([node, "scripts/verify-approved-beat-corpus.mjs"], cwd=ROOT, check=True)
     tests = sorted(str(path) for path in (ROOT / "tests").glob("*.test.mjs"))
     subprocess.run([node, "--test", *tests], cwd=ROOT, check=True)
     print("All local checks passed. Browser and real-device checks remain separate.")

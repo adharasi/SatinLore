@@ -1,6 +1,6 @@
 # Nocturne beat protocol shadow
 
-The founder shadow runner indexes an exact edition locally, plans contiguous cleared ranges, requests Luna discovery labels, then asks for independent prefix evidence at playback-sensitive decisions. It passes the resulting evidence to the JavaScript port of the approved v6 continuity compiler. It produces qualitative profiles and traces for comparison. This milestone is a command-line research path. Browser projection, authenticated Worker delivery, simulator timing, and physical dispatch are later stages.
+The founder shadow runner indexes an exact edition locally, plans contiguous cleared ranges, requests Luna discovery labels, then asks for independent prefix evidence at playback-sensitive decisions. It passes the resulting evidence to the JavaScript port of the approved v6 continuity compiler to produce qualitative profiles and traces. The authenticated Worker offers a founder-only diagnostic, and the simulator checks timing and commands offline. The [VS Code handoff](nocturne-vscode-handoff.md) covers the current v47 baseline and repeatable workflows. Reader release and physical output have separate [qualification gates](nocturne-release-qualification.md).
 
 ## Run the comparison
 

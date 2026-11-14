@@ -1,6 +1,6 @@
 # Frozen Luna development labels
 
-This reference is the exact frozen scoring sample used by the Luna live development comparisons. It includes **181 targets across 34 sampled works**, with edition pins for **all 41 works**. The [approved annotation protocol](nocturne-approved-annotation-protocol.md) defines how to interpret the labels. The full 17,895-unit annotated workbook and original source stay in the private review materials.
+This reference is the exact frozen scoring sample used by the Luna live development comparisons. It includes **181 targets across 34 sampled works**, with edition pins for **all 41 works**. The [approved annotation protocol](nocturne-approved-annotation-protocol.md) defines how to interpret the labels. The [VS Code handoff](nocturne-vscode-handoff.md) links the private source and full labels, the workbook and the clone-only compiler benchmark.
 
 | Corpus | Work pins | Sampled targets | Cue targets | Stress targets |
 | --- | ---: | ---: | ---: | ---: |
@@ -32,7 +32,7 @@ The sampled labels contain no story prose. Source-dependent replay uses the exac
 
 ## Full-corpus provenance
 
-The **SatinLore Full Corpus Beat Playback Review** workbook covers all 17,895 indexed units across 41 works, including 68 structural dividers. The full approved label input has the same digest as `referenceSha256` in the frozen sample. The workbook contains review and source context. Use the separately retained local corpus inputs with the [compiler parity tool](../scripts/replay-approved-beat-protocol.py) to reproduce the full playback reference.
+The **SatinLore Full Corpus Beat Playback Review** workbook covers all 17,895 indexed units across 41 works, including 68 structural dividers. The full approved label input has the same digest as `referenceSha256` in the frozen sample. The workbook contains review and source context. [Compiler parity](../scripts/verify-approved-beat-corpus.mjs) runs all 41 works from Git. The [historical adapter wrapper](../scripts/replay-approved-beat-protocol.py) recomputes the same comparison from the private source and review files.
 
 | Original artifact | SHA-256 |
 | --- | --- |

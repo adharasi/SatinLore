@@ -3,7 +3,7 @@
 ## Start here
 
 - Read `README.md`, `docs/development-spec.md` and the relevant milestone in `docs/beta-roadmap.md`.
-- For Luna scoring or annotation, use [the approved protocol](docs/nocturne-approved-annotation-protocol.md) and [the frozen development labels](docs/nocturne-frozen-labels.md). Join by exact work, edition and unit identity, and record proposed reference corrections separately.
+- For Luna scoring, annotation or discrepancy work, start with [the VS Code handoff](docs/nocturne-vscode-handoff.md), [the approved protocol](docs/nocturne-approved-annotation-protocol.md) and [the frozen development labels](docs/nocturne-frozen-labels.md). Reproduce the 41-work compiler benchmark first, join by exact work, edition and unit identity, and record proposed reference corrections separately.
 - Inspect current code and applicable nested instructions. Implementation status requires code and evidence, not plans.
 - This local FastAPI/static-JavaScript build has a themed saved-story reader and a separate local device-check flow. The private Cloudflare reader now includes verified-email accounts, explicitly saved toy/story presets, progressive calibration, combined controls where qualified, and a separately consented beta control-recording host. Follow the software-first F1–F6 roadmap; hardware is not a prerequisite for software work. Live vendor/hardware qualification and wider beta release remain outstanding. The current founder/tester runbook is `docs/beta-session-2026-11-03.md`.
 - Complete the requested milestone without unrelated frameworks or placeholders.

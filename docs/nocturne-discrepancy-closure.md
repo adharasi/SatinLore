@@ -1,6 +1,6 @@
 # Nocturne Luna discrepancy closure
 
-13 November 2026
+13–14 November 2026 · [VS Code handoff](nocturne-vscode-handoff.md)
 
 The v44 development inventory contains 181 frozen targets across 34 sampled works. Earlier runs completed 148 targets and withheld 33. The v44 live panel covered 17 distinct targets in 24 observations across 14 clip runs. It matched 9/24 profiles, 18/24 phases, 15/24 applied events, 14/24 model-reported events and 18/21 judged cues. Profile and applied event repeated exactly on 2/4 waveform pairs. Two frozen hard boundaries produced positive simulator output despite zero reported runtime violations at compiler-recognized hard boundaries. [Frozen scoring labels](nocturne-frozen-labels.md) · [V44 compiler](https://github.com/adharasi/SatinLore/commit/fb33de8b03157ab6871fcbbfaabe9859e8c786b0)
 
@@ -46,6 +46,8 @@ The 90% cue recall gate and the author-disjoint holdout remain open. [Release th
 
 ## V47 changes from the live results
 
+V47 shipped at [`dd6ebf8`](https://github.com/adharasi/SatinLore/commit/dd6ebf80c86790a07fd26efbb73e5d59999458d7). The pinned v46 build reproduced 26/26 saved observations. V47 replayed 24/26 with the identical answers and no provider calls. The two observations share one newly requested objective answer. Fresh v47 live measurements are pending.
+
 The day-heading check accepts quiet romantic depiction when the typed time cut, exact paragraph boundary and otherwise quiet evidence agree. A focused veto with prior evidence, a genuine same-episode ruling, a conflicting predecessor or an intervening barrier retains its existing behavior. The v47 replay of the fresh live answers reduces the wide and breadth day-heading observations to zero in all nine simulator conditions. The wide observation applies a scene cut. The clipped breadth observation clears its beat without establishing a new scene. The short control remains at zero.
 
 A material-entry proposal and an exact old-scope accent can now nominate the existing blind objective confirmation under the same per-clip budget. That nomination does not establish a cut. The two observations in the `o11-04` clip lack the new response in their v46 receipt. Tests cover agreeing objective evidence, conflicting context, missing proof and protection. A fresh v47 measurement remains outstanding.
@@ -56,10 +58,11 @@ An exact earlier release with independent local and typed corroboration can reta
 
 | Priority and target | Next evidence or change | Closure and matched controls |
 | --- | --- | --- |
+| P0 `a20-03:12` | Test the earlier prefix beginning at 2 against the arms beginning at 8 and 11. Start at 0 if unit 2 needs more context. End the first-entry question at 12 and the blind earlier-place question at 11. | Require independent old-place and exact arrival evidence in the same applicable frame with no intervening barrier. Check one cut at 12, zero target and output in 9/9, the new scene at 13 and no duplicate at 14. |
+| P0 `o11-04:224` | Obtain or independently adjudicate the new blind objective answer and whether local enacted action belongs to it. | A verified cut clears inherited playback in 9/9. Score exact cut, cue, phase and Taper independently. Compare same-episode action, no usable answer and a genuine hard cut. |
 | P1 `a20-01:13` | Independently verify the same active setting across the viewpoint change. | Preserve the bounded beat only on same-setting proof. Compare a distinct setting, expired beat, noncurrent frame and explicit Stop. Adjudicate the frozen Gradual build separately. |
 | P1 `a20-09:16` | Repeat v44 split-place corroboration for conflicting predecessor citations. | Apply one cut with zero output when both witnesses ground the same earlier situation. Independently adjudicate the frozen Taper location. Compare wrong earlier scene, routine movement and viewpoint-only. |
 | P2 `a20-09:17` | Compare the reported second entry with the grounded first arrival. | Keep applied none on a continuation and report raw duplicate error separately. Include a genuine second cut. |
-| P1 `o11-04:224` | Blindly adjudicate the new objective and whether local enacted action belongs to it. | Score the exact cut, cue, phase and Taper independently. Compare same-episode action and a genuine hard cut. |
 | P1 `o11-01:629` | Verify whether 626→627 attaches to the existing beat at 625. | Renew a bounded Undertone only on same-scope causal proof. Compare rejected, singleton, neutral, expired, wrong-scope and protective evidence. |
 | P1 `a20-16:12` | Verify sustained action on the existing onset at 10 with a blind check of the preceding support pair. | Select Sustain wave on the original beat and clock without a fresh cue or event. Compare ordinary contact, missing anchor, expiry and cut. |
 | P1 `a20-18:15` | Verify the exact earlier action across conflicting local and typed continuity readings. | Preserve the original beat and expiry with exact same-action evidence. Compare wrong action, wrong scope, unavailable proof, cut and Stop. |

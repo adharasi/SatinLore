@@ -63,7 +63,7 @@ function project(work, pin, isolated) {
   });
 }
 
-async function replay(work, pin, timings, wpm, maximum, isolated) {
+export async function replay(work, pin, timings, wpm, maximum, isolated, observe) {
   const clock = new SimulationClock();
   const simulator = new ProfileSimulator({model: "lush", now: clock.now});
   const dispatches = [];
@@ -103,6 +103,7 @@ async function replay(work, pin, timings, wpm, maximum, isolated) {
     for (let elapsed = 0; elapsed < dwellMs; elapsed += sampleMs) {
       const output = simulator.snapshot().strength;
       const target = playback.snapshot().target;
+      observe?.({index, output, target});
       positiveTarget ||= target > 0;
       counts.observedMs += sampleMs;
       if (target > 0) counts.positiveTargetMs += sampleMs;
@@ -141,6 +142,8 @@ async function replay(work, pin, timings, wpm, maximum, isolated) {
       (i > 0 && dispatches[i].at - dispatches[i - 1].at < heartbeatMs)).length,
     pauseViolation: Number(simulator.snapshot().strength !== 0 || dispatches.length !== dispatchCount)};
 }
+
+export {caps};
 
 function summarize(works) {
   const fields = ["observedMs", "positiveTargetMs", "positiveTargetZeroMs", "capViolationMs", "authoritativeQuietTargets",

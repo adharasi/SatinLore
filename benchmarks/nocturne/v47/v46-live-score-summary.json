@@ -1,0 +1,2084 @@
+{
+  "schema": 1,
+  "sourceProseIncluded": false,
+  "externalCallsMadeByScorer": 0,
+  "rubric": "nocturne-luna-protocol-v46",
+  "plannedClips": 15,
+  "plannedObservations": 26,
+  "plannedDistinct": 17,
+  "completedDistinct": 17,
+  "approvedReservationMicros": 2250000,
+  "totals": {
+    "completedClips": 15,
+    "completedTargets": 26,
+    "externalCalls": 154,
+    "chargedMicros": 61706,
+    "reservedMicros": 0,
+    "unsettled": 0
+  },
+  "matchedGrades": {
+    "pattern": {
+      "known": 24,
+      "observed": 24,
+      "exact": 7,
+      "paired": 24,
+      "v44Exact": 9,
+      "v46Exact": 7,
+      "improved": 1,
+      "regressed": 3
+    },
+    "phase": {
+      "known": 24,
+      "observed": 24,
+      "exact": 18,
+      "paired": 24,
+      "v44Exact": 18,
+      "v46Exact": 18,
+      "improved": 1,
+      "regressed": 1
+    },
+    "appliedTransition": {
+      "known": 24,
+      "observed": 24,
+      "exact": 16,
+      "paired": 24,
+      "v44Exact": 15,
+      "v46Exact": 16,
+      "improved": 3,
+      "regressed": 2
+    },
+    "typedTransition": {
+      "known": 24,
+      "observed": 24,
+      "exact": 17,
+      "paired": 24,
+      "v44Exact": 14,
+      "v46Exact": 17,
+      "improved": 4,
+      "regressed": 1
+    },
+    "cue": {
+      "known": 21,
+      "observed": 21,
+      "exact": 19,
+      "paired": 21,
+      "v44Exact": 18,
+      "v46Exact": 19,
+      "improved": 1,
+      "regressed": 0
+    }
+  },
+  "allGrades": {
+    "pattern": {
+      "known": 26,
+      "observed": 26,
+      "exact": 7,
+      "paired": 24,
+      "v44Exact": 9,
+      "v46Exact": 7,
+      "improved": 1,
+      "regressed": 3
+    },
+    "phase": {
+      "known": 26,
+      "observed": 26,
+      "exact": 19,
+      "paired": 24,
+      "v44Exact": 18,
+      "v46Exact": 18,
+      "improved": 1,
+      "regressed": 1
+    },
+    "appliedTransition": {
+      "known": 26,
+      "observed": 26,
+      "exact": 17,
+      "paired": 24,
+      "v44Exact": 15,
+      "v46Exact": 16,
+      "improved": 3,
+      "regressed": 2
+    },
+    "typedTransition": {
+      "known": 26,
+      "observed": 26,
+      "exact": 19,
+      "paired": 24,
+      "v44Exact": 14,
+      "v46Exact": 17,
+      "improved": 4,
+      "regressed": 1
+    },
+    "cue": {
+      "known": 22,
+      "observed": 22,
+      "exact": 20,
+      "paired": 21,
+      "v44Exact": 18,
+      "v46Exact": 19,
+      "improved": 1,
+      "regressed": 0
+    }
+  },
+  "waveformRepeatability": {
+    "pattern": {
+      "compared": 4,
+      "exact": 0,
+      "disagreements": [
+        {
+          "storyId": "d2-02",
+          "targetId": 1549,
+          "first": "Taper",
+          "repeat": "Baseline"
+        },
+        {
+          "storyId": "d2-02",
+          "targetId": 1550,
+          "first": "Taper",
+          "repeat": "Baseline"
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "first": "Baseline",
+          "repeat": "Onset rise"
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 16,
+          "first": "Baseline",
+          "repeat": "Undertone"
+        }
+      ]
+    },
+    "phase": {
+      "compared": 4,
+      "exact": 2,
+      "disagreements": [
+        {
+          "storyId": "d2-02",
+          "targetId": 1550,
+          "first": "ease",
+          "repeat": "quiet"
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "first": "quiet",
+          "repeat": "sustain"
+        }
+      ]
+    },
+    "appliedTransition": {
+      "compared": 4,
+      "exact": 3,
+      "disagreements": [
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "first": "uncertain-continuity",
+          "repeat": "none"
+        }
+      ]
+    },
+    "typedTransition": {
+      "compared": 4,
+      "exact": 2,
+      "disagreements": [
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "first": "uncertain-continuity",
+          "repeat": "none"
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 16,
+          "first": "scene-cut",
+          "repeat": "none"
+        }
+      ]
+    },
+    "cue": {
+      "compared": 4,
+      "exact": 4,
+      "disagreements": []
+    }
+  },
+  "originalReportSha256": "9547f5f57212928401276669b277137b8f31fe604b1f64b6c6a2d8c08551dff9",
+  "panels": [
+    {
+      "name": "breadth-1",
+      "packetSha256": "6052567d85df53f85501ad7bcf58a102b62d6d1574fc4dc4875c7dd7d65d17f0",
+      "receiptSha256": "9a872dfe8303228d878c64cd54775faa491d6e014741136fd4e87f58396b59f1",
+      "plannedClips": 5,
+      "plannedTargets": 9,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 5,
+        "completedTargets": 9,
+        "externalCalls": 51,
+        "chargedMicros": 20288,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 9,
+          "observed": 9,
+          "exact": 1,
+          "paired": 9,
+          "v44Exact": 2,
+          "v46Exact": 1,
+          "improved": 0,
+          "regressed": 1
+        },
+        "phase": {
+          "known": 9,
+          "observed": 9,
+          "exact": 7,
+          "paired": 9,
+          "v44Exact": 7,
+          "v46Exact": 7,
+          "improved": 0,
+          "regressed": 0
+        },
+        "appliedTransition": {
+          "known": 9,
+          "observed": 9,
+          "exact": 6,
+          "paired": 9,
+          "v44Exact": 6,
+          "v46Exact": 6,
+          "improved": 1,
+          "regressed": 1
+        },
+        "typedTransition": {
+          "known": 9,
+          "observed": 9,
+          "exact": 7,
+          "paired": 9,
+          "v44Exact": 6,
+          "v46Exact": 7,
+          "improved": 1,
+          "regressed": 0
+        },
+        "cue": {
+          "known": 8,
+          "observed": 8,
+          "exact": 8,
+          "paired": 8,
+          "v44Exact": 7,
+          "v46Exact": 8,
+          "improved": 1,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "returned": 51
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 9,
+        "selfStrict": 9,
+        "v44Comparable": 7
+      },
+      "targets": [
+        {
+          "storyId": "a20-01",
+          "targetId": 13,
+          "frozen": {
+            "id": 13,
+            "unitSha256": "0dbd3dd91a254fa0dde88da1ca46d50b80221cb9f1de974662b4bd722ede034a",
+            "transition": "none",
+            "transitionKnownAt": 13,
+            "pattern": "Gradual build",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-01:beat:12",
+            "sceneId": "a20-01:scene:11",
+            "knownAt": 12
+          },
+          "candidate": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-01:beat:11",
+            "sceneId": "a20-01:scene:11",
+            "knownAt": 11
+          }
+        },
+        {
+          "storyId": "a20-03",
+          "targetId": 12,
+          "frozen": {
+            "id": 12,
+            "unitSha256": "34d1fcd26908d7922d826ac18da2137fd63de6b00ed96245d442c8593c0bcf0b",
+            "transition": "scene-cut",
+            "transitionKnownAt": 12,
+            "pattern": "Reset",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-03:scene:11",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-03:scene:11",
+            "knownAt": null,
+            "boundaryWitnessStatus": "boundary-none"
+          }
+        },
+        {
+          "storyId": "a20-03",
+          "targetId": 14,
+          "frozen": {
+            "id": 14,
+            "unitSha256": "fbb1e4d6680a1b9812b6b6628e5dd83db8a7ce0dfc2241a69c3a2a6224e2f285",
+            "transition": "none",
+            "transitionKnownAt": 14,
+            "pattern": "Gradual build",
+            "phase": "build",
+            "cue": null
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-03:scene:11",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-03:scene:11",
+            "knownAt": null
+          }
+        },
+        {
+          "storyId": "a20-04",
+          "targetId": 10,
+          "frozen": {
+            "id": 10,
+            "unitSha256": "5971dc566e435e70adbacf55081e83f5de4e242663d535500e4e3b369e4b6090",
+            "transition": "none",
+            "transitionKnownAt": 10,
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-04:scene:10",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-04:scene:10",
+            "knownAt": null
+          }
+        },
+        {
+          "storyId": "a20-04",
+          "targetId": 14,
+          "frozen": {
+            "id": 14,
+            "unitSha256": "56b236a6783446f822b0fcda3f635fa70109c6c1bbf67dd56bb7b2739019ee99",
+            "transition": "scene-cut",
+            "transitionKnownAt": 14,
+            "pattern": "Reset",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-04:beat:13",
+            "sceneId": "a20-04:scene:10",
+            "knownAt": 13,
+            "boundaryWitnessStatus": "boundary-uncertain"
+          },
+          "candidate": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": "a20-04:beat:13",
+            "sceneId": "a20-04:scene:10",
+            "knownAt": 13
+          }
+        },
+        {
+          "storyId": "a20-17",
+          "targetId": 12,
+          "frozen": {
+            "id": 12,
+            "unitSha256": "9678be0804ad3adb79c910e86616ec95f2fd8e9fd9c88075e63f26227da2eb6b",
+            "transition": "scene-cut",
+            "transitionKnownAt": 12,
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-17:scene:8",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Reset",
+            "phase": "quiet",
+            "appliedTransition": "scene-cut",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-17:scene:12",
+            "knownAt": 12
+          }
+        },
+        {
+          "storyId": "a20-17",
+          "targetId": 13,
+          "frozen": {
+            "id": 13,
+            "unitSha256": "0452330243319a915486fea0d8b1fc6158d1b0960bcb8a1a9fdee5aa6179feb2",
+            "transition": "none",
+            "transitionKnownAt": 13,
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-17:scene:8",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-17:scene:12",
+            "knownAt": null
+          }
+        },
+        {
+          "storyId": "o11-04",
+          "targetId": 223,
+          "frozen": {
+            "id": 223,
+            "unitSha256": "c7c0433d4e7143930dd205a0423fa7262c2cdd128ac6d48f58cf25e6f25ea778",
+            "transition": "none",
+            "transitionKnownAt": 223,
+            "pattern": "Recovery",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "o11-04:beat:220",
+            "sceneId": "o11-04:scene:220",
+            "knownAt": 220
+          },
+          "candidate": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "o11-04:beat:220",
+            "sceneId": "o11-04:scene:220",
+            "knownAt": 220
+          }
+        },
+        {
+          "storyId": "o11-04",
+          "targetId": 224,
+          "frozen": {
+            "id": 224,
+            "unitSha256": "2c7839311461d589a0b725c1060bd925fa70ab0fa863234e04cfc71955f9935f",
+            "transition": "scene-cut",
+            "transitionKnownAt": 224,
+            "pattern": "Taper",
+            "phase": "build",
+            "cue": true
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Reset",
+            "phase": "sustain",
+            "appliedTransition": "scene-cut",
+            "typedTransition": "accent",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "o11-04:scene:224",
+            "knownAt": 224
+          },
+          "candidate": {
+            "pattern": "Onset rise",
+            "phase": "onset",
+            "appliedTransition": "accent",
+            "typedTransition": "accent",
+            "cue": true,
+            "beatId": "o11-04:beat:220",
+            "sceneId": "o11-04:scene:220",
+            "knownAt": 224
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "a20-01",
+          "targetId": 13,
+          "frozen": "Gradual build",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        },
+        {
+          "storyId": "a20-03",
+          "targetId": 12,
+          "frozen": "Reset",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": null
+        },
+        {
+          "storyId": "a20-03",
+          "targetId": 14,
+          "frozen": "Gradual build",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": null
+        },
+        {
+          "storyId": "a20-04",
+          "targetId": 10,
+          "frozen": "Undertone",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "a20-04",
+          "targetId": 14,
+          "frozen": "Reset",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        },
+        {
+          "storyId": "a20-17",
+          "targetId": 12,
+          "frozen": "Baseline",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 0
+          }
+        },
+        {
+          "storyId": "a20-17",
+          "targetId": 13,
+          "frozen": "Baseline",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "o11-04",
+          "targetId": 223,
+          "frozen": "Recovery",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        },
+        {
+          "storyId": "o11-04",
+          "targetId": 224,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "a20-04-context-short",
+      "packetSha256": "feeb841906a57a1d8fec49ee62d77e7a7ec9c74d8a3fdd28170055b5e07b155e",
+      "receiptSha256": "d7375d1a18463a5df46db1007437f43e48578b1102b21de4ae397e43555b0b87",
+      "plannedClips": 1,
+      "plannedTargets": 1,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 1,
+        "completedTargets": 1,
+        "externalCalls": 7,
+        "chargedMicros": 3254,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 1,
+          "v44Exact": 0,
+          "v46Exact": 1,
+          "improved": 1,
+          "regressed": 0
+        },
+        "phase": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 1,
+          "v44Exact": 1,
+          "v46Exact": 1,
+          "improved": 0,
+          "regressed": 0
+        },
+        "appliedTransition": {
+          "known": 1,
+          "observed": 1,
+          "exact": 0,
+          "paired": 1,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "typedTransition": {
+          "known": 1,
+          "observed": 1,
+          "exact": 0,
+          "paired": 1,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "cue": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 1,
+          "v44Exact": 1,
+          "v46Exact": 1,
+          "improved": 0,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "returned": 7
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 1,
+        "selfStrict": 1,
+        "v44Comparable": 0
+      },
+      "targets": [
+        {
+          "storyId": "a20-04",
+          "targetId": 14,
+          "frozen": {
+            "id": 14,
+            "unitSha256": "56b236a6783446f822b0fcda3f635fa70109c6c1bbf67dd56bb7b2739019ee99",
+            "transition": "scene-cut",
+            "transitionKnownAt": 14,
+            "pattern": "Reset",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-04:beat:13",
+            "sceneId": "a20-04:scene:10",
+            "knownAt": 13
+          },
+          "candidate": {
+            "pattern": "Reset",
+            "phase": "quiet",
+            "appliedTransition": "uncertain-continuity",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-04:scene:10",
+            "knownAt": null,
+            "boundaryWitnessStatus": "unresolved-day-heading"
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "a20-04",
+          "targetId": 14,
+          "frozen": "Reset",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v44OnV46Answers": null
+        }
+      ]
+    },
+    {
+      "name": "a20-04-context-wide",
+      "packetSha256": "a2eb0b5c73e851c549002fa759adca8df8178b06e1a7abf83af7bea7ca35c616",
+      "receiptSha256": "06a6189f13e068dcb48b432a63cc3c672bfc86f645a524fcc422f2a4a74511c5",
+      "plannedClips": 1,
+      "plannedTargets": 1,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 1,
+        "completedTargets": 1,
+        "externalCalls": 8,
+        "chargedMicros": 3612,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 1,
+          "observed": 1,
+          "exact": 0,
+          "paired": 1,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "phase": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 1,
+          "v44Exact": 1,
+          "v46Exact": 1,
+          "improved": 0,
+          "regressed": 0
+        },
+        "appliedTransition": {
+          "known": 1,
+          "observed": 1,
+          "exact": 0,
+          "paired": 1,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "typedTransition": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 1,
+          "v44Exact": 0,
+          "v46Exact": 1,
+          "improved": 1,
+          "regressed": 0
+        },
+        "cue": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 1,
+          "v44Exact": 1,
+          "v46Exact": 1,
+          "improved": 0,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "returned": 8
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 1,
+        "selfStrict": 1,
+        "v44Comparable": 1
+      },
+      "targets": [
+        {
+          "storyId": "a20-04",
+          "targetId": 14,
+          "frozen": {
+            "id": 14,
+            "unitSha256": "56b236a6783446f822b0fcda3f635fa70109c6c1bbf67dd56bb7b2739019ee99",
+            "transition": "scene-cut",
+            "transitionKnownAt": 14,
+            "pattern": "Reset",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-04:scene:8",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-04:scene:8",
+            "knownAt": null
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "a20-04",
+          "targetId": 14,
+          "frozen": "Reset",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "setting-controls",
+      "packetSha256": "d8171e751f917d07278d2bfd0c1a2e7dd76a4502fd919175bdea90a825b7a64c",
+      "receiptSha256": "8dbe57bcbbf2f05ef66a0346bb6e0a17ee858470937fafc4004ba0d727b01f8b",
+      "plannedClips": 3,
+      "plannedTargets": 5,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 3,
+        "completedTargets": 5,
+        "externalCalls": 29,
+        "chargedMicros": 10947,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 5,
+          "observed": 5,
+          "exact": 3,
+          "paired": 5,
+          "v44Exact": 3,
+          "v46Exact": 3,
+          "improved": 0,
+          "regressed": 0
+        },
+        "phase": {
+          "known": 5,
+          "observed": 5,
+          "exact": 5,
+          "paired": 5,
+          "v44Exact": 5,
+          "v46Exact": 5,
+          "improved": 0,
+          "regressed": 0
+        },
+        "appliedTransition": {
+          "known": 5,
+          "observed": 5,
+          "exact": 5,
+          "paired": 5,
+          "v44Exact": 4,
+          "v46Exact": 5,
+          "improved": 1,
+          "regressed": 0
+        },
+        "typedTransition": {
+          "known": 5,
+          "observed": 5,
+          "exact": 4,
+          "paired": 5,
+          "v44Exact": 2,
+          "v46Exact": 4,
+          "improved": 2,
+          "regressed": 0
+        },
+        "cue": {
+          "known": 5,
+          "observed": 5,
+          "exact": 5,
+          "paired": 5,
+          "v44Exact": 5,
+          "v46Exact": 5,
+          "improved": 0,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "returned": 29
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 5,
+        "selfStrict": 5,
+        "v44Comparable": 5
+      },
+      "targets": [
+        {
+          "storyId": "a20-01",
+          "targetId": 13,
+          "frozen": {
+            "id": 13,
+            "unitSha256": "0dbd3dd91a254fa0dde88da1ca46d50b80221cb9f1de974662b4bd722ede034a",
+            "transition": "none",
+            "transitionKnownAt": 13,
+            "pattern": "Gradual build",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "uncertain-continuity",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-01:scene:10",
+            "knownAt": 13
+          },
+          "candidate": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": "a20-01:beat:12",
+            "sceneId": "a20-01:scene:10",
+            "knownAt": 12
+          }
+        },
+        {
+          "storyId": "a20-09",
+          "targetId": 16,
+          "frozen": {
+            "id": 16,
+            "unitSha256": "569620ee47153048501df044f071c819a28bf06d43a428b3819ad8db2993dd88",
+            "transition": "scene-cut",
+            "transitionKnownAt": 16,
+            "pattern": "Taper",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Reset",
+            "phase": "quiet",
+            "appliedTransition": "scene-cut",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-09:scene:16",
+            "knownAt": 16
+          },
+          "candidate": {
+            "pattern": "Reset",
+            "phase": "quiet",
+            "appliedTransition": "scene-cut",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-09:scene:16",
+            "knownAt": 16
+          }
+        },
+        {
+          "storyId": "a20-09",
+          "targetId": 17,
+          "frozen": {
+            "id": 17,
+            "unitSha256": "b6d48e5888b0c330c19f44520fded4ef00e9d488e32a359d2f81d1b51b199023",
+            "transition": "none",
+            "transitionKnownAt": 17,
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-09:scene:16",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-09:scene:16",
+            "knownAt": null
+          }
+        },
+        {
+          "storyId": "a20-14",
+          "targetId": 8,
+          "frozen": {
+            "id": 8,
+            "unitSha256": "de6bd7c2eb3d52095fc0e0f7a0696c740f454e66a740f582dfd61f8f5ff2efad",
+            "transition": "scene-cut",
+            "transitionKnownAt": 8,
+            "pattern": "Reset",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Reset",
+            "phase": "quiet",
+            "appliedTransition": "scene-cut",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-14:scene:8",
+            "knownAt": 8
+          },
+          "candidate": {
+            "pattern": "Reset",
+            "phase": "quiet",
+            "appliedTransition": "scene-cut",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-14:scene:8",
+            "knownAt": 8
+          }
+        },
+        {
+          "storyId": "a20-14",
+          "targetId": 9,
+          "frozen": {
+            "id": 9,
+            "unitSha256": "56a34d94861b6a54c8fd9956b5cac02eea8966e818fd99765640bff81f15d5ad",
+            "transition": "none",
+            "transitionKnownAt": 9,
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-14:scene:8",
+            "knownAt": null
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-14:scene:8",
+            "knownAt": null
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "a20-01",
+          "targetId": 13,
+          "frozen": "Gradual build",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        },
+        {
+          "storyId": "a20-09",
+          "targetId": 16,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 0
+          }
+        },
+        {
+          "storyId": "a20-09",
+          "targetId": 17,
+          "frozen": "Baseline",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "a20-14",
+          "targetId": 8,
+          "frozen": "Reset",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 0
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 0
+          }
+        },
+        {
+          "storyId": "a20-14",
+          "targetId": 9,
+          "frozen": "Baseline",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "waveform-controls",
+      "packetSha256": "3c39e84913fe8ea9c939a83d822fe5cbc1e9b7e51253796f7ea1ba8ceb0b2eca",
+      "receiptSha256": "4a3fcb393ac52cf7319683b9a50736bb1d4630ebe2f29082d56ee7b38869533b",
+      "plannedClips": 2,
+      "plannedTargets": 4,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 2,
+        "completedTargets": 4,
+        "externalCalls": 23,
+        "chargedMicros": 9595,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 4,
+          "observed": 4,
+          "exact": 2,
+          "paired": 4,
+          "v44Exact": 2,
+          "v46Exact": 2,
+          "improved": 0,
+          "regressed": 0
+        },
+        "phase": {
+          "known": 4,
+          "observed": 4,
+          "exact": 1,
+          "paired": 4,
+          "v44Exact": 2,
+          "v46Exact": 1,
+          "improved": 0,
+          "regressed": 1
+        },
+        "appliedTransition": {
+          "known": 4,
+          "observed": 4,
+          "exact": 2,
+          "paired": 4,
+          "v44Exact": 3,
+          "v46Exact": 2,
+          "improved": 0,
+          "regressed": 1
+        },
+        "typedTransition": {
+          "known": 4,
+          "observed": 4,
+          "exact": 2,
+          "paired": 4,
+          "v44Exact": 3,
+          "v46Exact": 2,
+          "improved": 0,
+          "regressed": 1
+        },
+        "cue": {
+          "known": 3,
+          "observed": 3,
+          "exact": 2,
+          "paired": 3,
+          "v44Exact": 2,
+          "v46Exact": 2,
+          "improved": 0,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "partial": 1,
+        "returned": 22
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 4,
+        "selfStrict": 4,
+        "v44Comparable": 4
+      },
+      "targets": [
+        {
+          "storyId": "d2-02",
+          "targetId": 1549,
+          "frozen": {
+            "id": 1549,
+            "unitSha256": "e5dc26519938968ba041b582d1e2a1bf1375186bbfcacb3f53ba9fc624d49684",
+            "transition": "interruption",
+            "transitionKnownAt": 1549,
+            "pattern": "Taper",
+            "phase": "ease",
+            "cue": true
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Taper",
+            "phase": "ease",
+            "appliedTransition": "interruption",
+            "typedTransition": "interruption",
+            "cue": false,
+            "beatId": "d2-02:beat:1548",
+            "sceneId": "d2-02:scene:1545",
+            "knownAt": 1549
+          },
+          "candidate": {
+            "pattern": "Taper",
+            "phase": "ease",
+            "appliedTransition": "interruption",
+            "typedTransition": "interruption",
+            "cue": false,
+            "beatId": "d2-02:beat:1549",
+            "sceneId": "d2-02:scene:1545",
+            "knownAt": 1549
+          }
+        },
+        {
+          "storyId": "d2-02",
+          "targetId": 1550,
+          "frozen": {
+            "id": 1550,
+            "unitSha256": "90443b182e99f09fa96a08312f5ac600de7d98a6362f45cf66179b257fcaa563",
+            "transition": "none",
+            "transitionKnownAt": 1550,
+            "pattern": "Taper",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Taper",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "d2-02:beat:1548",
+            "sceneId": "d2-02:scene:1545",
+            "knownAt": 1548
+          },
+          "candidate": {
+            "pattern": "Taper",
+            "phase": "ease",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "d2-02:beat:1549",
+            "sceneId": "d2-02:scene:1545",
+            "knownAt": 1550
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "frozen": {
+            "id": 15,
+            "unitSha256": "c5977c913a67c8c4534121fbccd123cb3c959952d8abc78b8a834951a51ce94a",
+            "transition": "none",
+            "transitionKnownAt": 15,
+            "pattern": "Sustain wave",
+            "phase": "sustain",
+            "cue": null
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Recovery",
+            "phase": "recover",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-18:beat:13",
+            "sceneId": "a20-18:scene:12",
+            "knownAt": 15
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "uncertain-continuity",
+            "typedTransition": "uncertain-continuity",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-18:scene:13",
+            "knownAt": 15
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 16,
+          "frozen": {
+            "id": 16,
+            "unitSha256": "b746d552e8be515cfd678bbe65b70729959f35a71e733d6714bff9fc7812b223",
+            "transition": "interruption",
+            "transitionKnownAt": 16,
+            "pattern": "Taper",
+            "phase": "ease",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Recovery",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-18:beat:13",
+            "sceneId": "a20-18:scene:12",
+            "knownAt": 15
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-18:scene:13",
+            "knownAt": null
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "d2-02",
+          "targetId": 1549,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        },
+        {
+          "storyId": "d2-02",
+          "targetId": 1550,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "frozen": "Sustain wave",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 16,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "waveform-controls-repeat",
+      "packetSha256": "76d471b24a6e6a14fb16eec617bff166e805553674cb96b7d488bf69c1c30e85",
+      "receiptSha256": "ee2bf5bb9710fe1739b7598c12198394a79b334b49aa8b1f758d50f998cb8c49",
+      "plannedClips": 2,
+      "plannedTargets": 4,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 2,
+        "completedTargets": 4,
+        "externalCalls": 22,
+        "chargedMicros": 8889,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 4,
+          "observed": 4,
+          "exact": 0,
+          "paired": 4,
+          "v44Exact": 2,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 2
+        },
+        "phase": {
+          "known": 4,
+          "observed": 4,
+          "exact": 3,
+          "paired": 4,
+          "v44Exact": 2,
+          "v46Exact": 3,
+          "improved": 1,
+          "regressed": 0
+        },
+        "appliedTransition": {
+          "known": 4,
+          "observed": 4,
+          "exact": 3,
+          "paired": 4,
+          "v44Exact": 2,
+          "v46Exact": 3,
+          "improved": 1,
+          "regressed": 0
+        },
+        "typedTransition": {
+          "known": 4,
+          "observed": 4,
+          "exact": 3,
+          "paired": 4,
+          "v44Exact": 3,
+          "v46Exact": 3,
+          "improved": 0,
+          "regressed": 0
+        },
+        "cue": {
+          "known": 3,
+          "observed": 3,
+          "exact": 2,
+          "paired": 3,
+          "v44Exact": 2,
+          "v46Exact": 2,
+          "improved": 0,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "partial": 1,
+        "returned": 20,
+        "invalid-response": 1
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 4,
+        "selfStrict": 4,
+        "v44Comparable": 4
+      },
+      "targets": [
+        {
+          "storyId": "d2-02",
+          "targetId": 1549,
+          "frozen": {
+            "id": 1549,
+            "unitSha256": "e5dc26519938968ba041b582d1e2a1bf1375186bbfcacb3f53ba9fc624d49684",
+            "transition": "interruption",
+            "transitionKnownAt": 1549,
+            "pattern": "Taper",
+            "phase": "ease",
+            "cue": true
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Taper",
+            "phase": "ease",
+            "appliedTransition": "interruption",
+            "typedTransition": "interruption",
+            "cue": false,
+            "beatId": "d2-02:beat:1548",
+            "sceneId": "d2-02:scene:1545",
+            "knownAt": 1549
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "ease",
+            "appliedTransition": "interruption",
+            "typedTransition": "interruption",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "d2-02:scene:1549",
+            "knownAt": 1549
+          }
+        },
+        {
+          "storyId": "d2-02",
+          "targetId": 1550,
+          "frozen": {
+            "id": 1550,
+            "unitSha256": "90443b182e99f09fa96a08312f5ac600de7d98a6362f45cf66179b257fcaa563",
+            "transition": "none",
+            "transitionKnownAt": 1550,
+            "pattern": "Taper",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Taper",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "d2-02:beat:1548",
+            "sceneId": "d2-02:scene:1545",
+            "knownAt": 1548
+          },
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "d2-02:scene:1549",
+            "knownAt": null
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "frozen": {
+            "id": 15,
+            "unitSha256": "c5977c913a67c8c4534121fbccd123cb3c959952d8abc78b8a834951a51ce94a",
+            "transition": "none",
+            "transitionKnownAt": 15,
+            "pattern": "Sustain wave",
+            "phase": "sustain",
+            "cue": null
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "uncertain-continuity",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-18:scene:12",
+            "knownAt": 15
+          },
+          "candidate": {
+            "pattern": "Onset rise",
+            "phase": "sustain",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-18:beat:13",
+            "sceneId": "a20-18:scene:12",
+            "knownAt": 15
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 16,
+          "frozen": {
+            "id": 16,
+            "unitSha256": "b746d552e8be515cfd678bbe65b70729959f35a71e733d6714bff9fc7812b223",
+            "transition": "interruption",
+            "transitionKnownAt": 16,
+            "pattern": "Taper",
+            "phase": "ease",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "uncertain-continuity",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-18:scene:12",
+            "knownAt": 16
+          },
+          "candidate": {
+            "pattern": "Undertone",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": "a20-18:beat:13",
+            "sceneId": "a20-18:scene:12",
+            "knownAt": 13
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "d2-02",
+          "targetId": 1549,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "d2-02",
+          "targetId": 1550,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 15,
+          "frozen": "Sustain wave",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "a20-18",
+          "targetId": 16,
+          "frozen": "Taper",
+          "v44Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v46Live": {
+            "conditions": 9,
+            "positive": 3
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "a20-03-context-wide",
+      "packetSha256": "b753db47c3887769135927b50bb12a4e12566f84df042918cb739c8d095ad26a",
+      "receiptSha256": "e40c74ce18f66371dedfba5b4087b9cc90735eb3c030dca22c0f70558da70725",
+      "plannedClips": 1,
+      "plannedTargets": 2,
+      "spend": {
+        "rubricVersion": "nocturne-luna-protocol-v46",
+        "model": "gpt-6-luna",
+        "completedClips": 1,
+        "completedTargets": 2,
+        "externalCalls": 14,
+        "chargedMicros": 5121,
+        "reservedMicros": 0,
+        "unsettled": 0
+      },
+      "grade": {
+        "pattern": {
+          "known": 2,
+          "observed": 2,
+          "exact": 0,
+          "paired": 0,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "phase": {
+          "known": 2,
+          "observed": 2,
+          "exact": 1,
+          "paired": 0,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "appliedTransition": {
+          "known": 2,
+          "observed": 2,
+          "exact": 1,
+          "paired": 0,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "typedTransition": {
+          "known": 2,
+          "observed": 2,
+          "exact": 2,
+          "paired": 0,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        },
+        "cue": {
+          "known": 1,
+          "observed": 1,
+          "exact": 1,
+          "paired": 0,
+          "v44Exact": 0,
+          "v46Exact": 0,
+          "improved": 0,
+          "regressed": 0
+        }
+      },
+      "attemptsByStatus": {
+        "returned": 14
+      },
+      "runtimeViolations": [],
+      "sameAnswers": {
+        "selfReconstructed": 2,
+        "selfStrict": 2,
+        "v44Comparable": 2
+      },
+      "targets": [
+        {
+          "storyId": "a20-03",
+          "targetId": 12,
+          "frozen": {
+            "id": 12,
+            "unitSha256": "34d1fcd26908d7922d826ac18da2137fd63de6b00ed96245d442c8593c0bcf0b",
+            "transition": "scene-cut",
+            "transitionKnownAt": 12,
+            "pattern": "Reset",
+            "phase": "quiet",
+            "cue": false
+          },
+          "disposition": "completed",
+          "baseline": null,
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "scene-cut",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-03:scene:8",
+            "knownAt": null
+          }
+        },
+        {
+          "storyId": "a20-03",
+          "targetId": 14,
+          "frozen": {
+            "id": 14,
+            "unitSha256": "fbb1e4d6680a1b9812b6b6628e5dd83db8a7ce0dfc2241a69c3a2a6224e2f285",
+            "transition": "none",
+            "transitionKnownAt": 14,
+            "pattern": "Gradual build",
+            "phase": "build",
+            "cue": null
+          },
+          "disposition": "completed",
+          "baseline": null,
+          "candidate": {
+            "pattern": "Baseline",
+            "phase": "quiet",
+            "appliedTransition": "none",
+            "typedTransition": "none",
+            "cue": false,
+            "beatId": null,
+            "sceneId": "a20-03:scene:8",
+            "knownAt": null
+          }
+        }
+      ],
+      "priorityWindows": [
+        {
+          "storyId": "a20-03",
+          "targetId": 12,
+          "frozen": "Reset",
+          "v44Live": null,
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        },
+        {
+          "storyId": "a20-03",
+          "targetId": 14,
+          "frozen": "Gradual build",
+          "v44Live": null,
+          "v46Live": {
+            "conditions": 9,
+            "positive": 6
+          },
+          "v44OnV46Answers": {
+            "conditions": 9,
+            "positive": 6
+          }
+        }
+      ]
+    }
+  ]
+}

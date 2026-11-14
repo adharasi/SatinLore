@@ -1,0 +1,514 @@
+{
+  "schema": "satinlore-v23-full-offline-v1",
+  "measurement": "full-41-work-offline",
+  "sourceProseIncluded": false,
+  "externalCalls": 0,
+  "runtime": {
+    "node": "24.22.1",
+    "icu": "78.3"
+  },
+  "provenance": {
+    "source": "974013d39fc937ed436f80681c04cfd4a31f25909a9892134d38bd0ee0c0ec7c",
+    "paragraphs": "52efcedef26578af38f9f90fd0bf1b5319e709cf0e12f3703f023d3799066274",
+    "reference": "74c9388c0433cce598601bdb6a905f3b88f6348641b69b020ecedbe6fc603e1f",
+    "gold": "2218a5e851dd5621bc59cc6fbb1a4604acc09f25c9eb5919e590f6b77ce479f4",
+    "roster": "cfb35bda6de5259549152f931a46b420a5a99cac53f45fb04555840bebdbbd55",
+    "projection": "541dcf3a371782cfaeaf3edd3df5dabed90e54fdbb23eabb1b528f4d4e02e6f4",
+    "shadow": "e00f89f731b88b5b4ab93a03102766392e9242abbc70db2ddadea20be904b91e"
+  },
+  "rubric": "nocturne-luna-protocol-v47",
+  "readerAnalysisVersion": "scene-rules-v6.4",
+  "works": 41,
+  "worksWithFrozenTargets": 34,
+  "overall": {
+    "units": 17895,
+    "textUnits": 17827,
+    "structuralUnits": 68,
+    "knownPositive": 1250,
+    "knownNegative": 11438,
+    "unknownReference": 5139,
+    "truePositive": 19,
+    "trueNegative": 11398,
+    "falsePositive": 40,
+    "falseNegative": 1231,
+    "loomPositiveOnUnknown": 89,
+    "loomRawPositive": 147,
+    "loomAppliedPositive": 148,
+    "loomActiveOnProtected": 0,
+    "contextPlanned": 9792,
+    "contextUncapped": 16688,
+    "contextPlannedKnownPositive": 602,
+    "contextUncappedKnownPositive": 1195,
+    "cuePlanned": 14,
+    "cuePlannedKnownPositive": 7,
+    "frozenTargets": 181,
+    "frozenCueTargets": 175,
+    "frozenTransitionTargets": 181,
+    "frozenStressTargets": 36,
+    "fallbackObserved": 17827,
+    "fallbackExact": 6272,
+    "referenceActiveProfile": 10806,
+    "fallbackActive": 0,
+    "fallbackRecoveredActive": 0,
+    "fallbackNewActive": 0,
+    "referenceHardAction": 749,
+    "fallbackHardMatched": 0,
+    "shadowWithheld": 17827,
+    "structuralFallbackExact": 68,
+    "loomCuePrecision": 0.3220338983050847,
+    "loomCueRecall": 0.0152,
+    "contextOpportunityRecall": 0.4816,
+    "fallbackProfileAgreement": 0.3518258820889662
+  },
+  "groups": {
+    "original11": {
+      "works": 11,
+      "units": 8278,
+      "textUnits": 8225,
+      "structuralUnits": 53,
+      "knownPositive": 1015,
+      "knownNegative": 5376,
+      "unknownReference": 1834,
+      "truePositive": 16,
+      "trueNegative": 5347,
+      "falsePositive": 29,
+      "falseNegative": 999,
+      "loomPositiveOnUnknown": 32,
+      "loomRawPositive": 77,
+      "loomAppliedPositive": 77,
+      "loomActiveOnProtected": 0,
+      "contextPlanned": 5284,
+      "contextUncapped": 7687,
+      "contextPlannedKnownPositive": 452,
+      "contextUncappedKnownPositive": 984,
+      "cuePlanned": 4,
+      "cuePlannedKnownPositive": 4,
+      "frozenTargets": 51,
+      "frozenCueTargets": 47,
+      "frozenTransitionTargets": 51,
+      "frozenStressTargets": 16,
+      "fallbackObserved": 8225,
+      "fallbackExact": 2210,
+      "referenceActiveProfile": 5932,
+      "fallbackActive": 0,
+      "fallbackRecoveredActive": 0,
+      "fallbackNewActive": 0,
+      "referenceHardAction": 83,
+      "fallbackHardMatched": 0,
+      "shadowWithheld": 8225,
+      "structuralFallbackExact": 53,
+      "loomCuePrecision": 0.35555555555555557,
+      "loomCueRecall": 0.015763546798029555,
+      "contextOpportunityRecall": 0.44532019704433495,
+      "fallbackProfileAgreement": 0.26869300911854105
+    },
+    "storyDump2": {
+      "works": 10,
+      "units": 9310,
+      "textUnits": 9295,
+      "structuralUnits": 15,
+      "knownPositive": 234,
+      "knownNegative": 5816,
+      "unknownReference": 3245,
+      "truePositive": 3,
+      "trueNegative": 5805,
+      "falsePositive": 11,
+      "falseNegative": 231,
+      "loomPositiveOnUnknown": 57,
+      "loomRawPositive": 70,
+      "loomAppliedPositive": 71,
+      "loomActiveOnProtected": 0,
+      "contextPlanned": 4250,
+      "contextUncapped": 8743,
+      "contextPlannedKnownPositive": 149,
+      "contextUncappedKnownPositive": 210,
+      "cuePlanned": 10,
+      "cuePlannedKnownPositive": 3,
+      "frozenTargets": 18,
+      "frozenCueTargets": 18,
+      "frozenTransitionTargets": 18,
+      "frozenStressTargets": 6,
+      "fallbackObserved": 9295,
+      "fallbackExact": 3881,
+      "referenceActiveProfile": 4758,
+      "fallbackActive": 0,
+      "fallbackRecoveredActive": 0,
+      "fallbackNewActive": 0,
+      "referenceHardAction": 656,
+      "fallbackHardMatched": 0,
+      "shadowWithheld": 9295,
+      "structuralFallbackExact": 15,
+      "loomCuePrecision": 0.21428571428571427,
+      "loomCueRecall": 0.01282051282051282,
+      "contextOpportunityRecall": 0.6367521367521367,
+      "fallbackProfileAgreement": 0.41753630984400214
+    },
+    "authored20": {
+      "works": 20,
+      "units": 307,
+      "textUnits": 307,
+      "structuralUnits": 0,
+      "knownPositive": 1,
+      "knownNegative": 246,
+      "unknownReference": 60,
+      "truePositive": 0,
+      "trueNegative": 246,
+      "falsePositive": 0,
+      "falseNegative": 1,
+      "loomPositiveOnUnknown": 0,
+      "loomRawPositive": 0,
+      "loomAppliedPositive": 0,
+      "loomActiveOnProtected": 0,
+      "contextPlanned": 258,
+      "contextUncapped": 258,
+      "contextPlannedKnownPositive": 1,
+      "contextUncappedKnownPositive": 1,
+      "cuePlanned": 0,
+      "cuePlannedKnownPositive": 0,
+      "frozenTargets": 112,
+      "frozenCueTargets": 110,
+      "frozenTransitionTargets": 112,
+      "frozenStressTargets": 14,
+      "fallbackObserved": 307,
+      "fallbackExact": 181,
+      "referenceActiveProfile": 116,
+      "fallbackActive": 0,
+      "fallbackRecoveredActive": 0,
+      "fallbackNewActive": 0,
+      "referenceHardAction": 10,
+      "fallbackHardMatched": 0,
+      "shadowWithheld": 307,
+      "structuralFallbackExact": 0,
+      "loomCuePrecision": null,
+      "loomCueRecall": 0,
+      "contextOpportunityRecall": 1,
+      "fallbackProfileAgreement": 0.5895765472312704
+    }
+  },
+  "compiler": {
+    "textProfileMatches": 17827,
+    "structuralProfileMatches": 68,
+    "causalTraceViolations": 0,
+    "shortDips": {
+      "reference": 0,
+      "observed": 0,
+      "matched": 0,
+      "comparableWindows": 17638
+    }
+  },
+  "loomMissReasons": {
+    "no-keyword-match": 1181,
+    "sensitive-wording": 16,
+    "uncertain-or-speculative": 19,
+    "boundary-or-rest": 15
+  },
+  "loomMissesByDepiction": {
+    "suggestive": 320,
+    "romantic": 266,
+    "explicit": 388,
+    "graphic": 192,
+    "overt-sexual": 6,
+    "neutral": 7,
+    "unknown": 52
+  },
+  "loomMissesByFrame": {
+    "current": 1215,
+    "remembered": 4,
+    "mixed": 5,
+    "imagined": 7
+  },
+  "contextPlannerMissReasons": {
+    "session-source-byte-limit": 593,
+    "safety-filtered": 16,
+    "application-suppressed": 24,
+    "boundary-suppressed": 15
+  },
+  "contextLimits": {
+    "sessionRequests": 12,
+    "sessionSourceBytes": 60000,
+    "requestSourceBytes": 12000,
+    "paragraphBytes": 3000
+  },
+  "fallback": {
+    "profile": {
+      "reference": 17827,
+      "unresolvedReference": 0,
+      "observedOnUnresolvedReference": 0,
+      "observed": 17827,
+      "exact": 6272,
+      "accuracy": 0.3518258820889662,
+      "accuracyWhenObserved": 0.3518258820889662,
+      "coverage": 1,
+      "macroF1": 0.03470130157544573,
+      "categories": [
+        {
+          "label": "Baseline",
+          "support": 6272,
+          "matched": 6272,
+          "predicted": 17827,
+          "f1": 0.520519523631686
+        },
+        {
+          "label": "Gradual build",
+          "support": 1749,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Deepening build",
+          "support": 688,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Undertone",
+          "support": 4111,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Taper",
+          "support": 1011,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Sustain wave",
+          "support": 1161,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Recovery",
+          "support": 400,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Onset rise",
+          "support": 156,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Deep sustain",
+          "support": 1502,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Stop",
+          "support": 717,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Crest",
+          "support": 23,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Rebuild rise",
+          "support": 1,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Reset",
+          "support": 32,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Hold",
+          "support": 2,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "Crest approach",
+          "support": 2,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        }
+      ],
+      "confusion": {
+        "Baseline": {
+          "Baseline": 6272
+        },
+        "Gradual build": {
+          "Baseline": 1749
+        },
+        "Deepening build": {
+          "Baseline": 688
+        },
+        "Undertone": {
+          "Baseline": 4111
+        },
+        "Taper": {
+          "Baseline": 1011
+        },
+        "Sustain wave": {
+          "Baseline": 1161
+        },
+        "Recovery": {
+          "Baseline": 400
+        },
+        "Onset rise": {
+          "Baseline": 156
+        },
+        "Deep sustain": {
+          "Baseline": 1502
+        },
+        "Stop": {
+          "Baseline": 717
+        },
+        "Crest": {
+          "Baseline": 23
+        },
+        "Rebuild rise": {
+          "Baseline": 1
+        },
+        "Reset": {
+          "Baseline": 32
+        },
+        "Hold": {
+          "Baseline": 2
+        },
+        "Crest approach": {
+          "Baseline": 2
+        }
+      }
+    },
+    "phase": {
+      "reference": 16384,
+      "unresolvedReference": 1443,
+      "observedOnUnresolvedReference": 0,
+      "observed": 0,
+      "exact": 0,
+      "accuracy": 0,
+      "accuracyWhenObserved": null,
+      "coverage": 0,
+      "macroF1": 0,
+      "categories": [
+        {
+          "label": "quiet",
+          "support": 11564,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "build",
+          "support": 1625,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "ease",
+          "support": 255,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "sustain",
+          "support": 2444,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "recover",
+          "support": 333,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "onset",
+          "support": 138,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "peak",
+          "support": 24,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        },
+        {
+          "label": "rebuild",
+          "support": 1,
+          "matched": 0,
+          "predicted": 0,
+          "f1": 0
+        }
+      ],
+      "confusion": {
+        "quiet": {
+          "unobserved": 11564
+        },
+        "build": {
+          "unobserved": 1625
+        },
+        "ease": {
+          "unobserved": 255
+        },
+        "sustain": {
+          "unobserved": 2444
+        },
+        "recover": {
+          "unobserved": 333
+        },
+        "onset": {
+          "unobserved": 138
+        },
+        "peak": {
+          "unobserved": 24
+        },
+        "rebuild": {
+          "unobserved": 1
+        }
+      }
+    },
+    "structural": {
+      "reference": 68,
+      "observed": 68,
+      "exact": 68
+    },
+    "protection": {
+      "protectedReferenceRows": 1864,
+      "hardActions": 749,
+      "missedHardProfiles": 749,
+      "activeProfilesOnProtectedReference": 0,
+      "newActiveProfilesOnProtectedReference": 0,
+      "observedOutputRows": 0,
+      "positiveOutputOnProtectedReference": null
+    },
+    "modelCueRows": 0,
+    "modelTransitionRows": 0,
+    "recognitionScorable": false,
+    "statuses": {
+      "withheld": 17827
+    }
+  }
+}
