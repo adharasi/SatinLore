@@ -6,6 +6,8 @@ Start with the [VS Code handoff](nocturne-vscode-handoff.md) and the [current di
 
 The frozen label stays fixed when a candidate or reviewer disagrees with it. Record a proposed correction with independent provenance. Priorities and tests are development triage. See the [release qualification](nocturne-release-qualification.md) for independently sampled evidence.
 
+The [14 November local continuation](nocturne-local-audit-2026-11-14.md) reproduced the exact export and 41-work compiler parity, strengthened source joins and added independent hard-event target/output audits. Its 36 neutral conditions expose an evaluator blind spot; they do not close a source-specific discrepancy. Private inputs were absent: **0/7 archived panels replayed in this pass**, with all 181 historical rows and their coverage dispositions retained. The linked acceptance trail records first failing layers, exact setting arms, matched controls and the pending 16-clip proposal. [Reference questions remain separate](nocturne-reference-adjudication.md).
+
 ## Probe counts
 
 | Probe | Frozen targets |

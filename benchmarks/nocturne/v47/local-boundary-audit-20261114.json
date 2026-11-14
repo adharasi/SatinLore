@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "measurement": "offline-neutral-evaluator-controls",
+  "sourceProseIncluded": false,
+  "externalCalls": 0,
+  "baseline": "6deaa5159516486df111050ee61b0fadba91054e",
+  "runtimeBaseline": "dd6ebf80c86790a07fd26efbb73e5d59999458d7",
+  "rubricUnchanged": "nocturne-luna-protocol-v47",
+  "speeds": [
+    120,
+    240,
+    420
+  ],
+  "ceilings": [
+    10,
+    1,
+    0
+  ],
+  "samePlayback": true,
+  "conditions": 36,
+  "commandViolations": 0,
+  "pauseViolations": 0,
+  "capViolationMs": 0,
+  "cases": [
+    {
+      "id": "missed-profile-reset",
+      "conditions": 9,
+      "beforeAuditedHardConditions": 9,
+      "afterAuditedHardConditions": 9,
+      "beforeDetectedViolations": 6,
+      "afterDetectedViolations": 6,
+      "positiveTargetConditions": 6,
+      "positiveOutputConditions": 6
+    },
+    {
+      "id": "missed-event-cut",
+      "conditions": 9,
+      "beforeAuditedHardConditions": 0,
+      "afterAuditedHardConditions": 9,
+      "beforeDetectedViolations": 0,
+      "afterDetectedViolations": 3,
+      "positiveTargetConditions": 3,
+      "positiveOutputConditions": 3
+    },
+    {
+      "id": "compiled-reset",
+      "conditions": 9,
+      "beforeAuditedHardConditions": 9,
+      "afterAuditedHardConditions": 9,
+      "beforeDetectedViolations": 0,
+      "afterDetectedViolations": 0,
+      "positiveTargetConditions": 0,
+      "positiveOutputConditions": 0
+    },
+    {
+      "id": "active-control",
+      "conditions": 9,
+      "beforeAuditedHardConditions": 0,
+      "afterAuditedHardConditions": 0,
+      "beforeDetectedViolations": 0,
+      "afterDetectedViolations": 0,
+      "positiveTargetConditions": 6,
+      "positiveOutputConditions": 6
+    }
+  ],
+  "playbackComparison": "All 36 target and output sample traces are byte-identical at 100 ms resolution."
+}

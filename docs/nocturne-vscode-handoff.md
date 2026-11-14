@@ -2,6 +2,8 @@
 
 The baseline for the next development pass is **Luna rubric v47**, shipped at [`dd6ebf80c867`](https://github.com/adharasi/SatinLore/commit/dd6ebf80c86790a07fd26efbb73e5d59999458d7). The latest fresh provider measurement used [v46 at `bdf22efa6d01`](https://github.com/adharasi/SatinLore/commit/bdf22efa6d0110b56cde022190fbcdf0a81d271a). The founder tool is a diagnostic. The ordinary reader and physical-device scope have their own release checks.
 
+The [14 November local continuation](nocturne-local-audit-2026-11-14.md) reproduces parity, fixes exact-source and independent hard-event audit gaps, and records the archive-dependent checks and proposed 16-clip run. Runtime recognition remains v47; no new live authorization or result is implied.
+
 ## What to open
 
 | Input | Location and coverage |

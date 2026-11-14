@@ -5,6 +5,7 @@ import {pathToFileURL} from "node:url";
 import {parseArgs} from "node:util";
 import {sha256} from "./lib/approved-beat-corpus.mjs";
 import {caps, replay as simulate} from "./replay-luna-protocol-simulator.mjs";
+import {assessReplayPlayback, pinFrozenTarget} from "./lib/luna-replay-reference.mjs";
 
 const {values: paths} = parseArgs({options: {
   packet: {type: "string"}, receipt: {type: "string"}, baseline: {type: "string"}, candidate: {type: "string", default: "."},
@@ -210,13 +211,7 @@ const frozenLanes = {pattern: "pattern", phase: "phase", typedTransition: "trans
 const hard = new Set(["Stop", "Reset", "Divider"]);
 const quiet = new Set(["Baseline", "Hold"]);
 function frozenPin(clip, id) {
-  const work = references.get(clip.storyId), entry = roster.get(clip.storyId);
-  const row = work?.units.find(unit => unit.id === id);
-  if (work?.editionDigest !== clip.editionDigest || entry?.editionDigest !== clip.editionDigest ||
-      row?.unitSha256 !== clip.units.find(unit => unit.id === id).digest || !entry.transitionTargetIds.includes(id)) {
-    throw Error("Frozen target and packet edition/coordinate pins differ.");
-  }
-  return {pattern: row.pattern, phase: row.phase, transition: row.transition, cue: row.cue, cueScored: entry.targetIds.includes(id)};
+  return pinFrozenTarget(clip, id, references.get(clip.storyId), roster.get(clip.storyId));
 }
 
 async function playback(clip, frozen, before, after) {
@@ -224,7 +219,7 @@ async function playback(clip, frozen, before, after) {
     const label = frozen.get(id);
     const playbackGate = !label ? "unscored" : label.pattern === "Stop" ? "hard-stop" : hard.has(label.pattern) ? "reset" :
       quiet.has(label.pattern) ? (label.pattern === "Baseline" ? "quiet" : "unscored") : "active";
-    return {behavior: {playbackGate}, narrativePhase: label?.phase};
+    return {behavior: {playbackGate}, narrativePhase: label?.phase, hardBoundary: label?.hardBoundary === true};
   })};
   const comparisons = [];
   for (const wpm of [120, 240, 420]) for (const [calibration, maximum] of Object.entries(caps)) {
@@ -240,8 +235,13 @@ async function playback(clip, frozen, before, after) {
       });
       const hardViolations = outputByUnit.flatMap(({outputs, targets}, index) => hard.has(work.units[index].compiler.pattern) &&
         (outputs.some(value => value > 0) || targets.some(value => value > 0)) ? [clip.units[index].id] : []);
+      const frozenHardViolations = outputByUnit.flatMap(({outputs, targets}, index) => pin.units[index].hardBoundary &&
+        (outputs.some(value => value > 0) || targets.some(value => value > 0)) ? [clip.units[index].id] : []);
       condition[name] = {commandViolations: metrics.commandViolations, pauseViolation: metrics.pauseViolation,
-        capViolationMs: metrics.capViolationMs, compiledHardViolations: hardViolations, targets: clip.targetIds.map(id => {
+        capViolationMs: metrics.capViolationMs, compiledHardViolations: hardViolations, frozenHardViolations,
+        frozenHardTargets: metrics.authoritativeQuietTargets,
+        frozenHardTargetViolations: metrics.authoritativeQuietTargetViolations,
+        frozenHardOutputViolations: metrics.authoritativeQuietOutputViolations, targets: clip.targetIds.map(id => {
           const {outputs, targets} = outputByUnit[id - side.first];
           return {id, maximumTarget: Math.max(...targets), maximumOutput: Math.max(...outputs), outputTraceSha256: sha256(JSON.stringify(outputs)),
             targetTraceSha256: sha256(JSON.stringify(targets))};
@@ -291,6 +291,17 @@ for (const saved of completed.values()) {
         [[lane, {frozen: ref[key], before: left[lane] === ref[key], after: right[lane] === ref[key]}]]));
     return {id, changes: changes(left, right), ...(grades ? {grades} : {})};
   });
-  if (paths.simulator) entry.simulator = await playback(clip, frozen, before, after);
+  if (paths.simulator) {
+    entry.simulator = await playback(clip, frozen, before, after);
+    entry.simulatorGate = assessReplayPlayback(entry.simulator);
+  }
+}
+if (paths.simulator) {
+  const completedClips = report.clips.filter(clip => clip.status === "completed");
+  report.simulatorGate = completedClips.some(clip => clip.simulatorGate === "fail") ? "fail" :
+    !completedClips.length || report.clips.some(clip => clip.status !== "completed" || clip.simulatorGate !== "pass") ? "incomplete" : "pass";
+  // A comparison can explain a known failure without qualifying the candidate.
+  // Missing answers and compiler-missed frozen boundaries cannot yield a pass.
+  if (report.simulatorGate !== "pass") process.exitCode = 1;
 }
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

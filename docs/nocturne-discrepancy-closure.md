@@ -2,6 +2,8 @@
 
 13–14 November 2026 · [VS Code handoff](nocturne-vscode-handoff.md)
 
+The [local v47 continuation](nocturne-local-audit-2026-11-14.md) adds source-identity checks and a frozen-event playback audit independent of the profile lane. Compiler parity remains exact; 36 neutral audit conditions and common checks pass. No new provider result or archive replay is claimed because the private inputs were absent. The source-specific closure tests below remain open where they require those inputs.
+
 The v44 development inventory contains 181 frozen targets across 34 sampled works. Earlier runs completed 148 targets and withheld 33. The v44 live panel covered 17 distinct targets in 24 observations across 14 clip runs. It matched 9/24 profiles, 18/24 phases, 15/24 applied events, 14/24 model-reported events and 18/21 judged cues. Profile and applied event repeated exactly on 2/4 waveform pairs. Two frozen hard boundaries produced positive simulator output despite zero reported runtime violations at compiler-recognized hard boundaries. [Frozen scoring labels](nocturne-frozen-labels.md) · [V44 compiler](https://github.com/adharasi/SatinLore/commit/fb33de8b03157ab6871fcbbfaabe9859e8c786b0)
 
 ## Boundary repairs in v45 and v46

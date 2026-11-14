@@ -56,7 +56,9 @@ function project(work, pin, isolated) {
     // contiguous active units share a projection clock until a quiet boundary.
     const beat = level ? (!isolated ? row.compiler.beatAnchor : null) ?? previousBeat ?? row.id : null;
     previousBeat = beat;
-    return {level, playbackGate, profile: {phase, quiet: hard.has(pattern), rhythm: "steady", sceneId: beat === null ? null : beat + 1,
+    // Reference boundaries audit candidate playback; they never silence it.
+    const authoritativeQuiet = pin.units[index].hardBoundary === true || ["hard-stop", "reset"].includes(playbackGate);
+    return {level, playbackGate, authoritativeQuiet, profile: {phase, quiet: hard.has(pattern), rhythm: "steady", sceneId: beat === null ? null : beat + 1,
       ...(rendererPattern ? {pattern: rendererPattern} : {}), ...(phase === "peak" ? {peakPreset: DEFAULT_EXPERIENCE.peakPattern} : {}),
       ...(!isolated && row.compiler.verifiedRelease === true && pattern === "Taper" ? {verifiedRelease: true} : {}),
       ...(currentCue ? {currentCue: true, simulatorSceneId: beat + 1} : {})}};
@@ -83,15 +85,15 @@ export async function replay(work, pin, timings, wpm, maximum, isolated, observe
   playback.setCeilingFromControl(maximum);
   playback.start();
   const counts = {observedMs: 0, positiveTargetMs: 0, positiveTargetZeroMs: 0, capViolationMs: 0,
-    authoritativeQuietTargets: 0, authoritativeQuietViolations: 0, quietAboveBackgroundMs: 0};
+    authoritativeQuietTargets: 0, authoritativeQuietViolations: 0,
+    authoritativeQuietTargetViolations: 0, authoritativeQuietOutputViolations: 0, quietAboveBackgroundMs: 0};
   const episodes = [], firstDispatchDelaysMs = [], positiveTargetZeroUnits = [];
   let episode = null;
-  for (const [index, {playbackGate}] of projection.entries()) {
+  for (const [index, {playbackGate, authoritativeQuiet}] of projection.entries()) {
     const start = clock.now();
     const dwellMs = Math.max(sampleMs, Math.round(timings[index] * 60_000 / wpm / sampleMs) * sampleMs);
     const dispatchStart = index === 0 ? 0 : dispatches.length;
-    const authoritativeQuiet = playbackGate === "hard-stop" || playbackGate === "reset";
-    let quietViolation = false, positiveTarget = false, zeroMs = 0;
+    let quietTargetViolation = false, quietOutputViolation = false, positiveTarget = false, zeroMs = 0;
     playback.activity();
     playback.setPosition(index);
     if (playbackGate !== "active") episode = null;
@@ -110,7 +112,8 @@ export async function replay(work, pin, timings, wpm, maximum, isolated, observe
       if (target > 0 && output === 0) zeroMs += sampleMs;
       if (output > maximum) counts.capViolationMs += sampleMs;
       if (playbackGate === "quiet" && output > background) counts.quietAboveBackgroundMs += sampleMs;
-      if (authoritativeQuiet && output > 0) quietViolation = true;
+      if (authoritativeQuiet && target > 0) quietTargetViolation = true;
+      if (authoritativeQuiet && output > 0) quietOutputViolation = true;
       if (episode) {
         episode.dwellMs += sampleMs;
         episode.contrastMs = output > background ? episode.contrastMs + sampleMs : 0;
@@ -119,7 +122,9 @@ export async function replay(work, pin, timings, wpm, maximum, isolated, observe
       await clock.advance(sampleMs);
     }
     if (authoritativeQuiet) counts.authoritativeQuietTargets++;
-    if (quietViolation) counts.authoritativeQuietViolations++;
+    if (quietTargetViolation) counts.authoritativeQuietTargetViolations++;
+    if (quietOutputViolation) counts.authoritativeQuietOutputViolations++;
+    if (quietTargetViolation || quietOutputViolation) counts.authoritativeQuietViolations++;
     if (zeroMs) {
       counts.positiveTargetZeroMs += zeroMs;
       positiveTargetZeroUnits.push({id: index, milliseconds: zeroMs, expectedGate: playbackGate});
@@ -147,7 +152,8 @@ export {caps};
 
 function summarize(works) {
   const fields = ["observedMs", "positiveTargetMs", "positiveTargetZeroMs", "capViolationMs", "authoritativeQuietTargets",
-    "authoritativeQuietViolations", "quietAboveBackgroundMs", "contrastEpisodes", "contrastedEpisodes", "dispatchCount",
+    "authoritativeQuietViolations", "authoritativeQuietTargetViolations", "authoritativeQuietOutputViolations",
+    "quietAboveBackgroundMs", "contrastEpisodes", "contrastedEpisodes", "dispatchCount",
     "commandViolations", "pauseViolation"];
   const counts = Object.fromEntries(fields.map(key => [key, works.reduce((sum, row) => sum + row[key], 0)]));
   const delays = works.flatMap(({firstDispatchDelaysMs}) => firstDispatchDelaysMs);
