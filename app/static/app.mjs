@@ -2345,7 +2345,10 @@ async function savePlaybackPreferences(patch) {
 }
 
 async function offerExperience(continuation = null) {
-  if (window.location?.search === "?sign-in=feedback") { continuation?.(); return; }
+  const query = new URLSearchParams(window.location?.search);
+  if (window.location?.search === "?sign-in=feedback" || query.get("signin") === "1" && query.get("next") === "billing") {
+    continuation?.(); return;
+  }
   const owner = await loadAccountLibrary();
   if (!owner || !publicSignedIn || owner !== accountLibrary.owner || accountExperience || offeredExperience.has(owner) ||
       document.hidden || anyDialog()) { continuation?.(); return; }
@@ -2410,6 +2413,10 @@ function updatePublicSession(signedIn) {
 
 if (publicMode) {
   text("open-account-welcome", "Sign in");
+  if (document.querySelector('meta[name="satinlore-launch-usage"]')) {
+    const billing = $("public-billing-link");
+    if (billing) billing.hidden = false;
+  }
   text("account-storage-description", "Choose Save to my account on any story you want to open on other devices. Your reading settings and toy presets also sync when you sign in.");
   publicAccount = mountPublicAccount({document,
     openDialog: opener => openDialog("public-account-dialog", opener),
@@ -2477,9 +2484,21 @@ if (hostedMode) {
     },
   });
   const accessCheck = hostedAccess.start({visible: !document.hidden});
+  const accountQuery = new URLSearchParams(window.location?.search);
   if (publicMode && window.location?.search === "?sign-in=feedback") {
     const openFeedback = () => window.location.assign("/support");
     void accessCheck.then(allowed => allowed ? openFeedback() : publicAccount?.open($("public-account"), openFeedback));
+  } else if (publicMode && accountQuery.get("signin") === "1") {
+    const billing = accountQuery.get("next") === "billing" && document.querySelector('meta[name="satinlore-launch-usage"]');
+    const parameters = new URLSearchParams();
+    const ref = accountQuery.get("ref"), order = accountQuery.get("order");
+    if (/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(ref ?? "")) parameters.set("ref", ref);
+    if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(order ?? "")) parameters.set("order", order);
+    const openBilling = billing ? () => window.location.assign(`/billing${parameters.size ? `?${parameters}` : ""}`) : null;
+    void accessCheck.then(allowed => {
+      if (allowed) return openBilling ? openBilling() : offerExperience();
+      return publicAccount?.open($("public-account"), openBilling);
+    });
   } else if (publicMode) void accessCheck.then(allowed => { if (allowed) return offerExperience(); });
 }
 

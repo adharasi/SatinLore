@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Plans &amp; usage | SatinLore</title>
+  <script src="/static/appearance.js"></script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="stylesheet" href="/static/billing.css">
+  <script type="module" src="/static/billing.mjs"></script>
+</head>
+<body>
+  <header class="billing-header"><a href="/">SatinLore</a><a href="/">Back to the reader</a></header>
+  <main>
+    <h1>Plans &amp; usage</h1>
+    <p id="billing-status" role="status">Checking your account…</p>
+    <p id="billing-sign-in" hidden><a id="billing-sign-in-link" href="/?signin=1&amp;next=billing">Sign in or create an account</a></p>
+    <section id="usage-section" hidden aria-labelledby="usage-heading">
+      <h2 id="usage-heading">AI analysis usage</h2>
+      <dl class="usage-grid">
+        <div><dt>Credits remaining</dt><dd id="credit-remaining">—</dd></div>
+        <div><dt>Used this month</dt><dd id="month-used">—</dd></div>
+        <div><dt>Monthly limit</dt><dd id="month-limit">—</dd></div>
+      </dl>
+      <p id="usage-note"></p>
+      <button type="button" id="refresh-usage">Refresh usage</button>
+    </section>
+    <section id="order-section" hidden aria-labelledby="order-heading">
+      <h2 id="order-heading">Your order</h2>
+      <p id="order-status" role="status"></p>
+    </section>
+    <section id="plans-section" hidden aria-labelledby="plans-heading">
+      <h2 id="plans-heading">Buy AI credits</h2>
+      <p>Make a one-time purchase. One credit covers one token of AI analysis. Your monthly usage limit still applies.</p>
+      <form id="plan-form">
+        <label for="plan">Credit pack</label><select id="plan" required></select>
+        <label for="promotion">Promo code <small>(optional)</small></label>
+        <input id="promotion" maxlength="32" autocomplete="off" spellcheck="false">
+        <div class="billing-actions"><button type="submit" id="check-price">Check price</button></div>
+        <p id="quote-status" role="status"></p>
+        <button type="button" id="checkout" disabled>Continue to secure checkout</button>
+      </form>
+      <p>Checkout opens on Verotel. Credits appear when SatinLore receives payment confirmation.</p>
+    </section>
+  </main>
+</body>
+</html>

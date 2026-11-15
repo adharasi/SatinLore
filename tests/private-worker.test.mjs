@@ -61,6 +61,10 @@ test("every static reader route denies missing tokens before fetching assets or 
   const f = fixture();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const result = await f.worker.fetch(request(path), f.env);
+    if (["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
+      assert.equal(result.status, 404, path);
+      continue;
+    }
     assert.equal(result.status, 403, path);
     assert.deepEqual(await result.json(), { error: "Founder access required." });
   }
@@ -73,6 +77,10 @@ test("valid founder assertions grant only read-only allowlisted files and strip 
   const f = fixture(), jwt = await token();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const response = await f.worker.fetch(request(path, jwt), f.env);
+    if (["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
+      assert.equal(response.status, 404, path);
+      continue;
+    }
     if (path.startsWith("/feedback-admin/") || ["/admin","/admin/","/beta-admin.html","/static/beta-admin.mjs","/static/beta-admin.css"].includes(path)) {
       assert.equal(response.status,403,path);continue;
     }
@@ -169,8 +177,8 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.equal(config.workers_dev, false); assert.equal(config.preview_urls, false);
   assert.deepEqual(config.routes, [{ pattern: "app.satinlore.com", custom_domain: true }, {pattern:"beta.satinlore.com",custom_domain:true}]);
   assert.equal(config.d1_databases, undefined); assert.equal(config.r2_buckets, undefined);
-  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"},{name:"ALPHA_STUDY",class_name:"AlphaStudy"},{name:"SCENE_ANALYSIS_BUDGET",class_name:"SceneAnalysisBudget"},{name:"PUBLIC_READER_AUTH",class_name:"PublicReaderAuth"}]);
-  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]},{tag:"v3",new_sqlite_classes:["AlphaStudy"]},{tag:"v4",new_sqlite_classes:["SceneAnalysisBudget"]},{tag:"v5",new_sqlite_classes:["PublicReaderAuth"]}]);
+  assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"},{name:"ALPHA_STUDY",class_name:"AlphaStudy"},{name:"SCENE_ANALYSIS_BUDGET",class_name:"SceneAnalysisBudget"},{name:"PUBLIC_READER_AUTH",class_name:"PublicReaderAuth"},{name:"COMMERCE",class_name:"SatinLoreCommerce"},{name:"LAUNCH_USAGE",class_name:"LaunchUsage"}]);
+  assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]},{tag:"v3",new_sqlite_classes:["AlphaStudy"]},{tag:"v4",new_sqlite_classes:["SceneAnalysisBudget"]},{tag:"v5",new_sqlite_classes:["PublicReaderAuth"]},{tag:"v6",new_sqlite_classes:["SatinLoreCommerce","LaunchUsage"]}]);
   assert.equal(config.keep_vars, true);
   for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED", "PUBLIC_READER_ENABLED", "PUBLIC_READER_OTP_KEY"]) {
     assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);

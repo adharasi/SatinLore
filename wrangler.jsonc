@@ -26,7 +26,9 @@
       { "name": "BETA_RECORDINGS", "class_name": "BetaRecordings" },
       { "name": "ALPHA_STUDY", "class_name": "AlphaStudy" },
       { "name": "SCENE_ANALYSIS_BUDGET", "class_name": "SceneAnalysisBudget" },
-      { "name": "PUBLIC_READER_AUTH", "class_name": "PublicReaderAuth" }
+      { "name": "PUBLIC_READER_AUTH", "class_name": "PublicReaderAuth" },
+      { "name": "COMMERCE", "class_name": "SatinLoreCommerce" },
+      { "name": "LAUNCH_USAGE", "class_name": "LaunchUsage" }
     ]
   },
   "migrations": [
@@ -34,7 +36,8 @@
     { "tag": "v2", "new_sqlite_classes": ["ReaderAccount", "BetaRecordings"] },
     { "tag": "v3", "new_sqlite_classes": ["AlphaStudy"] },
     { "tag": "v4", "new_sqlite_classes": ["SceneAnalysisBudget"] },
-    { "tag": "v5", "new_sqlite_classes": ["PublicReaderAuth"] }
+    { "tag": "v5", "new_sqlite_classes": ["PublicReaderAuth"] },
+    { "tag": "v6", "new_sqlite_classes": ["SatinLoreCommerce", "LaunchUsage"] }
   ],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",

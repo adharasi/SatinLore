@@ -30,6 +30,8 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   const signupEmail = node('public-register-email'), signupPassword = node('public-register-password'), adult = node('public-adult');
   const forgotEmail = node('public-forgot-email'), resetPassword = node('public-reset-password');
   const code = node('public-code'), resetCode = node('public-reset-code');
+  const changePasswordForm = node('public-change-password-form');
+  const currentPassword = node('public-current-password'), newPassword = node('public-new-password');
   const trigger = node('public-account');
   const resendButtons = ['public-resend-code', 'public-resend-reset'].map(node);
   const views = {
@@ -41,8 +43,9 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   };
   const actions = ['public-login', 'public-register', 'public-verify-code', 'public-forgot', 'public-reset',
     'public-show-register', 'public-show-forgot', 'public-register-back', 'public-forgot-back',
-    'public-change-email', 'public-reset-back', 'public-sign-out'].map(node);
-  let session = false, busy = false, view = 'login', challenge = '', challengeEmail = '';
+    'public-change-email', 'public-reset-back', 'public-sign-out', 'public-show-change-password',
+    'public-change-password-back', 'public-change-password', 'public-sign-out-all'].map(node).filter(Boolean);
+  let session = false, busy = false, view = 'login', managingPassword = false, challenge = '', challengeEmail = '';
   let canResend = true, timer = null, next = null, visit = 0;
 
   function render() {
@@ -55,16 +58,21 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
     };
     node('public-account-label').textContent = session ? 'Account' : 'Sign in';
     trigger.setAttribute('aria-label', session ? 'Account, signed in' : 'Sign in');
-    node('public-account-heading').textContent = session ? 'Your account' : views[view][2];
-    node('public-account-intro').textContent = session ? 'You’re signed in. Manage reading settings and toy presets in the reader.' : copy[view];
+    const accountHeading = managingPassword ? 'Change your password' : 'Your account';
+    const accountIntro = managingPassword ? 'Changing your password signs you out on all devices.' :
+      'Manage reading settings and toy presets in the reader.';
+    node('public-account-heading').textContent = session ? accountHeading : views[view][2];
+    node('public-account-intro').textContent = session ? accountIntro : copy[view];
     for (const [name, [id]] of Object.entries(views)) node(id).hidden = session || name !== view;
-    node('public-account-session').hidden = !session;
+    node('public-account-session').hidden = !session || managingPassword;
+    if (changePasswordForm) changePasswordForm.hidden = !session || !managingPassword;
     for (const action of actions) action.disabled = busy;
     for (const button of resendButtons) button.disabled = busy || !canResend;
     dialog.setAttribute('aria-busy', String(busy));
   }
   function focusView() {
-    if (dialog.open) (session ? node('public-sign-out') : views[view][1]).focus();
+    const accountFocus = managingPassword ? currentPassword : node('public-sign-out');
+    if (dialog.open) (session ? accountFocus : views[view][1]).focus();
   }
   function clearChallenge() {
     clearTimer(timer); timer = null; challenge = ''; challengeEmail = ''; canResend = true;
@@ -72,8 +80,14 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   }
   function clearForm() {
     clearChallenge(); view = 'login';
+    resetPasswordManagement();
     for (const input of [email, password, signupEmail, signupPassword, forgotEmail, resetPassword]) input.value = '';
     adult.checked = false; remember.checked = false;
+  }
+  function resetPasswordManagement() {
+    managingPassword = false;
+    if (currentPassword) currentPassword.value = '';
+    if (newPassword) newPassword.value = '';
   }
   function showView(name, inputEmail = '', message = '') {
     password.value = ''; signupPassword.value = ''; resetPassword.value = '';
@@ -112,9 +126,9 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
     showView(nextView, '', 'If the email doesn’t arrive, check your spam folder or request another code after a minute.');
   }
   function submit(id, handler) {
-    node(id).addEventListener('submit', event => { event.preventDefault(); return handler(); });
+    node(id)?.addEventListener('submit', event => { event.preventDefault(); return handler(); });
   }
-  function click(id, handler) { node(id).addEventListener('click', handler); }
+  function click(id, handler) { node(id)?.addEventListener('click', handler); }
 
   submit('public-login-form', () => {
     const address = email.value.trim();
@@ -171,9 +185,34 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   click('public-reset-back', () => showView('forgot', challengeEmail));
   click('public-resend-code', resendCode);
   click('public-resend-reset', resendCode);
-  click('public-sign-out', () => perform(() => onSignOut(() => request('logout', {})), () => {
-    clearForm(); status.textContent = 'You’re signed out. You can still read and use the simulator.'; render(); focusView();
-  }));
+  function signOut(requestSignOut, message) {
+    return perform(() => onSignOut(requestSignOut), () => {
+      clearForm(); status.textContent = message; render(); focusView();
+    });
+  }
+  click('public-sign-out', () => signOut(() => request('logout', {}), 'You’re signed out. You can still read and use the simulator.'));
+  click('public-sign-out-all', () => signOut(() => request('logout-all', {}), 'You’re signed out on all devices.'));
+  click('public-show-change-password', () => {
+    if (!session || !changePasswordForm) return;
+    managingPassword = true; status.textContent = ''; render(); focusView();
+  });
+  click('public-change-password-back', () => {
+    resetPasswordManagement(); status.textContent = ''; render();
+    node('public-show-change-password')?.focus();
+  });
+  submit('public-change-password-form', () => {
+    if (!session || !managingPassword || !currentPassword.value) return;
+    const current = currentPassword.value, password = newPassword.value;
+    if (!validPassword(password)) { status.textContent = invalidPassword; newPassword.focus(); return; }
+    if (current.normalize('NFC') === password.normalize('NFC')) {
+      status.textContent = 'Choose a password different from your current password.'; newPassword.focus(); return;
+    }
+    return signOut(async () => {
+      const value = await request('change-password', {currentPassword: current, password});
+      if (value?.changed !== true) throw new Error();
+      return {authenticated: false};
+    }, 'Password changed. Sign in with your new password.');
+  });
   function close() {
     ++visit; next = null; clearForm(); render(); closeDialog();
   }
@@ -187,7 +226,9 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   click('public-account', () => open(trigger));
   render();
   return {open, close, update(signedIn) {
-    if (session !== signedIn && signedIn) clearForm();
+    if (session === signedIn) return;
+    clearForm();
     session = signedIn; render();
+    if (!session) focusView();
   }};
 }

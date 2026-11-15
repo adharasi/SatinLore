@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Billing administration | SatinLore</title>
+  <script src="/static/appearance.js"></script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="stylesheet" href="/static/billing.css">
+  <script type="module" src="/billing-admin/app.mjs"></script>
+</head>
+<body>
+  <header class="billing-header"><a href="/">SatinLore</a><a href="/billing">Reader plans</a></header>
+  <main>
+    <h1>Billing administration</h1>
+    <p id="admin-status" role="status">Loading campaign and order records…</p>
+    <button id="reload-billing" type="button">Refresh records</button>
+    <section aria-labelledby="promotions-heading">
+      <h2 id="promotions-heading">Promotions</h2>
+      <form id="promotion-form">
+        <label for="promo-code">Promo code</label><input id="promo-code" name="code" maxlength="32" required>
+        <label for="promo-discount">Discount (%)</label><input id="promo-discount" name="percent" type="number" min=".01" max="99.99" step=".01" required>
+        <label for="promo-limit">Redemption limit</label><input id="promo-limit" name="limit" type="number" min="1" max="100000" required>
+        <label for="promo-plan">Plan ID <small>(optional)</small></label><input id="promo-plan" name="planId" maxlength="32">
+        <label for="promo-start">Starts (UTC)</label><input id="promo-start" name="from" type="datetime-local" required>
+        <label for="promo-end">Ends (UTC)</label><input id="promo-end" name="until" type="datetime-local" required>
+        <label><input name="enabled" type="checkbox" checked> Active</label>
+        <button type="submit">Save promotion</button>
+      </form>
+      <ul id="promotions-list"></ul>
+    </section>
+    <section aria-labelledby="affiliates-heading">
+      <h2 id="affiliates-heading">Affiliates</h2>
+      <form id="affiliate-form">
+        <label for="affiliate-code">Referral code</label><input id="affiliate-code" name="code" maxlength="32" required>
+        <label for="affiliate-rate">Commission (%)</label><input id="affiliate-rate" name="percent" type="number" min="0" max="100" step=".01" required>
+        <label><input name="enabled" type="checkbox" checked> Active</label>
+        <button type="submit">Save affiliate</button>
+      </form>
+      <ul id="affiliates-list"></ul>
+    </section>
+    <section aria-labelledby="orders-heading">
+      <h2 id="orders-heading">Recent orders</h2>
+      <p>Use the merchant reference to reconcile settlement and reversals with the processor. Affiliate commissions shown here are recorded for reconciliation.</p>
+      <ul id="orders-list"></ul>
+    </section>
+  </main>
+</body>
+</html>

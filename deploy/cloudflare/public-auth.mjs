@@ -5,7 +5,7 @@ import { sendReaderCode } from "./reader-auth-email.mjs";
 export const APP_ORIGIN = "https://app.satinlore.com";
 const AUTH_ORIGIN = "https://reader-auth.internal";
 const AUTH_COOKIE = "__Host-satinlore-reader";
-const AUTH_ROUTES = new Set(["request", "register", "resend", "verify", "login", "forgot", "reset", "logout"]);
+const AUTH_ROUTES = new Set(["request", "register", "resend", "verify", "login", "forgot", "reset", "logout", "change-password", "logout-all"]);
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -27,6 +27,7 @@ const unavailable = () => json({ error: "Email sign-in is temporarily unavailabl
 const invalidCode = () => json({ error: "This code is incorrect, expired, or already used. Request a new code if needed." }, 401);
 const invalidPassword = () => json({ error: "Use a password of 15 to 128 characters (up to 512 bytes)." }, 400);
 const unauthenticated = () => json({ error: "The email or password did not match. Check your details or reset your password." }, 401);
+const sessionRequired = () => json({ error: "Sign in to SatinLore again to continue." }, 401);
 
 function emailAddress(value) {
   if (typeof value !== "string" || value.length > 254) return null;
@@ -136,11 +137,15 @@ function quotaResponse(response, message) {
   return json({ error: message }, 429, { "Retry-After": /^\d+$/.test(retryAfter) ? retryAfter : "60" });
 }
 
-async function requestIdentity(config, request, email) {
+function clientIdentity(config, request) {
   const ip = request.headers.get("CF-Connecting-IP") || "";
+  return authenticateValue(config.key, "email-client", /^[0-9a-f:.]{3,45}$/i.test(ip) ? ip : "unknown");
+}
+
+async function requestIdentity(config, request, email) {
   const [emailKey, client] = await Promise.all([
     authenticateValue(config.key, "email-identity", email),
-    authenticateValue(config.key, "email-client", /^[0-9a-f:.]{3,45}$/i.test(ip) ? ip : "unknown"),
+    clientIdentity(config, request),
   ]);
   return { subject: "email-v1:" + emailKey, client };
 }
@@ -236,6 +241,37 @@ async function loginWithPassword(body, request, config) {
   return json({ authenticated: true, expiresAt }, 200, { "Set-Cookie": readerCookie(token, body.remember) });
 }
 
+async function changePassword(body, request, config) {
+  const token = cookieToken(request);
+  if (!token) return sessionRequired();
+  if (!exact(body, "currentPassword", "password")) return json({ error: "Enter your current and new password." }, 400);
+  const current = normalizePassword(body.currentPassword);
+  const password = normalizePassword(body.password);
+  if (!password) return invalidPassword();
+  if (!current) return json({ error: "The current password did not match." }, 401);
+  if (current === password) return json({ error: "Choose a password different from your current password." }, 400);
+  const [tokenHash, client, currentProof, proof] = await Promise.all([
+    digest(token), clientIdentity(config, request), authenticateValue(config.key, "password-prehash", current),
+    authenticateValue(config.key, "password-prehash", password),
+  ]);
+  const changed = await authStore(config, "password/change", { tokenHash, client, currentProof, proof });
+  if (changed.status === 429) return quotaResponse(changed, "Too many password attempts. Wait a little and try again.");
+  if (changed.status === 403) return sessionRequired();
+  if (changed.status === 401) return json({ error: "The current password did not match." }, 401);
+  if (!changed.ok) return unavailable();
+  return json({ changed: true }, 200, { "Set-Cookie": readerCookie() });
+}
+
+async function logoutEverywhere(body, request, config) {
+  if (!exact(body)) return json({ error: "Use the sign-out button on SatinLore." }, 400);
+  const token = cookieToken(request);
+  if (!token) return sessionRequired();
+  const cleared = await authStore(config, "logout-all", { tokenHash: await digest(token) });
+  if (cleared.status === 401) return sessionRequired();
+  if (!cleared.ok) return unavailable();
+  return json({ authenticated: false, expiresAt: null }, 200, { "Set-Cookie": readerCookie() });
+}
+
 export async function handlePublicAuth(request, env, config, emailFetcher, ctx) {
   const { pathname, search } = new URL(request.url);
   const action = pathname.startsWith("/api/auth/") ? pathname.slice("/api/auth/".length) : "";
@@ -252,6 +288,8 @@ export async function handlePublicAuth(request, env, config, emailFetcher, ctx) 
     if (action === "request") return json({ error: "Use your email and password to sign in. Reload the reader to get the latest sign-in form." }, 410);
     if (["register", "resend", "forgot"].includes(action)) return await startEmailChallenge(action, body, request, config, emailFetcher, ctx);
     if (action === "login") return await loginWithPassword(body, request, config);
+    if (action === "change-password") return await changePassword(body, request, config);
+    if (action === "logout-all") return await logoutEverywhere(body, request, config);
     if (action === "logout") {
       if (!exact(body)) return json({ error: "Use the sign-out button on SatinLore." }, 400);
       const token = cookieToken(request);
@@ -324,6 +362,19 @@ export class PublicReaderAuth {
   credential(subject) {
     return this.sql.exec("SELECT salt, digest FROM password_credentials WHERE subject = ?", subject).toArray()[0];
   }
+  session(tokenHash, now) {
+    return this.sql.exec("SELECT subject, expires AS expiresAt FROM sessions WHERE token_hash = ? AND expires > ?",
+      tokenHash, now).toArray()[0];
+  }
+  passwordAttemptQuota(subject, client, now) {
+    return this.storage.transactionSync(() => this.consumeQuota([[`login-address:${subject}`, 8, 15 * MINUTE],
+      [`login-client:${client}`, 35, 15 * MINUTE], ["login-total", 150, MINUTE]], now));
+  }
+  replacePassword(subject, salt, passwordHash) {
+    this.sql.exec("UPDATE password_credentials SET salt = ?, digest = ? WHERE subject = ?", salt, passwordHash, subject);
+    this.sql.exec("DELETE FROM sessions WHERE subject = ?", subject);
+    this.sql.exec("DELETE FROM password_challenges WHERE subject = ?", subject);
+  }
   async hashPassword(proof, salt) {
     if (this.pendingHashes >= MAX_PENDING_HASHES) return null;
     this.pendingHashes++;
@@ -394,9 +445,7 @@ export class PublicReaderAuth {
       if (this.sql.exec("SELECT changes() AS count").one().count !== 1) return json({}, 401);
       if (reset) {
         if (!this.credential(claim.subject)) return json({}, 401);
-        this.sql.exec("UPDATE password_credentials SET salt = ?, digest = ? WHERE subject = ?", salt, passwordHash, claim.subject);
-        this.sql.exec("DELETE FROM sessions WHERE subject = ?", claim.subject);
-        this.sql.exec("DELETE FROM password_challenges WHERE subject = ?", claim.subject);
+        this.replacePassword(claim.subject, salt, passwordHash);
       } else {
         // A new email verification can enroll a pre-existing passwordless account but can never replace a password.
         this.sql.exec("INSERT INTO password_credentials VALUES (?, ?, ?) ON CONFLICT(subject) DO NOTHING", claim.subject, salt, passwordHash);
@@ -404,11 +453,33 @@ export class PublicReaderAuth {
       return json({});
     });
   }
+  async changePassword(body, now) {
+    const { tokenHash, client, currentProof, proof } = body;
+    if (![tokenHash, client, currentProof, proof].every(value => HEX.test(value)) || currentProof === proof) return json({}, 400);
+    const session = this.session(tokenHash, now);
+    const stored = session && this.credential(session.subject);
+    if (!stored) return json({}, 403);
+    const { subject } = session;
+    const blocked = this.passwordAttemptQuota(subject, client, now);
+    if (blocked) return blocked;
+    await this.schedule();
+    const candidate = await this.hashPassword(currentProof, stored.salt);
+    if (!candidate) return json({}, 503);
+    if (!constantTimeMatch(candidate, stored.digest)) return json({}, 401);
+    const salt = randomToken();
+    const passwordHash = await this.hashPassword(proof, salt);
+    if (!passwordHash) return json({}, 503);
+    return this.storage.transactionSync(() => {
+      // Both the calling session and credential generation must survive verification.
+      if (this.session(tokenHash, Date.now())?.subject !== subject || this.credential(subject)?.salt !== stored.salt) return json({}, 403);
+      this.replacePassword(subject, salt, passwordHash);
+      return json({});
+    });
+  }
   async login(body, now) {
     if (!SUBJECT.test(body.subject) || ![body.client, body.proof, body.tokenHash].every(value => HEX.test(value)) ||
         typeof body.remember !== "boolean") return json({}, 400);
-    const blocked = this.storage.transactionSync(() => this.consumeQuota([[`login-address:${body.subject}`, 8, 15 * MINUTE],
-      [`login-client:${body.client}`, 35, 15 * MINUTE], ["login-total", 150, MINUTE]], now));
+    const blocked = this.passwordAttemptQuota(body.subject, body.client, now);
     if (blocked) return blocked;
     await this.schedule();
     const stored = this.credential(body.subject);
@@ -438,17 +509,24 @@ export class PublicReaderAuth {
       else if (url.pathname === "/password/check") return this.check(body, now);
       else if (url.pathname === "/password/register") return await this.commitPassword(body, "verify", now);
       else if (url.pathname === "/password/reset") return await this.commitPassword(body, "reset", now);
+      else if (url.pathname === "/password/change") return await this.changePassword(body, now);
       else if (url.pathname === "/password/login") response = await this.login(body, now);
       else if (url.pathname === "/password/cancel" && HEX.test(body.challenge)) {
         this.sql.exec("DELETE FROM password_challenges WHERE id = ?", body.challenge);
         return json({});
       } else if (url.pathname === "/session" && HEX.test(body.tokenHash)) {
-        const session = this.sql.exec("SELECT subject, expires AS expiresAt FROM sessions WHERE token_hash = ? AND expires > ?",
-          body.tokenHash, now).toArray()[0];
+        const session = this.session(body.tokenHash, now);
         return session ? json(session) : json({}, 401);
       } else if (url.pathname === "/logout" && HEX.test(body.tokenHash)) {
         this.sql.exec("DELETE FROM sessions WHERE token_hash = ?", body.tokenHash);
         return json({});
+      } else if (url.pathname === "/logout-all" && HEX.test(body.tokenHash)) {
+        return this.storage.transactionSync(() => {
+          const session = this.session(body.tokenHash, now);
+          if (!session) return json({}, 401);
+          this.sql.exec("DELETE FROM sessions WHERE subject = ?", session.subject);
+          return json({});
+        });
       } else if (url.pathname === "/revoke" && SUBJECT.test(body.subject)) {
         this.storage.transactionSync(() => {
           this.sql.exec("DELETE FROM challenges WHERE subject = ?", body.subject);

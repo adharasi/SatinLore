@@ -164,3 +164,76 @@ test("closing an account form clears the password and ignores an earlier respons
   assert.equal(node("public-login-form").hidden, false);
   assert.equal(node("public-code-form").hidden, true);
 });
+
+test("signed-in password changes and all-device sign-out return the reader to a guest session", async t => {
+  let signedIn = true, credential = originalPassword;
+  const calls = [];
+  const app = workspace({publicAuth: true, authRequest: async (action, body) => {
+    calls.push({action, body});
+    if (action === "change-password") {
+      if (body.currentPassword !== credential) throw error("The current password did not match.");
+      credential = body.password;
+      signedIn = false;
+      return {changed: true};
+    }
+    if (action === "login" && body.password !== credential) throw error("The email or password is incorrect.");
+    signedIn = action === "login";
+    return {authenticated: signedIn, expiresAt: signedIn ? app.now() + 600000 : null};
+  }});
+  t.after(() => app.destroy());
+  app.access(async () => Response.json({authenticated: signedIn, expiresAt: signedIn ? app.now() + 600000 : null}));
+  await app.settle();
+  await app.read("hostedAccess.check({fresh: true})");
+  const node = id => app.nodes.get(id);
+  const current = node("public-current-password"), next = node("public-new-password");
+  const form = node("public-change-password-form"), status = node("public-account-status");
+  const session = node("public-account-session");
+
+  await app.click("public-account");
+  assert.equal(session.hidden, false);
+  assert.equal(form.hidden, true);
+  assert.equal(node("public-billing-link").hidden, true);
+  await app.click("public-show-change-password");
+  assert.equal(session.hidden, true);
+  assert.equal(form.hidden, false);
+  current.value = next.value = originalPassword;
+  await form.dispatch("submit");
+  assert.match(status.textContent, /different from your current password/);
+  assert.equal(calls.length, 0);
+  await app.click("public-change-password-back");
+  assert.equal(session.hidden, false);
+  assert.equal(form.hidden, true);
+  assert.equal(current.value, "");
+  assert.equal(next.value, "");
+
+  await app.click("public-show-change-password");
+  current.value = "an incorrect synthetic password";
+  next.value = replacementPassword;
+  await form.dispatch("submit");
+  assert.match(status.textContent, /current password did not match/);
+  assert.equal(form.hidden, false);
+  assert.equal(app.read("hasVerifiedAccess()"), true);
+  current.value = originalPassword;
+  await form.dispatch("submit");
+  assert.deepEqual(calls.at(-1), {action: "change-password", body: {currentPassword: originalPassword, password: replacementPassword}});
+  assert.equal(current.value, "");
+  assert.equal(next.value, "");
+  assert.equal(session.hidden, true);
+  assert.equal(form.hidden, true);
+  assert.equal(node("public-login-form").hidden, false);
+  assert.match(status.textContent, /Sign in with your new password/);
+  assert.equal(app.read("hasVerifiedAccess()"), false);
+
+  node("public-email").value = address;
+  node("public-password").value = replacementPassword;
+  await node("public-login-form").dispatch("submit");
+  await app.settle();
+  assert.equal(app.read("hasVerifiedAccess()"), true);
+  if (node("experience-dialog").open) await app.click("experience-later");
+  await app.click("public-account");
+  await app.click("public-sign-out-all");
+  assert.deepEqual(calls.at(-1), {action: "logout-all", body: {}});
+  assert.equal(app.read("hasVerifiedAccess()"), false);
+  assert.match(status.textContent, /signed out on all devices/);
+  assert.deepEqual(app.errors, []);
+});

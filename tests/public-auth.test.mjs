@@ -172,6 +172,8 @@ test("password registration, verification, login and recovery run on SQLite with
   assert.equal((await auth("register", { email: "alpha@example.test", password, adult: true }, { host: beta, source: beta })).status, 403);
   assert.equal((await auth("login", { email: "alpha@example.test", password, remember: true }, { source: beta })).status, 403);
   assert.equal((await auth("forgot", { email: "alpha@example.test" }, { headers: { "Sec-Fetch-Site": "same-site" } })).status, 403);
+  assert.equal((await auth("change-password", { currentPassword: password, password: changedPassword })).status, 401);
+  assert.equal((await auth("logout-all", {})).status, 401);
   assert.equal((await auth("request", { email: "alpha@example.test" })).status, 410);
   assert.equal((await send("invalid..address@example.test")).status, 400);
   assert.equal((await send("founder@example.test", "short")).status, 400);
@@ -285,14 +287,6 @@ test("password registration, verification, login and recovery run on SQLite with
   const restored = await (await request("/api/account/library", { cookie: resetCookie })).json();
   assert.equal(restored.owner, library.owner);
   assert.equal(restored.stories[0]?.text, story.text);
-  const response = await request("/api/account/delete", { body: { confirm: true, expectedRevision: savedAccount.revision }, cookie: resetCookie });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).registered, false);
-  assert.match(response.headers.get("Set-Cookie"), /Max-Age=0/);
-  assert.deepEqual(await (await request("/api/access", { cookie: resetCookie })).json(), guest);
-  assert.equal((await request("/api/account", { cookie: resetCookie })).status, 401);
-  assert.equal((await login("founder@example.test", changedPassword)).status, 401, "Deletion removes the password credential.");
-
   const second = await (await send("second@example.test")).json();
   const secondCode = outbound.at(-1).code;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -312,11 +306,62 @@ test("password registration, verification, login and recovery run on SQLite with
   const thirdSession = await login("third@example.test");
   assert.equal(thirdSession.status, 200);
   const thirdCookie = thirdSession.headers.get("Set-Cookie").split(";")[0];
+  const secondBrowser = await login("third@example.test", password, true);
+  assert.equal(secondBrowser.status, 200);
+  const secondBrowserCookie = secondBrowser.headers.get("Set-Cookie").split(";")[0];
   assert.equal((await request("/api/auth/logout", { body: {}, cookie: thirdCookie, source: beta })).status, 403);
   const loggedOut = await request("/api/auth/logout", { body: {}, cookie: thirdCookie });
   assert.deepEqual(await loggedOut.json(), guest);
   assert.match(loggedOut.headers.get("Set-Cookie"), /Max-Age=0/);
   assert.deepEqual(await (await request("/api/access", { cookie: thirdCookie })).json(), guest);
+  assert.equal((await (await request("/api/access", { cookie: secondBrowserCookie })).json()).authenticated, true);
+
+  const change = (currentPassword, next = changedPassword, cookie = secondBrowserCookie, extra) =>
+    auth("change-password", { currentPassword, password: next }, { cookie, ...extra });
+  assert.equal((await change(password, changedPassword, thirdCookie)).status, 401);
+  assert.equal((await change(password, changedPassword, secondBrowserCookie, { source: beta })).status, 403);
+  assert.equal((await change(password, password)).status, 400);
+  assert.equal((await change(password, "short")).status, 400);
+  assert.equal((await change("long synthetic incorrect password")).status, 401);
+  assert.equal((await (await request("/api/access", { cookie: secondBrowserCookie })).json()).authenticated, true);
+  await resetCooldown();
+  const pendingReset = await auth("forgot", { email: "third@example.test" });
+  assert.equal(pendingReset.status, 202);
+  const { challenge: pendingResetChallenge } = await pendingReset.json();
+  const pendingResetCode = (await awaitMail("third@example.test", "password reset")).code;
+  const replacements = await Promise.all([change(password), change(password)]);
+  assert.deepEqual(replacements.map(result => result.status).sort(), [200, 401]);
+  const changed = replacements.find(result => result.ok);
+  assert.deepEqual(await changed.json(), { changed: true });
+  assert.match(changed.headers.get("Set-Cookie"), /Max-Age=0/);
+  assert.deepEqual(await (await request("/api/access", { cookie: secondBrowserCookie })).json(), guest);
+  assert.equal((await reset(pendingResetChallenge, pendingResetCode, password)).status, 401);
+  assert.equal((await login("third@example.test", password)).status, 401);
+  const devices = await Promise.all([login("third@example.test", changedPassword), login("third@example.test", changedPassword, true)]);
+  assert.deepEqual(devices.map(device => device.status), [200, 200]);
+  const cookies = devices.map(device => device.headers.get("Set-Cookie").split(";")[0]);
+  const anotherClient = { headers: { "CF-Connecting-IP": "192.0.2.15" } };
+  // The concurrent request may observe the revocation before or after spending an attempt.
+  let changesLimited = await change(password, changedPassword, cookies[0], anotherClient);
+  if (changesLimited.status === 401) changesLimited = await change(password, changedPassword, cookies[0], anotherClient);
+  assert.equal(changesLimited.status, 429, "Changing IPs does not bypass the shared account password-attempt limit.");
+  assert.match(changesLimited.headers.get("Retry-After"), /^\d+$/);
+  assert.equal((await auth("logout-all", { subject: legacySubject }, { cookie: cookies[0] })).status, 400);
+  assert.equal((await auth("logout-all", {}, { cookie: cookies[0], source: beta })).status, 403);
+  const loggedOutAll = await auth("logout-all", {}, { cookie: cookies[0] });
+  assert.deepEqual(await loggedOutAll.json(), guest);
+  assert.match(loggedOutAll.headers.get("Set-Cookie"), /Max-Age=0/);
+  for (const revokedCookie of cookies) assert.deepEqual(await (await request("/api/access", { cookie: revokedCookie })).json(), guest);
+  assert.equal((await auth("logout-all", {}, { cookie: cookies[0] })).status, 401);
+  assert.equal((await (await request("/api/access", { cookie: resetCookie })).json()).authenticated, true);
+
+  const response = await request("/api/account/delete", { body: { confirm: true, expectedRevision: savedAccount.revision }, cookie: resetCookie });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).registered, false);
+  assert.match(response.headers.get("Set-Cookie"), /Max-Age=0/);
+  assert.deepEqual(await (await request("/api/access", { cookie: resetCookie })).json(), guest);
+  assert.equal((await request("/api/account", { cookie: resetCookie })).status, 401);
+  assert.equal((await login("founder@example.test", changedPassword)).status, 401, "Deletion removes the password credential.");
 
   const expired = await (await send("expired@example.test")).json();
   await resetCooldown(expired.challenge);
@@ -327,5 +372,5 @@ test("password registration, verification, login and recovery run on SQLite with
   const failed = await send("redirect@example.test");
   assert.equal(failed.status, 503);
   assert.deepEqual(await failed.json(), { error: "Email sign-in is temporarily unavailable. Try again shortly." });
-  assert.equal(outbound.length, 8);
+  assert.equal(outbound.length, 9);
 });

@@ -163,7 +163,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     requestNocturne: (cues, options) => requestNocturne(cues, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
     requestNocturneContext: (paragraphs, options) => requestNocturneContext(paragraphs, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
     storyToyRecommendation, channelLabel, nocturneContextCandidates, nocturneContextNeedsReview,
-    NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, queueMicrotask, AbortController,
+    NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, queueMicrotask, AbortController, URLSearchParams,
     DEFAULT_EXPERIENCE, validateExperience, mountExperienceDialog,
     createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,

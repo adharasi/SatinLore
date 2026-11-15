@@ -629,7 +629,9 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   }
 }
 
-export async function handleSceneAnalysis(request, env, { config, session, reverify, analysisFetcher = fetch }) {
+const launchTokenLimited = () => failure("token_limit_reached", 429, "Nocturne has reached your AI token limit. The local analysis is still available.");
+
+export async function handleSceneAnalysis(request, env, { config, session, reverify, analysisFetcher = fetch, launchUsage }) {
   const url = new URL(request.url);
   const read = request.method === "GET" || request.method === "HEAD";
   if (!read && request.method !== "POST") return failure("invalid_method", 405, "Use the story model controls.", { Allow: "GET, HEAD, POST" });
@@ -641,7 +643,13 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const key = env.OPENAI_API_KEY;
   const budget = env.SCENE_ANALYSIS_BUDGET;
   const available = analysisConfigured(key, budget);
-  if (read) return Response.json({ available });
+  const metered = session.authMode === "email" && env.LAUNCH_AI_USAGE_ENABLED === "true";
+  if (read) {
+    if (!available || !metered) return Response.json({ available });
+    const usage = await launchUsage?.status();
+    if (!usage?.ok) return providerUnavailable(session, "budget_unavailable");
+    return Response.json({ available: (await usage.json()).available });
+  }
   if (!available) return failure("unavailable", 503, "Nocturne is not configured. The local analysis is still available.");
   let cues, context;
   try {
@@ -653,45 +661,89 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
     if (error instanceof RangeError) return failure("invalid_request", 413, "The analysis exceeds the request limit.");
   }
   if (!cues && !context) return failure("invalid_request", 400, "Use the supported story analysis controls.");
-  if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
+  const invalidSession = () => failure("invalid_session", 403, "Your app session has ended.");
+  if (request.signal.aborted || Date.now() >= session.expiresAt) return invalidSession();
+  const contextualV2 = context?.version === NOCTURNE_CONTEXT_VERSION;
+  const instructions = contextualV2 ? CONTEXT_V2_INSTRUCTIONS : context ? CONTEXT_INSTRUCTIONS : INSTRUCTIONS;
+  const format = contextualV2 ? CONTEXT_V2_FORMAT : context ? CONTEXT_FORMAT : FORMAT;
+  const outputTokens = contextualV2 ? MAX_CONTEXT_OUTPUT_TOKENS : context ? 1000 : 600;
+  const body = JSON.stringify({
+    model: MODEL, instructions,
+    input: JSON.stringify(context ? { paragraphs: context.paragraphs } : { cues }), text: { format },
+    store: false, prompt_cache_options: { mode: "explicit" }, reasoning: { effort: "none" }, max_output_tokens: outputTokens,
+  });
+  let tokens;
+  if (metered) {
+    // Avoid consuming the existing shared request allowance for an unfunded account.
+    const response = await launchUsage?.status();
+    if (!response?.ok) return providerUnavailable(session, "budget_unavailable");
+    const { month, credits } = await response.json();
+    tokens = launchUsage.estimateTokens(body, outputTokens);
+    if (tokens > Math.min(month.remaining, credits.remaining)) return launchTokenLimited();
+  }
   let permission;
   try { permission = await reserveBudget(budget, config, session); }
   catch { return providerUnavailable(session, "budget_unavailable"); }
   if (permission.status === 429) return budgetLimited(permission);
   if (permission.status !== 204) return providerUnavailable(session, "budget_unavailable");
-  if (request.signal.aborted || Date.now() >= session.expiresAt) return failure("invalid_session", 403, "Your app session has ended.");
-  const contextualV2 = context?.version === NOCTURNE_CONTEXT_VERSION;
+  if (request.signal.aborted || Date.now() >= session.expiresAt) return invalidSession();
+
+  const attempt = metered ? crypto.randomUUID() : null;
+  if (attempt) {
+    const reservation = await launchUsage.reserve(attempt, tokens);
+    if (reservation.status === 429) return launchTokenLimited();
+    if (!reservation.ok) {
+      if (reservation.status !== 409) await launchUsage.refund(attempt);
+      return providerUnavailable(session, "budget_unavailable");
+    }
+    let renewed;
+    try { renewed = await reverify(); } catch { /* The hold can be refunded before provider dispatch. */ }
+    if (!renewed || renewed.subject !== session.subject || renewed.authMode !== "email" ||
+        Date.now() >= Math.min(renewed.expiresAt, session.expiresAt) || request.signal.aborted) {
+      await launchUsage.refund(attempt);
+      return invalidSession();
+    }
+    const dispatched = await launchUsage.dispatch(attempt);
+    if (dispatched.status === 429) return launchTokenLimited();
+    if (!dispatched.ok) {
+      // The dispatch lease can have been committed even if no acknowledgement arrived.
+      if (dispatched.status !== 409 && !(await launchUsage.refund(attempt)).ok) await launchUsage.finalize(attempt);
+      return providerUnavailable(session, "budget_unavailable");
+    }
+    if (request.signal.aborted || Date.now() >= Math.min(renewed.expiresAt, session.expiresAt)) {
+      await launchUsage.refundBeforeFetch(attempt);
+      return invalidSession();
+    }
+  }
+
   const timeout = AbortSignal.timeout(contextualV2 ? 24_000 : 9000);
   const signal = AbortSignal.any([request.signal, timeout]);
-  const instructions = contextualV2 ? CONTEXT_V2_INSTRUCTIONS : context ? CONTEXT_INSTRUCTIONS : INSTRUCTIONS;
-  const format = contextualV2 ? CONTEXT_V2_FORMAT : context ? CONTEXT_FORMAT : FORMAT;
-  const outputTokens = contextualV2 ? MAX_CONTEXT_OUTPUT_TOKENS : context ? 1000 : 600;
-  try {
-    const response = await analysisFetcher(API_URL, {
-      // Workers supports manual redirects. Non-2xx responses are rejected below
-      // without forwarding the project credential to a redirect destination.
-      method: "POST", signal, redirect: "manual",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
-      body: JSON.stringify({
-        model: MODEL, instructions,
-        input: JSON.stringify(context ? { paragraphs: context.paragraphs } : { cues }), text: { format },
-        store: false, prompt_cache_options: { mode: "explicit" }, reasoning: { effort: "none" }, max_output_tokens: outputTokens,
-      }),
-    });
-    if (!response.ok) return await rejectedProviderResponse(response, session, signal);
-    let parsed;
-    try { parsed = await readBoundedJson(response, 24_576, signal); }
-    catch { return signal.aborted ? providerUnavailable(session, timeout.aborted ? "provider_timeout" : undefined) : invalidResult(session); }
-    const renewed = await reverify();
-    if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt || request.signal.aborted) {
-      return failure("invalid_session", 403, "Your app session has ended.");
+  let reportedUsage;
+  const analyze = async () => {
+    try {
+      const response = await analysisFetcher(API_URL, {
+        // A redirect never receives the project credential.
+        method: "POST", signal, redirect: "manual",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Cache-Control": "no-store" },
+        body,
+      });
+      if (!response.ok) return await rejectedProviderResponse(response, session, signal);
+      let parsed;
+      try { parsed = await readBoundedJson(response, 24_576, signal); }
+      catch { return signal.aborted ? providerUnavailable(session, timeout.aborted ? "provider_timeout" : undefined) : invalidResult(session); }
+      reportedUsage = parsed?.usage;
+      const renewed = await reverify();
+      if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt || request.signal.aborted) return invalidSession();
+      const result = context ? checkedContext(parsed, context, session) : checkedLabels(parsed, cues, session);
+      return result.error ?? Response.json(context ? { version: context.version, labels: result.labels, usage: result.usage } : { labels: result.labels });
+    } catch (error) {
+      // Provider errors, internal responses and secrets never enter UI or logs.
+      return providerUnavailable(session, timeout.aborted || error?.name === "TimeoutError" ? "provider_timeout" : "provider_connection");
     }
-    const result = context ? checkedContext(parsed, context, session) : checkedLabels(parsed, cues, session);
-    return result.error ?? Response.json(context ? { version: context.version, labels: result.labels, usage: result.usage } : { labels: result.labels });
-  } catch (error) {
-    // Provider errors, internal responses and secrets never enter UI or logs.
-    return providerUnavailable(session, timeout.aborted || error?.name === "TimeoutError" ? "provider_timeout" : "provider_connection");
-  }
+  };
+  const result = await analyze();
+  if (attempt && !(await launchUsage.finalize(attempt, reportedUsage)).ok && result.ok) return providerUnavailable(session, "budget_unavailable");
+  return result;
 }
 
 function utcQuotaEnds(now) {

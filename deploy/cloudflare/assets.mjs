@@ -41,6 +41,11 @@ export const READER_ASSETS = Object.freeze([
   ["reader/experience-preferences.mjs", "/static/reader/experience-preferences.mjs"],
   ["reader/experience-dialog.mjs", "/static/reader/experience-dialog.mjs"],
   ["reader/public-account.mjs", "/static/reader/public-account.mjs"],
+  ["billing.html", "/billing.html"],
+  ["billing.mjs", "/static/billing.mjs"],
+  ["billing.css", "/static/billing.css"],
+  ["billing-admin.html", "/billing-admin.html"],
+  ["billing-admin.mjs", "/billing-admin/app.mjs"],
   ["reader/account-workspace.css", "/static/reader/account-workspace.css"],
   ["reader/beta-recording.mjs", "/static/reader/beta-recording.mjs"],
   ["reader/reading-feedback.mjs", "/static/reader/reading-feedback.mjs"],
@@ -83,7 +88,7 @@ export const ALPHA_ASSETS = Object.freeze([
 export const ALPHA_STATIC_PATHS = Object.freeze(ALPHA_ASSETS.map(([, path]) => path).filter(path => path.startsWith("/alpha/static/")));
 export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
   "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
-  "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html",
+  "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html", "/billing": "/billing.html",
 });
 // Served only by the authenticated research route. Do not add to reader assets.
 export const CORPUS_STUDY_CLIENT_ASSET = "/_research/corpus-study.mjs";

@@ -11,12 +11,17 @@ import { DECISIONS_STORY_STUDY_PATH, WHOLE_STORY_LUNA_STUDY_PATH, handleDecision
 import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
 import { CORPUS_BATCH_STREAM_TYPE, CORPUS_STUDY_PATH, handleCorpusStudy } from "./corpus-study.mjs";
 import { LUNA_CORPUS_PATH, handleLunaCorpus } from "./luna-corpus.mjs";
+import { BILLING_API, BILLING_ADMIN_API, BILLING_POSTBACK, handleBilling, handleBillingAdmin, handleBillingPostback,
+  launchBillingAvailable } from "./launch-billing.mjs";
+import { LAUNCH_USAGE_PATH, createLaunchUsage, handleLaunchUsage } from "./launch-usage.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
 export { AlphaStudy } from "./alpha-study.mjs";
 export { SceneAnalysisBudget } from "./scene-analysis.mjs";
 export { PublicReaderAuth } from "./public-auth.mjs";
+export { SatinLoreCommerce } from "./commerce.mjs";
+export { LaunchUsage } from "./launch-usage.mjs";
 
 export const BETA_ORIGIN = "https://beta.satinlore.com";
 const ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS);
@@ -25,6 +30,8 @@ const ALPHA_ADMIN_PATHS = new Set(["/admin", "/admin/"]);
 const ALPHA_ADMIN_ASSETS = new Set(["/alpha/static/alpha-admin.mjs", "/alpha/static/alpha-admin.css"]);
 const BETA_ADMIN_PATHS = new Set(["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"]);
 const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html", "/simulation.html"]);
+const LAUNCH_ADMIN_DOCUMENTS = new Map([["/billing-admin", "/billing-admin.html"], ["/billing-admin.html", "/billing-admin.html"],
+  ["/billing-admin/app.mjs", "/billing-admin/app.mjs"]]);
 const PUBLIC_ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS.filter(path => PUBLIC_DOCUMENTS.has(path) ||
   (path.startsWith("/static/") && !BETA_ADMIN_PATHS.has(path))));
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[a-zA-Z]{2,}$/;
@@ -194,7 +201,9 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
       headers.delete("Content-Length");
       headers.delete("Content-Encoding");
       headers.delete("ETag");
-      return finish(new Response(document.replace("</head>", '<meta name="satinlore-public-auth" content="true"></head>'),
+      const usage = launchBillingAvailable(env) || env.LAUNCH_AI_USAGE_ENABLED === "true" ?
+        '<meta name="satinlore-launch-usage" content="true">' : "";
+      return finish(new Response(document.replace("</head>", `<meta name="satinlore-public-auth" content="true">${usage}</head>`),
         { status: asset.status, headers }));
     }
     return finish(asset);
@@ -298,6 +307,17 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       // A valid token must not make workers.dev, version URLs or another hostname an origin bypass.
       if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
+      const billingAdmin = url.pathname === BILLING_ADMIN_API || url.pathname.startsWith(`${BILLING_ADMIN_API}/`) ||
+        LAUNCH_ADMIN_DOCUMENTS.has(url.pathname);
+      if (billingAdmin && (url.origin !== APP_ORIGIN || env.LAUNCH_BILLING_ADMIN_ENABLED !== "true")) {
+        return finish(json({error: "Not found."}, 404));
+      }
+      if (url.pathname === BILLING_POSTBACK) {
+        if (url.origin !== APP_ORIGIN || env.PRIVATE_APP_ENABLED !== "true" || env.LAUNCH_BILLING_POSTBACK_ENABLED !== "true") {
+          return finish(json({error: "Not found."}, 404));
+        }
+        return finish(await handleBillingPostback(request, env));
+      }
       const wholeStoryStudy = url.pathname === WHOLE_STORY_LUNA_STUDY_PATH;
       const corpusStudy = url.pathname === CORPUS_STUDY_PATH || url.pathname.startsWith(CORPUS_STUDY_PATH+"/");
       const lunaCorpus = url.pathname === LUNA_CORPUS_PATH || url.pathname.startsWith(`${LUNA_CORPUS_PATH}/`);
@@ -305,7 +325,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         return finish(json({ error: "Not found." }, 404));
       }
       const decisionsBenchmark = ["/api/scene-analysis/decisions-benchmark", DECISIONS_STORY_STUDY_PATH].includes(url.pathname);
-      const publicAuth = !decisionsBenchmark && !wholeStoryStudy && !corpusStudy && !lunaCorpus && url.origin === APP_ORIGIN && env.PUBLIC_READER_ENABLED === "true";
+      const publicAuth = !billingAdmin && !decisionsBenchmark && !wholeStoryStudy && !corpusStudy && !lunaCorpus && url.origin === APP_ORIGIN && env.PUBLIC_READER_ENABLED === "true";
       const config = publicAuth ? publicReaderConfiguration(env) : privateAppConfiguration(env, url.origin);
       if (!config) return finish(json({ error: publicAuth ? "Email sign-in is temporarily unavailable." : "The private preview is not available." }, 503));
       responseOrigin = config.origin;
@@ -316,6 +336,10 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       const read = ["GET", "HEAD"].includes(request.method);
       const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
       if (publicAuth && BETA_ADMIN_PATHS.has(url.pathname)) return finish(json({ error: "Not found." }, 404));
+      if (path === "/billing.html") {
+        if (!publicAuth || env.LAUNCH_AI_USAGE_ENABLED !== "true" || !read) return finish(json({error: "Not found."}, 404));
+        return serveAsset(request, env, path, {origin: config.origin});
+      }
       if (publicAuth && read && PUBLIC_ASSET_PATHS.has(path)) {
         return serveAsset(request, env, path, { origin: config.origin, publicAuth: true });
       }
@@ -326,6 +350,18 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       if (publicAuth && !session) return finish(json({ error: "Sign in to SatinLore to continue." }, 401));
       if (!session) return finish(json({ error: "Founder access required." }, 403));
+      if (billingAdmin) {
+        if (!session.isFounder) return finish(json({error: "Founder access required."}, 403));
+        const asset = LAUNCH_ADMIN_DOCUMENTS.get(url.pathname);
+        if (asset) return read ? serveAsset(request, env, asset, {origin: config.origin}) : finish(json({error: "Not found."}, 404));
+        return finish(await handleBillingAdmin(request, env, session, reverify));
+      }
+      if (publicAuth && url.pathname === LAUNCH_USAGE_PATH) {
+        return finish(await handleLaunchUsage(request, env, {config, session}));
+      }
+      if (publicAuth && url.pathname.startsWith(`${BILLING_API}/`)) {
+        return finish(await handleBilling(request, env, {config, session, reverify}));
+      }
       if (decisionsBenchmark || wholeStoryStudy || corpusStudy || lunaCorpus) {
         const context = { config, session, analysisFetcher, reverify };
         const result = lunaCorpus ? await handleLunaCorpus(request, env, context) : corpusStudy ? await handleCorpusStudy(request, env, context) :
@@ -362,7 +398,8 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         return handleLovense(request, env, { config, session, lovenseFetcher, reverify });
       }
       if (url.pathname === "/api/scene-analysis") {
-        return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher, reverify }));
+        const launchUsage = session.authMode === "email" && env.LAUNCH_AI_USAGE_ENABLED === "true" ? createLaunchUsage(env, {config, session}) : null;
+        return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher, reverify, launchUsage }));
       }
       if (url.pathname === "/api/story-import") {
         const expired = () => finish(json({ error: publicAuth ? "Sign in again to import a story." : "Founder access required." }, 403));

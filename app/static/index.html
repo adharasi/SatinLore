@@ -327,7 +327,18 @@
       <div class="dialog-actions"><button id="public-reset" type="submit" class="primary">Reset password</button></div>
       <div class="public-account-links"><button id="public-reset-back" type="button" class="quiet-control">Change email</button><button id="public-resend-reset" type="button" class="quiet-control">Send a new code</button></div>
     </form>
-    <div id="public-account-session" class="dialog-actions" hidden><button id="public-sign-out" type="button" class="quiet-control">Sign out</button></div>
+    <div id="public-account-session" class="dialog-actions" hidden>
+      <a id="public-billing-link" class="quiet-control" href="/billing" hidden>Plans and usage</a>
+      <button id="public-show-change-password" type="button" class="quiet-control">Change password</button>
+      <button id="public-sign-out-all" type="button" class="quiet-control">Sign out on all devices</button>
+      <button id="public-sign-out" type="button" class="quiet-control">Sign out</button>
+    </div>
+    <form id="public-change-password-form" hidden>
+      <label for="public-current-password">Current password</label><input id="public-current-password" name="current-password" type="password" autocomplete="current-password" maxlength="256" required>
+      <label for="public-new-password">New password</label><input id="public-new-password" name="new-password" type="password" autocomplete="new-password" maxlength="256" aria-describedby="public-new-password-help" required>
+      <p id="public-new-password-help" class="note">Use 15 to 128 characters.</p>
+      <div class="dialog-actions"><button id="public-change-password-back" type="button" class="quiet-control">Back to account</button><button id="public-change-password" type="submit" class="primary">Change password</button></div>
+    </form>
     <p id="public-account-status" class="note" role="status" aria-live="polite"></p>
   </dialog>
   <dialog id="practice-story-dialog" class="story-dialog" aria-labelledby="practice-story-heading">
