@@ -12,6 +12,7 @@ import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicRe
 import { CORPUS_BATCH_STREAM_TYPE, CORPUS_STUDY_PATH, handleCorpusStudy } from "./corpus-study.mjs";
 import { LUNA_CORPUS_PATH, handleLunaCorpus } from "./luna-corpus.mjs";
 import { BILLING_API, BILLING_ADMIN_API, BILLING_POSTBACK, handleBilling, handleBillingAdmin, handleBillingPostback } from "./launch-billing.mjs";
+import { STRIPE_WEBHOOK_PATH, handleStripeWebhook } from "./stripe-billing.mjs";
 import { LAUNCH_COST_METERING_FLAG, LAUNCH_USAGE_PATH, createLaunchUsage, handleLaunchUsage } from "./launch-usage.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
@@ -340,7 +341,7 @@ async function runWholeStoryLunaComparison(options) {
   return runBuiltInWholeStoryLunaComparison(options);
 }
 
-export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher, analysisFetcher, emailFetcher,
+export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser, lovenseFetcher, analysisFetcher, emailFetcher, billingFetcher,
   wholeStoryLunaComparison = runWholeStoryLunaComparison } = {}) {
   return {
     async fetch(request, env, ctx) {
@@ -364,11 +365,12 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       if (billingAdmin && (url.origin !== APP_ORIGIN || env.LAUNCH_BILLING_ADMIN_ENABLED !== "true")) {
         return finish(json({error: "Not found."}, 404));
       }
-      if (url.pathname === BILLING_POSTBACK) {
+      if (url.pathname === BILLING_POSTBACK || url.pathname === STRIPE_WEBHOOK_PATH) {
         if (url.origin !== APP_ORIGIN || env.PRIVATE_APP_ENABLED !== "true" || env.LAUNCH_BILLING_POSTBACK_ENABLED !== "true") {
           return finish(json({error: "Not found."}, 404));
         }
-        return finish(await handleBillingPostback(request, env));
+        return finish(url.pathname === STRIPE_WEBHOOK_PATH ? await handleStripeWebhook(request, env, billingFetcher) :
+          await handleBillingPostback(request, env));
       }
       const wholeStoryStudy = url.pathname === WHOLE_STORY_LUNA_STUDY_PATH;
       const corpusStudy = url.pathname === CORPUS_STUDY_PATH || url.pathname.startsWith(CORPUS_STUDY_PATH+"/");
@@ -423,7 +425,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         return finish(await handleLaunchUsage(request, env, {config, session}));
       }
       if (publicAuth && url.pathname.startsWith(`${BILLING_API}/`)) {
-        return finish(await handleBilling(request, env, {config, session, reverify}));
+        return finish(await handleBilling(request, env, {config, session, reverify, billingFetcher}));
       }
       if (decisionsBenchmark || wholeStoryStudy || corpusStudy || lunaCorpus) {
         const context = { config, session, analysisFetcher, reverify };
@@ -462,7 +464,9 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       if (url.pathname === "/api/scene-analysis") {
         const launchUsage = session.authMode === "email" && launchUsageEnabled(env) ? createLaunchUsage(env, {config, session}) : null;
-        return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher, reverify, launchUsage }));
+        const analysisEnv = env.LAUNCH_PAYMENT_PROVIDER === "stripe" && env.STRIPE_MODE === "test" ?
+          {...env, LAUNCH_AI_PAUSED: "true"} : env;
+        return finish(await handleSceneAnalysis(request, analysisEnv, { config, session, analysisFetcher, reverify, launchUsage }));
       }
       if (url.pathname === "/api/story-import") {
         const expired = () => finish(json({ error: publicAuth ? "Sign in again to import a story." : "Founder access required." }, 403));

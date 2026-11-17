@@ -642,6 +642,12 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
 
 const launchCreditLimited = () => failure("analysis_credit_limit", 429, "Nocturne has reached your AI analysis limit. The local analysis is still available.");
 
+async function launchUsageLimited(result) {
+  const { error } = await result.json();
+  return error === "analysis_app_spend_limit" ? failure("rate_limited", 429,
+    "SatinLore has reached its monthly AI spending limit. The local analysis is still available.") : launchCreditLimited();
+}
+
 export async function handleSceneAnalysis(request, env, { config, session, reverify, analysisFetcher = fetch, launchUsage }) {
   const url = new URL(request.url);
   const read = request.method === "GET" || request.method === "HEAD";
@@ -654,7 +660,12 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const key = env.OPENAI_API_KEY;
   const budget = env.SCENE_ANALYSIS_BUDGET;
   const available = analysisConfigured(key, budget);
-  const metered = session.authMode === "email" && env.LAUNCH_AI_COST_METERING_ENABLED === "true";
+  const publicReader = session.authMode === "email";
+  if (publicReader && env.LAUNCH_AI_PAUSED === "true") {
+    if (read) return Response.json({ available: false });
+    return failure("unavailable", 503, "Nocturne is temporarily paused. The local analysis is still available.");
+  }
+  const metered = publicReader && (env.LAUNCH_AI_COST_METERING_ENABLED === "true" || env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD !== undefined);
   if (read) {
     if (!available || !metered) return Response.json({ available });
     const usage = await launchUsage?.status?.();
@@ -705,7 +716,7 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const attempt = metered ? crypto.randomUUID() : null;
   if (attempt) {
     const reservation = await launchUsage.reserve(attempt, cost);
-    if (reservation.status === 429) return launchCreditLimited();
+    if (reservation.status === 429) return launchUsageLimited(reservation);
     if (!reservation.ok) {
       if (reservation.status !== 409) await launchUsage.refund(attempt);
       return providerUnavailable(session, "budget_unavailable");
@@ -718,7 +729,7 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
       return invalidSession();
     }
     const dispatched = await launchUsage.dispatch(attempt);
-    if (dispatched.status === 429) return launchCreditLimited();
+    if (dispatched.status === 429) return launchUsageLimited(dispatched);
     if (!dispatched.ok) {
       // The dispatch lease can have been committed even if no acknowledgement arrived.
       if (dispatched.status !== 409 && !(await launchUsage.refund(attempt)).ok) await launchUsage.finalize(attempt);

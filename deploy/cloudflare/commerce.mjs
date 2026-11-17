@@ -1,5 +1,6 @@
 // Internal SQLite commerce ledger. The Worker supplies a verified reader or a verified provider postback.
 const CHECKOUT_MS = 30 * 60_000;
+const STRIPE_CHECKOUT_MS = 35 * 60_000;
 const ATTRIBUTION_MS = 30 * 24 * 60 * 60_000;
 const PENDING_LIMIT = 3;
 const MAX_VALUE = 100_000_000;
@@ -14,6 +15,7 @@ const CODE = /^[A-Z0-9][A-Z0-9_-]{1,31}$/u;
 const PLAN = /^[a-z0-9][a-z0-9_-]{0,47}$/u;
 const CURRENCY = /^[A-Z]{3}$/u;
 const PROVIDER_ID = /^[1-9][0-9]{0,29}$/u;
+const STRIPE_ID = /^(?:pi|in|sub|ch|re|du|dp)_[A-Za-z0-9]{1,116}$/u;
 const EVENT = /^[A-Za-z0-9:_-]{1,128}$/u;
 const code = value => typeof value === "string" ? value.trim().toUpperCase() : value;
 const matches = (value, pattern) => typeof value === "string" && pattern.test(value);
@@ -39,9 +41,9 @@ function shape(value, required, optional = []) {
 }
 
 function checkoutInput(value, reserve) {
-  const optional = reserve ? ["promotionCode", "affiliateCode", "expectedAmountMinor"] : ["promotionCode", "affiliateCode"];
+  const optional = ["promotionCode", "affiliateCode", "provider", ...(reserve ? ["expectedAmountMinor"] : [])];
   shape(value, reserve ? ["subject", "plan", "idempotencyKey"] : ["subject", "plan"], optional);
-  const {subject, plan, idempotencyKey, expectedAmountMinor} = value;
+  const {subject, plan, idempotencyKey, expectedAmountMinor, provider = "verotel"} = value;
   shape(plan, ["id", "currency", "amountMinor", "credits", "unit"], ["kind", "rebillAmountMinor"]);
   const kind = plan.kind ?? "one-time", rebillAmountMinor = plan.rebillAmountMinor ?? plan.amountMinor;
   const promotion = code(value.promotionCode ?? null), affiliate = code(value.affiliateCode ?? null);
@@ -49,9 +51,10 @@ function checkoutInput(value, reserve) {
     plan.unit === NANO_USD && ["one-time", "monthly"].includes(kind) && number(plan.amountMinor) &&
     number(plan.credits, 1, MAX_NANO_USD) && (kind === "monthly" ? plan.currency === "USD" && plan.credits === MONTHLY_NANO_USD &&
       number(rebillAmountMinor) : plan.rebillAmountMinor === undefined) && (promotion === null || matches(promotion, CODE)) &&
-    (affiliate === null || matches(affiliate, CODE)) && (expectedAmountMinor === undefined || number(expectedAmountMinor)));
+    (affiliate === null || matches(affiliate, CODE)) && (expectedAmountMinor === undefined || number(expectedAmountMinor)) &&
+    ["verotel", "stripe"].includes(provider));
   return {subject, plan: {...plan, kind, rebillAmountMinor: kind === "monthly" ? rebillAmountMinor : null}, idempotencyKey,
-    expectedAmountMinor, promotion, affiliate};
+    expectedAmountMinor, promotion, affiliate, provider};
 }
 
 function ownerInput(input) {
@@ -63,15 +66,32 @@ function ownerInput(input) {
 function providerInput(value, reversal, monthly = false) {
   const keys = ["id", "eventId", "providerSaleId", "providerTransactionId", "amountMinor", "currency"];
   shape(value, reversal ? [...keys, "parentTransactionId", "reason", "kind"] : monthly ? [...keys, "periodEnd", "renewal"] : keys,
-    reversal && value?.kind === "monthly" ? ["terminated"] : []);
-  check(matches(value.id, UUID) && matches(value.eventId, EVENT) && matches(value.providerSaleId, PROVIDER_ID) &&
-    matches(value.providerTransactionId, PROVIDER_ID) && number(value.amountMinor) && matches(value.currency, CURRENCY) &&
-    (!reversal || matches(value.parentTransactionId, PROVIDER_ID) && value.parentTransactionId !== value.providerTransactionId &&
+    reversal ? (value?.kind === "monthly" ? ["terminated"] : []) : monthly ? ["paymentId", "periodStart"] : ["paymentId"]);
+  const stripe = matches(value.providerSaleId, STRIPE_ID);
+  const identity = stripe ? STRIPE_ID : PROVIDER_ID;
+  const recurring = monthly || reversal && value.kind === "monthly";
+  const stripePurchasePrefix = recurring ? "in_" : null;
+  const stripePurchase = id => matches(id, STRIPE_ID) &&
+    (stripePurchasePrefix ? id.startsWith(stripePurchasePrefix) : /^(?:pi|ch)_/.test(id));
+  check(matches(value.id, UUID) && matches(value.eventId, EVENT) && matches(value.providerSaleId, identity) &&
+    matches(value.providerTransactionId, identity) && number(value.amountMinor) && matches(value.currency, CURRENCY) &&
+    (!reversal || matches(value.parentTransactionId, identity) && value.parentTransactionId !== value.providerTransactionId &&
       ["refund", "chargeback"].includes(value.reason) && ["one-time", "monthly"].includes(value.kind) &&
-      (value.terminated === undefined || typeof value.terminated === "boolean")) &&
-    (!monthly || typeof value.renewal === "boolean" && billingDate(value.periodEnd)));
+      (value.terminated === undefined || typeof value.terminated === "boolean")));
+  if (stripe) {
+    check((recurring ? value.providerSaleId.startsWith("sub_") : /^(?:pi|ch)_/.test(value.providerSaleId)) &&
+      (reversal ? stripePurchase(value.parentTransactionId) &&
+        (value.reason === "refund" ? value.providerTransactionId.startsWith("re_") : /^(?:du|dp)_/.test(value.providerTransactionId)) :
+        stripePurchase(value.providerTransactionId) && matches(value.paymentId, STRIPE_ID) && value.paymentId.startsWith("pi_")));
+  } else {
+    check(value.paymentId === undefined && value.periodStart === undefined);
+  }
+  if (monthly) {
+    check(typeof value.renewal === "boolean" && (stripe ? timestamp(value.periodStart) && timestamp(value.periodEnd) &&
+      value.periodEnd - value.periodStart >= 27 * DAY_MS && value.periodEnd - value.periodStart <= 32 * DAY_MS : billingDate(value.periodEnd)));
+  }
   const kind = reversal ? value.reason : monthly ? (value.renewal ? "subscription-rebill" : "subscription-initial") : "purchase";
-  return {...value, orderKind: reversal ? value.kind : monthly ? "monthly" : "one-time", kind,
+  return {...value, provider: stripe ? "stripe" : "verotel", orderKind: reversal ? value.kind : monthly ? "monthly" : "one-time", kind,
     purchaseId: reversal ? value.parentTransactionId : value.providerTransactionId};
 }
 
@@ -88,7 +108,7 @@ function orderSummary(row, now, admin = false) {
   return {id: row.id, planId: row.plan, status, kind: row.plan_kind, unit: row.grant_unit, currency: row.currency, regularAmountMinor: row.regular_amount,
     amountMinor: row.amount, credits: row.credits, grantedCredits: row.granted_credits, refundedMinor: row.refunded_amount,
     promotionCode: row.promo, affiliateCode: row.affiliate, createdAt: row.created_at, expiresAt: row.expires_at,
-    ...(admin ? {providerSaleId: row.sale_id, providerTransactionId: row.purchase_id, commissionBps: row.commission_bps,
+    ...(admin ? {provider: row.provider, providerSaleId: row.sale_id, providerTransactionId: row.purchase_id, commissionBps: row.commission_bps,
       commissionMinor: row.commission_amount, reviewReason: row.review_reason, settledAt: row.settled_at} : {})};
 }
 
@@ -128,11 +148,11 @@ export class SatinLoreCommerce {
       const orderColumns = this.rows("PRAGMA table_info(commerce_orders)").map(row => row.name);
       for (const [name, column] of Object.entries({grant_unit: "TEXT NOT NULL DEFAULT 'legacy_tokens'",
         plan_kind: "TEXT NOT NULL DEFAULT 'one-time'", rebill_amount: "INTEGER", renewal_state: "TEXT NOT NULL DEFAULT 'active'",
-        renewal_state_end: "INTEGER"})) {
+        renewal_state_end: "INTEGER", provider: "TEXT NOT NULL DEFAULT 'verotel'", renewal_event_at: "INTEGER"})) {
         if (!orderColumns.includes(name)) this.sql.exec(`ALTER TABLE commerce_orders ADD COLUMN ${name} ${column}`);
       }
       const eventColumns = this.rows("PRAGMA table_info(commerce_events)").map(row => row.name);
-      for (const [name, column] of Object.entries({period_end: "INTEGER", terminated: "INTEGER NOT NULL DEFAULT 0"})) {
+      for (const [name, column] of Object.entries({period_end: "INTEGER", terminated: "INTEGER NOT NULL DEFAULT 0", payment_id: "TEXT", period_start: "INTEGER"})) {
         if (!eventColumns.includes(name)) this.sql.exec(`ALTER TABLE commerce_events ADD COLUMN ${name} ${column}`);
       }
       this.sql.exec("CREATE TABLE IF NOT EXISTS commerce_money_entitlements (subject TEXT PRIMARY KEY, credits INTEGER NOT NULL, revision INTEGER NOT NULL)");
@@ -145,6 +165,7 @@ export class SatinLoreCommerce {
       this.sql.exec("CREATE INDEX IF NOT EXISTS commerce_orders_subject_kind ON commerce_orders(subject,plan_kind,created_at DESC)");
       this.sql.exec("CREATE INDEX IF NOT EXISTS commerce_events_parent ON commerce_events(purchase_id)");
       this.sql.exec("CREATE INDEX IF NOT EXISTS commerce_events_recent ON commerce_events(recorded_at DESC,transaction_id DESC)");
+      this.sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS commerce_events_payment ON commerce_events(payment_id) WHERE payment_id IS NOT NULL");
     });
     this.initialized = true;
   }
@@ -175,8 +196,10 @@ export class SatinLoreCommerce {
     }
     const referral = this.affiliate(subject, affiliate, now);
     const discount = promo ? Math.floor(plan.amountMinor * promo.discount_bps / 10_000) : 0;
+    const amountMinor = plan.amountMinor - discount;
+    if (input.provider === "stripe") check(plan.currency === "USD" && amountMinor >= 50, "payment_below_minimum", 409);
     return {planId: plan.id, kind: plan.kind, rebillAmountMinor: plan.rebillAmountMinor, unit: plan.unit,
-      currency: plan.currency, regularAmountMinor: plan.amountMinor, amountMinor: plan.amountMinor - discount,
+      currency: plan.currency, regularAmountMinor: plan.amountMinor, amountMinor,
       credits: plan.credits, promotionCode: promo?.code ?? null, affiliateCode: referral?.code ?? null, commissionBps: referral?.commission_bps ?? 0};
   }
 
@@ -189,12 +212,12 @@ export class SatinLoreCommerce {
 
   reserveCheckout(value, now) {
     const input = checkoutInput(value, true);
-    const {subject, idempotencyKey, expectedAmountMinor, plan, promotion, affiliate} = input;
+    const {subject, idempotencyKey, expectedAmountMinor, plan, promotion, affiliate, provider} = input;
     const old = this.row("SELECT * FROM commerce_orders WHERE subject=? AND request_id=?", subject, idempotencyKey);
     if (old) {
       check(old.plan === plan.id && old.currency === plan.currency && old.regular_amount === plan.amountMinor && old.credits === plan.credits &&
         old.grant_unit === plan.unit && old.plan_kind === plan.kind && old.rebill_amount === plan.rebillAmountMinor &&
-        old.request_promo === promotion && old.request_affiliate === affiliate &&
+        old.request_promo === promotion && old.request_affiliate === affiliate && old.provider === provider &&
         (expectedAmountMinor === undefined || expectedAmountMinor === old.amount), "idempotency_conflict", 409);
       return json({checkout: orderSummary(old, now), duplicate: true});
     }
@@ -210,11 +233,11 @@ export class SatinLoreCommerce {
       subject, quote.affiliateCode, now + ATTRIBUTION_MS, now);
     }
     this.sql.exec(`INSERT INTO commerce_orders(id,subject,request_id,request_promo,request_affiliate,plan,currency,regular_amount,amount,
-      credits,promo,affiliate,commission_bps,created_at,expires_at,status,grant_unit,plan_kind,rebill_amount)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)`,
+      credits,promo,affiliate,commission_bps,created_at,expires_at,status,grant_unit,plan_kind,rebill_amount,provider)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)`,
     id, subject, idempotencyKey, promotion, affiliate, plan.id, quote.currency, quote.regularAmountMinor, quote.amountMinor,
-    quote.credits, quote.promotionCode, quote.affiliateCode, quote.commissionBps, now, now + CHECKOUT_MS, plan.unit, plan.kind,
-    plan.rebillAmountMinor);
+    quote.credits, quote.promotionCode, quote.affiliateCode, quote.commissionBps, now,
+    now + (provider === "stripe" ? STRIPE_CHECKOUT_MS : CHECKOUT_MS), plan.unit, plan.kind, plan.rebillAmountMinor, provider);
     return json({checkout: orderSummary(this.order(id), now), duplicate: false}, 201);
   }
 
@@ -231,7 +254,8 @@ export class SatinLoreCommerce {
       event.providerSaleId, event.purchaseId, order.id);
     const parentClaim = this.row("SELECT order_id FROM commerce_events WHERE purchase_id=? AND order_id<>? LIMIT 1", event.purchaseId, order.id);
     const pinsInitial = !monthly || event.kind === "subscription-initial";
-    check(!claimed && (order.sale_id === null || order.sale_id === event.providerSaleId) &&
+    const payment = event.paymentId && this.row("SELECT transaction_id FROM commerce_events WHERE payment_id=?", event.paymentId);
+    check(!payment && !claimed && (order.sale_id === null || order.sale_id === event.providerSaleId) &&
       !parentClaim && (!pinsInitial || order.purchase_id === null || order.purchase_id === event.purchaseId), "provider_identity_conflict", 409);
     if (["refund", "chargeback"].includes(event.kind)) {
       check(!this.row("SELECT id FROM commerce_orders WHERE purchase_id=?", event.providerTransactionId), "provider_identity_conflict", 409);
@@ -246,30 +270,35 @@ export class SatinLoreCommerce {
   duplicateEvent(event) {
     const old = this.rows("SELECT * FROM commerce_events WHERE id=? OR transaction_id=?", event.eventId, event.providerTransactionId);
     if (!old.length) return false;
-    check(old.length === 1 && old[0].id === event.eventId && old[0].order_id === event.id && old[0].kind === event.kind &&
+    check(old.length === 1 && (event.provider === "stripe" || old[0].id === event.eventId) &&
+      old[0].order_id === event.id && old[0].kind === event.kind &&
       old[0].sale_id === event.providerSaleId && old[0].transaction_id === event.providerTransactionId && old[0].purchase_id === event.purchaseId &&
       old[0].amount === event.amountMinor && old[0].currency === event.currency && old[0].period_end === (event.periodEnd ?? null) &&
-      old[0].terminated === Number(event.terminated === true),
+      old[0].terminated === Number(event.terminated === true) && old[0].payment_id === (event.paymentId ?? null) &&
+      old[0].period_start === (event.periodStart ?? null),
       "provider_event_conflict", 409);
     return true;
   }
 
   recordProviderEvent(event, now) {
-    this.sql.exec(`INSERT INTO commerce_events(id,order_id,kind,sale_id,transaction_id,purchase_id,amount,currency,recorded_at,period_end,terminated)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)`, event.eventId, event.id, event.kind, event.providerSaleId, event.providerTransactionId,
-    event.purchaseId, event.amountMinor, event.currency, now, event.periodEnd ?? null, Number(event.terminated === true));
+    this.sql.exec(`INSERT INTO commerce_events(id,order_id,kind,sale_id,transaction_id,purchase_id,amount,currency,recorded_at,period_end,terminated,payment_id,period_start)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.eventId, event.id, event.kind, event.providerSaleId, event.providerTransactionId,
+    event.purchaseId, event.amountMinor, event.currency, now, event.periodEnd ?? null, Number(event.terminated === true),
+    event.paymentId ?? null, event.periodStart ?? null);
   }
 
   receiveProviderEvent(value, now, reversal = false) {
     const event = providerInput(value, reversal), old = this.order(event.id);
     check(old, "checkout_not_found", 404);
     check(old.grant_unit === NANO_USD, "checkout_legacy_units", 409);
+    check(event.provider === old.provider, "checkout_provider_mismatch", 409);
     check(event.orderKind === old.plan_kind, "checkout_payment_kind_mismatch", 409);
     if (old.plan_kind === "monthly") {
       check(reversal, "checkout_payment_kind_mismatch", 409);
       return this.reverseSubscription(event, old, now);
     }
-    check(event.currency === old.currency && (event.kind === "refund" ? event.amountMinor <= old.amount : event.amountMinor === old.amount),
+    check(event.currency === old.currency && (reversal && event.provider === "stripe" || event.kind === "refund" ?
+      event.amountMinor <= old.amount : event.amountMinor === old.amount),
       "payment_amount_mismatch", 409);
     const duplicate = this.duplicateEvent(event);
     if (duplicate) {
@@ -278,7 +307,7 @@ export class SatinLoreCommerce {
     this.ensureProviderIdentity(event, old);
     const active = old.status === "pending" && old.expires_at > now;
     const previous = this.row(`SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN amount ELSE 0 END),0) refunded,
-      COALESCE(MAX(kind='chargeback'),0) charged_back FROM commerce_events WHERE order_id=?`, old.id);
+      COALESCE(MAX(CASE WHEN kind='chargeback' THEN amount ELSE 0 END),0) charged_back FROM commerce_events WHERE order_id=?`, old.id);
     const rawRefund = previous.refunded + (event.kind === "refund" ? event.amountMinor : 0);
     const chargedBack = previous.charged_back > 0 || event.kind === "chargeback";
     check(rawRefund <= old.amount && !(event.kind === "chargeback" && previous.charged_back), "excess_reversal", 409);
@@ -293,7 +322,8 @@ export class SatinLoreCommerce {
       }
     }
     const settled = !reversal || appliedStatuses.has(old.status);
-    const refunded = chargedBack ? old.amount : rawRefund;
+    const disputed = event.kind === "chargeback" ? event.amountMinor : previous.charged_back;
+    const refunded = event.provider === "stripe" ? Math.min(old.amount, rawRefund + disputed) : chargedBack ? old.amount : rawRefund;
     if (!settled) {
       this.sql.exec("UPDATE commerce_orders SET refunded_amount=? WHERE id=?", refunded, old.id);
       return json({checkout: orderSummary(this.order(old.id), now), duplicate: false});
@@ -327,7 +357,7 @@ export class SatinLoreCommerce {
     else if (row.settled_at !== null) status = paidThrough > now ? "active" : "past-due";
     return {id: row.id, status, planId: row.plan, rebillAmountMinor: row.rebill_amount, currency: row.currency,
       paidThrough, renews: row.settled_at !== null && row.renewal_state === "active",
-      ...(internal ? {providerSaleId: row.sale_id} : {})};
+      ...(internal ? {provider: row.provider, providerSaleId: row.sale_id} : {})};
   }
 
   findSubscription(subject, now, internal = false) {
@@ -342,6 +372,15 @@ export class SatinLoreCommerce {
     return json({subscription: this.findSubscription(value.subject, now, true)});
   }
 
+  readStripePayment(value) {
+    shape(value, ["paymentId"]);
+    check(matches(value.paymentId, STRIPE_ID) && value.paymentId.startsWith("pi_"));
+    const paid = this.row(`SELECT e.order_id,e.sale_id,e.transaction_id,e.amount,e.currency,o.plan_kind
+      FROM commerce_events e JOIN commerce_orders o ON o.id=e.order_id WHERE e.payment_id=? AND o.provider='stripe'`, value.paymentId);
+    return json({payment: paid ? {id: paid.order_id, kind: paid.plan_kind, providerSaleId: paid.sale_id,
+      providerTransactionId: paid.transaction_id, amountMinor: paid.amount, currency: paid.currency} : null});
+  }
+
   recurringOrder(id) {
     const row = this.order(id);
     check(row, "checkout_not_found", 404);
@@ -354,15 +393,16 @@ export class SatinLoreCommerce {
     return json({checkout: orderSummary(row, now), subscription: this.subscriptionSummary(row, now), duplicate});
   }
 
-  reversalAmounts(id, purchaseId, amount, incoming = null) {
+  reversalAmounts(id, purchaseId, amount, incoming = null, stripe = false) {
     const recorded = this.row(`SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN amount ELSE 0 END),0) refunded,
       COUNT(CASE WHEN kind='chargeback' THEN 1 END) chargebacks, MAX(CASE WHEN kind='chargeback' THEN amount END) chargeback_amount
       FROM commerce_events WHERE order_id=? AND purchase_id=?`, id, purchaseId);
     const refunded = recorded.refunded + (incoming?.kind === "refund" ? incoming.amountMinor : 0);
     const chargebacks = recorded.chargebacks + Number(incoming?.kind === "chargeback");
     const chargebackAmount = incoming?.kind === "chargeback" ? incoming.amountMinor : recorded.chargeback_amount;
-    check(refunded <= amount && chargebacks <= 1 && (!chargebacks || chargebackAmount === amount), "excess_reversal", 409);
-    return chargebacks ? amount : refunded;
+    check(refunded <= amount && chargebacks <= 1 && (!chargebacks || (stripe ? chargebackAmount <= amount : chargebackAmount === amount)),
+      "excess_reversal", 409);
+    return stripe ? Math.min(amount, refunded + (chargebackAmount ?? 0)) : chargebacks ? amount : refunded;
   }
 
   periodAmounts(order, amount, refunded, commissionEligible) {
@@ -397,11 +437,16 @@ export class SatinLoreCommerce {
 
   settleSubscription(value, now) {
     const event = providerInput(value, false, true), old = this.recurringOrder(event.id);
+    check(event.provider === old.provider, "checkout_provider_mismatch", 409);
+    const stripe = event.provider === "stripe";
     const expectedAmount = event.renewal ? old.rebill_amount : old.amount;
     check(event.currency === old.currency && event.amountMinor === expectedAmount, "payment_amount_mismatch", 409);
     if (this.duplicateEvent(event)) return old.review_reason ? json({code: old.review_reason}, 409) : this.recurringResult(old.id, now, true);
     check(event.periodEnd <= now + 33 * DAY_MS && event.periodEnd > old.created_at, "subscription_period_mismatch", 409);
-    check(!this.row(`SELECT 1 FROM commerce_subscription_periods WHERE order_id=? AND ABS(ends_at-?)<?`, old.id, event.periodEnd, 28 * DAY_MS),
+    const conflict = stripe ?
+      this.row(`SELECT 1 FROM commerce_events WHERE order_id=? AND period_start<? AND period_end>?`, old.id, event.periodEnd, event.periodStart) :
+      this.row(`SELECT 1 FROM commerce_subscription_periods WHERE order_id=? AND ABS(ends_at-?)<?`, old.id, event.periodEnd, 28 * DAY_MS);
+    check(!conflict,
       "subscription_period_conflict", 409);
     if (!event.renewal) {
       check(!this.row("SELECT 1 FROM commerce_subscription_periods WHERE order_id=? AND ends_at<?", old.id, event.periodEnd),
@@ -412,7 +457,7 @@ export class SatinLoreCommerce {
     check(old.renewal_state === "active" || event.periodEnd <= old.renewal_state_end || reversedBeforePayment, "subscription_renewal_closed", 409);
     check(!old.review_reason, "subscription_requires_review", 409);
     this.ensureProviderIdentity(event, old, true);
-    const refunded = this.reversalAmounts(old.id, event.purchaseId, expectedAmount);
+    const refunded = this.reversalAmounts(old.id, event.purchaseId, expectedAmount, null, stripe);
     this.recordProviderEvent(event, now);
     const {credits, commission} = this.periodAmounts(old, expectedAmount, refunded, !event.renewal);
     const purchased = !event.renewal && (old.status === "pending" || old.status === "cancelled");
@@ -425,7 +470,8 @@ export class SatinLoreCommerce {
         if (promotion && this.promotionUses(old.promo, now, old.id) >= promotion.max_redemptions) requiresReview = "promotion_exhausted";
       }
     }
-    const start = purchased && !requiresReview ? Math.max(old.created_at, previousBillingMonth(event.periodEnd)) : null;
+    const start = stripe ? (requiresReview ? null : event.periodStart) :
+      purchased && !requiresReview ? Math.max(old.created_at, previousBillingMonth(event.periodEnd)) : null;
     this.sql.exec(`INSERT INTO commerce_subscription_periods VALUES(?,?,?,?,?,?,?,?)`, event.purchaseId, old.id, start,
       event.periodEnd, expectedAmount, refunded, credits, requiresReview ? 0 : commission);
     if (requiresReview) {
@@ -436,21 +482,22 @@ export class SatinLoreCommerce {
       this.sql.exec("UPDATE commerce_orders SET status='paid',settled_at=?,refunded_amount=?,granted_credits=?,commission_amount=? WHERE id=?",
         now, refunded, credits, commission, old.id);
     }
-    this.connectSubscriptionPeriods(old.id);
+    if (!stripe) this.connectSubscriptionPeriods(old.id);
     this.updateEntitlement(old.subject, 0, true);
     return this.recurringResult(old.id, now);
   }
 
   reverseSubscription(event, old, now) {
+    const stripe = event.provider === "stripe";
     check(event.currency === old.currency && event.amountMinor <= Math.max(old.amount, old.rebill_amount), "payment_amount_mismatch", 409);
     if (this.duplicateEvent(event)) return this.recurringResult(old.id, now, true);
     this.ensureProviderIdentity(event, old, true);
     const period = this.row("SELECT * FROM commerce_subscription_periods WHERE order_id=? AND transaction_id=?", old.id, event.purchaseId);
     const amount = period?.amount ?? Math.max(old.amount, old.rebill_amount);
-    check(event.amountMinor <= amount && (event.kind !== "chargeback" || !period || event.amountMinor === amount), "payment_amount_mismatch", 409);
+    check(event.amountMinor <= amount && (stripe || event.kind !== "chargeback" || !period || event.amountMinor === amount), "payment_amount_mismatch", 409);
     const possibleCharge = !period && event.kind === "chargeback" ? event.amountMinor : amount;
     check(period || event.kind !== "chargeback" || [old.amount, old.rebill_amount].includes(event.amountMinor), "payment_amount_mismatch", 409);
-    const refunded = this.reversalAmounts(old.id, event.purchaseId, possibleCharge, event);
+    const refunded = this.reversalAmounts(old.id, event.purchaseId, possibleCharge, event, stripe);
     this.recordProviderEvent(event, now);
     if (event.terminated) {
       const deadline = Math.max(now, this.row("SELECT MAX(ends_at) end FROM commerce_subscription_periods WHERE order_id=?", old.id).end ?? 0);
@@ -470,12 +517,17 @@ export class SatinLoreCommerce {
   }
 
   updateSubscriptionLifecycle(value, now) {
-    shape(value, ["id", "eventId", "providerSaleId", "event", "periodEnd"]);
-    const {id, eventId, providerSaleId, event, periodEnd} = value;
+    shape(value, ["id", "eventId", "providerSaleId", "event", "periodEnd"], ["occurredAt"]);
+    const {id, eventId, providerSaleId, event, periodEnd, occurredAt} = value;
+    const stripe = matches(providerSaleId, STRIPE_ID) && providerSaleId.startsWith("sub_");
     const informational = event === "extend";
-    check(matches(id, UUID) && matches(eventId, EVENT) && matches(providerSaleId, PROVIDER_ID) &&
-      (["expire", "extend"].includes(event) && periodEnd === null || ["cancel", "uncancel", "extend"].includes(event) && billingDate(periodEnd)));
+    check(matches(id, UUID) && matches(eventId, EVENT) && (stripe ?
+      timestamp(occurredAt) && occurredAt <= now + DAY_MS &&
+        (event === "expire" && periodEnd === null || ["cancel", "uncancel"].includes(event) && timestamp(periodEnd)) :
+      matches(providerSaleId, PROVIDER_ID) && occurredAt === undefined && (["expire", "extend"].includes(event) && periodEnd === null ||
+        ["cancel", "uncancel", "extend"].includes(event) && billingDate(periodEnd))));
     const old = this.recurringOrder(id);
+    check(old.provider === (stripe ? "stripe" : "verotel"), "checkout_provider_mismatch", 409);
     const previous = this.row("SELECT * FROM commerce_subscription_lifecycle WHERE id=?", eventId);
     if (previous) {
       check(previous.order_id === id && previous.sale_id === providerSaleId && previous.event === event && previous.period_end === periodEnd,
@@ -492,11 +544,13 @@ export class SatinLoreCommerce {
     }
     const paidThrough = this.paidThrough(id) ?? 0;
     const deadline = periodEnd ?? Math.max(now, paidThrough);
-    const canChange = deadline >= paidThrough && (event === "uncancel" ? deadline > (old.renewal_state_end ?? 0) &&
+    const canChange = stripe ? old.renewal_state !== "expired" &&
+      (occurredAt >= (old.renewal_event_at ?? 0) || event === "expire") :
+      deadline >= paidThrough && (event === "uncancel" ? deadline > (old.renewal_state_end ?? 0) &&
       !this.monthlyCollision(old.subject, now, id) : deadline >= (old.renewal_state_end ?? 0));
     if (canChange) {
       const state = event === "cancel" ? "cancelled" : event === "expire" ? "expired" : "active";
-      this.sql.exec("UPDATE commerce_orders SET renewal_state=?,renewal_state_end=? WHERE id=?", state, deadline, id);
+      this.sql.exec("UPDATE commerce_orders SET renewal_state=?,renewal_state_end=?,renewal_event_at=? WHERE id=?", state, deadline, occurredAt ?? null, id);
       this.updateEntitlement(old.subject, 0, true);
     }
     return this.recurringResult(id, now);
@@ -565,7 +619,7 @@ export class SatinLoreCommerce {
   reconcilePayments(value, now) {
     shape(value, [], ["reference", "attention", "from", "until"]);
     const {reference, attention, from, until} = value;
-    check(reference === undefined || matches(reference, UUID) || matches(reference, PROVIDER_ID));
+    check(reference === undefined || matches(reference, UUID) || matches(reference, PROVIDER_ID) || matches(reference, STRIPE_ID));
     check(attention === undefined || attention === true);
     check(from === undefined && until === undefined ||
       billingDate(from) && billingDate(until) && from < until && until - from <= 366 * DAY_MS);
@@ -575,9 +629,9 @@ export class SatinLoreCommerce {
       orderFilters.push("o.id=?");
       orderArguments.push(reference);
     } else if (reference !== undefined) {
-      // A processor ID can refer to the sale or any transaction on it, including a refund or rebill.
-      orderFilters.push("(o.sale_id=? OR o.id=(SELECT order_id FROM commerce_events WHERE transaction_id=?))");
-      orderArguments.push(reference, reference);
+      // A processor ID can refer to the sale, any transaction, or a Stripe PaymentIntent behind an invoice.
+      orderFilters.push("(o.sale_id=? OR o.id IN (SELECT order_id FROM commerce_events WHERE transaction_id=? OR payment_id=?))");
+      orderArguments.push(reference, reference, reference);
     }
     const reviewFlag = "o.review_reason IS NOT NULL";
     const ordersInReview = `(${reviewFlag} OR EXISTS (
@@ -620,6 +674,7 @@ export class SatinLoreCommerce {
       case "updateSubscriptionLifecycle": return this.updateSubscriptionLifecycle(fields, now);
       case "readEntitlement": return this.readEntitlement(fields, now);
       case "readSubscription": return this.readSubscription(fields, now);
+      case "readStripePayment": return this.readStripePayment(fields);
       case "savePromotion": return this.savePromotion(fields, now);
       case "saveAffiliate": return this.saveAffiliate(fields);
       case "listCommerceRecords": return this.listCommerceRecords(fields, now);
@@ -656,6 +711,17 @@ export async function commerceRequest(namespace, command) {
   }
 }
 
+export const stripeTestRealm = env => env.LAUNCH_PAYMENT_PROVIDER === "stripe" && env.STRIPE_MODE === "test";
+
+export function launchCommerceNamespace(env) {
+  const namespace = env.COMMERCE;
+  if (!namespace || !stripeTestRealm(env)) return namespace;
+  return {
+    idFromName: name => namespace.idFromName("stripe-test:" + name),
+    get: id => namespace.get(id),
+  };
+}
+
 export const quoteCheckout = (namespace, fields) => commerceRequest(namespace, {action: "quoteCheckout", fields});
 export const reserveCheckout = (namespace, fields) => commerceRequest(namespace, {action: "reserveCheckout", fields});
 export const readCheckout = (namespace, fields) => commerceRequest(namespace, {action: "readCheckout", fields});
@@ -666,6 +732,7 @@ export const settleSubscription = (namespace, fields) => commerceRequest(namespa
 export const updateSubscriptionLifecycle = (namespace, fields) => commerceRequest(namespace, {action: "updateSubscriptionLifecycle", fields});
 export const readEntitlement = (namespace, fields) => commerceRequest(namespace, {action: "readEntitlement", fields});
 export const readSubscription = (namespace, fields) => commerceRequest(namespace, {action: "readSubscription", fields});
+export const readStripePayment = (namespace, fields) => commerceRequest(namespace, {action: "readStripePayment", fields});
 export const savePromotion = (namespace, fields) => commerceRequest(namespace, {action: "savePromotion", fields});
 export const saveAffiliate = (namespace, fields) => commerceRequest(namespace, {action: "saveAffiliate", fields});
 export const listCommerceRecords = (namespace, fields = {}) => commerceRequest(namespace, {action: "listCommerceRecords", fields});

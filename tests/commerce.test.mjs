@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {DatabaseSync} from "node:sqlite";
 import test from "node:test";
-import {cancelCheckout, listCommerceRecords, quoteCheckout, readCheckout, readEntitlement, reconcilePayments, reserveCheckout,
-  readSubscription, reverseCheckout, SatinLoreCommerce, saveAffiliate, savePromotion, settleCheckout, settleSubscription,
+import {cancelCheckout, launchCommerceNamespace, listCommerceRecords, quoteCheckout, readCheckout, readEntitlement, reconcilePayments, reserveCheckout,
+  readStripePayment, readSubscription, reverseCheckout, SatinLoreCommerce, saveAffiliate, savePromotion, settleCheckout, settleSubscription,
   updateSubscriptionLifecycle} from "../deploy/cloudflare/commerce.mjs";
 
 const reader = `account:v1:${"a".repeat(64)}`;
@@ -394,4 +394,93 @@ test("superseded recurring checkout is preserved for review and legacy token row
   db.prepare("UPDATE commerce_orders SET grant_unit='legacy_tokens' WHERE id=?").run(legacy.id);
   assert.equal((await body(settleCheckout(namespace, purchase(legacy.id)), 409)).code, "checkout_legacy_units");
   assert.equal((await body(readEntitlement(namespace, {subject: reader}))).credits, 0);
+});
+
+test("Stripe checkout pins the provider; object retries, payment lookup and a partial reversal preserve cents and isolate orders", async t => {
+  const {namespace} = fixture(t);
+  const initial = request({provider: "stripe"});
+  const {checkout} = await body(reserveCheckout(namespace, initial), 201);
+  const {checkout: otherOrder} = await body(reserveCheckout(namespace, request({provider: "stripe", subject: other})), 201);
+  assert.equal(checkout.expiresAt - checkout.createdAt, 35 * 60_000);
+  assert.equal((await body(reserveCheckout(namespace, {...initial, provider: "verotel"}), 409)).code, "idempotency_conflict");
+  assert.equal((await body(settleCheckout(namespace, purchase(checkout.id)), 409)).code, "checkout_provider_mismatch");
+  const captured = purchase(checkout.id, {providerSaleId: "pi_Checkout", providerTransactionId: "ch_Purchase",
+    paymentId: "pi_Checkout", eventId: "stripe:evt_paid"});
+  await body(settleCheckout(namespace, captured));
+  assert.equal((await body(settleCheckout(namespace, {...captured, eventId: "stripe:evt_copy"}))).duplicate, true);
+  assert.equal((await body(settleCheckout(namespace, {...captured, eventId: "stripe:evt_other", id: otherOrder.id,
+    providerSaleId: "pi_Other", providerTransactionId: "ch_Other"}), 409)).code, "provider_identity_conflict");
+  assert.deepEqual((await body(readStripePayment(namespace, {paymentId: "pi_Checkout"}))).payment, {
+    id: checkout.id, providerSaleId: "pi_Checkout", providerTransactionId: "ch_Purchase", kind: "one-time",
+    currency: "USD", amountMinor: 1001,
+  });
+  assert.equal((await body(readStripePayment(namespace, {paymentId: "pi_checkout"}))).payment, null);
+  const credited = refund(checkout.id, {providerSaleId: captured.providerSaleId, parentTransactionId: captured.providerTransactionId,
+    providerTransactionId: "re_Credit", eventId: "stripe:evt_refund", amountMinor: 200});
+  await body(reverseCheckout(namespace, credited));
+  assert.equal((await body(reverseCheckout(namespace, {...credited, providerTransactionId: "du_Lost", eventId: "stripe:evt_dispute",
+    reason: "chargeback", amountMinor: 100}))).checkout.grantedCredits, 702);
+  assert.deepEqual((await body(readEntitlement(namespace, {subject: other}))).credits, 0);
+  const history = await body(reconcilePayments(namespace, {reference: "re_Credit"}));
+  assert.equal(history.orders[0].provider, "stripe");
+  assert.deepEqual(history.transactions.map(row => row.amountMinor).sort((a, b) => a - b), [-200, -100, 1001]);
+});
+
+test("Stripe uses authoritative paid invoice timestamps, renews on one exact boundary and ignores stale cancellation updates", async t => {
+  let now = utc("2027-01-31") + 13 * 3_600_000;
+  t.mock.method(Date, "now", () => now);
+  const {namespace} = fixture(t);
+  const {checkout} = await body(reserveCheckout(namespace, request({provider: "stripe", plan: monthly})), 201);
+  const end = utc("2027-02-28") + 13 * 3_600_000;
+  const first = monthlySale(checkout.id, end, "in_First", false, {providerSaleId: "sub_Monthly",
+    paymentId: "pi_First", eventId: "stripe:evt_first", periodStart: now});
+  const renewal = monthlySale(checkout.id, utc("2027-03-31") + 13 * 3_600_000, "in_Renew", true, {providerSaleId: "sub_Monthly",
+    paymentId: "pi_Renew", eventId: "stripe:evt_renew", periodStart: end});
+  now = end;
+  await body(settleSubscription(namespace, renewal));
+  assert.deepEqual((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants, []);
+  await body(settleSubscription(namespace, first));
+  assert.deepEqual((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants.map(row => [row.startsAt, row.endsAt, row.credits]),
+    [[end, renewal.periodEnd, monthly.credits]]);
+  assert.equal((await body(readStripePayment(namespace, {paymentId: "pi_Renew"}))).payment.providerTransactionId, "in_Renew");
+  assert.equal((await body(settleSubscription(namespace, {...renewal, paymentId: "pi_Overlap", providerTransactionId: "in_Overlap",
+    eventId: "stripe:evt_overlap", periodStart: end + 1_000}), 409)).code, "subscription_period_conflict");
+  const stopped = {id: checkout.id, providerSaleId: "sub_Monthly", eventId: "stripe:evt_cancel", event: "cancel",
+    periodEnd: renewal.periodEnd, occurredAt: now};
+  await body(updateSubscriptionLifecycle(namespace, stopped));
+  await body(updateSubscriptionLifecycle(namespace, {...stopped, event: "uncancel", eventId: "stripe:evt_old", occurredAt: now - 1_000}));
+  const {subscription} = await body(readSubscription(namespace, {subject: reader}));
+  assert.equal(subscription.status, "cancelled");
+  assert.equal(subscription.renews, false);
+  assert.equal(subscription.paidThrough, renewal.periodEnd);
+  assert.equal(subscription.provider, "stripe");
+  const reversed = refund(checkout.id, {providerSaleId: "sub_Monthly", providerTransactionId: "re_Renewal", parentTransactionId: "in_Renew",
+    eventId: "stripe:evt_renewrefund", amountMinor: 999, kind: "monthly"});
+  await body(reverseCheckout(namespace, reversed));
+  assert.deepEqual((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants, []);
+});
+
+test("Stripe rejects an order below the USD card minimum before reserving a promo", async t => {
+  const {namespace, db} = fixture(t);
+  await body(savePromotion(namespace, promotion({discountBps: 9_999})));
+  const input = request({provider: "stripe", promotionCode: "TEST-CODE"});
+  const {idempotencyKey, ...quote} = input;
+  assert.equal((await body(quoteCheckout(namespace, quote), 409)).code, "payment_below_minimum");
+  assert.equal((await body(reserveCheckout(namespace, input), 409)).code, "payment_below_minimum");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM commerce_orders").get().n, 0);
+});
+
+test("Stripe test checkout and entitlement addressing is separate from the launch ledger", async t => {
+  const live = fixture(t).namespace;
+  const isolated = fixture(t).namespace;
+  const names = [];
+  const binding = {idFromName: name => { names.push(name); return name; }, get: name => name === "launch" ? live.get(name) : isolated.get(name)};
+  const env = {COMMERCE: binding, LAUNCH_PAYMENT_PROVIDER: "stripe", STRIPE_MODE: "test"};
+  const testRealm = launchCommerceNamespace(env);
+  const {checkout} = await body(reserveCheckout(testRealm, request({provider: "stripe"})), 201);
+  await body(settleCheckout(testRealm, purchase(checkout.id, {providerSaleId: "pi_Test", providerTransactionId: "ch_Test",
+    paymentId: "pi_Test", eventId: "stripe:evt_test"})));
+  assert.equal((await body(readEntitlement(launchCommerceNamespace({...env, STRIPE_MODE: "live"}), {subject: reader}))).credits, 0);
+  assert.equal((await body(readEntitlement(testRealm, {subject: reader}))).credits, plan.credits);
+  assert.deepEqual(names, ["stripe-test:launch", "stripe-test:launch", "launch", "stripe-test:launch"]);
 });

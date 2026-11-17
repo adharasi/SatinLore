@@ -1,10 +1,11 @@
 import { accountIdentity, accountJson, AccountError } from "./accounts.mjs";
-import { listCommerceRecords, quoteCheckout, readCheckout, readSubscription, reconcilePayments, reserveCheckout, reverseCheckout, saveAffiliate,
+import { launchCommerceNamespace, stripeTestRealm, listCommerceRecords, quoteCheckout, readCheckout, readSubscription, reconcilePayments, reserveCheckout, reverseCheckout, saveAffiliate,
   savePromotion, settleCheckout, settleSubscription, updateSubscriptionLifecycle } from "./commerce.mjs";
 import { APP_ORIGIN } from "./public-auth.mjs";
 import { launchUsageConfigured } from "./launch-usage.mjs";
 import { analysisConfigured } from "./scene-analysis.mjs";
 import { LAUNCH_PLANS, MONTHLY_PERIOD } from "./launch-plans.mjs";
+import { stripeCancelUrl, stripeCheckout, stripeConfigured, stripeIdentifier } from "./stripe-billing.mjs";
 
 export const BILLING_API = "/api/billing";
 export const BILLING_ADMIN_API = "/api/billing-admin";
@@ -31,6 +32,7 @@ const commerceMessages = new Map([
   ["promotion_unavailable", "This promo code is unavailable for your selected pack."],
   ["affiliate_unavailable", "This affiliate link is no longer active. Return to plans without it."],
   ["promotion_exhausted", "This promo code has reached its redemption limit."],
+  ["payment_below_minimum", "This price is below Stripe’s card minimum. Choose a different pack or promo code."],
   ["price_changed", "The price changed. Check the price again before continuing."],
   ["quote_changed", "The price changed. Check the price again before continuing."],
   ["checkout_closed", "This order is closed. Check the price to create a new order."],
@@ -66,9 +68,10 @@ function catalog(env) {
 
 export function launchBillingAvailable(env) {
   return env.LAUNCH_BILLING_ENABLED === "true" && env.LAUNCH_BILLING_POSTBACK_ENABLED === "true" && env.PUBLIC_READER_ENABLED === "true" &&
-    launchUsageConfigured(env) && analysisConfigured(env.OPENAI_API_KEY, env.SCENE_ANALYSIS_BUDGET) &&
-    numericId.test(env.VEROTEL_SHOP_ID ?? "") &&
-    typeof env.VEROTEL_SIGNATURE_KEY === "string" && /^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY) &&
+    launchUsageConfigured(env) && (stripeTestRealm(env) || analysisConfigured(env.OPENAI_API_KEY, env.SCENE_ANALYSIS_BUDGET)) &&
+    (env.LAUNCH_PAYMENT_PROVIDER === "stripe" ? stripeConfigured(env) :
+      (env.LAUNCH_PAYMENT_PROVIDER === undefined || env.LAUNCH_PAYMENT_PROVIDER === "verotel") &&
+      numericId.test(env.VEROTEL_SHOP_ID ?? "") && /^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY ?? "")) &&
     Boolean(catalog(env));
 }
 
@@ -184,7 +187,7 @@ function purchaseSelection(body, plans) {
   return {plan, ...(promotionCode ? {promotionCode} : {}), ...(affiliateCode ? {affiliateCode} : {})};
 }
 
-async function manageSubscription(request, env, {subject, session, reverify}, cancel) {
+async function manageSubscription(request, env, {subject, session, reverify, billingFetcher}, cancel) {
   if (request.method !== (cancel ? "POST" : "GET")) return json({error: "Use the subscription controls."}, 405);
   if (cancel && !mutable(request)) return json({error: "Use the subscription controls on SatinLore."}, 403);
   let id;
@@ -195,45 +198,52 @@ async function manageSubscription(request, env, {subject, session, reverify}, ca
     }
     id = body.id;
   }
-  const response = await readSubscription(env.COMMERCE, {subject});
+  const response = await readSubscription(launchCommerceNamespace(env), {subject});
   if (!response.ok) return publicResult(response);
   const {subscription} = await response.json();
   if (!cancel) {
     if (!subscription) return json({subscription: null});
-    const {providerSaleId, ...publicFields} = subscription;
-    return json({subscription: publicFields});
+    const {providerSaleId, provider, ...publicFields} = subscription;
+    return json({subscription: {...publicFields, ...(provider === "stripe" ? {provider} : {})}});
   }
-  if (subscription?.id !== id || subscription.renews !== true || !numericId.test(subscription.providerSaleId ?? "")) {
+  if (subscription?.id !== id || subscription.renews !== true) {
     return json({error: "This subscription cannot be cancelled from this account."}, 404);
   }
-  if (!numericId.test(env.VEROTEL_SHOP_ID ?? "") ||
-      !/^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY ?? "")) return json({error: "Contact support for cancellation."}, 503);
   const renewed = await reverify();
   if (!renewed || renewed.subject !== session.subject || renewed.expiresAt <= Date.now()) return json({error: "Sign in again to continue."}, 401);
+  if (subscription.provider === "stripe") {
+    return json({cancelUrl: await stripeCancelUrl(subscription, env, billingFetcher)});
+  }
+  if (!numericId.test(subscription.providerSaleId ?? "") || !numericId.test(env.VEROTEL_SHOP_ID ?? "") ||
+      !/^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY ?? "")) return json({error: "Contact support for cancellation."}, 503);
   const params = {saleID: subscription.providerSaleId, shopID: env.VEROTEL_SHOP_ID, version: "4"};
   params.signature = await flexPaySignature(env.VEROTEL_SIGNATURE_KEY, params);
   return json({cancelUrl: `${CANCEL_PAGE}?${new URLSearchParams(params)}`});
 }
 
-export async function handleBilling(request, env, {config, session, reverify}) {
+export async function handleBilling(request, env, {config, session, reverify, billingFetcher}) {
   const {pathname, searchParams, search} = new URL(request.url);
   if (config?.origin !== APP_ORIGIN || session?.authMode !== "email" || session.expiresAt <= Date.now()) {
     return json({error: "Sign in with your verified reader account."}, 401);
   }
   try {
     const subject = await accountIdentity(config, session);
+    const namespace = launchCommerceNamespace(env);
+    const stripe = env.LAUNCH_PAYMENT_PROVIDER === "stripe";
     if (pathname === `${BILLING_API}/subscription` || pathname === `${BILLING_API}/cancel-subscription`) {
       if (search) return json({error: "Use the subscription controls."}, 400);
-      return await manageSubscription(request, env, {subject, session, reverify}, pathname.endsWith("/cancel-subscription"));
+      return await manageSubscription(request, env, {subject, session, reverify, billingFetcher}, pathname.endsWith("/cancel-subscription"));
     }
     if (pathname === `${BILLING_API}/order` && request.method === "GET") {
       const id = searchParams.get("id");
       if ([...searchParams].length !== 1 || !orderId.test(id ?? "")) return json({error: "Choose a valid order."}, 400);
-      return await publicResult(await readCheckout(env.COMMERCE, {subject, id}));
+      return await publicResult(await readCheckout(namespace, {subject, id}));
     }
     if (!launchBillingAvailable(env)) return json({error: "Purchases are currently unavailable."}, 503);
     const plans = catalog(env);
-    if (pathname === `${BILLING_API}/plans` && request.method === "GET" && !search) return json({plans: [...plans.values()]});
+    if (pathname === `${BILLING_API}/plans` && request.method === "GET" && !search) {
+      return json({plans: [...plans.values()], ...(stripe ? {provider: "stripe"} : {})});
+    }
     const quote = pathname === `${BILLING_API}/quote`;
     if (!quote && pathname !== `${BILLING_API}/checkout`) return json({error: "Not found."}, 404);
     if (request.method !== "POST" || search) return json({error: "Use the plans form to continue."}, 405);
@@ -259,7 +269,7 @@ export async function handleBilling(request, env, {config, session, reverify}) {
       return json({error: "Sign in again to continue."}, 401);
     }
     const apply = quote ? quoteCheckout : reserveCheckout;
-    const response = await publicResult(await apply(env.COMMERCE, {subject, ...selection, plan,
+    const response = await publicResult(await apply(namespace, {subject, ...selection, plan, ...(stripe ? {provider: "stripe"} : {}),
       ...(!quote ? {idempotencyKey: body.idempotencyKey, expectedAmountMinor: body.expectedAmountMinor} : {})}));
     if (!response.ok) return response;
     if (quote) {
@@ -270,7 +280,9 @@ export async function handleBilling(request, env, {config, session, reverify}) {
     if (!checkout || checkout.status !== "pending" || checkout.expiresAt <= Date.now()) {
       return json({error: "This checkout is closed. Refresh your plans to start another purchase."}, 409);
     }
-    return json({checkout, checkoutUrl: await verotelCheckout(checkout, {name, kind}, env)});
+    const checkoutUrl = stripe ? await stripeCheckout(checkout, {name, kind}, env, billingFetcher) :
+      await verotelCheckout(checkout, {name, kind}, env);
+    return json({checkout, checkoutUrl});
   } catch (error) {
     if (error instanceof AccountError) return json({error: error.message}, error.status);
     return json({error: "Checkout could not be confirmed. Retry the same order."}, 503);
@@ -280,8 +292,10 @@ export async function handleBilling(request, env, {config, session, reverify}) {
 function reconciliationFilters(searchParams, search) {
   if (search.length > 512 || [...searchParams].some(([key]) => !filterNames.has(key) || searchParams.getAll(key).length !== 1)) return null;
   const values = Object.fromEntries(searchParams);
-  const reference = values.reference?.trim().toLowerCase();
-  if (reference !== undefined && !orderId.test(reference) && !numericId.test(reference) ||
+  const input = values.reference?.trim();
+  const reference = orderId.test(input?.toLowerCase()) ? input.toLowerCase() : input;
+  if (reference !== undefined && !orderId.test(reference) && !numericId.test(reference) &&
+      !["sub", "pi", "in", "ch", "re", "dp", "du"].some(prefix => stripeIdentifier(reference, prefix)) ||
       values.attention !== undefined && values.attention !== "1") return null;
   const from = verotelDate(values.from), through = verotelDate(values.through);
   if (values.from !== undefined || values.through !== undefined) {
@@ -305,7 +319,7 @@ async function reconciliation(request, env, url) {
   }
   const filters = reconciliationFilters(url.searchParams, url.search);
   if (!filters) return json({error: "Enter a valid payment reference and a date range of up to 366 days."}, 400);
-  const result = await reconcilePayments(env.COMMERCE, filters);
+  const result = await reconcilePayments(launchCommerceNamespace(env), filters);
   if (!result.ok || url.pathname !== reconciliationCsvPath) return result;
   const {transactions, truncated} = await result.json();
   if (truncated) return json({error: "More than 500 transactions match. Narrow the date range before downloading."}, 400);
@@ -330,7 +344,7 @@ export async function handleBillingAdmin(request, env, session, reverify) {
   if (pathname === reconciliationPath || pathname === reconciliationCsvPath) return reconciliation(request, env, url);
   if (search) return json({error: "Use the billing administration controls."}, 400);
   if (request.method === "GET" && pathname === BILLING_ADMIN_API) {
-    return listCommerceRecords(env.COMMERCE);
+    return listCommerceRecords(launchCommerceNamespace(env));
   }
   const apply = new Map([[`${BILLING_ADMIN_API}/promotion`, savePromotion], [`${BILLING_ADMIN_API}/affiliate`, saveAffiliate]]).get(pathname);
   if (request.method !== "POST" || !apply) return json({error: "Not found."}, 404);
@@ -344,7 +358,7 @@ export async function handleBillingAdmin(request, env, session, reverify) {
     if (!body || typeof body !== "object" || Array.isArray(body) || Object.hasOwn(body, "type")) {
       return json({error: "Use a valid campaign configuration."}, 400);
     }
-    return apply(env.COMMERCE, body);
+    return apply(launchCommerceNamespace(env), body);
   } catch (error) {
     if (error instanceof AccountError) return json({error: error.message}, error.status);
     return json({error: "Campaign settings are temporarily unavailable."}, 503);

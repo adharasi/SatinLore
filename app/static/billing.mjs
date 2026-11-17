@@ -130,6 +130,8 @@ function planOption(plan, group) {
 
 async function plans() {
   const state = await api("/api/billing/plans");
+  node("checkout-note").textContent = state.provider === "stripe" ? "Stripe handles checkout. Credits appear after your payment is confirmed." :
+    "Credits appear after your payment is confirmed.";
   const groups = {monthly: ["monthly-plans", "monthly-options"], "one-time": ["top-up-plans", "top-up-options"]};
   const preference = selectedPlan()?.id;
   const received = state.plans.map(item => ({...item, kind: item.kind ?? "one-time"})).filter(item => Object.hasOwn(groups, item.kind));
@@ -210,13 +212,22 @@ async function readSubscription() {
   renderSubscription(state.subscription);
 }
 
-function providerUrl(value, path) {
-  const target = URL.parse(value);
-  if (!target || target.origin !== "https://secure.verotel.com" || target.pathname !== path ||
-      target.username || target.password || target.hash) {
-    throw new Error("Verotel could not be opened. Please try again.");
+function providerUrl(value, purpose) {
+  const target = typeof value === "string" && value.length <= 4096 ? URL.parse(value) : null;
+  if (target && !target.username && !target.password) {
+    // Stripe Checkout includes an opaque session fragment in the hosted URL.
+    if (purpose === "checkout" && target.origin === "https://checkout.stripe.com" &&
+        /^\/c\/pay\/cs_(?:test|live)_[A-Za-z0-9_]+$/.test(target.pathname) && !target.search) return target.href;
+    if (purpose === "cancellation" && target.origin === "https://billing.stripe.com" && !target.hash) {
+      const secret = target.searchParams.get("secret");
+      if (target.pathname === "/p/session" && target.searchParams.size === 1 && /^[A-Za-z0-9_-]+$/.test(secret ?? "")) return target.href;
+      if (/^\/p\/session\/[A-Za-z0-9_-]+$/.test(target.pathname) && !target.search) return target.href;
+    }
+    // Existing staged Verotel records can still open their own hosted pages.
+    const legacyPath = purpose === "checkout" ? "/startorder" : "/cancel-subscription";
+    if (target.origin === "https://secure.verotel.com" && target.pathname === legacyPath && !target.hash) return target.href;
   }
-  return target.href;
+  throw new Error("The payment page could not be opened. Please try again.");
 }
 
 form.addEventListener("input", () => {
@@ -266,7 +277,7 @@ checkout.addEventListener("click", async () => {
   checkout.disabled = true;
   try {
     const outcome = await api("/api/billing/checkout", request);
-    if (approved === request) window.location.assign(providerUrl(outcome.checkoutUrl, "/startorder"));
+    if (approved === request) window.location.assign(providerUrl(outcome.checkoutUrl, "checkout"));
   } catch (error) {
     if (approved !== request) return;
     checkout.disabled = false;
@@ -291,7 +302,7 @@ confirmCancel.addEventListener("click", async () => {
   subscriptionMessage.textContent = "";
   try {
     const {cancelUrl} = await api("/api/billing/cancel-subscription", {id: subscription.id, confirm: true});
-    window.location.assign(providerUrl(cancelUrl, "/cancel-subscription"));
+    window.location.assign(providerUrl(cancelUrl, "cancellation"));
   } catch (error) {
     subscriptionMessage.textContent = error.message;
     confirmCancel.disabled = backCancel.disabled = false;

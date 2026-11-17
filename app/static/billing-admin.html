@@ -42,7 +42,7 @@
     </section>
     <section aria-labelledby="orders-heading">
       <h2 id="orders-heading">Recent orders</h2>
-      <p>Use the order reference to compare payments and refunds with FlexPay. Affiliate commissions are recorded here for manual payout.</p>
+      <p>Use the order reference to compare payments and refunds with your Stripe records. Review affiliate commissions here before manual payout.</p>
       <ul id="orders-list"></ul>
     </section>
     <section aria-labelledby="subscription-charges-heading">
@@ -51,10 +51,10 @@
     </section>
     <section aria-labelledby="reconciliation-heading">
       <h2 id="reconciliation-heading">Payment reconciliation</h2>
-      <p>Find an order by its SatinLore reference, FlexPay sale ID or transaction ID. Dates use UTC, when SatinLore received the transaction.</p>
+      <p>Find an order by its SatinLore reference or a Stripe payment, invoice, subscription, refund or dispute ID. Dates use UTC, when SatinLore received the transaction.</p>
       <form id="reconciliation-form">
         <label for="payment-reference">Payment reference <small>(optional)</small></label>
-        <input id="payment-reference" name="reference" maxlength="36" autocomplete="off" spellcheck="false">
+        <input id="payment-reference" name="reference" maxlength="120" autocomplete="off" spellcheck="false">
         <label for="activity-from">From (UTC)</label>
         <input id="activity-from" name="from" type="date">
         <label for="activity-through">Through (UTC)</label>
@@ -73,7 +73,7 @@
       <div id="reconciliation-activity" hidden>
         <h3>Payment activity</h3>
         <ul id="transactions-list"></ul>
-        <p class="billing-note">Open reference and ID columns as text to preserve long numbers. The CSV records payment activity in minor currency units and uses negative amounts for refunds and chargebacks.</p>
+        <p class="billing-note">Open reference and ID columns as text. The CSV records payment activity in minor currency units. Refunds and chargebacks use negative amounts.</p>
       </div>
     </section>
   </main>

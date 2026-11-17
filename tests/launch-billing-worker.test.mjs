@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { BILLING_ADMIN_API, BILLING_API, BILLING_POSTBACK, flexPaySignature } from "../deploy/cloudflare/launch-billing.mjs";
 import { LAUNCH_USAGE_PATH } from "../deploy/cloudflare/launch-usage.mjs";
+import { STRIPE_API_VERSION, STRIPE_WEBHOOK_PATH } from "../deploy/cloudflare/stripe-billing.mjs";
 import { createPrivateAppWorker, LaunchUsage, PublicReaderAuth, ReaderAccount, SatinLoreCommerce } from "../deploy/cloudflare/worker.mjs";
 
 const origin = "https://app.satinlore.com";
@@ -85,7 +86,7 @@ function sqliteNamespace(t, DurableClass) {
   return { idFromName: id => id, get };
 }
 
-function fixture(t, { sessionLifetime = 60_000 } = {}) {
+function fixture(t, { sessionLifetime = 60_000, billingFetcher = () => assert.fail("Unexpected billing request.") } = {}) {
   const auth = sqliteNamespace(t, PublicReaderAuth);
   const db = auth.get("public-reader-auth:v1").db;
   function addSession(label, expiresAt = Date.now() + sessionLifetime) {
@@ -109,7 +110,7 @@ function fixture(t, { sessionLifetime = 60_000 } = {}) {
       return new Response(new URL(request.url).pathname);
     } },
   };
-  const worker = createPrivateAppWorker({ keyResolver,
+  const worker = createPrivateAppWorker({ keyResolver, billingFetcher,
     emailFetcher: () => assert.fail("The fixture does not send email."),
     analysisFetcher: () => assert.fail("The fixture does not call the analysis provider."),
   });
@@ -476,4 +477,121 @@ test("monthly checkout grants one paid period at a time and waits for Verotel to
   assert.equal((await subscription()).status, "expired");
   assert.equal((await usage()).subscription.remaining, 0);
   assert.equal((await usage(other)).subscription.remaining, 0);
+});
+
+const stripeFlags = {LAUNCH_PAYMENT_PROVIDER: "stripe", STRIPE_MODE: "test", STRIPE_SECRET_KEY: "sk_test_123456Fixture",
+  STRIPE_WEBHOOK_SECRET: "whsec_123456FixtureTest", OPENAI_API_KEY: undefined};
+const stripeLiveFlags = {...stripeFlags, STRIPE_MODE: "live", STRIPE_SECRET_KEY: "sk_live_123456Fixture",
+  OPENAI_API_KEY: settings.OPENAI_API_KEY};
+const stripeMetadata = id => ({satinlore_reader: "v1", satinlore_checkout: id});
+
+function stripeEvent(type, value, changes = {}) {
+  return {id: "evt_" + randomUUID().replaceAll("-", ""), object: "event", api_version: STRIPE_API_VERSION,
+    livemode: false, created: Math.floor(Date.now() / 1000), type, data: {object: value}, ...changes};
+}
+
+function signedStripe(event, timestamp = Math.floor(Date.now() / 1000)) {
+  const hmac = createHmac("sha256", stripeFlags.STRIPE_WEBHOOK_SECRET).update(timestamp + "." + JSON.stringify(event)).digest("hex");
+  return {"Stripe-Signature": "t=" + timestamp + ",v1=" + hmac};
+}
+
+test("Stripe sandbox quote opens given exact signed-in price, and only a signed matching payment grants isolated test credits", async t => {
+  const calls = [];
+  const {request, owner, other} = fixture(t, {billingFetcher: async (url, init) => {
+    assert.equal(url, "https://api.stripe.com/v1/checkout/sessions");
+    assert.equal(init.headers.Authorization, "Bearer " + stripeFlags.STRIPE_SECRET_KEY);
+    assert.equal(init.headers["Stripe-Version"], STRIPE_API_VERSION);
+    assert.equal(init.redirect, "error");
+    assert.ok(Number(init.body.get("expires_at")) > Math.floor(Date.now() / 1000) + 1800);
+    assert.equal(init.body.get("line_items[0][price_data][unit_amount]"), "499");
+    assert.equal(init.body.get("payment_intent_data[metadata][satinlore_reader]"), "v1");
+    const id = init.body.get("client_reference_id");
+    assert.equal(init.body.get("payment_intent_data[metadata][satinlore_checkout]"), id);
+    assert.equal(init.headers["Idempotency-Key"], "satinlore-checkout-" + id);
+    calls.push(id);
+    return Response.json({object: "checkout.session", mode: "payment", client_reference_id: id, amount_total: 499, currency: "usd",
+      livemode: false, url: "https://checkout.stripe.com/c/pay/cs_test_Fixture#stripe-fragment"});
+  }});
+  const use = (path, options = {}) => request(path, {...options, flags: {...stripeFlags, ...options.flags}});
+  const notice = (event, options = {}) => use(STRIPE_WEBHOOK_PATH, {body: event, headers: signedStripe(event), ...options});
+  const plans = await json(use(BILLING_API + "/plans", {cookie: owner}));
+  assert.equal(plans.provider, "stripe");
+  assert.equal(plans.plans.find(pack => pack.kind === "monthly").amountMinor, 999);
+  const input = checkoutForm();
+  const purchase = await json(use(BILLING_API + "/checkout", {cookie: owner, body: input}));
+  assert.deepEqual(await json(use(BILLING_API + "/checkout", {cookie: owner, body: input})), purchase);
+  assert.deepEqual(calls, [purchase.checkout.id, purchase.checkout.id]);
+  assert.equal(purchase.checkoutUrl, "https://checkout.stripe.com/c/pay/cs_test_Fixture#stripe-fragment");
+  await json(use(BILLING_API + "/order?id=" + purchase.checkout.id, {cookie: other}), 404);
+  assert.equal((await json(use(LAUNCH_USAGE_PATH, {cookie: owner}))).credits.purchased, 0);
+
+  const payment = stripeEvent("payment_intent.succeeded", {object: "payment_intent", status: "succeeded", id: "pi_SandboxTopup",
+    currency: "usd", amount: 499, amount_received: 499, metadata: stripeMetadata(purchase.checkout.id)});
+  assert.equal((await notice(payment, {headers: {}})).status, 400);
+  assert.equal((await notice(payment, {headers: signedStripe(payment, payment.created - 301)})).status, 400);
+  assert.equal((await notice(payment, {host: beta})).status, 404);
+  assert.equal((await notice(payment, {flags: {LAUNCH_PAYMENT_PROVIDER: "verotel"}})).status, 503);
+  assert.equal((await notice(payment, {flags: stripeLiveFlags})).status, 400);
+  assert.equal((await notice(payment, {flags: {LAUNCH_BILLING_ENABLED: "false"}})).status, 204);
+  assert.equal((await notice({...payment, id: "evt_StripeReplay"})).status, 204);
+  assert.equal((await json(use(LAUNCH_USAGE_PATH, {cookie: owner}))).credits.purchased, 1_000_000_000);
+  assert.equal((await json(use(LAUNCH_USAGE_PATH, {cookie: owner, flags: stripeLiveFlags}))).credits.purchased, 0);
+  assert.equal((await json(use("/api/scene-analysis", {cookie: owner}))).available, false);
+  await json(use("/api/scene-analysis", {cookie: owner, body: {}}), 503);
+
+  const refund = stripeEvent("refund.created", {object: "refund", id: "re_SandboxTopup", payment_intent: "pi_SandboxTopup",
+    amount: 499, currency: "usd", status: "succeeded"});
+  assert.equal((await notice(refund)).status, 204);
+  assert.equal((await notice({...refund, id: "evt_RefundUpdated", type: "refund.updated"})).status, 204);
+  assert.equal((await json(use(LAUNCH_USAGE_PATH, {cookie: owner}))).credits.purchased, 0);
+});
+
+test("Stripe invoice grants the verified paid period and binds hosted cancellation to the owner", async t => {
+  let order;
+  const {request, owner, other} = fixture(t, {billingFetcher: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === "/v1/checkout/sessions") {
+      assert.equal(init.body.get("line_items[0][price_data][unit_amount]"), "999");
+      assert.equal(init.body.get("line_items[0][price_data][recurring][interval]"), "month");
+      order = init.body.get("subscription_data[metadata][satinlore_checkout]");
+      assert.equal(init.body.get("subscription_data[metadata][satinlore_reader]"), "v1");
+      return Response.json({object: "checkout.session", mode: "subscription", client_reference_id: order, amount_total: 999,
+        currency: "usd", livemode: false, url: "https://checkout.stripe.com/c/pay/cs_test_Subscription#stripe-fragment"});
+    }
+    if (path === "/v1/subscriptions/sub_SandboxMonthly") {
+      assert.equal(init.method, "GET");
+      return Response.json({object: "subscription", id: "sub_SandboxMonthly", customer: "cus_Original", metadata: stripeMetadata(order),
+        status: "active", cancel_at_period_end: false, livemode: false});
+    }
+    assert.equal(path, "/v1/billing_portal/sessions");
+    assert.equal(init.body.get("flow_data[type]"), "subscription_cancel");
+    assert.equal(init.body.get("flow_data[subscription_cancel][subscription]"), "sub_SandboxMonthly");
+    assert.equal(init.body.get("customer"), "cus_Original");
+    return Response.json({object: "billing_portal.session", customer: "cus_Original", livemode: false,
+      url: "https://billing.stripe.com/p/session?secret=test_Fixture"});
+  }});
+  const use = (path, options = {}) => request(path, {...options, flags: {...stripeFlags, ...options.flags}});
+  const notice = event => use(STRIPE_WEBHOOK_PATH, {body: event, headers: signedStripe(event)});
+  const {checkout} = await json(use(BILLING_API + "/checkout", {cookie: owner, body: checkoutForm({}, monthly)}));
+  assert.equal(checkout.id, order);
+  const start = Math.floor(Date.now() / 1000), end = start + 30 * 86400;
+  const invoice = stripeEvent("invoice.payment_succeeded", {object: "invoice", id: "in_SandboxMonthOne", billing_reason: "subscription_create",
+    status: "paid", paid: true, paid_out_of_band: false, collection_method: "charge_automatically", amount_paid: 999, currency: "usd",
+    subscription: "sub_SandboxMonthly", payment_intent: "pi_SandboxMonthOne", subscription_details: {metadata: stripeMetadata(order)},
+    lines: {has_more: false, data: [{type: "subscription", proration: false, amount: 999, currency: "usd", period: {start, end}}]}});
+  assert.equal((await notice(invoice)).status, 204);
+  const usage = await json(use(LAUNCH_USAGE_PATH, {cookie: owner}));
+  assert.equal(usage.subscription.granted, 2_000_000_000);
+  const cancelPath = BILLING_API + "/cancel-subscription";
+  await json(use(cancelPath, {cookie: other, body: {id: order, confirm: true}}), 404);
+  const cancel = await json(use(cancelPath, {cookie: owner, body: {id: order, confirm: true}}));
+  assert.equal(cancel.cancelUrl, "https://billing.stripe.com/p/session?secret=test_Fixture");
+  const update = stripeEvent("customer.subscription.updated", {object: "subscription"});
+  update.data = {object: {object: "subscription", id: "sub_SandboxMonthly", metadata: stripeMetadata(order),
+    cancel_at_period_end: true, current_period_end: end}, previous_attributes: {cancel_at_period_end: false}};
+  assert.equal((await notice(update)).status, 204);
+  const {subscription} = await json(use(BILLING_API + "/subscription", {cookie: owner}));
+  assert.equal(subscription.renews, false);
+  assert.equal(subscription.paidThrough, end * 1000);
+  assert.equal(Object.hasOwn(subscription, "providerSaleId"), false);
 });

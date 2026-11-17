@@ -94,14 +94,14 @@ function showReconciliation({orders, transactions, truncated}, query) {
   node("reconciliation-activity").hidden = false;
   render("matching-orders-list", orders, row => [
     `${row.id} · ${row.planId} · ${row.status} · ${money(row.currency, row.amountMinor)}` +
-    (row.providerSaleId ? ` · Sale ${row.providerSaleId}` : "") +
+    (row.providerSaleId ? ` · Payment reference ${row.providerSaleId}` : "") +
     (row.refundedMinor ? ` · ${money(row.currency, row.refundedMinor)} refunded` : "") +
     (row.affiliateCode ? ` · ${row.affiliateCode}: ${money(row.currency, row.commissionMinor)} commission` : "") +
     (row.reviewReason ? ` · Review: ${row.reviewReason}` : ""),
   ], "No orders match this reference.");
   render("transactions-list", transactions, row => [
     `${transactionLabels.get(row.kind) ?? row.kind} · ${money(row.currency, row.amountMinor)} · ${dateValue(row.receivedAt).replace("T", " ")} UTC` +
-    ` · Order ${row.checkoutId} · Sale ${row.providerSaleId} · Transaction ${row.providerTransactionId}` +
+    ` · Order ${row.checkoutId} · Payment reference ${row.providerSaleId} · Transaction ${row.providerTransactionId}` +
     (row.parentTransactionId ? ` · Original transaction ${row.parentTransactionId}` : "") +
     (row.needsReview ? ` · Review required${row.reviewReason ? " (" + row.reviewReason + ")" : ""}` : ""),
   ], "No transactions match your filters.");

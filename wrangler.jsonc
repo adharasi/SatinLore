@@ -41,6 +41,8 @@
   ],
   "vars": {
     "PUBLIC_APP_ORIGIN": "https://app.satinlore.com",
+    "LAUNCH_PAYMENT_PROVIDER": "stripe",
+    "LAUNCH_AI_COST_METERING_ENABLED": "true",
     "WHOLE_STORY_LUNA_STUDY_ENABLED": "true",
     "FOUNDER_EMAIL": "team@satinlore.com"
   }

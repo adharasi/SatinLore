@@ -231,6 +231,7 @@ function sceneFixture(t, { purchased = 15_000_000_000, monthlyCap, up, onDispatc
   const ledgers = new Map();
   const actors = [];
   const usageOps = [];
+  const appUsageOps = [];
   const budgetOps = [];
   const providerCalls = [];
   const session = { authMode: "email", subject: `email-v1:${"a".repeat(64)}`, expiresAt: Date.now() + 60_000 };
@@ -244,11 +245,12 @@ function sceneFixture(t, { purchased = 15_000_000_000, monthlyCap, up, onDispatc
       return entitlement ? entitlement() : Response.json({ unit: "nano_usd", credits: purchased, revision: 1, subscriptionGrants: [] });
     } }) },
     LAUNCH_USAGE: { idFromName: name => name, get(name) {
-      assert.match(name, /^cost:v1:account:v1:[a-f0-9]{64}$/);
+      const isApp = name === "cost:v1:app";
+      if (!isApp) assert.match(name, /^cost:v1:account:v1:[a-f0-9]{64}$/);
       if (!ledgers.has(name)) ledgers.set(name, new LaunchUsage({ storage: storageFixture(t) }));
       return { async fetch(request) {
         const value = await request.clone().json();
-        usageOps.push(value);
+        (isApp ? appUsageOps : usageOps).push(value);
         const result = await ledgers.get(name).fetch(request);
         if (value.operation === "dispatch" && result.ok) onDispatch?.();
         return result;
@@ -270,8 +272,28 @@ function sceneFixture(t, { purchased = 15_000_000_000, monthlyCap, up, onDispatc
     method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify(body), signal,
   }), env, { config, session: who, reverify, analysisFetcher, launchUsage: createLaunchUsage(env, { config, session: who }) });
   const usage = (who = session, headers) => handleLaunchUsage(new Request(`${ORIGIN}${LAUNCH_USAGE_PATH}`, { headers }), env, { config, session: who });
-  return { env, session, actors, usageOps, budgetOps, providerCalls, scene, usage };
+  return { env, session, actors, usageOps, appUsageOps, budgetOps, providerCalls, scene, usage };
 }
+
+test("Stripe test credits are visible in their own namespace but cannot reserve or dispatch paid AI", async t => {
+  const {env, session, usage, providerCalls, scene} = sceneFixture(t);
+  Object.assign(env, {LAUNCH_PAYMENT_PROVIDER: "stripe", STRIPE_MODE: "test"});
+  const names = [];
+  const testNamespace = (binding, prefix) => ({idFromName(name) {
+    assert.match(name, prefix);
+    names.push(name);
+    return binding.idFromName(name.slice("stripe-test:".length));
+  }, get: name => binding.get(name)});
+  env.COMMERCE = testNamespace(env.COMMERCE, /^stripe-test:launch$/);
+  env.LAUNCH_USAGE = testNamespace(env.LAUNCH_USAGE, /^stripe-test:cost:v1:account:v1:[a-f0-9]{64}$/);
+  const view = await (await usage()).json();
+  assert.equal(view.credits.purchased, 15_000_000_000);
+  assert.equal(view.available, false);
+  assert.equal(names.length, 2);
+  assert.equal((await scene()).status, 503);
+  assert.equal((await createLaunchUsage(env, {config, session}).dispatch(randomUUID())).status, 503);
+  assert.equal(providerCalls.length, 0);
+});
 
 test("production scene path sends no private payload to the ledger and settles the Luna cost mix", async t => {
   const f = sceneFixture(t);
@@ -290,11 +312,78 @@ test("production scene path sends no private payload to the ledger and settles t
   assert.deepEqual(f.budgetOps[0].value.limits, { accountDay: 100, appDay: 1000, appMonth: 15000 });
   assert.deepEqual([...new Set(f.actors)], [await accountIdentity(config, f.session)]);
   assert.deepEqual(f.usageOps.map(value => value.operation), ["status", "reserve", "dispatch", "settle", "status"]);
+  assert.deepEqual(f.appUsageOps.map(value => value.operation), ["reserve", "dispatch", "settle"]);
   assert.doesNotMatch(JSON.stringify(f.usageOps), /synthetic|email-v1|steady|instructions|reasoning|input_tokens/);
+  assert.doesNotMatch(JSON.stringify(f.appUsageOps), /synthetic|email-v1|account:v1|steady|instructions|reasoning|input_tokens/);
   const other = { ...f.session, subject: `email-v1:${"b".repeat(64)}` };
   assert.equal((await (await f.usage(other)).json()).credits.used, 0);
   assert.equal((await f.usage(undefined, { Origin: "https://beta.satinlore.com" })).status, 403);
   assert.equal((await f.usage({ ...f.session, authMode: "access" })).status, 403);
+});
+
+test("a monthly app cost limit serializes different accounts and refunds a rejected account hold", async t => {
+  let entered, release;
+  const enteredProvider = new Promise(resolve => { entered = resolve; });
+  const resumeProvider = new Promise(resolve => { release = resolve; });
+  const f = sceneFixture(t, { async up() {
+    entered();
+    await resumeProvider;
+    return Response.json({ status: "completed", usage: { input_tokens: 80, output_tokens: 22, total_tokens: 102 },
+      output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ labels: [{ id: 1, label: "steady" }] }) }] }] });
+  } });
+  const other = { ...f.session, subject: `email-v1:${"b".repeat(64)}` };
+  // Measure the fixed conservative request hold with the exact launch payload.
+  const probe = sceneFixture(t);
+  assert.equal((await probe.scene()).status, 200);
+  const { amount } = probe.appUsageOps.find(value => value.operation === "reserve");
+  probe.env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD = String(amount);
+  assert.equal((await probe.scene()).status, 429, "Enabling the cap must include earlier metered spend in this release.");
+  f.env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD = String(amount);
+  const first = f.scene();
+  try {
+    await Promise.race([enteredProvider, first.then(response => assert.fail(`Provider was not reached, HTTP ${response.status}`))]);
+    assert.equal((await (await f.usage(other)).json()).available, false);
+    const rejected = await f.scene({ who: other });
+    assert.equal(rejected.status, 429);
+    assert.equal((await rejected.json()).code, "rate_limited");
+    const ledger = await (await f.usage(other)).json();
+    assert.equal(ledger.credits.reserved, 0);
+    assert.equal(ledger.credits.used, 0);
+  } finally { release(); }
+  assert.equal((await first).status, 200);
+  assert.equal((await (await f.usage(other)).json()).available, true);
+  // The next full hold still cannot fit until the cap accounts for the settled spend.
+  assert.equal((await f.scene({ who: other })).status, 429);
+  f.env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD = String(amount + 19_000);
+  assert.equal((await f.scene({ who: other })).status, 200);
+  assert.equal(f.providerCalls.length, 2);
+});
+
+test("app calendar rollover and a pause leave personal credits and research traffic intact", async t => {
+  const { command } = ledgerFixture(t);
+  const expired = randomUUID(), rollover = randomUUID();
+  const appCap = 900;
+  assert.equal((await command("reserve", { id: expired, amount: 600, appCap })).status, 200);
+  assert.equal((await command("dispatch", { id: expired, appCap })).status, 200);
+  assert.equal((await command("reserve", { id: rollover, amount: 300, appCap })).status, 200);
+  assert.equal((await command("dispatch", { id: rollover, appCap }, FEBRUARY)).status, 429);
+  assert.equal((await command("settle", { id: expired, amount: 500 }, FEBRUARY)).status, 200);
+  assert.equal((await command("status", { appCap }, JANUARY + 1000)).month.remaining, 400);
+  assert.equal((await command("status", { appCap }, FEBRUARY)).month.remaining, 900);
+
+  const f = sceneFixture(t);
+  f.env.LAUNCH_AI_PAUSED = "true";
+  assert.equal((await f.scene()).status, 503);
+  assert.equal((await (await f.usage()).json()).available, false);
+  assert.equal(f.providerCalls.length, 0);
+  assert.equal((await f.scene({ who: { ...f.session, authMode: "access" } })).status, 200);
+  assert.equal(f.providerCalls.length, 1);
+
+  f.env.LAUNCH_AI_PAUSED = "false";
+  f.env.LAUNCH_AI_COST_METERING_ENABLED = "false";
+  f.env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD = "1000000";
+  assert.equal((await f.scene()).status, 503);
+  assert.equal(f.providerCalls.length, 1);
 });
 
 test("unfunded or misconfigured email calls stop before shared quota and flag-off preserves prior behavior", async t => {
@@ -360,7 +449,8 @@ test("Cloudflare SQLite bindings persist a successful metered provider response"
       export { SceneAnalysisBudget } from './deploy/cloudflare/scene-analysis.mjs';
       export default { fetch(request, env) {
         const config = { origin: '${ORIGIN}', issuer: '${ORIGIN}' };
-        const session = { authMode: 'email', subject: 'email-v1:' + 'a'.repeat(64), expiresAt: Date.now() + 60000 };
+        const fixture = request.headers.get('X-Second-Test-Account') === 'true' ? 'b' : 'a';
+        const session = { authMode: 'email', subject: 'email-v1:' + fixture.repeat(64), expiresAt: Date.now() + 60000 };
         if (new URL(request.url).pathname === LAUNCH_USAGE_PATH) return handleLaunchUsage(request, env, { config, session });
         return handleSceneAnalysis(request, env, { config, session, reverify: () => session,
           launchUsage: createLaunchUsage(env, { config, session }) });
@@ -373,7 +463,7 @@ test("Cloudflare SQLite bindings persist a successful metered provider response"
   const mf = new Miniflare({
     modules: [{ type: "ESModule", path: "launch-usage-fixture.mjs", contents: source.outputFiles[0].text }],
     compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], cf: false, port: 0, inspectorPort: 0,
-    bindings: { OPENAI_API_KEY: "sk-synthetic-only", LAUNCH_AI_COST_METERING_ENABLED: "true",
+    bindings: { OPENAI_API_KEY: "sk-synthetic-only", LAUNCH_AI_COST_METERING_ENABLED: "true", LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD: "800000",
       LAUNCH_AI_ACCOUNT_REQUESTS_PER_DAY: "1", LAUNCH_AI_MONTHLY_CAP_NANO_USD: "800000", LAUNCH_AI_TRIAL_NANO_USD: "10000000" },
     durableObjects: {
       COMMERCE: { className: "SatinLoreCommerce", useSQLite: true },
@@ -390,8 +480,8 @@ test("Cloudflare SQLite bindings persist a successful metered provider response"
     },
   });
   t.after(() => mf.dispose());
-  const submit = () => mf.dispatchFetch(`${ORIGIN}/api/scene-analysis`, {
-    method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify(CUES),
+  const submit = (other = false) => mf.dispatchFetch(`${ORIGIN}/api/scene-analysis`, {
+    method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json", "X-Second-Test-Account": String(other) }, body: JSON.stringify(CUES),
   });
   const first = submit();
   try {
@@ -399,6 +489,9 @@ test("Cloudflare SQLite bindings persist a successful metered provider response"
     const during = await submit();
     assert.equal(during.status, 429);
     assert.equal((await during.json()).code, "analysis_credit_limit");
+    const differentReader = await submit(true);
+    assert.equal(differentReader.status, 429);
+    assert.match((await differentReader.json()).error, /monthly AI spending limit/);
   } finally { releaseProvider(); }
   assert.equal((await first).status, 200);
   const overDailyLimit = await submit();

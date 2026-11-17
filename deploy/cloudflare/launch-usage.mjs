@@ -1,8 +1,9 @@
 import { accountIdentity } from "./accounts.mjs";
-import { readEntitlement } from "./commerce.mjs";
+import { launchCommerceNamespace, readEntitlement, stripeTestRealm } from "./commerce.mjs";
 
 export const LAUNCH_USAGE_PATH = "/api/account/usage";
 export const LAUNCH_COST_METERING_FLAG = "LAUNCH_AI_COST_METERING_ENABLED";
+const LAUNCH_APP_CAP_SETTING = "LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD";
 const UNIT = "nano_usd";
 const DEFAULT_MONTHLY_CAP = "10000000000";
 const PLAN_PERIOD_CAP = 2_000_000_000;
@@ -10,6 +11,7 @@ const PLAN_PERIOD_CAP = 2_000_000_000;
 const LUNA = { input: 100, cached: 10, output: 500, write30m: 125, write12h: 250 };
 const APP_ORIGIN = "https://app.satinlore.com";
 const INTERNAL_URL = "https://launch-usage.internal/ledger";
+const APP_LEDGER_URL = "https://launch-usage.internal/app-ledger";
 const OPERATION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const LEASE_MS = 60_000;
 const RECEIPT_MS = 35 * 86_400_000;
@@ -47,15 +49,16 @@ function validPolicy(policy) {
     new Set(subscriptionGrants.map(grant => grant.id)).size === subscriptionGrants.length;
 }
 
-function validOperation(value) {
+function validOperation(value, app) {
   if (typeof value?.operation !== "string" || !Object.hasOwn(OPERATIONS, value.operation)) return false;
   const fields = OPERATIONS[value.operation];
-  return exact(value, ["operation", ...fields]) && (!fields.includes("id") || (typeof value.id === "string" && OPERATION_ID.test(value.id))) &&
+  const keys = app ? fields.map(key => key === "policy" ? "appCap" : key) : fields;
+  return exact(value, ["operation", ...keys]) && (!fields.includes("id") || (typeof value.id === "string" && OPERATION_ID.test(value.id))) &&
     (!fields.includes("amount") || (count(value.amount) && (value.operation !== "reserve" || value.amount > 0))) &&
-    (!fields.includes("policy") || validPolicy(value.policy));
+    (!fields.includes("policy") || (app ? count(value.appCap) && value.appCap > 0 : validPolicy(value.policy)));
 }
 
-/** The Worker addresses one SQLite ledger for each verified email account. */
+/** Independent SQLite ledgers track each verified email account and aggregate public spend. */
 export class LaunchUsage {
   constructor(ctx) {
     this.storage = ctx.storage;
@@ -94,23 +97,27 @@ export class LaunchUsage {
       purchased, revision, trial, revision);
     const { revision: latest, ...balance } = this.sql.exec("SELECT used, reserved, purchased, trial, revision FROM balance WHERE id = 1").one();
     if (latest !== revision || balance.purchased !== purchased) throw new Error("Invalid entitlement revision");
-    const endsAt = monthEnd(now);
-    const month = this.sql.exec("SELECT used, reserved FROM periods WHERE ends_at = ?", endsAt).toArray()[0] ?? { used: 0, reserved: 0 };
+    const month = this.monthSnapshot(now, monthlyCap);
     const active = this.subscriptionPeriods(subscriptionGrants, now);
     const subscription = { granted: 0, used: 0, reserved: 0, remaining: 0, endsAt: active[0]?.endsAt ?? null };
     for (const period of active) {
       for (const key of ["granted", "used", "reserved", "remaining"]) subscription[key] += period[key];
     }
-    const monthRemaining = Math.max(0, monthlyCap - month.used - month.reserved);
     const creditRemaining = Math.max(0, balance.trial + balance.purchased - balance.used - balance.reserved);
     return { active, usage: {
       enabled: true,
       unit: UNIT,
-      available: monthRemaining > 0 && (creditRemaining > 0 || subscription.remaining > 0),
-      month: { endsAt, limit: monthlyCap, ...month, remaining: monthRemaining },
+      available: month.remaining > 0 && (creditRemaining > 0 || subscription.remaining > 0),
+      month,
       credits: { ...balance, remaining: creditRemaining },
       subscription,
     } };
+  }
+
+  monthSnapshot(now, limit) {
+    const endsAt = monthEnd(now);
+    const { used, reserved } = this.sql.exec("SELECT used, reserved FROM periods WHERE ends_at = ?", endsAt).toArray()[0] ?? { used: 0, reserved: 0 };
+    return { endsAt, limit, used, reserved, remaining: Math.max(0, limit - used - reserved) };
   }
 
   changeSource(source, used, reserved) {
@@ -128,15 +135,16 @@ export class LaunchUsage {
       after -= next;
     }
     // Attribute a provider overrun to the original first funding source. It cannot debit a different grant or spill into top-ups.
-    if (before || after) this.changeSource(allocation[0].source, after - before, 0);
+    if (allocation.length && (before || after)) this.changeSource(allocation[0].source, after - before, 0);
     const held = attempt.state === "unknown" ? 0 : attempt.reserved;
     this.sql.exec("UPDATE periods SET used = used + ?, reserved = reserved - ? WHERE ends_at = ?", amount - attempt.used, held, attempt.ends_at);
     this.sql.exec("UPDATE attempts SET used = ?, state = ?, expires_at = ? WHERE id = ?", amount, state, now + RECEIPT_MS, attempt.id);
     return reply({ state });
   }
 
-  reserveAttempt(id, amount, now, { usage, active }) {
-    if (amount > Math.min(usage.month.remaining, usage.subscription.remaining + usage.credits.remaining)) return reply(LIMITED, 429);
+  reserveAttempt(id, amount, now, { usage, active = [] }) {
+    const { month, subscription, credits } = usage;
+    if (amount > month.remaining || (credits && amount > subscription.remaining + credits.remaining)) return reply(LIMITED, 429);
     const allocation = [];
     let remaining = amount;
     for (const { id: source, remaining: budget } of active) {
@@ -145,7 +153,7 @@ export class LaunchUsage {
       remaining -= held;
       if (remaining === 0) break;
     }
-    if (remaining > 0) allocation.push({ source: null, held: remaining });
+    if (credits && remaining > 0) allocation.push({ source: null, held: remaining });
     this.sql.exec("INSERT OR IGNORE INTO periods VALUES (?, 0, 0)", usage.month.endsAt);
     this.sql.exec("INSERT INTO attempts VALUES (?, ?, ?, 0, 'reserved', ?, ?)", id, usage.month.endsAt, amount, now + LEASE_MS, JSON.stringify(allocation));
     for (const { source, held } of allocation) this.changeSource(source, 0, held);
@@ -153,9 +161,9 @@ export class LaunchUsage {
     return reply({ state: "reserved" });
   }
 
-  dispatchAttempt(attempt, now, { usage, active }) {
+  dispatchAttempt(attempt, now, { usage, active = [] }) {
     const balances = new Map(active.map(period => [period.id, period.granted - period.used - period.reserved]));
-    balances.set(null, usage.credits.trial + usage.credits.purchased - usage.credits.used - usage.credits.reserved);
+    if (usage.credits) balances.set(null, usage.credits.trial + usage.credits.purchased - usage.credits.used - usage.credits.reserved);
     if (attempt.ends_at !== usage.month.endsAt || usage.month.used + usage.month.reserved > usage.month.limit ||
         JSON.parse(attempt.allocation).some(({ source }) => !balances.has(source) || balances.get(source) < 0)) {
       this.finish(attempt, "refunded", 0, now);
@@ -174,9 +182,9 @@ export class LaunchUsage {
     this.sql.exec("DELETE FROM periods WHERE ends_at <= ? AND NOT EXISTS (SELECT 1 FROM attempts WHERE attempts.ends_at = periods.ends_at)", now - RECEIPT_MS);
   }
 
-  process({ operation, id, amount, policy }, now) {
+  process({ operation, id, amount, policy, appCap }, now) {
     this.expire(now);
-    const status = policy && this.snapshot(now, policy);
+    const status = policy ? this.snapshot(now, policy) : appCap === undefined ? null : { usage: { month: this.monthSnapshot(now, appCap) } };
     if (operation === "status") return reply(status.usage);
     const attempt = this.sql.exec("SELECT * FROM attempts WHERE id = ?", id).toArray()[0];
     const conflict = () => reply({ state: attempt?.state ?? "missing" }, 409);
@@ -204,10 +212,11 @@ export class LaunchUsage {
   }
 
   async fetch(request) {
-    if (request.url !== INTERNAL_URL || request.method !== "POST") return reply({}, 404);
+    const app = request.url === APP_LEDGER_URL;
+    if ((!app && request.url !== INTERNAL_URL) || request.method !== "POST") return reply({}, 404);
     let value;
     try { value = await request.json(); } catch { return reply({}, 400); }
-    if (!validOperation(value)) return reply({}, 400);
+    if (!validOperation(value, app)) return reply({}, 400);
     try {
       const result = this.storage.transactionSync(() => this.process(value, Date.now()));
       await this.scheduleExpiry();
@@ -260,6 +269,7 @@ function launchTrafficLimits(env) {
 export function launchUsageConfigured(env) {
   return env[LAUNCH_COST_METERING_FLAG] === "true" && configuredCount(env.LAUNCH_AI_MONTHLY_CAP_NANO_USD ?? DEFAULT_MONTHLY_CAP) > 0 &&
     configuredCount(env.LAUNCH_AI_TRIAL_NANO_USD ?? "0") !== null && Boolean(launchTrafficLimits(env)) &&
+    (env[LAUNCH_APP_CAP_SETTING] === undefined || configuredCount(env[LAUNCH_APP_CAP_SETTING]) > 0) &&
     usableNamespace(env.LAUNCH_USAGE) && usableNamespace(env.COMMERCE);
 }
 
@@ -267,44 +277,103 @@ export function createLaunchUsage(env, { config, session }) {
   if (env[LAUNCH_COST_METERING_FLAG] !== "true") return { enabled: false };
   const configured = launchUsageConfigured(env);
   const monthlyCap = configuredCount(env.LAUNCH_AI_MONTHLY_CAP_NANO_USD ?? DEFAULT_MONTHLY_CAP);
+  const appCapConfigured = env[LAUNCH_APP_CAP_SETTING] !== undefined;
+  const appCap = appCapConfigured ? configuredCount(env[LAUNCH_APP_CAP_SETTING]) : MAX_AMOUNT;
+  const testRealm = stripeTestRealm(env);
+  const commerce = launchCommerceNamespace(env);
   const trial = configuredCount(env.LAUNCH_AI_TRIAL_NANO_USD ?? "0");
-  async function command(operation, fields = {}) {
-    const readsPolicy = ["status", "reserve", "dispatch"].includes(operation);
+  const usesPolicy = operation => ["status", "reserve", "dispatch"].includes(operation);
+  async function ledger(name, url, operation, fields) {
+    const namespace = env.LAUNCH_USAGE;
+    return namespace.get(namespace.idFromName(testRealm ? "stripe-test:" + name : name)).fetch(new Request(url, {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({ operation, ...fields }),
+    }));
+  }
+  async function accountCommand(operation, fields = {}) {
+    const readsPolicy = usesPolicy(operation);
     if (!configured || (readsPolicy && !emailSession(config, session))) return unavailable();
     try {
       const subject = await accountIdentity(config, session);
       if (readsPolicy) {
-        const response = await readEntitlement(env.COMMERCE, { subject });
+        const response = await readEntitlement(commerce, { subject });
         if (!response.ok) return unavailable();
         const { unit, credits: purchased, revision, subscriptionGrants } = await response.json();
         const policy = { monthlyCap, trial, purchased, revision, subscriptionGrants };
         if (unit !== UNIT || !validPolicy(policy)) return unavailable();
         fields = { ...fields, policy };
       }
-      const namespace = env.LAUNCH_USAGE;
-      return await namespace.get(namespace.idFromName(`cost:v1:${subject}`)).fetch(new Request(INTERNAL_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(5000),
-        body: JSON.stringify({ operation, ...fields }),
-      }));
+      return await ledger(`cost:v1:${subject}`, INTERNAL_URL, operation, fields);
     } catch { return unavailable(); }
   }
-  async function complete(operation, fields) {
+  async function appCommand(operation, fields = {}) {
+    if (!configured) return unavailable();
+    try {
+      return await ledger("cost:v1:app", APP_LEDGER_URL, operation, usesPolicy(operation) ? { ...fields, appCap } : fields);
+    } catch { return unavailable(); }
+  }
+  async function complete(command, operation, fields) {
     const result = await command(operation, fields);
     return result.status >= 500 ? command(operation, fields) : result;
+  }
+  async function completeBoth(operation, fields) {
+    const [account, app] = await Promise.all([complete(accountCommand, operation, fields), complete(appCommand, operation, fields)]);
+    return account.ok ? app : account;
+  }
+  function appLimit(result) {
+    return result.status === 429 ? reply({ error: "analysis_app_spend_limit" }, 429) : result;
+  }
+  async function status() {
+    const account = await accountCommand("status");
+    const paused = testRealm || env.LAUNCH_AI_PAUSED === "true";
+    if (!account.ok || (!appCapConfigured && !paused)) return account;
+    const usage = await account.json();
+    if (usage.available && !paused) {
+      const app = await appCommand("status");
+      if (!app.ok) return unavailable();
+      usage.available = (await app.json()).month.remaining > 0;
+    } else usage.available = false;
+    return reply(usage);
+  }
+  async function reserve(id, amount) {
+    if (testRealm) return unavailable();
+    const account = await accountCommand("reserve", { id, amount });
+    if (!account.ok) return account;
+    const app = await appCommand("reserve", { id, amount });
+    if (!app.ok) {
+      await complete(accountCommand, "refund", { id });
+      if (app.status >= 500) await complete(appCommand, "refund", { id });
+    }
+    return appLimit(app);
+  }
+  async function dispatch(id) {
+    if (testRealm) return unavailable();
+    const account = await accountCommand("dispatch", { id });
+    if (!account.ok) {
+      await complete(appCommand, "refund", { id });
+      return account;
+    }
+    const app = await appCommand("dispatch", { id });
+    if (!app.ok) {
+      await complete(accountCommand, "refund-before-fetch", { id });
+      // This attempt cannot make its provider request without both dispatch acknowledgements.
+      if (app.status >= 500 && !(await complete(appCommand, "refund", { id })).ok) {
+        await complete(appCommand, "refund-before-fetch", { id });
+      }
+    }
+    return appLimit(app);
   }
   return {
     enabled: true,
     estimateCost: estimateLunaCost,
     trafficLimits: launchTrafficLimits(env),
-    status: () => command("status"),
-    reserve: (id, amount) => command("reserve", { id, amount }),
-    dispatch: id => command("dispatch", { id }),
-    refund: id => complete("refund", { id }),
+    status, reserve, dispatch,
+    refund: id => completeBoth("refund", { id }),
     // Only the handler with the dispatch acknowledgement can prove fetch never ran.
-    refundBeforeFetch: id => complete("refund-before-fetch", { id }),
+    refundBeforeFetch: id => completeBoth("refund-before-fetch", { id }),
     finalize: (id, usage) => {
       const amount = reportedLunaCost(usage);
-      return amount === null ? complete("unknown", { id }) : complete("settle", { id, amount });
+      return amount === null ? completeBoth("unknown", { id }) : completeBoth("settle", { id, amount });
     },
   };
 }
