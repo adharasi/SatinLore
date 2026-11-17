@@ -64,8 +64,8 @@ export class BridgeTransport {
       this.configurationChecks = value?.checks && typeof value.checks === "object" && fields.every(key => ["ready", "missing", "invalid"].includes(value.checks[key])) ?
         Object.fromEntries(fields.map(key => [key, value.checks[key]])) : null;
       this.message = typeof value?.message === "string" && value.message.trim() && value.message.length <= 600 && !/[\u0000-\u001f\u007f]/.test(value.message) ? value.message :
-        this.available ? "Lovense connection is available." : "Lovense setup is not configured on this server. You can rehearse with the simulator.";
-    } catch { if (operation !== this.epoch) return false; this.available = false; this.configurationChecks = null; this.message = "Lovense setup could not be checked. You can rehearse with the simulator."; }
+        this.available ? "Lovense connection is available." : "Lovense pairing is not configured. Try again later.";
+    } catch { if (operation !== this.epoch) return false; this.available = false; this.configurationChecks = null; this.message = "Could not check Lovense pairing. Try again."; }
     this.notify(); return this.available;
   }
   async acquire() {

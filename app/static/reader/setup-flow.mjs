@@ -1,31 +1,11 @@
 import {TOY_PROFILES, getToyProfile} from "../devices/toy-profiles.mjs";
 import {safeQrUrl, safeGeneratedQrImage} from "../devices/pairing-image.mjs";
 import {createCalibrationView} from "./calibration-view.mjs";
-import {CONTROLLED_BETA_STORIES} from "./beta-stories.mjs";
-
-// The application adapter owns device connection and safety checks.
-// Practice opens a session-only story through the application's normal loader;
-// it never starts playback or persists controls on the reader's behalf.
-export const PRACTICE_STORY = Object.freeze({
-  title: "Find your rhythm",
-  text: [
-    "The reading room was quiet. Sunlight crossed the floor and the first pages waited on the table. Begin here with a quiet section: the preview should be still, even after you press Start.",
-    "The station clock moved towards the hour. Beyond the window a train approached, slowly at first, its lights appearing through the evening haze. Scroll to this section and watch the preview begin to move.",
-    "The train gathered speed. The landscape changed from fields to woodland and back again, its rhythm growing stronger. Try the + and − level buttons and move the maximum. The preview shows how the toy would move.",
-    "The carriage slowed beside a small platform. A traveller folded a letter and looked towards the door. Read this part more slowly. Stop scrolling for a moment, then move back to the previous section if you want to compare the change.",
-    "A whistle sounded and the journey continued. Lights flickered past the window, then faded into the distance. Try a quicker scroll, then Pause or Stop. Restart only when you are ready; changing a control while paused will not start playback.",
-    "At the final station everything became quiet again. The book rested beside the window. When the controls feel comfortable, finish setup and open a story of your own.",
-  ].join("\n\n"),
-  corrections: Object.freeze([0, 2, 4, 1, 3, 0]),
-});
 
 // All connection callbacks stay in the application adapter. This view receives
 // status snapshots; model choice alone never authorises a command or a toy ID.
 export const SETUP_MODELS = Object.freeze(TOY_PROFILES.map(({id, label, pickerLabel}) => Object.freeze({id, label, pickerLabel}))
   .sort((first, second) => first.pickerLabel.localeCompare(second.pickerLabel, "en")));
-export const SETUP_STORIES = Object.freeze([Object.freeze({...PRACTICE_STORY, betaId: "control-check-v1", controlled: true,
-  description: "Check scrolling, section levels, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
-  .map(story => Object.freeze({...story, authoredLevels: true, quietZeros: true})));
 const CHANNEL_LABELS = Object.freeze(Object.fromEntries(TOY_PROFILES.flatMap(profile => profile.channels.map(channel => [channel.id, channel.label]))));
 const QR_IMAGE_TIMEOUT_MS = 8000;
 export function createSetupFlow({document = globalThis.document, window = globalThis.window,
@@ -33,7 +13,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   onRefresh = () => {}, onTest = () => false, onConfirmTest = () => true, onDisconnect = () => {}, onSimulateFailure = () => {},
   onPractice = () => false, onStart = () => {}, onStop = () => {}, onFinish = () => {},
   canConnectLive = () => true, onLiveSignIn = () => {},
-  quickSetup = false, onQuickTest = () => false, onConfirmQuickTest = () => false, onOpenAdvanced = () => {},
+  quickSetup = false, allowSimulation = false, allowLive = true, practiceStories = [], defaultPractice = null, onQuickTest = () => false, onConfirmQuickTest = () => false, onOpenAdvanced = () => {},
   enableCalibration = false, onCalibrationChange = () => {}, onApplyCalibration = () => false,
   onApplyChannels = null, onEnablePersonalRange = null, onCalibrationModeChange = () => {}, onResearchEvent = () => {}} = {}) {
   if (!document?.body || !document.createElement) return {open() {}, update() {}, finish() {}, cancel() {}, destroy() {}, snapshot: () => ({active: false, checks: {}})};
@@ -61,7 +41,7 @@ export function createSetupFlow({document = globalThis.document, window = global
   headingBlock.append(step, heading);
   const close = button("setup-close", "×", "icon-button"); close.setAttribute("aria-label", "Close setup");
   header.append(headingBlock, close);
-  const intro = make("p", {id: "setup-intro", value: "Connect a toy through Lovense Remote or try the controls with a simulator."});
+  const intro = make("p", {id: "setup-intro", value: "Set up a toy to get started."});
   const chooser = make("section", {id: "setup-choices", className: "setup-choices"});
   const model = make("select", {id: "setup-model"});
   for (const toy of SETUP_MODELS) model.append(option(toy.id, toy.pickerLabel));
@@ -71,8 +51,11 @@ export function createSetupFlow({document = globalThis.document, window = global
   const liveMode = button("setup-mode-lovense", "Connect my toy", "setup-mode");
   simMode.append(make("span", {className: "setup-mode-note", value: "Try the controls on this screen without a physical toy."}));
   liveMode.append(make("span", {className: "setup-mode-note", value: "Use Lovense Remote on your phone and open this page on another screen."}));
-  modeGroup.append(simMode, liveMode);
-  chooser.append(field("Which toy?", model), modeGroup);
+  chooser.append(field("Which toy?", model));
+  if (allowSimulation && allowLive) {
+    modeGroup.append(simMode, liveMode);
+    chooser.append(modeGroup);
+  }
   const connection = make("section", {id: "setup-pairing", className: "setup-pairing"});
   const connectionBadge = make("span", {id: "setup-connection-badge", className: "setup-connection-badge", attrs: {role: "status"}});
   const instructions = make("ol", {id: "setup-instructions", className: "setup-instructions"});
@@ -125,8 +108,8 @@ export function createSetupFlow({document = globalThis.document, window = global
   const calibrationMount = make("div", {id: "setup-calibration-mount"}); calibrationMount.hidden = true;
   const practicePicker = make("section", {id: "setup-practice-picker", className: "setup-practice-picker"});
   const practiceStory = make("select", {id: "setup-practice-story"});
-  for (const story of SETUP_STORIES) practiceStory.append(option(story.betaId, story.title));
-  practiceStory.value = SETUP_STORIES[0].betaId;
+  for (const story of practiceStories) practiceStory.append(option(story.betaId, story.title));
+  practiceStory.value = practiceStories[0]?.betaId ?? "";
   const practiceDescription = make("p", {id: "setup-practice-description", className: "note"});
   practicePicker.append(field("Choose a controlled test story", practiceStory), practiceDescription,
     make("p", {className: "note", value: "These original, non-explicit stories use known levels so you can compare controls before trying your own text. Every story opens paused."}));
@@ -135,9 +118,11 @@ export function createSetupFlow({document = globalThis.document, window = global
   const stop = button("setup-stop", "Stop", "stop");
   const back = button("setup-back", "Back");
   const skip = button("setup-skip", "Skip for now");
-  const primary = button("setup-primary", "Connect simulator", "primary");
+  const primary = button("setup-primary", "Connect", "primary");
   actions.append(stop, back, skip, primary);
-  dialog.append(header, intro, pairStage, testPanel, calibrationMount, practicePicker, rehearsal, status, actions);
+  dialog.append(header, intro, pairStage, testPanel, calibrationMount);
+  if (allowSimulation) dialog.append(practicePicker, rehearsal);
+  dialog.append(status, actions);
   document.body.append(dialog);
 
   const coach = make("section", {id: "setup-coach", className: "setup-coach" + (coachMount ? "" : " setup-coach-floating"),
@@ -157,10 +142,11 @@ export function createSetupFlow({document = globalThis.document, window = global
   const finishButton = button("setup-finish", "Done — open my story");
   coachActions.append(start, coachStop, finishButton);
   const coachStatus = make("p", {id: "setup-coach-status", className: "setup-coach-status", attrs: {role: "status", "aria-live": "polite"}});
-  coach.append(checklist, coachActions, coachStatus); (coachMount || document.body).append(coach);
+  coach.append(checklist, coachActions, coachStatus);
+  if (allowSimulation) (coachMount || document.body).append(coach);
 
   let current = {}, phase = "closed", epoch = 0, busy = false, disposed = false, opener = null;
-  let mode = "simulator", preferredModel = "lush", tested = false, initial = null, pausedAfterStart = false;
+  let mode = allowSimulation ? "simulator" : "lovense", preferredModel = "lush", tested = false, initial = null, pausedAfterStart = false;
   let qrRequest = null;
   const label = () => SETUP_MODELS.find(toy => toy.id === preferredModel)?.label || "Toy";
   const stopped = () => { try { onStop(); } catch { /* The application owns error recovery. */ } };
@@ -183,6 +169,11 @@ export function createSetupFlow({document = globalThis.document, window = global
     onModeChange: onCalibrationModeChange, onEvent: onResearchEvent,
     onComplete(result) {
       if (disposed || phase !== "calibrate") return;
+      if (!allowSimulation) {
+        leave();
+        onOpenAdvanced();
+        return;
+      }
       stopped(); phase = "practice";
       status.textContent = result.applied.length ? "Settings applied. Choose a story to try them with. It will open paused." : "Choose a practice story. It will open paused.";
       render();
@@ -263,8 +254,9 @@ export function createSetupFlow({document = globalThis.document, window = global
     current.qrUrl = null; clearQrImage();
     if (openStory) { try { onFinish({completed}); } catch { /* Caller owns navigation. */ } } else focusBack();
   };
+  const allowedMode = value => value === "simulator" ? allowSimulation : value === "lovense" && allowLive;
   const chooseMode = value => {
-    if (busy || mode === value) return;
+    if (!allowedMode(value) || busy || mode === value) return;
     stopped(); mode = value; resetTest(); status.textContent = ""; render();
   };
   const prepareDeviceList = () => {
@@ -306,7 +298,8 @@ export function createSetupFlow({document = globalThis.document, window = global
     if (phase === "connect") {
       step.textContent = quickSetup ? `Step 1 of 3 · ${simulator ? "Choose" : "Pair"}` : "01 / Choose your toy";
       heading.textContent = quickSetup && !simulator ? "Pair your toy" : "Set up your toy";
-      intro.textContent = "Connect a toy through Lovense Remote or try the controls with a simulator.";
+      intro.textContent = allowSimulation && allowLive ? "Connect a toy through Lovense Remote or try the controls with a simulator." :
+        simulator ? "Choose a simulator to try the controls on this screen." : "Choose your toy, then pair it through Lovense Remote.";
       primary.textContent = simulator ? "Connect " + label() + " simulator" : canConnectLive() ? "Connect " + label() : "Sign in to connect " + label();
     } else if (phase === "pair") {
       step.textContent = quickSetup ? "Step 1 of 3 · Pair" : "02 / Connect";
@@ -332,10 +325,11 @@ export function createSetupFlow({document = globalThis.document, window = global
             ready ? "" : "Waiting for your private pairing code…";
       if (qrPlaceholder.textContent !== qrMessage) qrPlaceholder.textContent = qrMessage;
       pairingNote.textContent = current.liveConfigured === false && !simulator ?
-        "The site owner needs to finish the Lovense setup. You can go back and try a simulator." :
+        (allowSimulation && allowLive ? "The site owner needs to finish the Lovense setup. You can go back and try a simulator." :
+          "Lovense pairing is unavailable right now. Try again later.") :
         simulator ? "Choose Reconnect to load the simulator again." : ready ?
           "Keep the code private. If the toy does not appear after scanning, choose Refresh device list." :
-          failed ? "If a new code also fails, you can go back and try the simulator." : "";
+          failed ? "If a new code also fails, check Lovense Remote and reconnect." : "";
       primary.textContent = failed ? "Try a new code" : needsReconnect() ? "Reconnect" :
         ready || simulator ? "Refresh device list" : "Waiting for code…";
       primary.disabled = busy || (!simulator && (current.liveConfigured === false || !ready && !failed && !needsReconnect()));
@@ -368,8 +362,8 @@ export function createSetupFlow({document = globalThis.document, window = global
       step.textContent = "05 / A short practice read"; heading.textContent = "Make it feel like you.";
       intro.textContent = "Try scrolling, the level buttons, maximum and Stop with a short neutral story before importing your own.";
       primary.textContent = "Open practice story";
-      const choice = SETUP_STORIES.find(story => story.betaId === practiceStory.value) || SETUP_STORIES[0];
-      practiceDescription.textContent = choice.description;
+      const choice = practiceStories.find(story => story.betaId === practiceStory.value) || practiceStories[0];
+      practiceDescription.textContent = choice?.description ?? "";
     } else if (phase === "calibrate") {
       step.textContent = "04 / Movement preferences"; heading.textContent = "Set your movement preferences";
       intro.textContent = "Choose the movements to use and adjust each one on this page.";
@@ -416,7 +410,7 @@ export function createSetupFlow({document = globalThis.document, window = global
     } catch {
       if (activeEpoch !== epoch || disposed) return;
       status.textContent = mode === "simulator" ? "The simulator could not connect. Try again or keep reading." :
-        "The connection could not start. Check sign-in and Lovense setup, then try again. You can use a simulator while this is resolved.";
+        "Could not connect. Check your sign-in and Lovense Remote, then try again.";
       if (mode === "lovense" && current.liveConfigured === false) phase = "pair";
     } finally { if (activeEpoch === epoch && !disposed) setBusy(false); }
   };
@@ -467,13 +461,19 @@ export function createSetupFlow({document = globalThis.document, window = global
         tested = false; confirmation.checked = false;
         status.textContent = "The test confirmation is no longer current. Select the toy and repeat its test before continuing."; render(); return;
       }
+      if (!allowSimulation) {
+        leave();
+        onOpenAdvanced();
+        return;
+      }
       stopped();
       phase = "practice"; status.textContent = "The test read opens paused. Start only when ready."; render(); return;
     }
-    if (phase !== "practice") return;
+    if (!allowSimulation || phase !== "practice") return;
     const activeEpoch = ++epoch; setBusy(true); status.textContent = "Opening practice story…";
     try {
-      const story = enableCalibration ? SETUP_STORIES.find(story => story.betaId === practiceStory.value) || SETUP_STORIES[0] : PRACTICE_STORY;
+      const story = enableCalibration ? practiceStories.find(story => story.betaId === practiceStory.value) || practiceStories[0] : defaultPractice;
+      if (!story) throw new Error();
       const result = await onPractice(story);
       if (activeEpoch !== epoch || disposed || !dialog.open) return;
       if (result === false) throw new Error();
@@ -546,7 +546,7 @@ export function createSetupFlow({document = globalThis.document, window = global
       if (disposed) return;
       ++epoch; stopped(); coach.hidden = true; opener = document.activeElement;
       calibration.close();
-      if (options.mode === "simulator" || options.mode === "lovense") mode = options.mode;
+      if (allowedMode(options.mode)) mode = options.mode;
       if (SETUP_MODELS.some(toy => toy.id === options.model)) preferredModel = options.model;
       model.value = preferredModel; resetChecks(); resetTest(); phase = "connect"; setBusy(false); status.textContent = "";
       if (!dialog.open) dialog.showModal(); model.focus();

@@ -1,27 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
+import {BetaReaderDeviceController as ReaderDeviceController} from "../app/static/devices/reader-beta-device.mjs";
 import {getToyProfile,TOY_PROFILES} from "../app/static/devices/toy-profiles.mjs";
+import {FakeBridge} from "./helpers/reader-bridge.mjs";
 
 const settle = async () => {for(let index=0;index<12;index++)await Promise.resolve();};
 function clock(){let time=0,sequence=0;const timers=new Map();return{now:()=>time,setTimer:(fn,delay)=>{timers.set(++sequence,{fn,at:time+delay});return sequence;},clearTimer:id=>timers.delete(id),async advance(ms){const target=time+ms;while(true){const next=[...timers].filter(([,timer])=>timer.at<=target).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)break;time=next[1].at;timers.delete(next[0]);next[1].fn();await settle();}time=target;await settle();},timers};}
-class FakeBridge {
-  constructor(){this.listeners=new Set();this.toys=[];this.selected=null;this.available=true;this.qrUrl=null;this.channel="vibrate";this.ceiling=5;this.calls=[];this.stops=[];this.model="lush";this.commands=[];}
-  snapshot(){return{liveConfigured:this.available,connectionState:this.selected?"paused":"discovered",toys:this.discover(),selectedId:this.selected,qrUrl:this.qrUrl,connectionMessage:this.available?"Ready":"Not configured"};}
-  notify(){this.onChange?.(this.snapshot());}
-  async begin(){if(!this.available){this.notify();return false;}this.toys=[{id:"physical-toy",label:getToyProfile(this.model).label,model:this.model,capabilities:[...getToyProfile(this.model).physicalChannels]}];this.notify();return true;}
-  discover(){return this.toys.map(toy=>({...toy,name:toy.label,vibration:true}));}
-  subscribe(callback){this.listeners.add(callback);return()=>this.listeners.delete(callback);}
-  async connect(frame){this.selected=frame.deviceId;this.notify();return{...frame,connected:true};}
-  command(frame){this.commands.push({...frame,channel:this.channel,ceiling:this.ceiling,at:this.now?.()});return this.commandGate||Promise.resolve({...frame});}
-  async stop(frame){this.stops.push({...frame});if(this.failStop)throw Error("Synthetic Stop failure");return{...frame,level:0};}
-  async disconnect(frame){return{...frame};}
-  setChannel(channel){this.channel=channel;}
-  setCeiling(value){this.ceiling=value;}
-  refresh(){return this.snapshot();}
-  dispose(){const previous=this.selected;this.selected=null;this.toys=[];if(previous)for(const callback of this.listeners)callback({type:"disconnect",deviceId:previous});this.notify();}
-  destroy(){this.dispose();}
-}
 function fixture({bridge=new FakeBridge(),onChange=()=>{}}={}){const timing=clock();bridge.now=timing.now;const controller=new ReaderDeviceController({...timing,bridge,onChange});return{controller,bridge,...timing};}
 
 test("a successful sign-in check clears the temporary expiry message without starting output",()=>{
@@ -182,7 +166,7 @@ test("a failed renderer stops output and explicit reconnect resets the recovery 
 });
 
 test("the first-run Nora guide tests rotation with no story and real facade/UI callbacks",async()=>{
-  const {setupDOM}=await import("./helpers/setup-dom.mjs");const {createSetupFlow}=await import("../app/static/reader/setup-flow.mjs");
+  const {setupDOM}=await import("./helpers/setup-dom.mjs");const {createBetaSetupFlow:createSetupFlow}=await import("../app/static/reader/beta-toolkit.mjs");
   const dom=setupDOM(),timing=clock();let flow,latest={},connection={};
   const c=new ReaderDeviceController({...timing,onChange:state=>{latest=state;flow?.update({...connection,...state});},onSetupChange:state=>{connection=state;flow?.update({...latest,...state});}});
   flow=createSetupFlow({...dom,onConnect:options=>{c.pause("Preparing connection.");return c.beginConnection(options);},onSelectDevice:id=>c.selectDevice(id),onTest:options=>c.test(options),onConfirmTest:()=>c.confirmTest(),onStop:()=>c.pause("Setup paused.")});

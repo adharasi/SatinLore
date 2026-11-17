@@ -11,6 +11,7 @@ import {flexPaySignature} from "../deploy/cloudflare/launch-billing.mjs";
 
 const app = "https://app.satinlore.com", checkout = "https://secure.verotel.com";
 const issuer = "https://launch-fixture.cloudflareaccess.com", audience = "f".repeat(64);
+const betaAudience = "b".repeat(64), testerEmail = "tester@example.test";
 const signatureKey = "local-test-flexpay-signature";
 const shopId = "81234";
 const email = "reader@example.test", founderEmail = "founder@example.test";
@@ -20,6 +21,8 @@ const {privateKey, publicKey} = await generateKeyPair("RS256");
 const jwk = {...await exportJWK(publicKey), kid: "launch-fixture", alg: "RS256"};
 const founder = await new SignJWT({email: founderEmail, type: "app"}).setProtectedHeader({alg: "RS256", kid: jwk.kid})
   .setIssuer(issuer).setAudience(audience).setSubject("fixture-founder").setIssuedAt().setExpirationTime("1h").sign(privateKey);
+const tester = await new SignJWT({email: testerEmail, type: "app"}).setProtectedHeader({alg: "RS256", kid: jwk.kid})
+  .setIssuer(issuer).setAudience(betaAudience).setSubject("fixture-tester").setIssuedAt().setExpirationTime("1h").sign(privateKey);
 const packagePath = new URL("../dist/private-app/", import.meta.url);
 const assetType = {html: "text/html", mjs: "text/javascript", js: "text/javascript", css: "text/css", svg: "image/svg+xml"};
 const codes = [];
@@ -40,6 +43,7 @@ const mf = new Miniflare({
     AUTH_SES_REGION: "eu-north-1", AUTH_SES_FROM_EMAIL: "team@example.test",
     AUTH_SES_ACCESS_KEY_ID: "A".repeat(20), AUTH_SES_SECRET_ACCESS_KEY: "B".repeat(40),
     FOUNDER_EMAIL: founderEmail, ACCESS_TEAM_DOMAIN: new URL(issuer).host, ACCESS_AUD: audience,
+    APP_BETA_ACCESS_AUD: betaAudience, BETA_TESTER_EMAILS: testerEmail,
     LAUNCH_BILLING_ENABLED: "true", LAUNCH_BILLING_ADMIN_ENABLED: "true", LAUNCH_BILLING_POSTBACK_ENABLED: "true",
     LAUNCH_AI_COST_METERING_ENABLED: "true", LAUNCH_AI_TRIAL_NANO_USD: "0",
     VEROTEL_SHOP_ID: shopId, VEROTEL_SIGNATURE_KEY: signatureKey, OPENAI_API_KEY: "sk-proj-fixture-openai-key",
@@ -76,7 +80,7 @@ const mf = new Miniflare({
 let browser;
 const errors = [];
 const excludedOrigins = [];
-async function context({isFounder = false, width = 1180} = {}) {
+async function context({accessAssertion, width = 1180} = {}) {
   const browserContext = await browser.newContext({viewport: {width, height: 860}, locale: "en-US", reducedMotion: "reduce"});
   await browserContext.route("**/*", async route => {
     const incoming = route.request(), url = new URL(incoming.url());
@@ -91,7 +95,7 @@ async function context({isFounder = false, width = 1180} = {}) {
     if (url.origin !== app) { excludedOrigins.push(url.origin); return route.abort(); }
     const headers = await incoming.allHeaders();
     headers["CF-Connecting-IP"] = "192.0.2.42";
-    if (isFounder) headers["Cf-Access-Jwt-Assertion"] = founder;
+    if (accessAssertion) headers["Cf-Access-Jwt-Assertion"] = accessAssertion;
     const body = incoming.postDataBuffer();
     const response = await mf.dispatchFetch(incoming.url(), {method: incoming.method(), headers, ...(body ? {body} : {})});
     return route.fulfill({status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer())});
@@ -118,7 +122,7 @@ const readUsage = page => page.evaluate(async () => (await fetch("/api/account/u
 try {
   browser = await chromium.launch({headless: true, ...(process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH ?
     {executablePath: process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH} : {})});
-  const admin = await context({isFounder: true});
+  const admin = await context({accessAssertion: founder});
   await admin.page.goto(`${app}/billing-admin`);
   await expect(admin.page.locator("#admin-status")).toHaveText("");
   const time = offset => new Date(Date.now() + offset).toISOString().slice(0, 16);
@@ -249,8 +253,16 @@ try {
   await page.getByRole("link", {name: "Back to the reader"}).click();
   await expect(page.locator("#public-account")).toBeVisible();
   const onboarding = page.locator("#experience-dialog");
-  await expect(onboarding).toBeVisible();
-  await page.locator("#experience-later").click();
+  if (await onboarding.isVisible()) await page.locator("#experience-later").click();
+  await expect(page.locator("body")).not.toContainText(/simulat[eo]/i, {useInnerText: true});
+  const privatePaths = ["/beta", "/beta/simulator-lab", "/simulator-lab"];
+  const publicStatuses = await page.evaluate(async paths => Promise.all(paths.map(async path => (await fetch(path)).status)), privatePaths);
+  assert.deepEqual(publicStatuses, [403, 403, 404]);
+  const beta = await context({accessAssertion: tester});
+  assert.equal((await beta.page.goto(app + "/beta"))?.status(), 200);
+  await expect(beta.page.locator("#empty-practice")).toBeVisible();
+  assert.equal((await beta.page.goto(app + "/beta/simulator-lab"))?.status(), 200);
+  await expect(beta.page.getByRole("heading", {name: "One simulated device."})).toBeVisible();
   await page.locator("#public-account").click();
   await page.locator("#public-show-change-password").click();
   await page.locator("#public-current-password").fill(password);

@@ -1,5 +1,5 @@
 import {BridgeTransport} from "./devices/bridge-transport.mjs";
-import {ReaderDeviceController} from "./devices/reader-device.mjs";
+import {BetaReaderDeviceController as ReaderDeviceController} from "./devices/reader-beta-device.mjs";
 import {channelMaximum, getToyProfile, MOVEMENT_IDS} from "./devices/toy-profiles.mjs";
 
 const RHYTHMS = ["steady", "gentle", "dynamic"];

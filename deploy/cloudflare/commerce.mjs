@@ -7,6 +7,7 @@ const MAX_NANO_USD = 100_000_000_000;
 const MONTHLY_NANO_USD = 2_000_000_000;
 const NANO_USD = "nano_usd";
 const DAY_MS = 86_400_000;
+const RECONCILIATION_LIMIT = 500;
 const SUBJECT = /^account:v1:[a-f0-9]{64}$/u;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const CODE = /^[A-Z0-9][A-Z0-9_-]{1,31}$/u;
@@ -143,6 +144,7 @@ export class SatinLoreCommerce {
         id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES commerce_orders(id), sale_id TEXT NOT NULL, event TEXT NOT NULL, period_end INTEGER)`);
       this.sql.exec("CREATE INDEX IF NOT EXISTS commerce_orders_subject_kind ON commerce_orders(subject,plan_kind,created_at DESC)");
       this.sql.exec("CREATE INDEX IF NOT EXISTS commerce_events_parent ON commerce_events(purchase_id)");
+      this.sql.exec("CREATE INDEX IF NOT EXISTS commerce_events_recent ON commerce_events(recorded_at DESC,transaction_id DESC)");
     });
     this.initialized = true;
   }
@@ -560,6 +562,52 @@ export class SatinLoreCommerce {
     return json({promotions, affiliates, checkouts, subscriptionCharges});
   }
 
+  reconcilePayments(value, now) {
+    shape(value, [], ["reference", "attention", "from", "until"]);
+    const {reference, attention, from, until} = value;
+    check(reference === undefined || matches(reference, UUID) || matches(reference, PROVIDER_ID));
+    check(attention === undefined || attention === true);
+    check(from === undefined && until === undefined ||
+      billingDate(from) && billingDate(until) && from < until && until - from <= 366 * DAY_MS);
+
+    const orderFilters = [], orderArguments = [];
+    if (matches(reference, UUID)) {
+      orderFilters.push("o.id=?");
+      orderArguments.push(reference);
+    } else if (reference !== undefined) {
+      // A processor ID can refer to the sale or any transaction on it, including a refund or rebill.
+      orderFilters.push("(o.sale_id=? OR o.id=(SELECT order_id FROM commerce_events WHERE transaction_id=?))");
+      orderArguments.push(reference, reference);
+    }
+    const reviewFlag = "o.review_reason IS NOT NULL";
+    const ordersInReview = `(${reviewFlag} OR EXISTS (
+      SELECT 1 FROM commerce_subscription_periods missing WHERE missing.order_id=o.id AND missing.starts_at IS NULL))`;
+    const orders = reference === undefined ? [] : this.rows(`SELECT o.* FROM commerce_orders o
+      WHERE ${orderFilters.join(" AND ")} ${attention ? "AND " + ordersInReview : ""}
+      ORDER BY o.created_at DESC,o.id DESC`, ...orderArguments).map(row => orderSummary(row, now, true));
+
+    const filters = [...orderFilters], args = [...orderArguments];
+    const needsReview = `(${reviewFlag} OR EXISTS (
+      SELECT 1 FROM commerce_subscription_periods missing WHERE missing.transaction_id=e.purchase_id AND missing.starts_at IS NULL))`;
+    if (attention) filters.push(needsReview);
+    if (from !== undefined) {
+      filters.push("e.recorded_at>=? AND e.recorded_at<?");
+      args.push(from, until);
+    }
+    const recent = this.rows(`SELECT e.kind,e.sale_id,e.transaction_id,e.purchase_id,e.order_id,e.amount,e.currency,e.recorded_at,
+        o.plan,o.affiliate,o.review_reason,${needsReview} AS needs_review
+      FROM commerce_events e JOIN commerce_orders o ON o.id=e.order_id
+      ${filters.length ? "WHERE " + filters.join(" AND ") : ""}
+      ORDER BY e.recorded_at DESC,e.transaction_id DESC LIMIT ?`, ...args, RECONCILIATION_LIMIT + 1);
+    const transactions = recent.slice(0, RECONCILIATION_LIMIT).map(row => ({
+      checkoutId: row.order_id, planId: row.plan, providerSaleId: row.sale_id, providerTransactionId: row.transaction_id,
+      parentTransactionId: row.purchase_id === row.transaction_id ? null : row.purchase_id, kind: row.kind,
+      currency: row.currency, amountMinor: ["refund", "chargeback"].includes(row.kind) ? -row.amount : row.amount,
+      receivedAt: row.recorded_at, affiliateCode: row.affiliate, needsReview: row.needs_review === 1, reviewReason: row.review_reason,
+    }));
+    return json({orders, transactions, truncated: recent.length > RECONCILIATION_LIMIT});
+  }
+
   dispatch(action, fields, now) {
     switch (action) {
       case "quoteCheckout": return this.quoteCheckout(fields, now);
@@ -575,6 +623,7 @@ export class SatinLoreCommerce {
       case "savePromotion": return this.savePromotion(fields, now);
       case "saveAffiliate": return this.saveAffiliate(fields);
       case "listCommerceRecords": return this.listCommerceRecords(fields, now);
+      case "reconcilePayments": return this.reconcilePayments(fields, now);
       default: throw new CommerceError("invalid_commerce_request");
     }
   }
@@ -620,3 +669,4 @@ export const readSubscription = (namespace, fields) => commerceRequest(namespace
 export const savePromotion = (namespace, fields) => commerceRequest(namespace, {action: "savePromotion", fields});
 export const saveAffiliate = (namespace, fields) => commerceRequest(namespace, {action: "saveAffiliate", fields});
 export const listCommerceRecords = (namespace, fields = {}) => commerceRequest(namespace, {action: "listCommerceRecords", fields});
+export const reconcilePayments = (namespace, fields) => commerceRequest(namespace, {action: "reconcilePayments", fields});

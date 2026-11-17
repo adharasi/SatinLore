@@ -50,7 +50,7 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
 
   function render() {
     const copy = {
-      login: 'Sign in with your email and password. You can try the simulator as a guest.',
+      login: 'Sign in with your email and password. You can read without an account.',
       register: 'Choose a password. We’ll ask you to confirm your email before you sign in.',
       verify: `Check ${challengeEmail} for a six-digit verification code. It expires after 10 minutes.`,
       forgot: 'Enter the email address you used to create your account.',
@@ -190,7 +190,7 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
       clearForm(); status.textContent = message; render(); focusView();
     });
   }
-  click('public-sign-out', () => signOut(() => request('logout', {}), 'You’re signed out. You can still read and use the simulator.'));
+  click('public-sign-out', () => signOut(() => request('logout', {}), 'You’re signed out. You can still read.'));
   click('public-sign-out-all', () => signOut(() => request('logout-all', {}), 'You’re signed out on all devices.'));
   click('public-show-change-password', () => {
     if (!session || !changePasswordForm) return;

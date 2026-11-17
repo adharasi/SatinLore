@@ -9,6 +9,7 @@ import {createStoryId} from "../../app/static/reader/identity.mjs";
 import {ReaderModel} from "../../app/static/reader/model.mjs";
 import {isReadingJump, selectReadingParagraph} from "../../app/static/reader/position.mjs";
 import {PlaybackController} from "../../app/static/playback/controller.mjs";
+import {createReaderSimulation} from "../../app/static/devices/reader-beta-device.mjs";
 import {ReaderDeviceController} from "../../app/static/devices/reader-device.mjs";
 import {HostedAccessGuard} from "../../app/static/access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "../../app/static/reader/library-view.mjs";
@@ -30,7 +31,7 @@ import {storyToyRecommendation} from "../../app/static/reader/toy-recommendation
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
-export function workspace({hosted = false, locks = true, publicAuth = false, launchBilling = false, location, authRequest, libraryRequest, sceneRequest} = {}) {
+export function workspace({hosted = false, locks = true, publicAuth = false, launchBilling = false, readerMode, location, authRequest, libraryRequest, sceneRequest, bridge} = {}) {
   let time = 1000000, timerId = 0, context, narrow = false, document;
   const timers = new Map(), nodes = new Map(), errors = [], documentListeners = new Map(), windowListeners = new Map();
   const preferenceValues = new Map(), downloads = [];
@@ -104,6 +105,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
     querySelector(selector) {
       if (selector === 'meta[name="satinlore-hosted-access"]') return hosted ? {content: "true"} : null;
       if (selector === 'meta[name="satinlore-public-auth"]') return publicAuth ? {content: "true"} : null;
+      if (selector === 'meta[name="satinlore-reader-mode"]') return readerMode ? {content: readerMode} : null;
       if (selector === 'meta[name="satinlore-launch-usage"]') return launchBilling ? {content: "true"} : null;
       if (selector === "dialog[open]") return [...nodes.values()].find(node => node.tagName === "DIALOG" && node.open) || null;
       if (selector === ".workspace-header") return nodes.get("workspace-header");
@@ -133,7 +135,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
   class TestController extends ReaderDeviceController {
     constructor(options) {
       const onChange = options.onChange;
-      super({...options, now, setTimer, clearTimer, onChange(state) {
+      super({...options, bridge, now, setTimer, clearTimer, onChange(state) {
         try { return onChange(state); } catch (error) { errors.push(error); throw error; }
       }});
     }
@@ -148,7 +150,8 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
   class TestPreferences extends ReaderPreferences {
     constructor() { super({storage: {getItem: key => preferenceValues.get(key) ?? null, setItem: (key, value) => preferenceValues.set(key, value)}}); }
   }
-  const source = readFileSync(new URL("../../app/static/app.mjs", import.meta.url), "utf8").replace(/^import .+;\s*$/gm, "");
+  const source = readFileSync(new URL("../../app/static/app.mjs", import.meta.url), "utf8").replace(/^import .+;\s*$/gm, "")
+    .replace('await import("./reader/beta-toolkit.mjs")', "testBetaTools");
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     MockDevice: TestDevice, preparePlainStoryText, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE,
@@ -156,8 +159,9 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
-    WebStoryImporter, identifyStoryUrl, readStoryFile, PRACTICE_STORIES,
-    ReaderAccountClient, mountAccountWorkspace, createBetaRecorder, mountBetaRecording, clampCalibration, simulatorScenePatternLabel,
+    WebStoryImporter, identifyStoryUrl, readStoryFile,
+    testBetaTools: {createReaderSimulation, createSimulatorView: () => null, PRACTICE_STORIES, createBetaRecorder, mountBetaRecording},
+    ReaderAccountClient, mountAccountWorkspace, clampCalibration, simulatorScenePatternLabel,
     AccountLibrary: class extends AccountLibrary { constructor() { super({request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates,
@@ -167,7 +171,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
     storyToyRecommendation, channelLabel, nocturneContextCandidates, nocturneContextNeedsReview,
     NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, queueMicrotask, AbortController, URLSearchParams,
     DEFAULT_EXPERIENCE, validateExperience, mountExperienceDialog,
-    createSimulatorView: () => null, createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
+    createSetupFlow: () => null, mountReadingFeedback: () => ({update() {}, sharing() {}}),
     performance: {now}, setTimeout: setTimer, clearTimeout: clearTimer,
     innerHeight: 1000, scrollY: 0, console, confirm: () => true, prompt: () => null,
   });

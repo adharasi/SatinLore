@@ -1,4 +1,4 @@
-import {SETUP_STORIES} from "./setup-flow.mjs";
+import {SETUP_STORIES} from "./beta-stories.mjs";
 
 // Original, non-explicit stories for comparing actual analysis. The notes give
 // readers a target to check without inserting overrides into the story.

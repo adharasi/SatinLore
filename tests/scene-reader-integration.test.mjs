@@ -4,7 +4,7 @@ import {ReaderModel} from "../app/static/reader/model.mjs";
 import {normalizeSceneProfiles, ReadingFeel, scenePatternChanged} from "../app/static/reader/calibration.mjs";
 import {PlaybackController} from "../app/static/playback/controller.mjs";
 import {MockDevice} from "../app/static/devices/mock.mjs";
-import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
+import {BetaReaderDeviceController as ReaderDeviceController} from "../app/static/devices/reader-beta-device.mjs";
 import {DEFAULT_EXPERIENCE} from "../app/static/reader/experience-preferences.mjs";
 import {NOCTURNE_CONTEXT_VERSION, validateNocturneContext} from "../app/static/reader/nocturne-context-contract.mjs";
 import {SimulationClock} from "../app/static/simulation/clock.mjs";

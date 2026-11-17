@@ -4,6 +4,8 @@ Decision record: 29 October 2026, product owner Hammad, **SatinLore frontend imp
 
 The workspace opens a story directly into one continuous reading canvas. A collapsible left library and optional right settings panel support reading; neither review nor a settings screen is a compulsory step. The deterministic F3 lab and hosted F4 feedback/support service are implemented. F5/F6 scoring/usability evaluation and H1/H2 physical qualification remain separate. The marketing waitlist is a separate application.
 
+The launch reader offers device pairing and ordinary reading. Simulator controls and practice stories described in the earlier design milestones below now belong to the [private beta](launch-rollout.md#private-beta-access) and the local test build. The launch setup shows a clear unavailable state if physical pairing is unavailable.
+
 ## Reader refinement — 2 November 2026
 
 The current product direction follows NovelAI's dense library/editor pattern while retaining SatinLore's colours and continuous document scrolling. The Add a story page puts writing or pasting, supported file uploads and story links together. The directly typable story area opens without a modal or a separate review stage. Copy speaks about stories, reading and controls, rather than file-extension jargon or a “workspace” introduction.

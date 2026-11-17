@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
+import {BetaReaderDeviceController as ReaderDeviceController} from "../app/static/devices/reader-beta-device.mjs";
 import {DEFAULT_CHANNEL_CALIBRATION} from "../app/static/reader/calibration.mjs";
 import {SimulationClock} from "../app/static/simulation/clock.mjs";
 import {ReaderModel} from "../app/static/reader/model.mjs";

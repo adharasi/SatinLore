@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createCalibrationView, calibrationFeature, calibrationDraft, CALIBRATION_FIELDS} from "../app/static/reader/calibration-view.mjs";
-import {createSetupFlow, SETUP_STORIES} from "../app/static/reader/setup-flow.mjs";
+import {createBetaSetupFlow as createSetupFlow, SETUP_STORIES} from "../app/static/reader/beta-toolkit.mjs";
+import {createSetupFlow as createPublicSetup} from "../app/static/reader/setup-flow.mjs";
 import {setupDOM} from "./helpers/setup-dom.mjs";
 
 const context = overrides => ({model: "flexer", mode: "simulator", connected: true, selectedId: "sim-flexer",
@@ -198,6 +199,22 @@ test("extended setup opens the single calibration panel after selection and lead
   flow.update({connected: false, connectionState: "disconnected"});
   assert.equal(flow.snapshot().phase, "pair");
   assert.equal(flow.calibrationSnapshot().active, false);
+});
+
+test("public toy calibration returns to reader controls without offering a practice story", async () => {
+  const dom = setupDOM(), toy = {id: "paired-toy", label: "Lush", model: "lush", capabilities: ["vibrate"]};
+  let returned = false;
+  const flow = createPublicSetup({...dom, quickSetup: true,
+    onOpenAdvanced: () => { returned = true; }});
+  flow.open({mode: "simulator"});
+  assert.equal(flow.snapshot().mode, "lovense");
+  const visible = node => node.hidden ? "" : [node.textContent, ...node.children.map(visible)].join(" ");
+  assert.doesNotMatch(visible(dom.nodes.get("setup-dialog")), /simulat/i);
+  flow.update({mode: "lovense", connected: true, connectionState: "paused", toys: [toy], selectedId: toy.id, ceiling: 5, output: 0});
+  assert.equal(flow.openCalibration(), true);
+  await dom.nodes.get("calibration-skip").click();
+  assert.equal(flow.snapshot().phase, "closed");
+  assert.equal(returned, true);
 });
 
 test("controlled story fixtures keep their authored levels and distinct quiet zeros", () => {

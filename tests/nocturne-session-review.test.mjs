@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {workspace} from "./helpers/workspace.mjs";
+import {FakeBridge} from "./helpers/reader-bridge.mjs";
 import {waitForWorkspace, waitForContext} from "./helpers/workspace-wait.mjs";
 
 const labelsFor = paragraphs => ({version: "context-v2", labels: paragraphs.map(({id}) =>
   ({id, category: "romance", phase: "build", shape: "unspecified", confidence: 93, eventKind: "current"})), usage: null});
 
 async function contextualReader(t, provider, publicAuth = false) {
-  const app = workspace({hosted: true, publicAuth, sceneRequest: async (_path, init = {}) => {
+  const bridge = publicAuth ? new FakeBridge() : undefined;
+  const app = workspace({hosted: true, publicAuth, bridge, sceneRequest: async (_path, init = {}) => {
     if (init.method !== "POST") return Response.json({available: true});
     const {paragraphs} = JSON.parse(init.body);
     return provider ? provider(paragraphs) : Response.json(labelsFor(paragraphs));
@@ -29,7 +31,17 @@ async function contextualReader(t, provider, publicAuth = false) {
 }
 
 async function start(app) {
-  await app.click("connect");
+  if (app.read("publicMode")) {
+    assert.ok(await app.read('controller.beginConnection({mode: "lovense"})'));
+    assert.ok(await app.read('controller.selectDevice("physical-toy")'));
+    const pending = app.read("controller.test()");
+    await app.settle();
+    await app.advance(2000);
+    assert.equal(await pending, true);
+    assert.equal(app.read("controller.confirmTest()"), true);
+  } else {
+    await app.click("connect");
+  }
   await app.click("start");
   await app.click("confirm-start");
   await app.settle();

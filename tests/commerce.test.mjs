@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {DatabaseSync} from "node:sqlite";
 import test from "node:test";
-import {cancelCheckout, listCommerceRecords, quoteCheckout, readCheckout, readEntitlement, reserveCheckout,
+import {cancelCheckout, listCommerceRecords, quoteCheckout, readCheckout, readEntitlement, reconcilePayments, reserveCheckout,
   readSubscription, reverseCheckout, SatinLoreCommerce, saveAffiliate, savePromotion, settleCheckout, settleSubscription,
   updateSubscriptionLifecycle} from "../deploy/cloudflare/commerce.mjs";
 
@@ -332,6 +332,11 @@ test("signed extend anchors a shifted renewal only after a separate verified pay
   await body(settleSubscription(namespace, rebill));
   assert.deepEqual((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants, []);
   assert.equal((await body(listCommerceRecords(namespace))).subscriptionCharges[0].status, "pending-period-link");
+  const attention = await body(reconcilePayments(namespace, {attention: true, reference: rebill.providerTransactionId}));
+  assert.equal(attention.orders[0].id, checkout.id);
+  assert.deepEqual(attention.transactions.map(row => [row.providerTransactionId, row.kind, row.needsReview]), [
+    [rebill.providerTransactionId, "subscription-rebill", true],
+  ]);
   const before = (await body(readEntitlement(namespace, {subject: reader}))).revision;
   await body(updateSubscriptionLifecycle(namespace, extension));
   const result = await body(readEntitlement(namespace, {subject: reader}));
@@ -339,6 +344,7 @@ test("signed extend anchors a shifted renewal only after a separate verified pay
     startsAt: extension.periodEnd, endsAt: rebill.periodEnd}]);
   assert.equal(result.revision, before + 1);
   assert.equal((await body(listCommerceRecords(namespace))).subscriptionCharges[0].status, "linked");
+  assert.deepEqual((await body(reconcilePayments(namespace, {attention: true}))).transactions, []);
   assert.equal((await body(updateSubscriptionLifecycle(namespace, extension))).duplicate, true);
   assert.equal((await body(readEntitlement(namespace, {subject: reader}))).revision, result.revision);
 });

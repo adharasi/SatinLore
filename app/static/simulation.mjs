@@ -6,6 +6,7 @@ import { HostedAccessGuard } from "./access.mjs";
 
 const $ = id => document.getElementById(id);
 const hosted = document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
+const scopedBeta = document.querySelector('meta[name="satinlore-reader-mode"]')?.content === "beta";
 let current = null, trace = [], timer = null, advancing = false, startIntent = null, ceilingIntent = null, mapping = 0;
 let accessAllowed = !hosted, simulatedHidden = false;
 const write = (id, value) => { $(id).textContent = String(value); };
@@ -97,7 +98,20 @@ $("lab-confirm-start").addEventListener("click", async () => {
   finally { $("lab-confirm-start").disabled = false; }
 });
 $("clear-trace").addEventListener("click", () => { trace = []; $("lab-trace").replaceChildren(); });
-const guard = hosted ? new HostedAccessGuard({ onChange: state => { accessAllowed = state.allowed; current?.controller.setAuthorized(accessAllowed); write("lab-access", state.allowed ? "Founder sign-in checked. This is still a simulation, with no physical output." : "Checking founder sign-in. Start remains unavailable until access is verified."); }, onLost: reason => { closeDialogs(); current?.controller.setAuthorized(false); write("lab-access", `${reason} Reload this page to sign in again. No story data is held by this lab.`); } }) : null;
+const guard = hosted ? new HostedAccessGuard({
+  ...(scopedBeta ? {request: options => fetch("/beta/api/access", options)} : {}),
+  onChange: state => {
+    accessAllowed = state.allowed;
+    current?.controller.setAuthorized(accessAllowed);
+    write("lab-access", state.allowed ? "Tester sign-in checked. This is a simulation with no physical output." :
+      "Checking tester sign-in. Wait for confirmation before choosing Start.");
+  },
+  onLost: reason => {
+    closeDialogs();
+    current?.controller.setAuthorized(false);
+    write("lab-access", `${reason} Reload this page to sign in again. This lab holds no story data.`);
+  },
+}) : null;
 document.addEventListener("visibilitychange", () => { closeDialogs(); if (document.hidden) { clockOff(); current.controller.setVisible(false); guard?.suspend(); } else { current.controller.setVisible(!simulatedHidden); if (guard) void guard.resume(); } });
 window.addEventListener("pagehide", () => { clockOff(); current?.controller.destroy(); guard?.destroy(); });
 reset(); if (guard) void guard.start({ visible: !document.hidden });

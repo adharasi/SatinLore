@@ -19,7 +19,7 @@ export class AsyncPlaybackController {
     this.levels = []; this.sceneProfiles = []; this.position = 0; this.ceiling = 5; this.strengthTenths = 10; this.output = 0;this.outputLevels=null;
     this.levelAdjustment = 0;
     this.readingSeeking = false;
-    this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose a simulated device explicitly.";
+    this.generation = 0; this.sequence = 0; this.revision = 0; this.staleReplies = 0; this.reason = "Choose the device you want to use.";
     this.requests = new Map(); this.stopTasks = new Map(); this.uncertain = new Set(); this.errorLatch = false;
     this.commandSettlements = new Map(); this.needsFreshStop = new Set();
     this.tickTimer = null; this.idleTimer = null; this.lastDispatch = -Infinity; this.lastTick = 0; this.lastActivity = 0; this.disposed = false;
@@ -171,7 +171,7 @@ export class AsyncPlaybackController {
   async connect() {
     if (!this.selected || !this.visible || !this.authorized || this.disposed) { this.reason = "Choose an eligible device in an active, authorised tab."; this.notify(); return false; }
     const deviceId = this.selected, wasConnected = this.connected;
-    const generation = this.invalidate(); this.connected = false; this.state = "CONNECTING"; this.reason = "Connecting the selected simulated device."; this.notify();
+    const generation = this.invalidate(); this.connected = false; this.state = "CONNECTING"; this.reason = "Connecting your device."; this.notify();
     try {
       // A different unresolved device must be made safe before switching. The selected
       // device may need its link re-established before a fresh Stop can be acknowledged.
@@ -298,7 +298,7 @@ export class AsyncPlaybackController {
   }
   start(intent) {
     if (!intent || intent !== this.startIntent || intent.generation !== this.generation || intent.revision !== this.revision || this.state !== "READY_PAUSED" || !this.connected || !this.visible || !this.authorized || this.errorLatch || this.uncertain.size) return false;
-    this.startIntent = null; this.feel.start(this.now()); this.state = "PLAYING"; this.lastActivity = this.lastTick = this.now(); this.reason = "Simulation is playing. Every nonzero request lasts two seconds.";
+    this.startIntent = null; this.feel.start(this.now()); this.state = "PLAYING"; this.lastActivity = this.lastTick = this.now(); this.reason = "Playback is running. Each movement command lasts up to two seconds.";
     this.armIdle(); this.tick(); return true;
   }
   async reduce() {
@@ -351,5 +351,5 @@ export class AsyncPlaybackController {
   activity() { this.lastActivity = this.now(); this.armIdle(); }
   setVisible(value) { this.visible = value === true; if (!this.visible) void this.pause("Tab hidden. Returning stays paused."); else this.notify(); }
   setAuthorized(value) { this.authorized = value === true; if (!this.authorized) void this.pause("Sign-in could not be checked. Playback stays paused."); else this.notify(); }
-  destroy() { void this.pause("Simulation ended."); this.disposed = true; this.clearSchedules(); this.unsubscribe?.(); }
+  destroy() { void this.pause("Playback ended."); this.disposed = true; this.clearSchedules(); this.unsubscribe?.(); }
 }

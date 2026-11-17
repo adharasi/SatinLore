@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_STATIC_PATHS } from "./assets.mjs";
+import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, BETA_ONLY_ASSET_PATHS, ALPHA_STATIC_PATHS, ALPHA_SESSION_ASSET_PATHS } from "./assets.mjs";
 import { feedbackJson, normalizeFeedback, normalizeFeedbackReview, FeedbackError, FEEDBACK_INBOX_NAME } from "./feedback.mjs";
 import { storyImportJson, importPublicStory, StoryImportError } from "./story-import.mjs";
 import { emptyLovenseRequest, issueLovenseToken, lovenseConfiguration, lovenseReadiness, lovenseIdentity, LovenseServiceError } from "./lovense.mjs";
@@ -25,15 +25,20 @@ export { LaunchUsage } from "./launch-usage.mjs";
 export const BETA_ORIGIN = "https://beta.satinlore.com";
 const ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS);
 const ALPHA_ASSET_PATHS = new Set(ALPHA_STATIC_PATHS);
+const ALPHA_SESSION_ASSETS = new Set(ALPHA_SESSION_ASSET_PATHS);
 const ALPHA_ADMIN_PATHS = new Set(["/admin", "/admin/"]);
 const ALPHA_ADMIN_ASSETS = new Set(["/alpha/static/alpha-admin.mjs", "/alpha/static/alpha-admin.css"]);
 const BETA_ADMIN_PATHS = new Set(["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"]);
-const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html", "/simulation.html"]);
+const APP_BETA_PATH = "/beta";
+const APP_BETA_DOCUMENTS = new Map([[APP_BETA_PATH, "/index.html"], [`${APP_BETA_PATH}/`, "/index.html"],
+  [`${APP_BETA_PATH}/simulator-lab`, "/simulation.html"]]);
+const BETA_ONLY_ASSETS = new Set(BETA_ONLY_ASSET_PATHS);
+const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html"]);
 const launchUsageEnabled = env => env[LAUNCH_COST_METERING_FLAG] === "true";
 const LAUNCH_ADMIN_DOCUMENTS = new Map([["/billing-admin", "/billing-admin.html"], ["/billing-admin.html", "/billing-admin.html"],
   ["/billing-admin/app.mjs", "/billing-admin/app.mjs"]]);
 const PUBLIC_ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS.filter(path => PUBLIC_DOCUMENTS.has(path) ||
-  (path.startsWith("/static/") && !BETA_ADMIN_PATHS.has(path))));
+  (path.startsWith("/static/") && !BETA_ONLY_ASSETS.has(path) && !BETA_ADMIN_PATHS.has(path))));
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[a-zA-Z]{2,}$/;
 const cachedKeys = new Map();
 const FEEDBACK_METHODS = new Map([
@@ -50,18 +55,21 @@ const BRIDGE_VENDOR_HTTPS = "https://*.lovense.com https://*.lovense-api.com htt
 const BRIDGE_VENDOR_WSS = "wss://*.lovense.com wss://*.lovense-api.com wss://*.lovense.club:*";
 
 /** No production defaults can turn a missing Access configuration into a public app. */
-export function privateAppConfiguration(env, origin = APP_ORIGIN) {
+export function privateAppConfiguration(env, origin = APP_ORIGIN, { appBeta = false } = {}) {
   if (env.PRIVATE_APP_ENABLED !== "true" || env.PUBLIC_APP_ORIGIN !== APP_ORIGIN) return null;
   if (![APP_ORIGIN, BETA_ORIGIN].includes(origin)) return null;
   const team = typeof env.ACCESS_TEAM_DOMAIN === "string" ? env.ACCESS_TEAM_DOMAIN.trim().toLowerCase() : "";
   // The same Access application can cover both hostnames. A separate beta
   // application may instead supply its own exact audience without accepting
   // both audiences on either hostname.
-  const configuredAudience = origin === BETA_ORIGIN && env.BETA_ACCESS_AUD !== undefined ? env.BETA_ACCESS_AUD : env.ACCESS_AUD;
+  const configuredAudience = appBeta ? env.APP_BETA_ACCESS_AUD :
+    origin === BETA_ORIGIN && env.BETA_ACCESS_AUD !== undefined ? env.BETA_ACCESS_AUD : env.ACCESS_AUD;
   const audience = typeof configuredAudience === "string" ? configuredAudience.trim() : "";
   const email = typeof env.FOUNDER_EMAIL === "string" ? env.FOUNDER_EMAIL.trim().toLowerCase() : "";
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/.test(team)) return null;
   if (!/^[a-f0-9]{64}$/.test(audience) || /^0+$/.test(audience)) return null;
+  if (appBeta && (origin !== APP_ORIGIN || [env.ACCESS_AUD, env.BETA_ACCESS_AUD]
+    .some(other => typeof other === "string" && other.trim() === audience))) return null;
   if (!EMAIL.test(email) || email.length > 254) return null;
   const testerValue = env.BETA_TESTER_EMAILS;
   if (testerValue !== undefined && (typeof testerValue !== "string" || testerValue.length > 6000)) return null;
@@ -69,10 +77,11 @@ export function privateAppConfiguration(env, origin = APP_ORIGIN) {
   if (testerEmails.length > 20 || testerEmails.some(value => value.length > 254 || !EMAIL.test(value))) return null;
   return { origin, issuer: `https://${team}`, audience, email,
     ...(origin === BETA_ORIGIN ? { beta: true } : {}),
+    ...(appBeta ? { appBeta: true } : {}),
     ...(testerEmails.length ? { testerEmails: [...new Set(testerEmails)] } : {}) };
 }
 
-function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false } = {}) {
+function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false, betaPage = false } = {}) {
   const result = new Response(head ? null : response.body, response);
   result.headers.set("Cache-Control", "no-store");
   result.headers.set("Referrer-Policy", "no-referrer");
@@ -83,6 +92,7 @@ function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN
   let pagePolicy = CONTENT_POLICY.replaceAll(APP_ORIGIN, origin);
   if (alphaPage || alphaAdmin) pagePolicy += "; media-src 'self' blob:";
   if (alphaPage) pagePolicy = pagePolicy.replace(/frame-src [^;]+/, `frame-src ${APP_ORIGIN}/alpha/device-bridge`);
+  if (betaPage) pagePolicy = pagePolicy.replace(/frame-src [^;]+/, "frame-src 'none'");
   result.headers.set("Content-Security-Policy", bridgeHash ?
     `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${origin}; base-uri 'none'; form-action 'none'` : pagePolicy);
   return result;
@@ -110,6 +120,7 @@ export async function verifyFounder(request, config, keyResolver) {
       algorithms: ["RS256"], issuer: config.issuer, audience: config.audience,
       requiredClaims: ["exp", "iat", "sub", "email"],
     });
+    if (config.appBeta && Array.isArray(payload.aud) && payload.aud.length !== 1) return null;
     const now = Math.floor(Date.now() / 1000);
     if (payload.type !== "app" || typeof payload.sub !== "string" || !payload.sub || payload.sub.length > 512) return null;
     if (typeof payload.email !== "string" || !EMAIL.test(payload.email) ||
@@ -177,9 +188,11 @@ async function handleLovense(request, env, { config, session, reverify, lovenseF
   }
 }
 
-async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false, publicAuth = false } = {}) {
+async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false, publicAuth = false,
+  scopedBeta = false } = {}) {
   const head = request.method === "HEAD";
-  const finish = response => secure(response, { head, origin, alphaPage, alphaAdmin });
+  const betaDocument = scopedBeta && ["/index.html", "/simulation.html"].includes(path);
+  const finish = response => secure(response, { head, origin, alphaPage, alphaAdmin, betaPage: betaDocument });
   if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") return finish(json({ error: "The private preview is not available." }, 503));
   try {
     const assetUrl = new URL(path, origin);
@@ -195,21 +208,53 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
       const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
       return secure(new Response(document, asset), { head, bridgeHash: hash, origin: origin });
     }
-    if (publicAuth && !head && PUBLIC_DOCUMENTS.has(path)) {
-      const document = await asset.text();
+    const publicDocument = publicAuth && PUBLIC_DOCUMENTS.has(path);
+    const liveReaderDocument = origin === APP_ORIGIN && !scopedBeta && path === "/index.html";
+    if (!head && (publicDocument || betaDocument || liveReaderDocument)) {
+      let document = await asset.text();
       const headers = new Headers(asset.headers);
       headers.delete("Content-Length");
       headers.delete("Content-Encoding");
       headers.delete("ETag");
-      const usage = launchUsageEnabled(env) ?
-        '<meta name="satinlore-launch-usage" content="true">' : "";
-      return finish(new Response(document.replace("</head>", `<meta name="satinlore-public-auth" content="true">${usage}</head>`),
-        { status: asset.status, headers }));
+      const meta = [];
+      if (publicDocument) {
+        meta.push('<meta name="satinlore-public-auth" content="true">');
+        if (launchUsageEnabled(env)) meta.push('<meta name="satinlore-launch-usage" content="true">');
+      }
+      if (liveReaderDocument) meta.push('<meta name="satinlore-reader-mode" content="live">');
+      if (betaDocument) {
+        meta.push('<meta name="satinlore-reader-mode" content="beta">');
+        document = document.replace(/((?:href|src)=["'])\/static\//gu, `$1${APP_BETA_PATH}/static/`)
+          .replace(/href=(["'])\/\1/gu, `href=$1${APP_BETA_PATH}$1`);
+      }
+      return finish(new Response(document.replace("</head>", `${meta.join("")}</head>`), { status: asset.status, headers }));
     }
     return finish(asset);
   } catch {
     return finish(json({ error: "The preview asset is unavailable." }, 503));
   }
+}
+
+async function handleAppBeta(request, env, url, keyResolver) {
+  const head = request.method === "HEAD";
+  const finish = response => secure(response, { head });
+  const config = privateAppConfiguration(env, APP_ORIGIN, { appBeta: true });
+  if (!config) return finish(json({ error: "Beta testing is temporarily unavailable." }, 503));
+  const session = await verifyFounder(request, config, keyResolver);
+  if (!session) return finish(json({ error: "Beta tester access required." }, 403));
+  if (request.method !== "GET" && !head) {
+    const response = json({ error: "This action is not available." }, 405);
+    response.headers.set("Allow", "GET, HEAD");
+    return finish(response);
+  }
+  if (url.pathname === `${APP_BETA_PATH}/api/access` && !url.search) {
+    return finish(json({ authenticated: true, expiresAt: session.expiresAt }));
+  }
+  const path = APP_BETA_DOCUMENTS.get(url.pathname) ?? url.pathname.slice(APP_BETA_PATH.length);
+  const allowed = APP_BETA_DOCUMENTS.has(url.pathname) ||
+    path.startsWith("/static/") && ASSET_PATHS.has(path) && !BETA_ADMIN_PATHS.has(path) && !path.startsWith("/static/billing");
+  if (!allowed) return finish(json({ error: "Not found." }, 404));
+  return serveAsset(request, env, path, { scopedBeta: true });
 }
 
 async function handleAlphaSurface(request, env, url, lovenseFetcher) {
@@ -227,14 +272,15 @@ async function handleAlphaSurface(request, env, url, lovenseFetcher) {
   if (read && (pathname === "/alpha" || pathname === "/alpha/")) {
     return serveAsset(request, env, "/alpha/index.html", { alphaPage: true });
   }
-  if (read && ALPHA_ASSET_PATHS.has(pathname) && !ALPHA_ADMIN_ASSETS.has(pathname)) {
+  const sessionAsset = ALPHA_SESSION_ASSETS.has(pathname);
+  if (read && ALPHA_ASSET_PATHS.has(pathname) && !ALPHA_ADMIN_ASSETS.has(pathname) && !sessionAsset) {
     return serveAsset(request, env, pathname);
   }
   const admin = ALPHA_ADMIN_PATHS.has(pathname) || ALPHA_ADMIN_ASSETS.has(pathname);
   const vendor = pathname === "/alpha/api/lovense/status" || pathname === "/alpha/api/lovense/session";
   const bridge = pathname === "/alpha/device-bridge";
   const probe = pathname === "/alpha/api/access";
-  if (!admin && !vendor && !bridge && !probe) return finish(json({ error: "Not found." }, 404));
+  if (!admin && !vendor && !bridge && !probe && !sessionAsset) return finish(json({ error: "Not found." }, 404));
   if (!vendor && !read) return finish(json({ error: "Use the controls on SatinLore Alpha." }, 405));
   const session = await verifyAlphaSession(request, env);
   if (!session) {
@@ -246,6 +292,7 @@ async function handleAlphaSurface(request, env, url, lovenseFetcher) {
     return serveAsset(request, env, ALPHA_ADMIN_PATHS.has(pathname) ? "/alpha/admin.html" : pathname, { alphaAdmin: true });
   }
   if (probe) return finish(json({ authenticated: true, expiresAt: session.expiresAt }));
+  if (sessionAsset) return serveAsset(request, env, pathname);
   if (bridge) return serveAsset(request, env, "/device-bridge.html");
   return handleLovense(request, env, { session, lovenseFetcher,
     config: { origin: APP_ORIGIN, audience: "satinlore-alpha-v1" }, reverify: () => verifyAlphaSession(request, env) });
@@ -307,6 +354,11 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       // A valid token must not make workers.dev, version URLs or another hostname an origin bypass.
       if (![APP_ORIGIN, BETA_ORIGIN].includes(url.origin)) return finish(json({ error: "Founder access required." }, 403));
+      if (url.origin === APP_ORIGIN && (url.pathname === APP_BETA_PATH || url.pathname.startsWith(`${APP_BETA_PATH}/`))) {
+        return handleAppBeta(request, env, url, keyResolver);
+      }
+      const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
+      if (url.origin === APP_ORIGIN && BETA_ONLY_ASSETS.has(path)) return finish(json({ error: "Not found." }, 404));
       const billingAdmin = url.pathname === BILLING_ADMIN_API || url.pathname.startsWith(`${BILLING_ADMIN_API}/`) ||
         LAUNCH_ADMIN_DOCUMENTS.has(url.pathname);
       if (billingAdmin && (url.origin !== APP_ORIGIN || env.LAUNCH_BILLING_ADMIN_ENABLED !== "true")) {
@@ -346,7 +398,6 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         if (destination.has("ref") || destination.has("order") || url.searchParams.get("next") === "billing") destination.set("next", "billing");
         return finish(new Response(null, {status: 303, headers: {Location: `/?${destination}`}}));
       }
-      const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
       if (publicAuth && BETA_ADMIN_PATHS.has(url.pathname)) return finish(json({ error: "Not found." }, 404));
       if (path === "/billing.html") {
         if (!publicAuth || !launchUsageEnabled(env) || !read) return finish(json({error: "Not found."}, 404));
@@ -515,8 +566,8 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         return finish(denied);
       }
       if (url.pathname === "/api/access") return finish(json({ authenticated: true, expiresAt: session.expiresAt }));
-      if (url.pathname === "/api/health") return finish(json({ status: "ok", device_mode: "simulator", beta_ready: false }));
-      if (!ASSET_PATHS.has(path)) return finish(json({ error: "This page is not part of the private simulator." }, 404));
+      if (url.pathname === "/api/health") return finish(json({ status: "ok", device_mode: config.beta ? "simulator" : "lovense", beta_ready: false }));
+      if (!ASSET_PATHS.has(path)) return finish(json({ error: "Not found." }, 404));
       return serveAsset(request, env, path, { origin: config.origin });
     },
   };

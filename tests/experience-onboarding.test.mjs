@@ -65,7 +65,7 @@ test("first account sign-in asks for preferences and applies only an acknowledge
   assert.equal(node("experience-dialog").open, false);
   assert.deepEqual(stored.experience, {...DEFAULT_EXPERIENCE, quiet: "edging", edging: true, maximum: 16, rhythm: "gentle"});
   assert.equal(app.read("currentExperience().maximum"), 16);
-  assert.equal(app.read("latest.ceiling"), 16);
+  assert.equal(app.read("latest.ceiling"), 5, "A saved preference never grants more than the gentle physical range.");
   assert.equal(app.read("latest.running"), false);
 
   await app.click("open-app-settings");
@@ -78,7 +78,7 @@ test("first account sign-in asks for preferences and applies only an acknowledge
   assert.match(node("experience-heading").textContent, /preview complete/i);
   assert.equal(stored.revision, 1);
   assert.equal(app.read("currentExperience().maximum"), 16);
-  assert.equal(app.read("latest.ceiling"), 16);
+  assert.equal(app.read("latest.ceiling"), 5, "A saved preference never grants more than the gentle physical range.");
   await app.click("experience-later");
   assert.equal(node("experience-dialog").open, false);
   assert.equal(node("app-settings-dialog").open, true);
@@ -90,7 +90,7 @@ test("first account sign-in asks for preferences and applies only an acknowledge
   assert.equal(stored.experience.maximum, 16, "Reset previews defaults until the reader saves.");
   await node("experience-form").dispatch("submit");
   assert.deepEqual(stored.experience, DEFAULT_EXPERIENCE);
-  assert.equal(app.read("latest.ceiling"), 10);
+  assert.equal(app.read("latest.ceiling"), 5, "Resetting preferences keeps the gentle physical range.");
   assert.deepEqual(app.errors, []);
 });
 
@@ -164,7 +164,7 @@ for (const saved of [
   assert.equal(stored.experience.quiet, saved.experience.quiet);
   assert.equal(stored.experience.rhythm, saved.experience.rhythm);
   assert.equal(app.read("currentExperience().peakPattern"), saved.experience.peakPattern);
-  assert.equal(app.read("latest.ceiling"), 12);
+  assert.equal(app.read("latest.ceiling"), 5, "A saved preference never grants more than the gentle physical range.");
   assert.equal(app.read("latest.running"), false);
   assert.deepEqual(app.errors, []);
 });

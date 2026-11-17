@@ -1,13 +1,19 @@
 const node = id => document.getElementById(id);
 const status = node("admin-status"), promotion = node("promotion-form"), affiliate = node("affiliate-form");
+const reconciliation = node("reconciliation-form"), reconciliationStatus = node("reconciliation-status");
+const download = node("download-activity");
 let busy = false;
+let filterRevision = 0;
 
 async function call(path = "", body) {
   const response = await fetch(`/api/billing-admin${path}`, {
     credentials: "same-origin", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000),
     ...(body ? {method: "POST", body: JSON.stringify(body), headers: {"Content-Type": "application/json"}} : {}),
   });
-  if (!response.ok) throw new Error(response.status === 403 ? "Sign in through founder access." : "The billing request could not be confirmed.");
+  if (!response.ok) {
+    const detail = response.status === 400 ? (await response.json().catch(() => ({}))).error : null;
+    throw new Error(response.status === 403 ? "Sign in through founder access." : detail ?? "The billing request could not be confirmed.");
+  }
   return response.json();
 }
 
@@ -17,6 +23,8 @@ const number = new Intl.NumberFormat(undefined, {maximumFractionDigits: 7});
 const day = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeZone: "UTC"});
 const grant = (amount, unit) => unit === "nano_usd" ?
   `${number.format(amount / 10_000_000)} credits` : `${number.format(amount)} legacy tokens`;
+const transactionLabels = new Map([["purchase", "Top-up"], ["subscription-initial", "First subscription payment"],
+  ["subscription-rebill", "Subscription renewal"], ["refund", "Refund"], ["chargeback", "Chargeback"]]);
 
 function fill(form, values) {
   for (const [name, value] of Object.entries(values)) {
@@ -27,7 +35,7 @@ function fill(form, values) {
   form.elements.namedItem("code").focus();
 }
 
-function render(id, entries, content) {
+function render(id, entries, content, empty = "No records yet.") {
   const list = node(id);
   list.replaceChildren();
   for (const entry of entries) {
@@ -37,7 +45,7 @@ function render(id, entries, content) {
   }
   if (!entries.length) {
     const item = document.createElement("li");
-    item.textContent = "No records yet.";
+    item.textContent = empty;
     list.append(item);
   }
 }
@@ -81,6 +89,28 @@ async function reload() {
   });
 }
 
+function showReconciliation({orders, transactions, truncated}, query) {
+  node("reconciliation-orders").hidden = !query.has("reference");
+  node("reconciliation-activity").hidden = false;
+  render("matching-orders-list", orders, row => [
+    `${row.id} · ${row.planId} · ${row.status} · ${money(row.currency, row.amountMinor)}` +
+    (row.providerSaleId ? ` · Sale ${row.providerSaleId}` : "") +
+    (row.refundedMinor ? ` · ${money(row.currency, row.refundedMinor)} refunded` : "") +
+    (row.affiliateCode ? ` · ${row.affiliateCode}: ${money(row.currency, row.commissionMinor)} commission` : "") +
+    (row.reviewReason ? ` · Review: ${row.reviewReason}` : ""),
+  ], "No orders match this reference.");
+  render("transactions-list", transactions, row => [
+    `${transactionLabels.get(row.kind) ?? row.kind} · ${money(row.currency, row.amountMinor)} · ${dateValue(row.receivedAt).replace("T", " ")} UTC` +
+    ` · Order ${row.checkoutId} · Sale ${row.providerSaleId} · Transaction ${row.providerTransactionId}` +
+    (row.parentTransactionId ? ` · Original transaction ${row.parentTransactionId}` : "") +
+    (row.needsReview ? ` · Review required${row.reviewReason ? " (" + row.reviewReason + ")" : ""}` : ""),
+  ], "No transactions match your filters.");
+  reconciliationStatus.textContent = truncated ? "Showing the latest 500 transactions. Narrow the dates to download the activity." :
+    `${number.format(transactions.length)} ${transactions.length === 1 ? "transaction" : "transactions"} found.`;
+  download.href = `/api/billing-admin/reconciliation.csv?${query}`;
+  download.hidden = truncated || !transactions.length;
+}
+
 async function perform(action, completed = "") {
   if (busy) return;
   busy = true; status.textContent = "Working…";
@@ -106,6 +136,34 @@ affiliate.addEventListener("submit", event => {
       enabled: data.has("enabled")});
     await reload();
   }, "Affiliate saved.");
+});
+reconciliation.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (busy) return;
+  const data = new FormData(reconciliation), query = new URLSearchParams();
+  for (const field of ["reference", "from", "through"]) {
+    const value = data.get(field).trim();
+    if (value) query.set(field, value);
+  }
+  if (data.has("attention")) query.set("attention", "1");
+  const revision = filterRevision;
+  download.hidden = true;
+  node("reconciliation-orders").hidden = true;
+  node("reconciliation-activity").hidden = true;
+  busy = true;
+  reconciliationStatus.textContent = "Finding payments…";
+  try {
+    const report = await call(`/reconciliation?${query}`);
+    if (revision === filterRevision) showReconciliation(report, query);
+  } catch (error) {
+    if (revision === filterRevision) reconciliationStatus.textContent = error.message;
+  }
+  finally { busy = false; }
+});
+reconciliation.addEventListener("input", () => {
+  filterRevision++;
+  download.hidden = true;
+  reconciliationStatus.textContent = "Select Find payments to apply filters.";
 });
 node("reload-billing").addEventListener("click", () => void perform(reload));
 await perform(reload);

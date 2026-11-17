@@ -4,6 +4,10 @@ Approved workspace revision: 29 October 2026 (frontend specification v1.2), refi
 
 There are separate gates: **S** for the software experience and **H** for physical device qualification and release. The 2 November eight-model request adds simulated rehearsal and a configured bounded live path; no physical model is qualified by implementation alone. Passing S does not pass H, and the full software beta still needs the remaining milestones below.
 
+## Launch reader and private test workspace
+
+The launch branch serves physical pairing and reading on the app homepage. `/beta` and the lab beneath it require a dedicated Access audience and an approved tester. The local test build and existing separately authorised beta and Alpha environments retain their test workflows. The launch branch also includes founder-only FlexPay payment lookup and reconciliation. Local Worker and browser fixtures verify the paths and UI. The [launch runbook](launch-rollout.md) covers the remaining production Access, merchant, email and physical device checks.
+
 ## Defaults and contextual Nocturne — 5 November 2026
 
 The next source phase applies Continuous background, Follow scene rhythm and Steady hold to absent experience preferences, preserving existing explicit choices and all current limits. The neutral dispatched-output harness compares these defaults with story-following and continuing scene-rhythm conditions, including long dwell, connective text, hard quiet, seek, explicit restart and lower/zero limits. Its measured gaps still include the existing Stop-before-reduction behavior; commanded means differ and no preference winner is inferred.

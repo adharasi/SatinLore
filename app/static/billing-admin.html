@@ -42,12 +42,39 @@
     </section>
     <section aria-labelledby="orders-heading">
       <h2 id="orders-heading">Recent orders</h2>
-      <p>Use the merchant reference to reconcile settlement and reversals with the processor. Affiliate commissions shown here are recorded for reconciliation.</p>
+      <p>Use the order reference to compare payments and refunds with FlexPay. Affiliate commissions are recorded here for manual payout.</p>
       <ul id="orders-list"></ul>
     </section>
     <section aria-labelledby="subscription-charges-heading">
       <h2 id="subscription-charges-heading">Recent subscription charges</h2>
       <ul id="subscription-charges-list"></ul>
+    </section>
+    <section aria-labelledby="reconciliation-heading">
+      <h2 id="reconciliation-heading">Payment reconciliation</h2>
+      <p>Find an order by its SatinLore reference, FlexPay sale ID or transaction ID. Dates use UTC, when SatinLore received the transaction.</p>
+      <form id="reconciliation-form">
+        <label for="payment-reference">Payment reference <small>(optional)</small></label>
+        <input id="payment-reference" name="reference" maxlength="36" autocomplete="off" spellcheck="false">
+        <label for="activity-from">From (UTC)</label>
+        <input id="activity-from" name="from" type="date">
+        <label for="activity-through">Through (UTC)</label>
+        <input id="activity-through" name="through" type="date">
+        <label><input name="attention" type="checkbox"> Requires review</label>
+        <div class="billing-actions">
+          <button type="submit">Find payments</button>
+          <a id="download-activity" class="billing-link" hidden>Download activity CSV</a>
+        </div>
+      </form>
+      <p id="reconciliation-status" role="status"></p>
+      <div id="reconciliation-orders" hidden>
+        <h3>Matching orders</h3>
+        <ul id="matching-orders-list"></ul>
+      </div>
+      <div id="reconciliation-activity" hidden>
+        <h3>Payment activity</h3>
+        <ul id="transactions-list"></ul>
+        <p class="billing-note">Open reference and ID columns as text to preserve long numbers. The CSV records payment activity in minor currency units and uses negative amounts for refunds and chargebacks.</p>
+      </div>
     </section>
   </main>
 </body>

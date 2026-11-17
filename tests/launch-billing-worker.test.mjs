@@ -306,6 +306,61 @@ test("only the correct signed Verotel postback credits the owner, with duplicate
   assert.equal(await purchased(owner), 0);
 });
 
+test("only founder can look up FlexPay orders and export the same recorded activity", async t => {
+  const now = Date.parse("2026-11-17T15:00:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const { request, owner } = fixture(t);
+  const founder = await accessAssertion(settings.FOUNDER_EMAIL);
+  const tester = await accessAssertion(settings.BETA_TESTER_EMAILS);
+  const lookup = `${BILLING_ADMIN_API}/reconciliation`;
+  const download = `${lookup}.csv`;
+  const { checkout } = await json(request(`${BILLING_API}/checkout`, { cookie: owner, body: checkoutForm() }));
+  const sale = { shopID: settings.VEROTEL_SHOP_ID, type: "purchase", referenceID: checkout.id,
+    saleID: "123456789012345678901", transactionID: "234567890123456789012", priceAmount: "4.99", priceCurrency: "USD" };
+  assert.equal((await request(postback(sale))).status, 200);
+  const credit = { ...sale, event: "credit", transactionID: "345678901234567890123", parentID: sale.transactionID, priceAmount: "1.00" };
+  assert.equal((await request(postback(credit))).status, 200);
+  assert.equal((await request(postback(credit))).status, 200);
+
+  for (const path of [lookup, download]) {
+    await json(request(path, { cookie: owner }), 403);
+    await json(request(path, { assertion: tester }), 403);
+    await json(request(path, { assertion: founder, host: beta }), 404);
+    await json(request(path, { assertion: founder, headers: { "Sec-Fetch-Site": "same-site" } }), 403);
+    await json(request(path, { assertion: founder, body: {} }), 405);
+  }
+  for (const query of ["reference=123&reference=456", "reference=a%25", "subject=other",
+    "from=2026-02-30&through=2026-11-17", "from=2025-01-01&through=2026-11-17", "attention=0"]) {
+    await json(request(`${lookup}?${query}`, { assertion: founder }), 400);
+  }
+  for (const reference of [checkout.id, sale.saleID, sale.transactionID, credit.transactionID]) {
+    const report = await json(request(`${lookup}?reference=${reference}&from=2026-11-17&through=2026-11-17`, { assertion: founder }));
+    assert.equal(report.orders.length, 1);
+    assert.equal(report.orders[0].status, "partially-refunded");
+    assert.equal(report.orders[0].id, checkout.id);
+    assert.equal(report.truncated, false);
+    assert.equal(report.transactions.length, 2);
+    assert.deepEqual(report.transactions.map(({ kind, amountMinor, parentTransactionId }) => ({ kind, amountMinor, parentTransactionId })), [
+      { kind: "refund", amountMinor: -100, parentTransactionId: sale.transactionID },
+      { kind: "purchase", amountMinor: 499, parentTransactionId: null },
+    ]);
+    assert.ok(report.transactions.every(row => row.providerSaleId === sale.saleID && row.receivedAt === now && !row.needsReview));
+    assert.doesNotMatch(JSON.stringify(report), /subject|satinlore-reader|@example\.test/iu);
+  }
+  assert.deepEqual((await json(request(`${lookup}?from=2026-11-16&through=2026-11-16`, { assertion: founder }))).transactions, []);
+  assert.deepEqual((await json(request(`${lookup}?attention=1`, { assertion: founder }))).transactions, []);
+  const exported = await request(`${download}?reference=${credit.transactionID}`, { assertion: founder });
+  assert.equal(exported.status, 200);
+  assert.equal(exported.headers.get("Cache-Control"), "no-store");
+  assert.match(exported.headers.get("Content-Type"), /^text\/csv\b/u);
+  assert.match(exported.headers.get("Content-Disposition"), /^attachment;/u);
+  const [header, refund, purchase, final] = (await exported.text()).split("\r\n");
+  assert.match(header, /"currency","amount_minor"/u);
+  assert.ok(refund.includes(`"${credit.transactionID}","${sale.transactionID}","refund","${checkout.planId}","USD",-100,`));
+  assert.ok(purchase.includes(`"${sale.transactionID}","","purchase","${checkout.planId}","USD",499,`));
+  assert.equal(final, "");
+});
+
 test("monthly checkout grants one paid period at a time and waits for Verotel to confirm cancellation", async t => {
   const day = 86_400_000;
   const endOfFirstPeriod = Date.parse("2027-02-01");

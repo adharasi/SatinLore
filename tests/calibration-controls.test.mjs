@@ -7,7 +7,7 @@ import {MockDevice} from "../app/static/devices/mock.mjs";
 import {ProfileSimulator} from "../app/static/devices/profile-simulator.mjs";
 import {ScenarioTransport} from "../app/static/simulation/transport.mjs";
 import {SimulationClock} from "../app/static/simulation/clock.mjs";
-import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
+import {BetaReaderDeviceController as ReaderDeviceController} from "../app/static/devices/reader-beta-device.mjs";
 
 function synchronous() {
   let time=0,sequence=0;const timers=new Map();

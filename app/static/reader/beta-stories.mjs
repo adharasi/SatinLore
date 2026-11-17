@@ -23,3 +23,23 @@ export const CONTROLLED_BETA_STORIES = Object.freeze([
 ]);
 
 export function controlledStory(id) { return CONTROLLED_BETA_STORIES.find(value => value.betaId === id) || null; }
+
+// The application adapter owns device connection and safety checks.
+// Practice opens a session-only story through the application's normal loader;
+// it never starts playback or persists controls on the reader's behalf.
+export const PRACTICE_STORY = Object.freeze({
+  title: "Find your rhythm",
+  text: [
+    "The reading room was quiet. Sunlight crossed the floor and the first pages waited on the table. Begin here with a quiet section: the preview should be still, even after you press Start.",
+    "The station clock moved towards the hour. Beyond the window a train approached, slowly at first, its lights appearing through the evening haze. Scroll to this section and watch the preview begin to move.",
+    "The train gathered speed. The landscape changed from fields to woodland and back again, its rhythm growing stronger. Try the + and − level buttons and move the maximum. The preview shows how the toy would move.",
+    "The carriage slowed beside a small platform. A traveller folded a letter and looked towards the door. Read this part more slowly. Stop scrolling for a moment, then move back to the previous section if you want to compare the change.",
+    "A whistle sounded and the journey continued. Lights flickered past the window, then faded into the distance. Try a quicker scroll, then Pause or Stop. Restart only when you are ready; changing a control while paused will not start playback.",
+    "At the final station everything became quiet again. The book rested beside the window. When the controls feel comfortable, finish setup and open a story of your own.",
+  ].join("\n\n"),
+  corrections: Object.freeze([0, 2, 4, 1, 3, 0]),
+});
+
+export const SETUP_STORIES = Object.freeze([Object.freeze({...PRACTICE_STORY, betaId: "control-check-v1", controlled: true,
+  description: "Check scrolling, section levels, limits and Stop with a known sequence."}), ...CONTROLLED_BETA_STORIES]
+  .map(story => Object.freeze({...story, authoredLevels: true, quietZeros: true})));

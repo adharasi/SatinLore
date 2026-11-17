@@ -57,7 +57,7 @@ test("a billing signup link opens registration and returns the verified reader t
   assert.deepEqual(destinations, ["/billing?ref=FIXTURE"]);
 });
 
-test("guest simulation, email verification and password sign-in preserve the reader", async t => {
+test("guest reading, email verification and password sign-in preserve the reader", async t => {
   let signedIn = false, currentPassword = "";
   const calls = [];
   const app = workspace({publicAuth: true, authRequest: async (action, body) => {
@@ -84,15 +84,17 @@ test("guest simulation, email verification and password sign-in preserve the rea
   assert.equal(node("public-account-dialog").open, false);
   assert.equal(app.read("hasVerifiedAccess()"), false);
   assert.equal(app.read("controller.authorized"), false);
+  assert.match(node("message").textContent, /Sign in to connect your toy/);
+  assert.doesNotMatch(node("message").textContent, /expired|simulat/i);
   await app.add();
-  await app.click("connect");
-  const guestChecks = app.accessCalls();
-  await app.click("start");
-  await app.click("confirm-start");
-  await app.settle();
-  assert.equal(app.read("latest.running"), true);
-  assert.equal(app.accessCalls(), guestChecks);
-  await app.click("stop");
+  assert.equal(app.read("currentStory().title"), "Synthetic story");
+  assert.equal(app.read("latest.mode"), "lovense");
+  assert.equal(app.read("controller.sim"), undefined);
+  assert.equal(node("transport").getAttribute("aria-label"), "Toy playback controls");
+  assert.equal(node("connect").getAttribute("aria-label"), "Pair your toy");
+  assert.equal(node("empty-practice").hidden, true);
+  assert.equal(node("start").disabled, true);
+  await assert.rejects(app.read('controller.beginConnection({mode: "simulator"})'), /supported toy and connection/);
 
   const model = node("scene-model");
   assert.equal(model.disabled, false);
@@ -155,7 +157,7 @@ test("guest simulation, email verification and password sign-in preserve the rea
   assert.equal(node("public-account-label").textContent, "Sign in");
   assert.equal(app.read("hasVerifiedAccess()"), false);
   assert.equal(app.read("currentStory().title"), "Synthetic story");
-  assert.equal(app.read("canStartHere()"), true);
+  assert.equal(app.read("canStartHere()"), false);
   assert.equal(node("public-remember").checked, false);
 
   await app.click("public-show-forgot");
@@ -178,6 +180,36 @@ test("guest simulation, email verification and password sign-in preserve the rea
   assert.equal(app.read("hasVerifiedAccess()"), true);
   assert.equal(node("experience-dialog").open, false, "Deferring the choices does not prompt again in the same reader visit.");
   assert.deepEqual(app.errors, []);
+});
+
+test("the hosted launch fallback is physical-only and the scoped beta can only play privately", async t => {
+  const live = workspace({hosted: true, readerMode: "live"});
+  const beta = workspace({hosted: true, readerMode: "beta"});
+  t.after(() => { live.destroy(); beta.destroy(); });
+  await Promise.all([live.settle(), beta.settle()]);
+  assert.equal(live.read("latest.mode"), "lovense");
+  assert.equal(live.read("controller.sim"), undefined);
+  assert.equal(live.nodes.get("empty-practice").hidden, true);
+  assert.equal(beta.read("latest.mode"), "simulator");
+  assert.equal(beta.nodes.get("empty-practice").hidden, false);
+  assert.match(beta.nodes.get("message").textContent, /Choose Simulator/);
+  assert.doesNotMatch(beta.nodes.get("message").textContent, /connect a toy/);
+  await beta.click("empty-practice");
+  assert.equal(beta.nodes.get("practice-story-dialog").open, true);
+  await beta.click("practice-story-close");
+  assert.equal(beta.read("hostedAnalysis"), false);
+  await assert.rejects(beta.read('controller.beginConnection({mode: "lovense"})'), /supported toy and connection/);
+  beta.read('betaStorage.setItem("example", "only in beta")');
+  assert.equal(beta.preferenceValues.get("beta.example"), "only in beta");
+  assert.equal(beta.preferenceValues.has("example"), false);
+  await beta.add();
+  await beta.click("connect");
+  await beta.click("start");
+  await beta.click("confirm-start");
+  await beta.settle();
+  assert.equal(beta.read("latest.running"), true);
+  await beta.click("stop");
+  assert.equal(beta.read("latest.running"), false);
 });
 
 test("closing an account form clears the password and ignores an earlier response", async t => {

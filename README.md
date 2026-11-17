@@ -1,10 +1,10 @@
 # SatinLore
 
-A private browser reader that turns a person's chosen story into changing controls for a compatible Lovense toy. The app has hardware-free simulators, verified email and password accounts, an opt-in account library, saved toy presets and a guided calibration-to-reading flow. Physical-device qualification remains separate from software implementation.
+A browser reader that changes a compatible toy's rhythm and strength as someone reads their own story. Readers can sign in with a verified email and password, save stories to their account, and save settings for their toy. Physical-device qualification remains separate from software implementation.
 
 **For 3 November testing:** start with the [founder and tester session runbook](docs/beta-session-2026-11-03.md). It covers the remaining Cloudflare hostname/allowlist steps, account creation, the simulator rehearsal, live checks, personal-range permission, controlled stories and the private recording admin.
 
-**Public reader rollout:** use the [email sign-in activation checklist](deploy/cloudflare/public-reader.md) to verify delivery and open the app hostname. The beta and Alpha workflows keep their existing authentication. See the [onboarding walkthrough and UX review](docs/public-reader-ux-review.md) for the next usability improvements.
+**Public reader rollout:** follow the [launch runbook](docs/launch-rollout.md) for email sign-in, private tester access and paid plans. See the [onboarding walkthrough and UX review](docs/public-reader-ux-review.md) for follow-up usability improvements.
 
 ## Current experience
 
@@ -24,7 +24,7 @@ Live control uses an isolated Lovense Remote bridge. The documented Standard Soc
 
 The same private reader is packaged for app.satinlore.com and beta.satinlore.com. Only the exact beta host offers an explicit recording choice. Its structured control timeline captures allowed steps, settings changes, requested/simulated channel output, optional ratings, normalized navigation and fixed controlled-story identifiers. It does not capture DOM/screen video, story text/title, typed preset names, private URLs or pairing/credential material. Founder-only beta.satinlore.com/admin provides the timeline, channel graphs and review controls. Each recording is bounded to one hour, 20,000 events and 4 MiB; retained data expires after 30 days within a 128 MiB global budget. Recording controls are independent of device Stop.
 
-The marketing website, CRM, SES and questionnaire bridge remain separate. The local Python invitation/device-check service also remains separate and retains its discrete low-level contract. Generated stories, billing, other toy brands and multiple physical toys remain outside this iteration. No physical toy or full Lovense Remote feature parity is claimed from simulator results.
+The marketing website, CRM, SES and questionnaire bridge have separate deployments. The Python invitation and device check run locally. The launch branch includes hosted billing for subscriptions and AI credit top-ups, subject to merchant approval and rollout. Generation and simultaneous control of multiple physical toys are outside this release.
 
 ## Quick start
 
@@ -54,15 +54,15 @@ Open <http://127.0.0.1:8000>; Ctrl+C stops the server. Bootstrap installs depend
 
 For hardware work, follow [the dedicated setup](docs/hardware-check.md). [`.env.example`](.env.example) is the copyable template for local settings. The Python app reads process variables. For live Luna CLI commands, see [local OpenAI credentials](docs/nocturne-vscode-handoff.md#local-openai-credentials).
 
-## Private hosted workspace
+## Hosted reader and private testing
 
-The `app.satinlore.com` deployment uses the same reader and local story processing. In private mode the Worker requires a signed Cloudflare Access token. With public email sign-in enabled, guests can read and rehearse with the simulator. A verified account is required for live pairing, Nocturne, link imports, saved presets and feedback. Direct Worker and preview hostnames are disabled. Session expiry or failed revalidation pauses playback and tears down a live connection while leaving the current text readable.
+The `app.satinlore.com` reader processes stories locally by default. With public email sign-in enabled, guests can open their own text and read. A verified account is required for device pairing, Nocturne, link imports, saved presets and feedback. Direct Worker and preview hostnames are disabled. Session expiry or failed revalidation pauses playback and disconnects the toy, and the current text stays readable.
 
 The reader explains why Start is unavailable, provides a nearby sign-in retry and supports repeated Start/Stop/reconnect without restoring an armed session. A synchronous access-check failure no longer leaves retries stuck.
 
-This is a private **software beta** with hardware-free simulation, explicit account/preset persistence and a configured Lovense route. Physical-device playback and the intensity algorithm still need qualification. The Python invitation/device-check backend stays local and is excluded from the hosted build. The one-time browser setup connects this GitHub repository to Cloudflare for automatic deployment on future pushes. Access settings remain in the Cloudflare dashboard and survive those deployments. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for the exact setup, checks and rollback; source publication alone does not establish a live, protected deployment.
+The beta reader and lab use a dedicated Cloudflare Access audience at `app.satinlore.com/beta`. The separate `beta.satinlore.com` recording programme and Alpha study keep their own sign-in. The Python invitation/device-check backend stays local. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for setup, checks and rollback. Physical playback and model performance are qualified separately.
 
-Useful hosted pages include `/help` for controls and privacy, `/support` for feedback and your submitted notes, and `/simulator-lab` for repeatable failure scenarios. The header Feedback link opens a separate tab so the reader stays in place. The founder inbox is on `beta.satinlore.com/feedback-admin`. A deliberate AO3 link import uses the authenticated `/api/story-import` service to fetch the requested public source without retaining it or forwarding browser credentials. Local drafts and uploads stay on the device unless the reader explicitly saves them to an account.
+The reader links to `/help` for controls and privacy and `/support` for feedback. The founder inbox is on `beta.satinlore.com/feedback-admin`. The beta lab for repeatable failure scenarios is at `/beta/simulator-lab` on the app hostname. An AO3 link import uses the authenticated `/api/story-import` service to fetch the selected public source. The service neither retains the source nor forwards browser credentials.
 
 ![Satin Editorial private-reader preview with neutral sample text](docs/images/private-reader-desktop.jpg)
 

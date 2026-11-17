@@ -11,23 +11,31 @@ import {BackupImporter, serializeBackup, downloadBackup} from "./reader/backup.m
 import {ReaderPreferences} from "./reader/preferences.mjs";
 import {FolderStore, selectFolderStories} from "./reader/folders.mjs";
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "./reader/web-import.mjs";
-import {createSimulatorView} from "./reader/simulator-view.mjs";
 import {createSetupFlow} from "./reader/setup-flow.mjs";
-import {PRACTICE_STORIES} from "./reader/practice-stories.mjs";
 import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-workspace.mjs";
 import {AccountLibrary} from "./reader/account-library.mjs";
 import {DEFAULT_EXPERIENCE, validateExperience} from "./reader/experience-preferences.mjs";
 import {mountExperienceDialog} from "./reader/experience-dialog.mjs";
 import {mountPublicAccount} from "./reader/public-account.mjs";
-import {createBetaRecorder, mountBetaRecording} from "./reader/beta-recording.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "./reader/calibration.mjs";
 import {nocturneAvailable, nocturneCandidates, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "./reader/nocturne.mjs";
 import {storyToyRecommendation} from "./reader/toy-recommendations.mjs";
 
 const $ = id => document.getElementById(id);
+const publicMode = document.querySelector('meta[name="satinlore-public-auth"]')?.content === "true";
+const readerMode = document.querySelector('meta[name="satinlore-reader-mode"]')?.content;
+const liveReader = publicMode || readerMode === "live";
+const scopedBeta = !liveReader && readerMode === "beta";
+const betaTools = liveReader ? null : await import("./reader/beta-toolkit.mjs");
+const practiceStories = betaTools?.PRACTICE_STORIES ?? [];
+const betaStorage = scopedBeta ? {
+  getItem: key => window.localStorage.getItem(`beta.${key}`),
+  setItem: (key, value) => window.localStorage.setItem(`beta.${key}`, value),
+  removeItem: key => window.localStorage.removeItem(`beta.${key}`),
+} : undefined;
 const importer = new TextImporter();
-const store = new StoryStore();
+const store = new StoryStore({storage: betaStorage});
 const folderStore = new FolderStore({store});
 const webImporter = new WebStoryImporter();
 let folders = [];
@@ -40,9 +48,9 @@ let publicAccount = null, publicSignedIn = false;
 let patternChoices = {peakPattern: DEFAULT_EXPERIENCE.peakPattern, edgePattern: "auto", edging: DEFAULT_EXPERIENCE.edging};
 let savingPatternChoice = false;
 let recordedDevice = "", recordedStory = "", recordedStep = "", feelChannelSignature = "", feelEditingChannel = null, combinationSignature = "";
-let connection = {mode: "simulator", model: "lush", toys: [], selectedId: null};
+let connection = {mode: liveReader ? "lovense" : "simulator", model: "lush", toys: [], selectedId: null};
 const backupImporter = new BackupImporter();
-const preferences = new ReaderPreferences();
+const preferences = new ReaderPreferences({storage: betaStorage});
 const stories = [];
 let libraryQuery = "";
 let librarySort = "updated";
@@ -82,7 +90,6 @@ let libraryLoading = true;
 let libraryMutation = false;
 let focusArrangement = null;
 const dialogOpeners = new Map();
-const publicMode = document.querySelector('meta[name="satinlore-public-auth"]')?.content === "true";
 const accountLibrary = publicMode ? new AccountLibrary() : null;
 const sessionChangeKey = "satinlore.public-session-change";
 let pendingAccountLibrary = null, localLibraryReady = Promise.resolve();
@@ -100,18 +107,19 @@ const experienceDialog = mountExperienceDialog({document,
   },
 });
 const hostedMode = publicMode || document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
+const hostedAnalysis = hostedMode && !scopedBeta;
 let nocturneReady = null, checkingNocturne = false, nocturneOperation = null;
 let nextStoryModel = "loom";
 let analysisPresentation = {model: null, generation: null, hasActivity: false};
 let hostedAccess = null;
 let hostedAccessReady = !hostedMode;
 const hasVerifiedAccess = () => !hostedMode || Boolean(hostedAccessReady && hostedAccess?.isAuthorized());
-const canStartHere = () => publicMode && latest.mode !== "lovense" || hasVerifiedAccess();
+const canStartHere = () => hasVerifiedAccess();
 let latest = {state: "DISCONNECTED", connected: false, running: false, output: 0,
-  ceiling: DEFAULT_SIMULATOR_MAXIMUM, levelAdjustment: 0, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
+  ceiling: liveReader ? 5 : DEFAULT_SIMULATOR_MAXIMUM, levelAdjustment: 0, baseLevel: 0, target: 0, position: 0, reason: "Open a story to begin."};
 
 const currentStory = () => stories.find(story => story.id === activeId) ?? null;
-const playbackIdentity = () => JSON.stringify([latest.mode || "simulator",connection.selectedId || latest.selectedDeviceId || "",latest.activeChannels || [latest.channel || "vibrate"],latest.calibration?.channels || {}]);
+const playbackIdentity = () => JSON.stringify([latest.mode || connection.mode,connection.selectedId || latest.selectedDeviceId || "",latest.activeChannels || [latest.channel || "vibrate"],latest.calibration?.channels || {}]);
 const isNarrow = () => window.matchMedia("(max-width: 1099px)").matches;
 function text(id, value) {
   const node = $(id);
@@ -161,7 +169,7 @@ function applyReadingDefaults(values) {
   display(controller.snapshot());
 }
 function renderNocturnePeakSettings(story) {
-  const hasPatterns = Boolean(story && !story.controlled && story.sceneModel === "nocturne");
+  const hasPatterns = !liveReader && Boolean(story && !story.controlled && story.sceneModel === "nocturne");
   $("nocturne-peak-settings").hidden = !hasPatterns;
   $("nocturne-peak-pattern").value = patternChoices.peakPattern;
   $("nocturne-edge-pattern").value = patternChoices.edgePattern;
@@ -176,7 +184,7 @@ function renderNocturnePeakSettings(story) {
   const profile = paragraph?.analysed ? story.model.effectiveProfile(latest.position, {nocturne: true, ...patternChoices}) : undefined;
   const movement = feelEditingChannel || latest.channel;
   let currentPattern = "The current section’s pattern will appear when it’s analysed.";
-  if (latest.mode !== "simulator") currentPattern = "Nocturne patterns are available in the simulator.";
+  if (latest.mode !== "simulator") currentPattern = "Switch to the preview to compare patterns.";
   else if (profile?.manual) currentPattern = "Current section uses your level correction.";
   else if (profile?.quiet) currentPattern = "Current section is a quiet boundary.";
   else if (profile?.endedMovements?.includes(movement)) currentPattern = `${channelLabel(movement)} pauses in the current section.`;
@@ -547,8 +555,8 @@ function display(state = latest) {
   }
   text("status", ({DISCONNECTED: "Disconnected", READY_PAUSED: "Connected · paused",
     PLAYING: state.mode === "lovense" ? "Toy playback" : "Simulator running", CONNECTING: "Connecting…", STOPPING: "Stopping…", ERROR_PAUSED: "Error · paused"})[state.state] || "Paused");
-  text("device-label", state.deviceLabel ?? "Lush simulator");
-  text("connection-badge", state.mode === "lovense" ? "LIVE · BETA" : "SIMULATED");
+  text("device-label", state.deviceLabel ?? "Toy");
+  text("connection-badge", state.mode === "lovense" ? "LOVENSE REMOTE" : "SIMULATED");
   text("output-label", state.mode === "lovense" ? "Level sent to toy" : "Simulator level");
   $("transport").setAttribute("aria-label", state.mode === "lovense" ? "Toy playback controls" : "Simulator playback controls");
   $("transport").dataset.running = String(Boolean(state.running || pendingStart));
@@ -583,13 +591,14 @@ function display(state = latest) {
   else if (state.outputKnown === false) readiness = "Check that your toy has stopped, then reconnect before starting.";
   else if (state.state === "ERROR_PAUSED") readiness = "Reconnect, then confirm Start again.";
   else if (!canStartHere()) readiness = hostedAccess?.snapshot().state === "checking" ? "Checking sign-in. Start will be available when the check passes." :
-    publicMode ? "Sign in to connect a physical toy. You can still try a simulator." : "Check your sign-in before starting. Your story is still readable.";
+    publicMode ? "Sign in to connect your toy. You can still read." : "Check your sign-in before starting. Your story is still readable.";
   else if (importing) readiness = "Opening your text. Start will be available after analysis and connection.";
   else if (libraryMutation || story?.deleting) readiness = "Finishing the library change. Playback stays paused.";
-  else if (!story) readiness = "Add a story, or choose Set up a toy for a guided test read.";
+  else if (!story) readiness = liveReader ? "Add a story or pair your toy." : "Add a story or open Toy setup.";
   else if (!story.model.analysisReady) readiness = story.model.analysisStatus === "error" ? "Analysis needs attention. Open Advanced in Reading controls and choose Analyse again." : "Preparing story suggestions. You can keep reading while you wait.";
   else if (nocturneOperation) readiness = "Nocturne is reviewing scene cues. Start is available when it finishes.";
-  else if (!state.connected) readiness = live ? "Choose Pair toy to connect through Lovense Remote." : "Choose Simulator to try this story, or open Toy setup to connect your own toy.";
+  else if (!state.connected) readiness = live ? "Choose Pair toy to connect through Lovense Remote." :
+    scopedBeta ? "Choose Simulator to try this story." : "Choose Simulator to try this story, or open Toy setup to connect your own toy.";
   else if (!navigator.locks) readiness = "Start needs browser Web Locks. Use a current browser over HTTPS or localhost; reading still works here.";
   else if (state.mode === "lovense" && state.canStart === false) readiness = state.reason || "Complete Toy setup and confirm the short connection test before Start.";
   else if (finished) readiness = "Story finished. Replay returns to the first section and asks you to confirm playback.";
@@ -672,7 +681,7 @@ function controlRecovery(state) {
   text("start-help", "The controls could not update. Stop was requested. Check your toy and reconnect before continuing.");
   show("The controls could not update. Reconnect; your story remains readable.");
 }
-const controller = new ReaderDeviceController({document, window, navigator, storyRhythms: true, allowGuestSimulation: publicMode,
+const controller = new ReaderDeviceController({document, window, navigator, storyRhythms: true, createSimulation: betaTools?.createReaderSimulation, allowLive: !scopedBeta,
   independentRhythms: !hostedMode || window.location?.hostname === "app.satinlore.com",
   authorize: async () => !hostedMode || Boolean(await hostedAccess?.check({fresh: true}) && hasVerifiedAccess()),
   onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
@@ -716,28 +725,29 @@ function renderStoryModel(story) {
   $("scene-model").value = selected;
   $("scene-model").disabled = Boolean(story?.deleting || libraryMutation);
   text("scene-model-help", story?.controlled ? "This calibration story keeps its fixed levels. Choose a model for your next story, or open a model practice story to try it now." :
-    "Loom analyses on this browser. Nocturne can also review nearby story context when you enable it.");
-  $("model-practice-shortcut").hidden = !story?.controlled;
+    hostedAnalysis ? "Loom analyses on this browser. Nocturne can also review nearby story context when you enable it." :
+      "Loom analyses the story on this browser.");
+  $("model-practice-shortcut").hidden = liveReader || !story?.controlled;
   $("model-practice-shortcut").disabled = libraryMutation || story?.deleting;
-  $("nocturne-panel").hidden = selected !== "nocturne" || !analysedStory;
+  $("nocturne-panel").hidden = scopedBeta || selected !== "nocturne" || !analysedStory;
   $("nocturne-sign-in").hidden = !signInNeeded;
   $("nocturne-run").hidden = signInNeeded;
-  $("nocturne-run").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
+  $("nocturne-run").disabled = !hostedAnalysis || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne || libraryMutation;
   const context = story?.nocturneContextSession;
   const contextEnabled = context?.enabled === true;
   const {requests, bytes} = remainingContextAllowance(context);
   $("nocturne-context-enable").hidden = signInNeeded || contextEnabled;
   $("nocturne-context-disable").hidden = !contextEnabled;
   $("nocturne-context-consent").disabled = contextEnabled || busy;
-  $("nocturne-context-enable").disabled = !hostedMode || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne ||
+  $("nocturne-context-enable").disabled = !hostedAnalysis || !story?.model.analysisReady || !hasVerifiedAccess() || busy || checkingNocturne ||
     libraryMutation || !$("nocturne-context-consent").checked || requests === 0 || bytes === 0;
   const coverage = contextEnabled ? `${story.model.nocturneContext.size} of ${story.model.paragraphs.length} sections reviewed. ` : "";
-  const allowance = context?.rateLimited ? "The beta usage limit has been reached." : requests === 0 || bytes === 0 ?
+  const allowance = context?.rateLimited ? "You’ve reached the Nocturne usage limit." : requests === 0 || bytes === 0 ?
     "The nearby review allowance for this visit has been used." :
     `${requests} ${requests === 1 ? "request" : "requests"} and ${bytes.toLocaleString()} text bytes remain this visit.`;
   text("nocturne-context-status", `${coverage}${allowance} Unreviewed sections use Loom.`);
   text("nocturne-run", nocturneReady === false ? "Check availability" : "Analyse with Nocturne");
-  text("nocturne-status", !hostedMode ? "Your patterns follow Loom’s scene cues. Further analysis is available in the hosted app." :
+  text("nocturne-status", !hostedAnalysis ? "Your patterns follow Loom’s scene cues. Further analysis is available in the hosted app." :
     signInNeeded ? "Your patterns are ready. Sign in to let Nocturne review scene cues." :
     checkingNocturne ? "Checking analysis availability…" : busy ? "Nocturne is reviewing selected context or cues." :
     story?.nocturneMessage || (nocturneReady === false ? "Further analysis is unavailable. Your patterns follow Loom’s scene cues." : "Choose Analyse with Nocturne when you’re ready."));
@@ -770,7 +780,7 @@ function contextNeedsReview(story, position) {
 
 async function runNocturneContext({automatic = false} = {}) {
   const story = currentStory();
-  if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" ||
+  if (!hostedAnalysis || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" ||
       story.controlled || story.deleting || libraryMutation || nocturneOperation) return;
   let session = story.nocturneContextSession;
   const {requests, bytes} = remainingContextAllowance(session);
@@ -810,7 +820,7 @@ async function runNocturneContext({automatic = false} = {}) {
       story.nocturneMessage = `Nearby context reviewed. ${result.usage ? `${result.usage.totalTokens} tokens used by this request. ` : ""}Uncertain sections keep Loom.`;
     } else if (result.code === "rate_limited") {
       session.rateLimited = true;
-      story.nocturneMessage = "The beta usage limit has been reached. Loom covers unreviewed sections.";
+      story.nocturneMessage = "You’ve reached the Nocturne usage limit. Loom covers unreviewed sections.";
     } else story.nocturneMessage = "Nearby review could not finish. Loom covers those sections. This request counts towards the visit limit.";
   } catch {
     if (current()) story.nocturneMessage = "Nearby review could not finish. Loom covers those sections. This request counts towards the visit limit.";
@@ -820,7 +830,7 @@ async function runNocturneContext({automatic = false} = {}) {
 }
 
 async function checkNocturne() {
-  if (!hostedMode || !hasVerifiedAccess() || checkingNocturne) return;
+  if (!hostedAnalysis || !hasVerifiedAccess() || checkingNocturne) return;
   checkingNocturne = true; display();
   const available = await nocturneAvailable();
   nocturneReady = hasVerifiedAccess() ? available : null;
@@ -838,7 +848,7 @@ function cancelNocturne() {
 
 async function runNocturne() {
   const story = currentStory();
-  if (!hostedMode || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" || nocturneOperation) return;
+  if (!hostedAnalysis || !hasVerifiedAccess() || document.hidden || !story?.model.analysisReady || story.sceneModel !== "nocturne" || nocturneOperation) return;
   if (nocturneReady !== true) { await checkNocturne(); return; }
   pause("Nocturne analysis pauses playback. Confirm Start after review.");
   clearNocturneContext(story);
@@ -1137,7 +1147,7 @@ function selectStory(id, {focusReader = isNarrow()} = {}) {
     return;
   }
   closeDialogs();
-  pause("Story opened. Confirm Start when you want simulated playback.");
+  pause("Story opened. Confirm Start when you’re ready.");
   const previous = currentStory();
   clearNocturneContext(previous);
   clearNocturneContext(story);
@@ -1483,7 +1493,7 @@ function deleteStory(story) {
 }
 
 function selectedPracticeStory() {
-  return PRACTICE_STORIES.find(story => story.id === $("practice-story-choice").value);
+  return practiceStories.find(story => story.id === $("practice-story-choice").value);
 }
 function updatePracticeChoice() {
   const story = selectedPracticeStory();
@@ -1496,14 +1506,14 @@ function updatePracticeChoice() {
   text("practice-story-status", "");
 }
 function openPracticePicker({models = false} = {}) {
-  if (libraryLoading || libraryMutation || $("practice-story-dialog").open) return;
+  if (!practiceStories.length || libraryLoading || libraryMutation || $("practice-story-dialog").open) return;
   setupFlow?.cancel();
   cancelImport();
   const picker = $("practice-story-choice");
-  const selected = (models ? PRACTICE_STORIES.find(story => !story.controlled)?.id : picker.value) || PRACTICE_STORIES[0].id;
+  const selected = (models ? practiceStories.find(story => !story.controlled)?.id : picker.value) || practiceStories[0].id;
   picker.replaceChildren(...[[true, "Controls with known levels"], [false, "Compare story models"]].map(([controlled, label]) => {
     const group = document.createElement("optgroup"); group.label = label;
-    for (const story of PRACTICE_STORIES.filter(story => Boolean(story.controlled) === controlled)) {
+    for (const story of practiceStories.filter(story => Boolean(story.controlled) === controlled)) {
       const option = document.createElement("option"); option.value = story.id; option.textContent = story.title;
       group.append(option);
     }
@@ -1538,7 +1548,8 @@ async function openDraftText() {
     addPreparedStory({title: $("draft-title").value, text: preparePlainStoryText(source)},
       {folderId: folders.some(folder => folder.id === folderFilter) ? folderFilter : null});
     $("draft-story").value = ""; $("draft-title").value = ""; text("draft-status", "");
-    show(latest.connected ? "Story opened for this visit. Choose Start when you want to play along." : "Story opened for this visit. Try the simulator or use Toy setup to connect your own toy.");
+    show(latest.connected ? "Story opened for this visit. Choose Start when you’re ready." :
+      "Story opened for this visit. Choose Toy setup to connect your toy.");
   } catch (error) { text("draft-status", error.message || "Could not open your story. Your writing is still here."); }
 }
 
@@ -1563,9 +1574,9 @@ async function importStoryUrl() {
   catch (error) { text("url-import-status", error.message); return; }
   const link = $("open-source-link");
   if (link) { link.href = plan.url; link.textContent = plan.name === "This site" ? "Open original site" : `Open ${plan.name}`; link.hidden = false; }
-  if ($("paste-source-trigger")) $("paste-source-trigger").hidden = plan.automatic;
-  if (!plan.automatic) {
-    text("url-import-status", plan.guidance);
+  if ($("paste-source-trigger")) $("paste-source-trigger").hidden = plan.automatic && !scopedBeta;
+  if (!plan.automatic || scopedBeta) {
+    text("url-import-status", scopedBeta && plan.automatic ? "Open the story and paste text you have permission to use." : plan.guidance);
     // Keep the source openable without automatically opening a new tab.
     return;
   }
@@ -1611,7 +1622,7 @@ async function confirmStart() {
   if (focusStop) $("stop").focus({preventScroll: true});
   let release = null;
   try {
-    if (hostedMode && (!publicMode || latest.mode === "lovense")) {
+    if (hostedMode) {
       const allowed = await hostedAccess.check({fresh: true});
       if (!allowed || !canStartHere() || operation !== startEpoch || document.hidden || currentStory() !== story ||
           !story.model.analysisReady || latest.ceiling !== intent.ceiling || latest.levelAdjustment !== intent.levelAdjustment || playbackIdentity() !== intent.device || !latest.connected) return;
@@ -1817,7 +1828,12 @@ for(const[id,value]of[["mark-good",5],["mark-uncomfortable",1]])$(id)?.addEventL
   text("beta-feedback-status","Marked in this beta recording. Your controls are unchanged.");
 });
 $("apply-combined")?.addEventListener("click",async()=>{try{const channels=Array.from($("combination-choices").querySelectorAll('input:checked')).map(input=>input.value);if(!channels.length)throw Error("Choose at least one movement.");const mode=latest.feel?.mode||"story";pause("Applying movement choices.");if(channels.length===1){await controller.applyCalibration(channels[0]);controller.setFeel({mode});}else await controller.applyChannels(channels,{mode});display(controller.snapshot());}catch(error){show(error.message||"The movements could not be combined.");}});
-for (const id of ["control-playground", "empty-practice"]) $(id)?.addEventListener("click", openPracticePicker);
+if (betaTools) {
+  for (const id of ["control-playground", "empty-practice"]) {
+    $(id).hidden = false;
+    $(id).addEventListener("click", openPracticePicker);
+  }
+}
 $("model-practice-shortcut")?.addEventListener("click", () => openPracticePicker({models: true}));
 $("practice-story-choice").addEventListener("change", updatePracticeChoice);
 $("practice-story-open").addEventListener("click", openSelectedPracticeStory);
@@ -1931,7 +1947,7 @@ $("start").addEventListener("click", () => {
   const section = story.model.paragraphs[latest.position];
   const quiet = latest.ceiling === 0 ? " The maximum is zero, so the toy will stay still." : latest.baseLevel === 0 && latest.target === 0 ?
     (section?.override === 0 ? " You set this section to level zero." : " This section starts quiet. The level can change as you read.") : "";
-  text("start-summary", `${latest.deviceLabel ?? "Lush simulator"} · ${movement} · maximum ${latest.ceiling}/20 · current level ${latest.target}/20.${quiet}${latest.mode === "lovense" ? " Each command lasts up to two seconds. Check the movement on your toy." : ""}`);
+  text("start-summary", `${latest.deviceLabel ?? "Toy"} · ${movement} · maximum ${latest.ceiling}/20 · current level ${latest.target}/20.${quiet}${latest.mode === "lovense" ? " Each command lasts up to two seconds. Check the movement on your toy." : ""}`);
   text("confirm-start", `Start with maximum ${latest.ceiling}/20`);
 });
 $("confirm-start").addEventListener("click", () => void confirmStart());
@@ -2442,15 +2458,19 @@ if (publicMode) {
   });
 }
 
+// Local hardware checks stay available only in the local application.
+for (const link of document.querySelectorAll('a[href="/device-check"]')) link.hidden = hostedMode;
 if (hostedMode) {
-  // Local hardware checks stay available only in the local application.
-  for (const link of document.querySelectorAll('a[href="/device-check"]')) link.hidden = true;
   const accessStatus = $("access-status");
   hostedAccess = new HostedAccessGuard({
     allowGuest: publicMode,
+    ...(scopedBeta ? {request: options => fetch("/beta/api/access", options)} : {}),
     onChange: state => {
       hostedAccessReady = state.allowed;
-      controller.setAuthorized?.(state.allowed);
+      controller.setAuthorized?.(state.allowed, {
+        unavailableMessage: publicMode && !publicSignedIn ?
+          (state.state === "checking" ? "Checking sign-in. You can still read." : "Sign in to connect your toy. You can still read.") : undefined,
+      });
       if (publicMode && (state.allowed || ["guest", "blocked"].includes(state.state))) updatePublicSession(state.allowed);
       if (accessStatus && state.allowed) { accessStatus.hidden = true; accessStatus.replaceChildren(); }
       else if (!publicMode && accessStatus && state.state === "checking" && !state.allowed) {
@@ -2464,7 +2484,7 @@ if (hostedMode) {
       if (currentStory()) syncReaderMapping(currentStory());
       if (publicMode) {
         if (latest.mode === "lovense" || nocturneOperation) {
-          pause("Sign in again to reconnect a toy or use Nocturne. You can still read and try a simulator.");
+          pause("Sign in again to reconnect your toy or use Nocturne. You can still read.");
           closeDialog("start-dialog");
         }
         return;
@@ -2477,7 +2497,7 @@ if (hostedMode) {
         const retry = document.createElement("button"); retry.type = "button"; retry.className = "quiet-control";
         retry.textContent = "Check sign-in again";
         retry.addEventListener("click", () => void hostedAccess.check());
-        const login = document.createElement("a"); login.href = "/"; login.textContent = "Reload to sign in";
+        const login = document.createElement("a"); login.href = scopedBeta ? "/beta" : "/"; login.textContent = "Reload to sign in";
         accessStatus.replaceChildren(explanation, retry, document.createTextNode(" "), login);
         accessStatus.hidden = false;
       }
@@ -2509,10 +2529,26 @@ applyReadingDefaults(currentExperience());
 text("reader-preferences-note", loadedPreferences.message);
 // These presentation modules consume snapshots; they never dispatch device commands.
 if (document.createElementNS) {
-  simulatorView = createSimulatorView($("simulator-visual"), {document, window});
-  setupFlow = createSetupFlow({document, window, coachMount: $("setup-coach-mount"),
+  if (scopedBeta) {
+    text("about-reader-copy", "Use the simulator to check the reader controls.");
+    text("device-preview-heading", "Simulator controls");
+    $("choose-toy").title = "Set up the simulator";
+  }
+  if (betaTools) {
+    simulatorView = betaTools.createSimulatorView($("device-visual"), {document, window});
+    const labLink = document.createElement("a");
+    labLink.href = scopedBeta ? "/beta/simulator-lab" : "/simulator-lab";
+    labLink.target = "_blank"; labLink.rel = "noopener"; labLink.textContent = "Simulator scenarios";
+    $("about-reader").append(labLink);
+  }
+  $("device-preview").hidden = false;
+  $("device-visual").hidden = liveReader;
+  $("open-nocturne-patterns").hidden = liveReader;
+  const mountSetup = betaTools?.createBetaSetupFlow ?? createSetupFlow;
+  setupFlow = mountSetup({document, window, coachMount: $("setup-coach-mount"),
     enableCalibration: true,
-    quickSetup: publicMode || window.location?.hostname === "app.satinlore.com",
+    quickSetup: liveReader || scopedBeta,
+    allowLive: !scopedBeta,
     onQuickTest: options => controller.quickTest(options),
     onConfirmQuickTest: () => controller.confirmQuickTest(),
     onOpenAdvanced: () => {
@@ -2550,10 +2586,10 @@ if (document.createElementNS) {
     onFinish: () => { openDraft(); setPanel("settings", true, {restore: false}); selectSettingsTab("reader"); },
   });
   connection = controller.setupSnapshot();
-  accountClient = new ReaderAccountClient({hosted:hostedMode});
+  accountClient = new ReaderAccountClient({hosted:hostedMode && !scopedBeta});
   if (publicMode && !publicSignedIn) accountClient.clear();
   accountWorkspace = mountAccountWorkspace({client:accountClient,document,welcomeMount:$("account-welcome"),settingsMount:$("account-settings-mount"),presetMount:$("preset-mount"),
-    publicMode, onSignIn: () => publicAccount?.open($("public-account")),
+    publicMode, allowSimulation: !liveReader, onSignIn: () => publicAccount?.open($("public-account")),
     onDeleted: () => {
       if (publicMode) {
         hostedAccess.suspend();
@@ -2587,16 +2623,29 @@ if (document.createElementNS) {
     },onResearchEvent:recordAllowedEvent,
   });
   if (!publicMode || publicSignedIn) void accountClient.load();
-  betaRecorder=createBetaRecorder({hostname:window.location?.hostname});
-  $("beta-feedback-controls").hidden=!betaRecorder.snapshot().enabled;
-  mountBetaRecording({mount:$("beta-recording-mount"),recorder:betaRecorder,document,
-    context:()=>({mode:latest.mode==="lovense"?"live":"simulator",toy:latest.model||"none"})});
-  let wasRecording=false;
-  betaRecorder.subscribe(state=>{const began=state.recording&&!wasRecording;wasRecording=state.recording;readingFeedback.sharing(state.recording);for(const id of ["mark-good","mark-uncomfortable"])$(id).disabled=!latest.running||!state.recording;if(began){recordedDevice=recordedStory=recordedStep="";recordControlSnapshot(latest);}});
-  const setupDialog=$("setup-dialog"),recordingNode=$("beta-recording");
-  if(setupDialog&&recordingNode&&typeof MutationObserver!=="undefined")new MutationObserver(()=>{
-    if(setupDialog.open)setupDialog.prepend(recordingNode);else $("beta-recording-mount").append(recordingNode);
-  }).observe(setupDialog,{attributes:true,attributeFilter:["open"]});
+  if (betaTools && window.location?.hostname === "beta.satinlore.com") {
+    const recordingStyles = document.createElement("link");
+    recordingStyles.rel = "stylesheet"; recordingStyles.href = "/static/reader/beta-recording.css";
+    document.head?.append(recordingStyles);
+    $("beta-recording-mount").hidden = false;
+    betaRecorder = betaTools.createBetaRecorder({hostname: window.location.hostname});
+    $("beta-feedback-controls").hidden = !betaRecorder.snapshot().enabled;
+    betaTools.mountBetaRecording({mount: $("beta-recording-mount"), recorder: betaRecorder, document,
+      context: () => ({mode: latest.mode === "lovense" ? "live" : "simulator", toy: latest.model || "none"})});
+    let wasRecording = false;
+    betaRecorder.subscribe(state => {
+      const began = state.recording && !wasRecording;
+      wasRecording = state.recording;
+      readingFeedback.sharing(state.recording);
+      for (const id of ["mark-good", "mark-uncomfortable"]) $(id).disabled = !latest.running || !state.recording;
+      if (began) { recordedDevice = recordedStory = recordedStep = ""; recordControlSnapshot(latest); }
+    });
+    const setupDialog = $("setup-dialog"), recordingNode = $("beta-recording");
+    if (setupDialog && recordingNode && typeof MutationObserver !== "undefined") new MutationObserver(() => {
+      if (setupDialog.open) setupDialog.prepend(recordingNode);
+      else $("beta-recording-mount").append(recordingNode);
+    }).observe(setupDialog, {attributes: true, attributeFilter: ["open"]});
+  }
 }
 selectSettingsTab("reader");
 setPanel("library", !isNarrow(), {restore: false});

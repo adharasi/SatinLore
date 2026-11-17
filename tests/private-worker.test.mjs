@@ -9,6 +9,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createPrivateAppWorker, privateAppConfiguration } from "../deploy/cloudflare/worker.mjs";
 import { PRIVATE_ASSET_PATHS, PRIVATE_DOCUMENT_ROUTES, ALPHA_ASSETS, CORPUS_STUDY_CLIENT_ASSET } from "../deploy/cloudflare/assets.mjs";
 import { FEEDBACK_INBOX_NAME } from "../deploy/cloudflare/feedback.mjs";
+import { ALPHA_COOKIE } from "../deploy/cloudflare/alpha-contract.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://app.satinlore.com";
@@ -17,6 +18,11 @@ const ENV = {
   ACCESS_TEAM_DOMAIN: "synthetic-team.cloudflareaccess.com",
   ACCESS_AUD: "a".repeat(64), FOUNDER_EMAIL: "founder@example.test",
 };
+const BETA_ONLY_ROUTES = new Set(["/simulator-lab", "/simulation.html", "/static/simulation.mjs", "/static/simulation.css",
+  "/static/simulation/clock.mjs", "/static/simulation/transport.mjs", "/static/simulation/scenarios.mjs", "/static/devices/mock.mjs",
+  "/static/devices/profile-simulator.mjs", "/static/devices/reader-beta-device.mjs", "/static/playback/controller.mjs",
+  "/static/reader/beta-toolkit.mjs", "/static/reader/simulator-view.mjs", "/static/reader/practice-stories.mjs",
+  "/static/reader/beta-recording.mjs", "/static/reader/beta-recording.css", "/static/reader/beta-stories.mjs"]);
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const otherKeys = await generateKeyPair("RS256");
 const publicJwk = { ...await exportJWK(publicKey), kid: "synthetic-key", alg: "RS256" };
@@ -32,7 +38,11 @@ function fixture() {
   const worker = createPrivateAppWorker({ keyResolver: async (...args) => { keyRequests.push(args[0]); return localKeys(...args); } });
   const env = { ...ENV, ASSETS: { async fetch(request) {
     reads.push(request);
-    return new Response(new URL(request.url).pathname === "/device-bridge.html" ? '<!doctype html><script id="lovense-isolated-bundle">void 0;</script>' : "Synthetic reader asset", { headers: { "Content-Type": "text/html", "Cache-Control": "public, max-age=3600" } });
+    const path = new URL(request.url).pathname;
+    const bundle = '<!doctype html><script id="lovense-isolated-bundle">void 0;</script>';
+    const document = '<!doctype html><head><script src="/static/app.mjs"></script></head><a href="/">Back</a>';
+    return new Response(path === "/device-bridge.html" ? bundle : path.endsWith(".html") ? document : "Synthetic reader asset",
+      { headers: { "Content-Type": "text/html", "Cache-Control": "public, max-age=3600" } });
   } } };
   return { worker, env, reads, keyRequests };
 }
@@ -61,7 +71,7 @@ test("every static reader route denies missing tokens before fetching assets or 
   const f = fixture();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const result = await f.worker.fetch(request(path), f.env);
-    if (["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
+    if (BETA_ONLY_ROUTES.has(path) || ["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
       assert.equal(result.status, 404, path);
       continue;
     }
@@ -77,7 +87,7 @@ test("valid founder assertions grant only read-only allowlisted files and strip 
   const f = fixture(), jwt = await token();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const response = await f.worker.fetch(request(path, jwt), f.env);
-    if (["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
+    if (BETA_ONLY_ROUTES.has(path) || ["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
       assert.equal(response.status, 404, path);
       continue;
     }
@@ -153,14 +163,80 @@ test("a valid assertion cannot enable alternate hostnames, local invitation or p
   assert.equal(f.reads.length, 0);
 });
 
-test("the authenticated access probe exposes only expiry in milliseconds; health never claims a complete beta", async () => {
+test("the authenticated access probe exposes only expiry in milliseconds and labels each reader's connection mode", async () => {
   const f = fixture(), exp = Math.floor(Date.now() / 1000) + 120, jwt = await token({ exp });
   const response = await f.worker.fetch(request("/api/access", jwt), f.env);
   assert.deepEqual(await response.json(), { authenticated: true, expiresAt: exp * 1000 });
   assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.deepEqual(await (await f.worker.fetch(request("/api/health", jwt), f.env)).json(), { status: "ok", device_mode: "simulator", beta_ready: false });
+  assert.deepEqual(await (await f.worker.fetch(request("/api/health", jwt), f.env)).json(), { status: "ok", device_mode: "lovense", beta_ready: false });
+  const betaHealth = await f.worker.fetch(request("/api/health", jwt, {origin: "https://beta.satinlore.com"}), f.env);
+  assert.deepEqual(await betaHealth.json(), { status: "ok", device_mode: "simulator", beta_ready: false });
   assert.equal(f.reads.length, 0);
   assert.equal((await f.worker.fetch(request("/api/access"), f.env)).status, 403);
+});
+
+test("app beta requires its own signed Access audience for the page, modules and playback probe", async () => {
+  const f = fixture();
+  const aud = "b".repeat(64), legacyAud = "c".repeat(64), email = "tester@example.test";
+  const env = {...f.env, APP_BETA_ACCESS_AUD: aud, BETA_ACCESS_AUD: legacyAud, BETA_TESTER_EMAILS: email,
+    PUBLIC_READER_ENABLED: "true", PUBLIC_READER_OTP_KEY: "ba".repeat(32),
+    PUBLIC_READER_AUTH: {idFromName() {}, get() {}}, READER_ACCOUNTS: {idFromName() {}, get() {}},
+    AUTH_SES_REGION: "eu-west-2", AUTH_SES_FROM_EMAIL: "reader@example.test", AUTH_SES_ACCESS_KEY_ID: "X".repeat(20),
+    AUTH_SES_SECRET_ACCESS_KEY: "X".repeat(40)};
+  const expires = Math.floor(Date.now() / 1000) + 120;
+  const tester = await token({ aud, email, exp: expires }), founder = await token({ aud });
+  const rejected = [undefined, await token(), await token({aud: legacyAud, email}),
+    await token({aud, email: "other@example.test"}), await token({aud: [aud, ENV.ACCESS_AUD]}),
+    await token({aud, email, exp: expires - 180})];
+  for (const path of ["/beta", "/beta/", "/beta/simulator-lab", "/beta/static/reader/beta-toolkit.mjs", "/beta/api/access"]) {
+    for (const jwt of rejected) {
+      assert.equal((await f.worker.fetch(request(path, jwt, {headers: {Cookie: "synthetic=public-session"}}), env)).status, 403, path);
+    }
+  }
+  assert.equal(f.reads.length, 0);
+  for (const value of [undefined, ENV.ACCESS_AUD, legacyAud, "placeholder"]) {
+    assert.equal((await f.worker.fetch(request("/beta", tester), {...env, APP_BETA_ACCESS_AUD: value})).status, 503);
+  }
+
+  for (const path of ["/beta", "/beta/", "/beta/simulator-lab"]) {
+    const page = await f.worker.fetch(request(path, tester), env);
+    assert.equal(page.status, 200, path);
+    assert.equal(page.headers.get("Cache-Control"), "no-store");
+    assert.match(page.headers.get("Content-Security-Policy"), /frame-src 'none';/);
+    const html = await page.text();
+    assert.match(html, /name="satinlore-reader-mode" content="beta"/);
+    assert.match(html, /src="\/beta\/static\/app\.mjs"/);
+    assert.match(html, /href="\/beta"/);
+    assert.doesNotMatch(html, /satinlore-public-auth/);
+  }
+  const module = await f.worker.fetch(request("/beta/static/reader/beta-toolkit.mjs?ignored=1", tester, {headers: {Cookie:"private=synthetic"}}), env);
+  assert.equal(module.status, 200);
+  assert.equal(f.reads.at(-1).url, ORIGIN + "/static/reader/beta-toolkit.mjs");
+  assert.equal(f.reads.at(-1).headers.get("Cookie"), null);
+  assert.equal(f.reads.at(-1).headers.get("Cf-Access-Jwt-Assertion"), null);
+  const access = await f.worker.fetch(request("/beta/api/access", tester), env);
+  assert.deepEqual(await access.json(), {authenticated: true, expiresAt: expires * 1000});
+  const head = await f.worker.fetch(request("/beta", founder, {method: "HEAD"}), env);
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  assert.equal((await f.worker.fetch(request("/beta/api/access", tester, {method: "POST"}), env)).status, 405);
+  for (const path of ["/beta/api/access?extra=1", "/beta/admin", "/beta/api/lovense/session", "/beta/api/billing-admin", "/beta/api/beta/recordings", "/beta/static/beta-admin.mjs", "/beta/.env"]) {
+    assert.equal((await f.worker.fetch(request(path, founder), env)).status, 404, path);
+  }
+
+  for (const path of BETA_ONLY_ROUTES) {
+    assert.equal((await f.worker.fetch(request(path, founder), env)).status, 404, path);
+    assert.equal((await f.worker.fetch(request(path), env)).status, 404, path);
+  }
+  const publicReader = await (await f.worker.fetch(request("/"), env)).text();
+  assert.match(publicReader, /name="satinlore-reader-mode" content="live"/);
+  assert.match(publicReader, /satinlore-public-auth/);
+  assert.match(publicReader, /src="\/static\/app\.mjs"/);
+  const privateReader = await (await f.worker.fetch(request("/", await token()), {...env, PUBLIC_READER_ENABLED: "false"})).text();
+  assert.match(privateReader, /name="satinlore-reader-mode" content="live"/);
+  assert.doesNotMatch(privateReader, /satinlore-public-auth/);
+  assert.equal((await f.worker.fetch(request("/", tester, {origin: "https://beta.satinlore.com"}), env)).status, 403);
+  assert.equal((await f.worker.fetch(request("/simulator-lab", await token({aud: legacyAud, email}), {origin: "https://beta.satinlore.com"}), env)).status, 200);
 });
 
 test("unavailable asset bindings and asset-service errors cannot serve an unprotected fallback", async () => {
@@ -180,7 +256,7 @@ test("deployment invokes authentication ahead of all assets and packages only th
   assert.deepEqual(config.durable_objects.bindings, [{ name: "PRIVATE_FEEDBACK", class_name: "PrivateFeedback" },{name:"READER_ACCOUNTS",class_name:"ReaderAccount"},{name:"BETA_RECORDINGS",class_name:"BetaRecordings"},{name:"ALPHA_STUDY",class_name:"AlphaStudy"},{name:"SCENE_ANALYSIS_BUDGET",class_name:"SceneAnalysisBudget"},{name:"PUBLIC_READER_AUTH",class_name:"PublicReaderAuth"},{name:"COMMERCE",class_name:"SatinLoreCommerce"},{name:"LAUNCH_USAGE",class_name:"LaunchUsage"}]);
   assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["PrivateFeedback"] },{tag:"v2",new_sqlite_classes:["ReaderAccount","BetaRecordings"]},{tag:"v3",new_sqlite_classes:["AlphaStudy"]},{tag:"v4",new_sqlite_classes:["SceneAnalysisBudget"]},{tag:"v5",new_sqlite_classes:["PublicReaderAuth"]},{tag:"v6",new_sqlite_classes:["SatinLoreCommerce","LaunchUsage"]}]);
   assert.equal(config.keep_vars, true);
-  for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "PRIVATE_APP_ENABLED", "PUBLIC_READER_ENABLED", "PUBLIC_READER_OTP_KEY"]) {
+  for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "APP_BETA_ACCESS_AUD", "PRIVATE_APP_ENABLED", "PUBLIC_READER_ENABLED", "PUBLIC_READER_OTP_KEY"]) {
     assert.equal(Object.hasOwn(config.vars, key), false, `${key} must remain dashboard-owned`);
   }
   assert.equal(config.vars.PUBLIC_APP_ORIGIN, ORIGIN);
@@ -242,6 +318,24 @@ test("the unauthenticated Alpha namespace serves its sign-in shell without openi
   assert.equal((await f.worker.fetch(request("/alpha", await token(), { origin: "https://beta.satinlore.com" }), f.env)).status, 404);
   assert.equal((await f.worker.fetch(request("/static/app.mjs", undefined, { headers: { Cookie: "__Host-satinlore_alpha=synthetic" } }), f.env)).status, 403);
   assert.equal(f.reads.length, 2);
+});
+
+test("Alpha's login module remains available while simulator code needs a verified Alpha session", async () => {
+  const f = fixture(), alphaToken = "a".repeat(64);
+  const env = {...f.env, ALPHA_DILAN_VERIFIER: "b".repeat(64), ALPHA_SADIE_VERIFIER: "c".repeat(64),
+    ALPHA_STUDY: {idFromName: name => name, get: () => ({async fetch(request) {
+      const authenticated = request.headers.get("X-Alpha-Session") === alphaToken;
+      return Response.json({authenticated, username: "Sadie", expiresAt: Date.now() + 60_000});
+    }})}};
+  assert.equal((await f.worker.fetch(request("/alpha/static/alpha.mjs"), env)).status, 200);
+  for (const file of ["alpha-device.mjs", "alpha-movement-view.mjs", "devices/reader-beta-device.mjs",
+    "devices/profile-simulator.mjs", "playback/controller.mjs", "reader/simulator-view.mjs"]) {
+    const path = `/alpha/static/${file}`;
+    assert.equal((await f.worker.fetch(request(path, await token()), env)).status, 401, path);
+    const headers = {Cookie: `${ALPHA_COOKIE}=${alphaToken}`};
+    assert.equal((await f.worker.fetch(request(path, undefined, { headers }), env)).status, 200, path);
+    assert.equal(f.reads.at(-1).headers.get("Cookie"), null);
+  }
 });
 
 test("beta review documents and assets require the founder on the beta host", async()=>{

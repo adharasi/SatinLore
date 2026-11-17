@@ -10,6 +10,7 @@ export const READER_ASSETS = Object.freeze([
   ["reader.css", "/static/reader.css"],
   ["devices/mock.mjs", "/static/devices/mock.mjs"],
   ["devices/reader-device.mjs", "/static/devices/reader-device.mjs"],
+  ["devices/reader-beta-device.mjs", "/static/devices/reader-beta-device.mjs"],
   ["devices/bridge-transport.mjs", "/static/devices/bridge-transport.mjs"],
   ["devices/pairing-image.mjs", "/static/devices/pairing-image.mjs"],
   ["devices/profile-simulator.mjs", "/static/devices/profile-simulator.mjs"],
@@ -20,6 +21,7 @@ export const READER_ASSETS = Object.freeze([
   ["favicon.svg", "/static/favicon.svg"],
   ["reader/setup-flow.mjs", "/static/reader/setup-flow.mjs"],
   ["reader/simulator-view.mjs", "/static/reader/simulator-view.mjs"],
+  ["reader/beta-toolkit.mjs", "/static/reader/beta-toolkit.mjs"],
   ["setup.css", "/static/setup.css"],
   ["reader/identity.mjs", "/static/reader/identity.mjs"],
   ["reader/model.mjs", "/static/reader/model.mjs"],
@@ -72,6 +74,13 @@ export const READER_ASSETS = Object.freeze([
 ].map(entry => Object.freeze(entry)));
 
 export const PRIVATE_ASSET_PATHS = Object.freeze(READER_ASSETS.map(([, path]) => path));
+export const BETA_ONLY_ASSET_PATHS = Object.freeze([
+  "/simulation.html", "/static/simulation.mjs", "/static/simulation.css",
+  "/static/simulation/clock.mjs", "/static/simulation/transport.mjs", "/static/simulation/scenarios.mjs",
+  "/static/devices/mock.mjs", "/static/devices/profile-simulator.mjs", "/static/devices/reader-beta-device.mjs",
+  "/static/playback/controller.mjs", "/static/reader/beta-toolkit.mjs", "/static/reader/beta-recording.mjs",
+  "/static/reader/beta-recording.css", "/static/reader/beta-stories.mjs", "/static/reader/simulator-view.mjs", "/static/reader/practice-stories.mjs",
+]);
 // Keep the Alpha dependency tree under one edge-auth exception. Reader assets
 // and APIs at their original paths still require the reader's Access JWT.
 export const ALPHA_ASSETS = Object.freeze([
@@ -81,11 +90,14 @@ export const ALPHA_ASSETS = Object.freeze([
     "alpha.css", "alpha.mjs", "alpha-movement-view.mjs", "alpha-device.mjs", "alpha-screen.mjs", "alpha-screen-schema.mjs", "alpha-timeline.mjs",
     "alpha-admin.css", "alpha-admin.mjs", "theme.css", "favicon.svg",
     "devices/reader-device.mjs", "devices/bridge-transport.mjs", "devices/pairing-image.mjs",
+    "devices/reader-beta-device.mjs",
     "devices/profile-simulator.mjs", "devices/toy-profiles.mjs",
     "playback/controller.mjs", "playback/async-controller.mjs", "reader/calibration.mjs", "reader/simulator-view.mjs",
   ].map(source => [source, `/alpha/static/${source}`]),
 ].map(entry => Object.freeze(entry)));
 export const ALPHA_STATIC_PATHS = Object.freeze(ALPHA_ASSETS.map(([, path]) => path).filter(path => path.startsWith("/alpha/static/")));
+export const ALPHA_SESSION_ASSET_PATHS = Object.freeze(ALPHA_STATIC_PATHS.filter(path => ["/alpha/static/alpha-device.mjs",
+  "/alpha/static/alpha-movement-view.mjs"].includes(path) || BETA_ONLY_ASSET_PATHS.includes(path.slice("/alpha".length))));
 export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
   "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
   "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html", "/billing": "/billing.html",

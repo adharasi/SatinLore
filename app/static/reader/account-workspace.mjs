@@ -39,7 +39,7 @@ export class ReaderAccountClient {
 }
 
 function el(document,tag,text,className){const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n;}
-export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetMount,getContext,onRegistered=()=>{},onApply=()=>{},onStop=()=>{},onResearchEvent=()=>{},publicMode=false,onSignIn=()=>{},onDeleted=()=>{},document=globalThis.document}={}){
+export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetMount,getContext,onRegistered=()=>{},onApply=()=>{},onStop=()=>{},onResearchEvent=()=>{},publicMode=false,allowSimulation=false,onSignIn=()=>{},onDeleted=()=>{},document=globalThis.document}={}){
   let lastRegistered=false,signature='',applying=false,selected='',note='';
   const button=(label,fn,className='')=>{const n=el(document,'button',label,className);n.type='button';n.addEventListener('click',()=>void fn());return n;};
   const status=el(document,'p','','note');status.setAttribute('role','status');
@@ -47,7 +47,7 @@ export function mountAccountWorkspace({client,welcomeMount,settingsMount,presetM
   const adultLabel=el(document,'label','','check-label');adultLabel.append(adult,document.createTextNode('I am 18 or over.'));
   const create=button('Set up saved presets',async()=>{if(!adult.checked){note='Confirm that you are 18 or over to set up your profile.';render();return;}onStop();if(await client.create())onRegistered();},'primary');
   const retry=button('Refresh account',()=>client.load());
-  const intro=el(document,'div','','account-intro');intro.append(el(document,'p','PRIVATE PREVIEW','eyebrow'),el(document,'h2','Keep your toy presets'),el(document,'p','Add a profile to use your saved toy settings on future visits. You can add a story and try the simulator right away.'),adultLabel,create,retry,status);welcomeMount?.append(intro);
+  const intro=el(document,'div','','account-intro');intro.append(el(document,'p','PRIVATE PREVIEW','eyebrow'),el(document,'h2','Keep your toy presets'),el(document,'p',allowSimulation ? 'Add a profile to use your saved toy settings on future visits. You can add a story and try the simulator right away.' : 'Add a profile to use your saved toy settings on future visits.'),adultLabel,create,retry,status);welcomeMount?.append(intro);
   const settingsStatus=el(document,'p','','note');settingsStatus.setAttribute('role','status');
   const deleteChoice=el(document,'input');deleteChoice.type='checkbox';deleteChoice.id='confirm-account-delete';
   const deleteLabel=el(document,'label','','check-label');deleteLabel.append(deleteChoice,document.createTextNode(publicMode?'I want to delete my SatinLore account.':'Remove my saved toy presets and app profile.'));

@@ -1,7 +1,5 @@
 import {AlphaTimeline} from "./alpha-timeline.mjs";
-import {createAlphaDevice} from "./alpha-device.mjs";
 import {captureAlphaScreen} from "./alpha-screen.mjs";
-import {createAlphaMovementView} from "./alpha-movement-view.mjs";
 import {ALPHA_TOY_PROFILES, channelLabel, channelMaximum, getToyProfile} from "./devices/toy-profiles.mjs";
 
 const $ = id => document.getElementById(id);
@@ -27,6 +25,7 @@ let session = null;
 let timeline = null;
 let device = null;
 let deviceState = null;
+let movementPreview = null;
 let deviceGeneration = 0;
 let stage = "connect";
 let busy = false;
@@ -82,7 +81,6 @@ function currentScreen() {
 }
 
 const screenCapture = captureAlphaScreen({currentScreen, record: emit});
-const movementPreview = createAlphaMovementView($("alpha-movement-preview"));
 
 function setAccount(value) {
   account = value?.authenticated === true ? value : null;
@@ -127,7 +125,7 @@ function teardownDevice() {
   ++deviceGeneration;
   device?.destroy();
   device = deviceState = null;
-  movementPreview.update(null);
+  movementPreview?.update(null);
   previousChannels = previousToys = "";
   selectedLiveDevice = false;
   $("alpha-device-qr-image").removeAttribute("src");
@@ -180,6 +178,12 @@ async function startStudy(recorded) {
   updateWelcome();
   const currentAccount = account;
   try {
+    if (!await checkAccess()) throw new Error("Sign in again to start a study session.");
+    const [{createAlphaDevice}, {createAlphaMovementView}] = await Promise.all([
+      import("./alpha-device.mjs"), import("./alpha-movement-view.mjs"),
+    ]);
+    if (account !== currentAccount) return;
+    movementPreview ??= createAlphaMovementView($("alpha-movement-preview"));
     let remote = null;
     if (recorded) {
       note("alpha-start-status", "Starting your study session…");
@@ -299,7 +303,7 @@ function buildDeviceRows(channels) {
 
 function renderDevice() {
   if (!session || !deviceState || stage === "feedback") {
-    movementPreview.update(null);
+    movementPreview?.update(null);
     return;
   }
   const d = deviceState;
@@ -315,7 +319,7 @@ function renderDevice() {
   const channels = d.channels ?? [];
   const checked = d.verifiedChannels ?? [];
   const active = d.activeChannels ?? [];
-  movementPreview.update(verifying ? d : exploring ? {...d, channels: checked} : null);
+  movementPreview?.update(verifying ? d : exploring ? {...d, channels: checked} : null);
   const selectedToy = d.toys?.find(toy => toy.id === d.selectedId);
   const profile = connected || simulator ? alphaProfile(d.model ?? selectedToy?.model ?? session.model) : null;
   const deviceLabel = (connected ? d.deviceLabel ?? selectedToy?.label : null) ?? profile?.label;

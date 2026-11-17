@@ -1,5 +1,5 @@
 import { accountIdentity, accountJson, AccountError } from "./accounts.mjs";
-import { listCommerceRecords, quoteCheckout, readCheckout, readSubscription, reserveCheckout, reverseCheckout, saveAffiliate,
+import { listCommerceRecords, quoteCheckout, readCheckout, readSubscription, reconcilePayments, reserveCheckout, reverseCheckout, saveAffiliate,
   savePromotion, settleCheckout, settleSubscription, updateSubscriptionLifecycle } from "./commerce.mjs";
 import { APP_ORIGIN } from "./public-auth.mjs";
 import { launchUsageConfigured } from "./launch-usage.mjs";
@@ -17,6 +17,10 @@ const orderId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u;
 const code = /^[A-Z0-9][A-Z0-9_-]{1,31}$/u;
 const planId = /^[a-z0-9][a-z0-9-]{1,31}$/u;
 const hex = /^[a-f0-9]{64}$/u;
+const reconciliationPath = `${BILLING_ADMIN_API}/reconciliation`;
+const reconciliationCsvPath = `${reconciliationPath}.csv`;
+const filterNames = new Set(["reference", "attention", "from", "through"]);
+const dayMilliseconds = 86_400_000;
 const eventParams = new Set(["shopID", "type", "event", "referenceID", "saleID", "transactionID", "parentID",
   "priceAmount", "priceCurrency", "paymentMethod", "custom1", "custom2", "custom3", "truncatedPAN", "CCBrand", "version",
   "subscriptionType", "period", "nextChargeOn", "expiresOn", "subscriptionPhase", "amount", "currency", "cancelledBy",
@@ -273,10 +277,57 @@ export async function handleBilling(request, env, {config, session, reverify}) {
   }
 }
 
+function reconciliationFilters(searchParams, search) {
+  if (search.length > 512 || [...searchParams].some(([key]) => !filterNames.has(key) || searchParams.getAll(key).length !== 1)) return null;
+  const values = Object.fromEntries(searchParams);
+  const reference = values.reference?.trim().toLowerCase();
+  if (reference !== undefined && !orderId.test(reference) && !numericId.test(reference) ||
+      values.attention !== undefined && values.attention !== "1") return null;
+  const from = verotelDate(values.from), through = verotelDate(values.through);
+  if (values.from !== undefined || values.through !== undefined) {
+    if (from === null || through === null || from > through || through - from >= 366 * dayMilliseconds) return null;
+  }
+  return {...(reference ? {reference} : {}), ...(values.attention ? {attention: true} : {}),
+    ...(from === null ? {} : {from, until: through + dayMilliseconds})};
+}
+
+function csvCell(value) {
+  if (typeof value === "number") return value.toString();
+  const text = value ?? "";
+  const safe = /^[=+@\-\t\r\n]/u.test(text) ? "'" + text : text;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+
+async function reconciliation(request, env, url) {
+  if (request.method !== "GET") return json({error: "Use the payment reconciliation controls."}, 405);
+  if (["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) {
+    return json({error: "Open the billing administration page first."}, 403);
+  }
+  const filters = reconciliationFilters(url.searchParams, url.search);
+  if (!filters) return json({error: "Enter a valid payment reference and a date range of up to 366 days."}, 400);
+  const result = await reconcilePayments(env.COMMERCE, filters);
+  if (!result.ok || url.pathname !== reconciliationCsvPath) return result;
+  const {transactions, truncated} = await result.json();
+  if (truncated) return json({error: "More than 500 transactions match. Narrow the date range before downloading."}, 400);
+  const rows = [["received_at_utc", "checkout_reference", "sale_id", "transaction_id", "parent_transaction_id", "event",
+    "plan_id", "currency", "amount_minor", "affiliate_code", "needs_review", "review_reason"]];
+  for (const row of transactions) {
+    rows.push([new Date(row.receivedAt).toISOString(), row.checkoutId, row.providerSaleId, row.providerTransactionId,
+      row.parentTransactionId, row.kind, row.planId, row.currency, row.amountMinor, row.affiliateCode,
+      row.needsReview ? "yes" : "no", row.reviewReason]);
+  }
+  return new Response(rows.map(row => row.map(csvCell).join(",")).join("\r\n") + "\r\n", {headers: {
+    "Cache-Control": "no-store", "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": 'attachment; filename="satinlore-payment-activity.csv"',
+  }});
+}
+
 export async function handleBillingAdmin(request, env, session, reverify) {
   if (!session?.isFounder || session.expiresAt <= Date.now()) return json({error: "Founder access required."}, 403);
   if (!env.COMMERCE) return json({error: "Commerce storage is unavailable."}, 503);
-  const {pathname, search} = new URL(request.url);
+  const url = new URL(request.url);
+  const {pathname, search} = url;
+  if (pathname === reconciliationPath || pathname === reconciliationCsvPath) return reconciliation(request, env, url);
   if (search) return json({error: "Use the billing administration controls."}, 400);
   if (request.method === "GET" && pathname === BILLING_ADMIN_API) {
     return listCommerceRecords(env.COMMERCE);

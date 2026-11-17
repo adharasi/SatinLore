@@ -84,7 +84,7 @@ export function mountExperienceDialog({document, openDialog, closeDialog, save, 
     if (!active || node("save").disabled || node("save").hidden) return;
     if (active.preview) {
       node("heading").textContent = "Onboarding preview complete";
-      node("intro").textContent = "In first-time setup, the next step offers a real toy connection or a simulator for a quick test.";
+      node("intro").textContent = "In first-time setup, the next step helps you pair and check your toy.";
       node("questions").hidden = true;
       node("save").hidden = true;
       node("later").textContent = "Back to Settings";

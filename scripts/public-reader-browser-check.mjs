@@ -19,13 +19,14 @@ const testOwner = "00000000-0000-4000-8000-000000000001";
 
 async function browserPage(width, account = {pendingPassword: "", savedPassword: "", revision: 0, stories: [], preferences: null}) {
   const context = await browser.newContext({viewport: {width, height: 900}, reducedMotion: "reduce"});
-  const posts = [], feedback = [];
+  const posts = [], feedback = [], requestedPaths = [];
   context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
   await context.route("**/*", async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.origin !== origin) { errors.push(`Unexpected external request to ${url.origin}`); return route.abort(); }
     const authenticated = (await request.headerValue("cookie"))?.includes("__Host-satinlore-reader=fixture");
     const path = url.pathname;
+    requestedPaths.push(path);
     if (path === "/api/access") return route.fulfill({json: authenticated ? signedIn : guest});
     if (request.method() === "POST") posts.push({path, body: request.postDataJSON()});
     if (path === "/api/auth/register") {
@@ -80,6 +81,7 @@ async function browserPage(width, account = {pendingPassword: "", savedPassword:
       }
       return route.fulfill({status: 400, json: {error: "Unsupported account action."}});
     }
+    if (path === "/api/lovense/status" && authenticated) return route.fulfill({json: {available: false}});
     if (path === "/api/scene-analysis" && authenticated) {
       if (request.method() === "GET") return route.fulfill({json: {available: true}});
       const labels = request.postDataJSON().cues.map(({id, phase}) => ({id, label: phase === "peak" ? "crest" : "abstain"}));
@@ -96,10 +98,10 @@ async function browserPage(width, account = {pendingPassword: "", savedPassword:
     const file = ({"/": "index.html", "/support": "feedback.html", "/help": "help.html"})[path] ?? path.slice(1);
     if (!/^(?:(?:index|feedback|help)\.html|static\/[A-Za-z0-9_.\/-]+)$/.test(file) || file.includes("..")) return route.fulfill({status: 404});
     let body = await readFile(new URL("../dist/private-app/" + file, import.meta.url), "utf8");
-    if (file.endsWith(".html")) body = body.replace("</head>", '<meta name="satinlore-public-auth" content="true"></head>');
+    if (file.endsWith(".html")) body = body.replace("</head>", '<meta name="satinlore-public-auth" content="true"><meta name="satinlore-reader-mode" content="live"></head>');
     return route.fulfill({contentType: mime[file.split(".").at(-1)], body});
   });
-  return {context, page: await context.newPage(), posts, account};
+  return {context, page: await context.newPage(), posts, account, requestedPaths};
 }
 
 async function registerAndSignIn(page, {wrongFirst = false, remember = false} = {}) {
@@ -141,25 +143,21 @@ async function completeExperience(page) {
   await expect(page.locator("#experience-dialog")).toBeHidden();
 }
 
-async function checkQuickSimulatorSetup(page) {
-  await page.locator("#setup-mode-simulator").click();
+async function checkUnavailablePairing(page, requestedPaths) {
+  await expect(page.locator("#setup-mode-simulator")).toHaveCount(0);
+  await expect(page.locator("#setup-model")).toHaveValue("flexer");
+  await expect(page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
+  await expect(page.locator("#setup-primary")).toHaveText("Connect Flexer");
+  await expect(page.locator("#setup-qr")).toBeHidden();
   await page.locator("#setup-primary").click();
-  await expect(page.locator("#setup-devices")).toBeHidden();
-  await expect(page.locator("#setup-heading")).toHaveText("Check the Flexer simulator");
-  const test = page.locator("#setup-test");
-  const confirmation = page.locator("#setup-response-checked");
-  await expect(page.locator("#setup-step-label")).toContainText(/quick test/i);
-  await expect(page.locator("#setup-test-maximum")).toContainText(/vibration.+flexing/i);
-  await expect(page.locator("#setup-test-level")).toBeHidden();
-  await expect(confirmation).toBeDisabled();
-  await test.click();
-  await expect(confirmation).toBeEnabled({timeout: 15_000});
-  await confirmation.check();
-  await page.locator("#setup-primary").click();
+  await expect(page.locator("#setup-qr-placeholder")).toContainText("Live connection is not configured");
+  await expect(page.locator("#setup-pairing-note")).toContainText("Lovense pairing is unavailable");
+  await expect(page.locator("#setup-qr")).toBeHidden();
+  await expect(page.locator("#setup-primary")).toBeDisabled();
+  assert.equal(requestedPaths.filter(path => path === "/api/lovense/status").length, 1);
+  assert.equal(requestedPaths.includes("/api/lovense/session"), false);
+  await page.locator("#setup-close").click();
   await expect(page.locator("#setup-dialog")).toBeHidden();
-  await expect(page.locator("#settings-story-tab")).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator('#combination-choices input[value="vibrate"]')).toBeChecked();
-  await expect(page.locator('#combination-choices input[value="fingering"]')).toBeChecked();
   await expect(page.locator("#output")).toHaveText("0 / 20");
 }
 
@@ -190,16 +188,17 @@ try {
   await expect(recommendations).toContainText("Flexer");
   await expect(recommendations).toContainText(/fingering/i);
   await page.locator("#story-toy-recommendations-toggle").click();
-  await page.locator("#connect").click();
-  await page.locator("#start").click();
-  await page.locator("#confirm-start").click();
-  await expect(page.locator("#status")).toHaveText("Simulator running");
-  await page.locator("#stop").click();
+  await expect(page.locator("#story-title")).toHaveText("Synthetic browser story");
+  await expect(page.locator("#connect")).toHaveAccessibleName("Pair your toy");
+  await expect(page.locator("#start")).toBeDisabled();
+  await expect(page.locator("#start-help")).toContainText("Sign in to connect your toy");
+  await expect(page.getByText(/simulator/i)).toHaveCount(0);
+  assert.equal(desktop.requestedPaths.some(path => /beta-toolkit|profile-simulator|simulator-view/.test(path)), false);
   await page.locator("#scene-model").selectOption("nocturne");
   await expect(page.locator("#nocturne-sign-in")).toBeVisible();
   await page.locator("#choose-toy").click();
   await page.locator("#setup-model").selectOption("flexer");
-  await page.locator("#setup-mode-lovense").click();
+
   await expect(page.locator("#setup-primary")).toHaveText("Sign in to connect Flexer");
   await page.locator("#setup-primary").click();
   await registerAndSignIn(page, {wrongFirst: true, remember: true});
@@ -207,18 +206,9 @@ try {
   await expect.poll(() => desktop.account.preferences?.experience).toEqual({
     quiet: "continuous", edging: true, maximum: 7, rhythm: "gentle", peakPattern: "steady",
   });
-  await expect(page.locator("#setup-model")).toHaveValue("flexer");
-  await expect(page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
-  await expect(page.locator("#setup-primary")).toHaveText("Connect Flexer");
-  await expect(page.locator("#setup-qr")).not.toBeVisible();
-  await checkQuickSimulatorSetup(page);
-  await expect(page.locator("#cap")).toHaveValue("7");
-  await expect(page.locator("#nocturne-peak-pattern")).toHaveValue("steady");
-  await page.locator("#nocturne-peak-pattern").selectOption("accents");
-  await expect.poll(() => desktop.account.preferences?.experience?.peakPattern).toBe("accents");
-  await expect(page.locator("#nocturne-edge-pattern")).toHaveValue("auto");
-  await page.locator("#nocturne-edge-pattern").selectOption("off");
-  await expect.poll(() => desktop.account.preferences?.experience?.edgePattern).toBe("off");
+  await checkUnavailablePairing(page, desktop.requestedPaths);
+  await expect(page.locator("#cap")).toHaveValue("5");
+  await expect(page.locator("#nocturne-peak-settings")).toBeHidden();
   await page.locator("#settings-reader-tab").click();
   await expect(page.locator("#feel-mode")).toHaveValue("continuous");
   await expect(page.locator("#public-account")).toHaveAccessibleName("Account, signed in");
@@ -300,7 +290,7 @@ try {
   await expect(second.page.locator("#font-size")).toHaveValue("large");
   await expect(second.page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(second.page.locator("#experience-dialog")).toBeHidden();
-  await expect(second.page.locator("#nocturne-edge-pattern")).toHaveValue("off");
+  await expect(second.page.locator("#nocturne-peak-settings")).toBeHidden();
   await second.page.locator("#open-app-settings").click();
   const preview = second.page.getByRole("button", {name: "Preview onboarding"});
   const savedExperience = {...second.account.preferences.experience};
@@ -328,7 +318,7 @@ try {
   await expect(second.page.locator("#experience-dialog")).toBeHidden();
   await expect(second.page.locator("#setup-dialog")).toBeHidden();
   await expect.poll(() => second.account.preferences?.experience).toEqual({
-    quiet: "edging", edging: true, maximum: 7, rhythm: "steady", peakPattern: "accents", edgePattern: "off",
+    quiet: "edging", edging: true, maximum: 7, rhythm: "steady", peakPattern: "steady",
   });
   if (await second.page.locator("#app-settings-dialog").isVisible()) await second.page.locator("#close-app-settings").click();
   const sibling = await second.context.newPage();
@@ -366,7 +356,8 @@ try {
   assert.equal(await onboarding.evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth), true, "Onboarding fits a 320px viewport.");
   await completeExperience(mobile.page);
   await expect(mobile.page.locator("#setup-step-label")).toContainText(/step 1 of 3.+pair/i);
-  await expect(mobile.page.locator("#setup-mode-lovense")).toHaveAttribute("aria-pressed", "true");
+  await expect(mobile.page.locator("#setup-primary")).toHaveText("Connect Lush");
+  await expect(mobile.page.locator("#setup-mode-simulator")).toHaveCount(0);
   await mobile.page.locator("#setup-close").click();
   await mobile.page.setViewportSize({width: 320, height: 568});
   await mobile.page.evaluate(() => window.scrollTo(0, 0));
@@ -380,7 +371,8 @@ try {
   await mobile.page.goto(origin + "/help");
   await expect(mobile.page.locator("#help-signout")).not.toBeVisible();
   await expect(mobile.page.locator("#public-guides")).toHaveCount(0);
+  await expect(mobile.page.getByText(/simulator/i)).toHaveCount(0);
   await mobile.context.close();
   assert.deepEqual(errors, []);
-  console.log("Public reader Chromium smoke passed: model selection, movement-based toy recommendations, guest simulator, email verification and password recovery, onboarding, three-step simulator setup, saved Nocturne controls, feedback, cross-context story and preference sync, sign-out, and 320px onboarding.");
+  console.log("Public reader Chromium smoke passed: model selection, movement-based toy recommendations, guest reading, email verification and password recovery, onboarding, unavailable Lovense pairing, Nocturne analysis, feedback, cross-context story and preference sync, sign-out, and 320px onboarding.");
 } finally { await browser.close(); }

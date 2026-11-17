@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {createSetupFlow, PRACTICE_STORY, SETUP_MODELS} from "../app/static/reader/setup-flow.mjs";
+import {createBetaSetupFlow as createSetupFlow, PRACTICE_STORY} from "../app/static/reader/beta-toolkit.mjs";
+import {SETUP_MODELS} from "../app/static/reader/setup-flow.mjs";
 import {getToyProfile, TOY_PROFILES} from "../app/static/devices/toy-profiles.mjs";
 import {setupDOM} from "./helpers/setup-dom.mjs";
 

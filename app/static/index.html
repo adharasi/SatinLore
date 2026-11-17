@@ -11,7 +11,6 @@
   <link rel="stylesheet" href="/static/reader.css">
   <link rel="stylesheet" href="/static/setup.css">
   <link rel="stylesheet" href="/static/reader/account-workspace.css">
-  <link rel="stylesheet" href="/static/reader/beta-recording.css">
   <script type="module" src="/static/app.mjs"></script>
 </head>
 <body data-library-open="true" data-settings-open="false" data-focus="false" data-reading-width="wide">
@@ -24,7 +23,7 @@
     <div class="header-story"><span id="header-story-title">A little space for your next story</span><div id="story-tabs" class="story-tabs" role="tablist" aria-label="Open stories"></div></div>
     <a class="header-feedback-link" href="/support" target="_blank" rel="noopener" aria-label="Send feedback (opens in a new tab)" title="Send feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4zM8 9h8m-8 3h6"/></svg><span>Feedback</span></a>
     <div class="header-actions">
-      <button id="choose-toy" type="button" class="quiet-control device-setup-shortcut" aria-label="Set up a toy" title="Choose a toy or rehearse with a simulator"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8V4m6 4V4M7 8h10v4a5 5 0 0 1-4 4.9V21h-2v-4.1A5 5 0 0 1 7 12z"/></svg><span>Toy setup</span></button>
+      <button id="choose-toy" type="button" class="quiet-control device-setup-shortcut" aria-label="Set up a toy" title="Connect your toy through Lovense Remote"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8V4m6 4V4M7 8h10v4a5 5 0 0 1-4 4.9V21h-2v-4.1A5 5 0 0 1 7 12z"/></svg><span>Toy setup</span></button>
       <button id="toggle-dark-mode" type="button" class="quiet-control theme-toggle" role="switch" aria-checked="false" aria-label="Dark mode" title="Dark mode"><span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span><span class="theme-toggle-label">Dark</span></button>
       <button id="focus-mode" class="quiet-control" aria-pressed="false" title="Hide side panels and keep reading controls">Focus</button>
       <button id="public-account" type="button" class="quiet-control header-icon public-account-button" aria-label="Sign in" aria-haspopup="dialog" aria-controls="public-account-dialog" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20v-1a7 7 0 0 1 14 0v1"/></svg><span id="public-account-label">Sign in</span></button>
@@ -55,7 +54,7 @@
   </aside>
 
   <main id="main-content" class="reading-canvas" tabindex="-1">
-    <section id="beta-recording-mount" aria-label="Beta recording choices"></section>
+    <section id="beta-recording-mount" aria-label="Beta recording choices" hidden></section>
     <section id="account-welcome" class="account-welcome" aria-label="Your private account" hidden></section>
     <section id="empty-workspace" class="empty-workspace" aria-labelledby="empty-heading">
       <div class="draft-heading"><span class="draft-mark" aria-hidden="true">S.</span><h1 id="empty-heading">Add a story</h1></div>
@@ -79,7 +78,7 @@
       <p id="draft-help" class="note draft-help">Use text you have permission to read here. You can choose how to save the story after you open it.</p>
       <div class="draft-actions">
         <button id="empty-setup" class="quiet-control empty-setup-button">Set up a toy <span aria-hidden="true">→</span></button>
-        <button id="empty-practice" class="quiet-control empty-setup-button">Try a practice story <span aria-hidden="true">→</span></button>
+        <button id="empty-practice" hidden class="quiet-control empty-setup-button">Try a practice story <span aria-hidden="true">→</span></button>
       </div>
     </section>
     <section id="reading-workspace" class="reading-workspace" role="tabpanel" aria-labelledby="story-title" hidden>
@@ -97,7 +96,7 @@
       </div>
     </section>
     <p id="access-status" class="session-message" role="status" aria-live="polite" hidden></p>
-    <p id="message" class="session-message" role="status" aria-live="polite">Read on your own, connect a toy or try its simulator.</p>
+    <p id="message" class="session-message" role="status" aria-live="polite">Read on your own or connect your toy.</p>
   </main>
 
   <aside id="settings-panel" class="workspace-panel settings-panel" aria-label="Reading settings" hidden>
@@ -112,7 +111,7 @@
           <h3 id="scene-model-heading">Story model</h3>
           <label class="visually-hidden" for="scene-model">Story model</label>
           <select id="scene-model" aria-describedby="scene-model-help"><option value="loom">Loom</option><option value="nocturne">Nocturne · Advanced</option></select>
-          <p id="scene-model-help" class="note">Loom finds scene changes. Nocturne uses those scenes and adds more rhythm options in the simulator.</p>
+          <p id="scene-model-help" class="note">Loom finds scene changes. Nocturne can review scene cues to refine the analysis.</p>
           <button id="model-practice-shortcut" type="button" class="setup-button" hidden>Open a model practice story <span aria-hidden="true">→</span></button>
           <div id="nocturne-panel" hidden>
             <p class="note">Optional context review sends nearby story excerpts to OpenAI through SatinLore. A request can include up to 64 paragraphs and 12,000 bytes of text. Review begins when enabled and continues as you read within this visit’s allowance. <a href="/help#nocturne-privacy" target="_blank" rel="noopener">How your text is processed</a></p>
@@ -127,9 +126,9 @@
             <p id="nocturne-status" class="note" role="status"></p>
           </div>
         </section>
-        <section class="sidebar-section simulator-section" aria-labelledby="simulator-preview-heading">
-          <div class="section-title-row"><h3 id="simulator-preview-heading">Toy preview</h3><span id="connection-badge" class="simulation-label">SIMULATED</span></div>
-          <div id="simulator-visual"></div>
+        <section class="sidebar-section device-preview" id="device-preview" aria-labelledby="device-preview-heading" hidden>
+          <div class="section-title-row"><h3 id="device-preview-heading">Toy controls</h3><span id="connection-badge" class="connection-label">LOVENSE REMOTE</span></div>
+          <div id="device-visual"></div>
           <div id="setup-coach-mount"></div>
           <section class="feel-adjustments movement-tuning" aria-labelledby="movement-tuning-heading">
             <h4 id="movement-tuning-heading" tabindex="-1">Tune a movement</h4>
@@ -150,7 +149,7 @@
           </section>
           <button id="open-setup" class="setup-button">Set up a toy <span aria-hidden="true">→</span></button>
           <button id="open-calibration" class="setup-button">Calibrate <span aria-hidden="true">→</span></button>
-          <button id="control-playground" class="setup-button">Try a practice story <span aria-hidden="true">→</span></button>
+          <button id="control-playground" hidden class="setup-button">Try a practice story <span aria-hidden="true">→</span></button>
         </section>
         <section class="sidebar-section feel-adjustments" aria-labelledby="feel-heading">
           <h3 id="feel-heading">How it feels</h3>
@@ -210,7 +209,7 @@
         </details>
         <section id="nocturne-peak-settings" class="sidebar-section" aria-labelledby="nocturne-peak-heading" hidden>
           <h3 id="nocturne-peak-heading" tabindex="-1">Nocturne patterns</h3>
-          <p id="nocturne-pattern-help" class="note">Try these patterns in the simulator. Your maximum and section corrections still apply.</p>
+          <p id="nocturne-pattern-help" class="note">Your maximum and section corrections still apply.</p>
           <p id="nocturne-current-pattern" class="note"></p>
           <label for="nocturne-edge-pattern">During the build-up</label>
           <select id="nocturne-edge-pattern" aria-describedby="nocturne-edge-help nocturne-pattern-help"><option value="auto">Automatic</option><option value="ease">Build and ease</option><option value="off">No edging pattern</option></select>
@@ -229,26 +228,26 @@
             <label class="check-label"><input id="scene-auto-movement" type="checkbox"> Let the story switch movements</label>
             <p class="note">The story can use several movements together when it detects an overlap. It uses only the movements you enabled.</p>
           </div>
-          <button id="open-movement-tuning" type="button" class="setup-button">Tune movement and see the preview <span aria-hidden="true">→</span></button>
+          <button id="open-movement-tuning" type="button" class="setup-button">Tune a movement <span aria-hidden="true">→</span></button>
         </section>
         <section id="preset-mount" class="sidebar-section preset-section" aria-label="Saved toy presets"></section>
       </section>
     </div>
   </aside>
 
-  <aside id="transport" class="transport" aria-label="Simulator playback controls" data-expanded="false">
+  <aside id="transport" class="transport" aria-label="Toy playback controls" data-expanded="false">
     <div class="transport-layout">
       <div class="transport-primary">
         <div class="output-line"><span id="output-label">Level</span> <output id="output">0 / 20</output> <span id="reading-sync-state" class="note" hidden></span></div>
         <meter id="meter" min="0" max="20" value="0" aria-label="Requested intensity">0</meter>
-        <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Connect Lush simulator" title="Connect Lush simulator">Simulator</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
+        <div class="playback-buttons" role="group" aria-label="Playback"><div class="connection-controls"><button id="connect" class="primary" aria-label="Pair your toy" title="Pair your toy">Pair toy</button><button id="disconnect" disabled>Disconnect</button></div><button id="start" class="primary" aria-describedby="start-help" disabled>Start</button><button id="pause" disabled>Pause</button><button id="stop" class="stop">Stop</button></div>
         <button id="transport-more" type="button" aria-expanded="false" aria-controls="transport-options" aria-label="More playback controls">More</button>
       </div>
       <div id="transport-options" class="transport-options">
-        <div class="simulator-status"><span class="status-dot" aria-hidden="true"></span><strong id="device-label">Lush simulator</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div>
+        <div class="device-status"><span class="status-dot" aria-hidden="true"></span><strong id="device-label">Toy</strong><span class="status-separator" aria-hidden="true">·</span><span id="status">Disconnected</span></div>
         <div class="transport-help"><p id="start-help" class="start-help" role="status" aria-live="polite">Open a story to begin.</p><button id="retry-access" type="button" class="quiet-control" hidden>Check sign-in</button></div>
         <div class="level-step-control"><span id="section-level-label" class="control-caption">Section level</span><div class="level-step-buttons" role="group" aria-labelledby="section-level-label"><button id="level-down" class="icon-button" aria-label="Lower section level by one" disabled>−</button><output id="target-output" aria-live="polite">0 / 20</output><button id="level-up" class="icon-button" aria-label="Raise section level by one" disabled>+</button></div></div>
-        <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">10</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="10" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Changes apply immediately within the simulator. Adjusting the maximum does not start playback.</span></div>
+        <div class="ceiling-control"><label for="cap">Maximum <span class="numeric"><output id="capValue">10</output> / 20</span></label><input id="cap" type="range" min="0" max="20" value="10" aria-describedby="ceiling-help"><span id="ceiling-help" class="visually-hidden">Lowering the maximum applies immediately. Raising it pauses playback until you choose Start.</span></div>
         <div class="transport-navigation">
           <div class="section-navigation"><button id="previous" class="icon-button" aria-label="Previous section" title="Previous section" disabled>←</button><span id="position" class="note">No story open</span><button id="next" class="icon-button" aria-label="Next section" title="Next section" disabled>→</button></div>
           <div class="transport-navigation-actions">
@@ -267,7 +266,7 @@
     <section class="app-settings-section"><h3>Account &amp; storage</h3><p id="account-storage-description">Save toy presets to your account. Stories can be kept for this visit or saved on this browser.</p><div id="account-settings-mount" class="account-data-controls"></div><button id="open-account-welcome" class="quiet-control">Open account setup</button></section>
     <div class="library-footer">
       <details class="library-tools"><summary>Import &amp; backup</summary><div class="library-transfer-actions"><button id="export-story" disabled>Back up current story</button><button id="export-library" disabled>Back up browser library</button><button id="import-backup-trigger" aria-controls="import-backup">Restore a backup</button><input id="import-backup" type="file" accept=".json,application/json" aria-label="Choose a SatinLore backup" hidden></div><p class="note">The browser library backup includes saved and session-only stories in this tab. Back up account stories individually. Keep backups private because they contain story text. Restored copies open for this visit under Unfiled.</p><p id="library-transfer-status" class="note" role="status" aria-live="polite"></p></details>
-      <details class="about-preview"><summary>About SatinLore</summary><p class="note">Try a toy simulator or connect through Lovense Remote. Available movements depend on the model and your connection.</p><a href="/device-check" target="_blank" rel="noopener">Local device connection check <span aria-hidden="true">↗</span></a><a href="/simulator-lab" target="_blank" rel="noopener">Simulator scenarios <span aria-hidden="true">↗</span></a></details>
+      <details class="about-preview" id="about-reader"><summary>About SatinLore</summary><p id="about-reader-copy" class="note">Connect through Lovense Remote. Available movements depend on your toy and connection.</p><a href="/device-check" target="_blank" rel="noopener" hidden>Local device connection check <span aria-hidden="true">↗</span></a></details>
       <nav class="library-resource-links" aria-label="Help and support"><a href="/help" target="_blank" rel="noopener">Help <span aria-hidden="true">↗</span></a><a href="/support" target="_blank" rel="noopener">Send feedback <span aria-hidden="true">↗</span></a></nav>
       <button id="delete-all" class="quiet-button" disabled>Delete local stories</button>
     </div>
@@ -280,12 +279,12 @@
     <form id="experience-form">
       <div id="experience-questions" class="experience-questions">
         <label for="experience-quiet">What should happen in quiet passages?</label><select id="experience-quiet"><option value="off">Keep the toy off</option><option value="continuous">Keep it moving gently</option><option value="edging">Light pulses with breaks</option></select>
-        <p id="experience-quiet-help" class="note" hidden>Try light pulses with breaks in the simulator. A connected toy uses a gentle steady level for this choice.</p>
+        <p id="experience-quiet-help" class="note" hidden>A connected toy uses a light, steady level during quiet passages.</p>
         <label for="experience-edging">Do you like edging?</label><select id="experience-edging"><option value="no">No, keep building</option><option value="yes">Yes, build and ease</option></select>
-        <p id="experience-edging-help" class="note" hidden>In Nocturne’s simulator, a scene can build, ease off briefly, then build again.</p>
+        <p id="experience-edging-help" class="note" hidden>Nocturne can identify when a scene builds, eases off and builds again.</p>
         <label for="experience-maximum">How strong should it get? <output id="experience-maximum-value" for="experience-maximum">10</output> / 20</label><input id="experience-maximum" type="range" min="1" max="20" value="10" aria-describedby="experience-maximum-help"><p id="experience-maximum-help" class="note">This sets your highest level. A connected toy may start with a lower limit until you’ve tested it.</p>
         <label for="experience-rhythm">Which rhythm do you like?</label><select id="experience-rhythm"><option value="scene">Follow the scene</option><option value="steady">Steady</option><option value="gentle">Gentle waves</option><option value="dynamic">More variation</option></select>
-        <p id="experience-next" class="note" hidden>Next, pair a toy or try the simulator.</p>
+        <p id="experience-next" class="note" hidden>Next, pair your toy.</p>
       </div>
       <p id="experience-status" class="note" role="status" aria-live="polite"></p>
       <div class="dialog-actions"><button id="experience-stop" type="button" class="stop" hidden>Stop</button><button id="experience-reset" type="button" class="quiet-control" hidden>Reset to defaults</button><button id="experience-later" type="button" class="quiet-control">Not now</button><button id="experience-save" type="submit" class="primary">Save and continue</button></div>
@@ -293,7 +292,7 @@
   </dialog>
   <dialog id="public-account-dialog" class="story-dialog public-account-dialog" aria-labelledby="public-account-heading">
     <div class="dialog-heading"><h2 id="public-account-heading">Sign in to SatinLore</h2><button id="public-account-close" type="button" class="icon-button" aria-label="Close account">×</button></div>
-    <p id="public-account-intro" class="note">Sign in with your email and password. You can try the simulator as a guest.</p>
+    <p id="public-account-intro" class="note">Sign in with your email and password. You can read without an account.</p>
     <form id="public-login-form">
       <label for="public-email">Email address</label><input id="public-email" name="email" type="email" autocomplete="username" maxlength="254" required>
       <label for="public-password">Password</label><input id="public-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
@@ -343,7 +342,7 @@
   </dialog>
   <dialog id="practice-story-dialog" class="story-dialog" aria-labelledby="practice-story-heading">
     <div class="dialog-heading"><h2 id="practice-story-heading">Practice stories</h2><button id="practice-story-close" class="icon-button" aria-label="Close practice stories">×</button></div>
-    <p class="note">Use a simulator to check the controls or compare Loom and Nocturne. Every practice story opens paused for this visit.</p>
+    <p class="note">Check the controls or compare Loom and Nocturne. Every practice story opens paused.</p>
     <label for="practice-story-choice">Choose a practice story</label><select id="practice-story-choice" aria-describedby="practice-story-description"></select>
     <p id="practice-story-description" class="note"></p>
     <ul id="practice-story-checkpoints" class="note"></ul>
@@ -378,7 +377,7 @@
       <div class="dialog-actions"><button id="story-details-stop" type="button" class="stop">Stop</button><button id="story-details-cancel" type="button">Cancel</button><button id="story-details-save" type="submit" class="primary">Save settings</button></div>
     </form>
   </dialog>
-  <dialog id="start-dialog" class="confirmation-dialog" aria-labelledby="start-heading"><h2 id="start-heading">Ready to start?</h2><p id="start-summary">Simulator · maximum 5/20 · current level 0/20</p><p class="note">You can adjust the controls or stop at any time.</p><div class="dialog-actions"><button id="start-stop" class="stop">Stop</button><button id="cancel-start">Keep reading</button><button id="confirm-start" class="primary">Start with maximum 5/20</button></div></dialog>
+  <dialog id="start-dialog" class="confirmation-dialog" aria-labelledby="start-heading"><h2 id="start-heading">Ready to start?</h2><p id="start-summary">Maximum 5/20 · current level 0/20</p><p class="note">You can adjust the controls or stop at any time.</p><div class="dialog-actions"><button id="start-stop" class="stop">Stop</button><button id="cancel-start">Keep reading</button><button id="confirm-start" class="primary">Start with maximum 5/20</button></div></dialog>
   <dialog id="ceiling-dialog" class="confirmation-dialog" aria-labelledby="ceiling-heading"><h2 id="ceiling-heading">Raise the maximum?</h2><p id="ceiling-summary">Confirm the new maximum before it can take effect.</p><div class="dialog-actions"><button id="ceiling-stop" class="stop">Stop</button><button id="cancel-ceiling">Keep current maximum</button><button id="confirm-ceiling" class="primary">Confirm maximum</button></div></dialog>
   <dialog id="save-dialog" class="confirmation-dialog" aria-labelledby="save-heading"><h2 id="save-heading">Save on this browser?</h2><p id="save-description">Your story and reading position will be here when you return.</p><p id="save-privacy" class="note">Anyone using this browser profile may be able to see them. Clearing browser data can remove them.</p><div class="dialog-actions"><button id="save-stop" class="stop">Stop</button><button id="cancel-save">Cancel</button><button id="confirm-save" class="primary">Save on this browser</button></div></dialog>
 </body>

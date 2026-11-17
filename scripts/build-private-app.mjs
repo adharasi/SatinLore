@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { build } from "esbuild";
-import { READER_ASSETS, ALPHA_ASSETS, CORPUS_STUDY_CLIENT_ASSET } from "../deploy/cloudflare/assets.mjs";
+import { READER_ASSETS, BETA_ONLY_ASSET_PATHS, ALPHA_ASSETS, ALPHA_SESSION_ASSET_PATHS, CORPUS_STUDY_CLIENT_ASSET } from "../deploy/cloudflare/assets.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE = resolve(ROOT, "app/static");
@@ -11,6 +11,8 @@ const OUTPUT = resolve(ROOT, "dist/private-app");
 const entries = [...READER_ASSETS, ...ALPHA_ASSETS,
   [resolve(ROOT,"deploy/cloudflare/corpus-study-client.mjs"),CORPUS_STUDY_CLIENT_ASSET]];
 const paths = new Set(entries.map(([, path]) => path));
+const betaOnlyPaths = new Set(BETA_ONLY_ASSET_PATHS);
+const alphaSessionPaths = new Set(ALPHA_SESSION_ASSET_PATHS);
 const assets = [];
 let revision = process.env.WORKERS_CI_COMMIT_SHA ?? "";
 if (!/^[a-f0-9]{40}$/.test(revision)) {
@@ -44,17 +46,27 @@ for (const [source, target] of entries) {
     const checked = source === "help.html" ? content.replace(
       '<a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener">OpenAI’s data controls</a>', "") : content;
     if (source !== "device-bridge.html" && /device-check|device-bridge|lovense\.mjs|https?:\/\//i.test(checked)) throw new Error("The hosted document references a non-reader surface.");
+    for (const [, reference] of content.matchAll(/\b(?:src|href)=["'](\/[^"']+)["']/gu)) {
+      if ((!betaOnlyPaths.has(target) && betaOnlyPaths.has(reference)) || alphaSessionPaths.has(reference)) {
+        throw new Error(`The hosted document ${source} loads a protected dependency directly: ${reference}.`);
+      }
+    }
   }
   if (source.endsWith(".mjs")) {
     const imports = [
-      ...content.matchAll(/(?:^|\n)\s*import\s+(?:[^;\n]+?\s+from\s+)?["']([^"']+)["']/g),
-      ...content.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/g),
+      ...Array.from(content.matchAll(/(?:^|\n)\s*(?:import\s+(?:[^;\n]+?\s+from\s+)?|export\s+[^;\n]+?\s+from\s+)["']([^"']+)["']/g),
+        ([, path]) => ({ path, dynamic: false })),
+      ...Array.from(content.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/g), ([, path]) => ({ path, dynamic: true })),
     ];
-    for (const [, specifier] of imports) {
+    for (const { path: specifier, dynamic } of imports) {
       const dependency = new URL(specifier, "https://app.satinlore.com" + target);
       if (dependency.origin !== "https://app.satinlore.com" || !paths.has(dependency.pathname) ||
           (target.startsWith("/alpha/") && !dependency.pathname.startsWith("/alpha/static/"))) {
         throw new Error(`Unlisted module dependency in ${source}: ${specifier}.`);
+      }
+      if (!dynamic && ((!betaOnlyPaths.has(target) && betaOnlyPaths.has(dependency.pathname)) ||
+          (!alphaSessionPaths.has(target) && alphaSessionPaths.has(dependency.pathname)))) {
+        throw new Error(`${source} loads a protected dependency before access checks: ${specifier}.`);
       }
     }
   }

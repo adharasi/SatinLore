@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {BridgeTransport} from "../app/static/devices/bridge-transport.mjs";
-import {ReaderDeviceController} from "../app/static/devices/reader-device.mjs";
+import {BetaReaderDeviceController as ReaderDeviceController} from "../app/static/devices/reader-beta-device.mjs";
 
 const settle = async () => { for (let index = 0; index < 16; index++) await Promise.resolve(); };
 const toy = (id = "toy-one") => ({id, label: "Lush simulator fixture", model: "lush", capabilities: ["vibrate"], battery: 60});
