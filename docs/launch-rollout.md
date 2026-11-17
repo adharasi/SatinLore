@@ -1,45 +1,60 @@
-# SatinLore launch staging
+# SatinLore launch rollout
 
-This branch adds accounts, metered AI access and one-time purchases to the reader Worker. The marketing website lives separately. The homepage design draft is an unpublished preview. It offers original SatinLore copy, an interactive simulator illustration, compatibility and privacy sections, FAQs, and editorial space for AO3 import, Lovense setup and simulator guides.
+The reader Worker serves public registration, account recovery, the Luna usage meter, hosted checkout, top-up promotion codes and affiliate links. The marketing website has a separate deployment. Use this runbook to open the reader and activate payments from your own accounts.
 
-## Reader and founder workflows
+## Launch pricing
 
-| Surface | Intended behavior |
+All prices below are in USD. A SatinLore AI credit represents $0.01 of metered Luna API spend.
+
+| Purchase | Customer price | AI credits | Luna budget | Billing |
+| --- | ---: | ---: | ---: | --- |
+| SatinLore Monthly | $9.99 | 200 | $2.00 | Renews each calendar month |
+| Starter | $4.99 | 100 | $1.00 | One-time |
+| Plus | $9.49 | 200 | $2.00 | One-time |
+| Stock-up | $17.99 | 400 | $4.00 | One-time |
+
+Stock-up saves about 10% against the $5-per-$1 baseline. The monthly price is about five times its included model budget before taxes, processor fees, promotions and commissions. Guests can use the simulator and registration is free. Paid Nocturne access starts at zero credits.
+
+Included credits from a subscription apply first and expire at the end of its paid period. Successful renewal gives that period a fresh 200 credits. Purchased top-ups carry over. Cancellation stops renewal through Verotel while the current paid period remains available. A checkout return displays pending until a signed provider payment confirmation arrives. Refunds and chargebacks reverse available credits and attributable commissions for the payment concerned.
+
+The meter uses Standard GPT-6 Luna short-context input at $0.10 per million tokens, cached reads at $0.01 per million, and output at $0.50 per million. Output includes reported reasoning tokens. The Worker reserves an upper estimate before making an API call, then reconciles the reported usage. An ambiguous provider response retains its reserved cost. Request size and traffic ceilings also apply. Purchase amounts and balance records are held in integer nano-USD, so one dollar is 1,000,000,000 nano-USD and one displayed credit is 10,000,000. [Luna pricing](https://developers.openai.com/api/docs/models/gpt-6-luna)
+
+## 1. Review and deploy the reader Worker behind Access
+
+1. Merge the tested launch changes into `main` when you are ready to deploy. Confirm Cloudflare deploys the `satinlore-private-app` Worker with its v6 Durable Object migration and the `COMMERCE` and `LAUNCH_USAGE` bindings. First keep the existing whole-host Cloudflare Access policy in place. Keep `LAUNCH_BILLING_ENABLED` false.
+2. Follow the [reader rollout](../deploy/cloudflare/public-reader.md) for signup and email. In the SES region with a verified SatinLore sending identity, confirm production sending access and provision a dedicated IAM identity for `ses:SendEmail`. Add the region and From address as Worker variables. Add `AUTH_SES_ACCESS_KEY_ID`, `AUTH_SES_SECRET_ACCESS_KEY`, and the optional `AUTH_SES_SESSION_TOKEN` through **Settings → Variables & Secrets**. Keep the existing `PUBLIC_READER_OTP_KEY` if one is already in use. Its value also preserves account identities.
+3. Keep a restricted OpenAI project key as the Worker secret `OPENAI_API_KEY` and set spend controls for that project. Enable `PUBLIC_READER_ENABLED=true` and `LAUNCH_AI_COST_METERING_ENABLED=true` together before opening the host. Keep `PRIVATE_APP_ENABLED`, `PUBLIC_APP_ORIGIN=https://app.satinlore.com`, SES delivery settings and the required production bindings in place. Check that a funded staging account can run Nocturne and that a new public account begins with zero paid credits.
+4. Behind Access, use two browser profiles and a real inbox you control. Register at `/signup`, verify the email, and sign in at `/login`. Exercise password reset, password change and all-device sign-out. Verify that each ends the appropriate older sessions. Check the simulator, the account being able to see only its own saved stories and billing records, and the founder page rejecting an ordinary reader.
+
+| Optional runtime variable | Default and purpose |
 | --- | --- |
-| Reader account | Guests can try the simulator. Account signup uses a password, 18+ declaration and email ownership verification. Verified readers can reset or change their password and sign out every session. Changing a password revokes existing sessions and pending reset challenges. |
-| `/billing` | A verified reader sees remaining AI credits and the current UTC-month limit. Checkout needs a server-priced one-time pack and supports a promo code. The provider return shows pending until a trusted payment confirmation arrives. |
-| `/billing-admin` | A verified Cloudflare Access founder can create, update or disable promotions and affiliate codes, copy referral links and inspect recent order and commission records. A public-reader cookie cannot authorize this page or its API. |
-| Affiliate attribution | The affiliate URL is `/billing?ref=CODE`. Signup and sign-in preserve the code during that journey. The first valid referral attached to checkout is retained for 30 days server-side. Commission uses the discounted order amount after customer reversals and before processor fees and tax. Payouts require manual reconciliation. |
-| Payment | Verotel FlexPay is the implemented hosted adapter. A signed v2 postback must match the order, merchant, currency, provider transaction and sale ID. Card-entry takes place on the processor's site. The ledger limits each account to three open checkout holds, each valid for 30 minutes. Duplicate payments do not create extra credits. Refunds and chargebacks reverse attributable credits and commissions. A separate flag can suspend new purchases while signed events still reconcile. |
+| `LAUNCH_AI_MONTHLY_CAP_NANO_USD` | `10000000000` gives each verified reader a $10 metered API spend cap per UTC calendar month across subscriptions and top-ups. It applies separately from the $2 allowance granted by each paid subscription period. |
+| `LAUNCH_AI_TRIAL_NANO_USD` | `0` gives no free paid AI. If configured, the initial grant is established once per account. |
+| `LAUNCH_AI_ACCOUNT_REQUESTS_PER_DAY` | `100` metered requests per account per UTC day. |
+| `LAUNCH_AI_APP_REQUESTS_PER_DAY` | `1000` metered requests across public accounts per UTC day. |
+| `LAUNCH_AI_APP_REQUESTS_PER_MONTH` | `15000` metered requests across public accounts per UTC month. |
+| `LAUNCH_PLAN_CATALOG` | Leave unset for the four prices above. A staged custom USD catalog uses integer `amountMinor` in cents, `credits` in nano-USD, and `kind` as `monthly` or `one-time`. A monthly entry must grant exactly $2 of Luna spend. |
 
-Credits are consumed by the provider's input and output tokens, including reasoning included in the reported total. The ledger reserves a conservative token amount before dispatch and enforces both the credit balance and monthly cap. A request known to be unsent releases its hold. Missing or ambiguous provider usage consumes the original reservation. A verified report can settle the same held attempt. A one-time trial grant is pinned when a verified account first opens a configured ledger. Set it to zero for launch without a trial. The existing per-reader and global request budgets still apply. This is separate from the founder benchmark and existing research spend controls.
+The older launch staging meter used raw tokens. Use the new cost-metering flag and variables. Any old raw-token ledger will require a deliberate migration for a pre-existing paid balance. This is relevant only if that earlier branch accepted orders.
 
-## Configure an isolated staging environment
+## 2. Obtain merchant approval and test payments
 
-Use separate storage, an approved test merchant and a separate SES identity and model project if testing those providers. The Worker checks the exact app origin. Browser fixtures exercise that production contract with synthetic services. An internet-accessible staging deployment requires dedicated host configuration and restricted edge access. Keep production flags off while testing.
+1. Get written approval for SatinLore's product and pricing from an acquiring processor. The implemented adapter is **Verotel FlexPay v4**. Confirm that the account is eligible for both one-time credits and a USD recurring plan. Verotel lists FlexPay under Premium with processing-history and volume criteria. CCBill serves adult startups and would need its own integration if you choose it. [FlexPay](https://controlcenter.verotel.com/flexpay-doc/subscription.html) · [Verotel eligibility](https://www.verotel.com/en/productchoice.html) · [CCBill adult processing](https://ccbill.com/industries/adult-business)
+2. In a separate test environment, set `VEROTEL_SHOP_ID` as a Worker variable and `VEROTEL_SIGNATURE_KEY` as a Worker secret. Enable `LAUNCH_BILLING_POSTBACK_ENABLED=true`. Configure Verotel signed v2 postbacks to the test equivalent of `https://app.satinlore.com/api/billing/verotel/postback`. Give processor servers access to that route without a customer session or a whole-host Access challenge. Keep the signature key on the server. Avoid logging postback query strings.
+3. Confirm with the merchant that its checkout renders the correct currency, price and calendar-month recurrence (`P1M`), and that signed v2 callbacks include the expected ID, price and calendar fields. Exercise initial payment, decline, renewal, duplicate callback, retry extension, refund, chargeback, cancellation and expiry. Check that the return before a callback grants zero, the first charge grants 200 credits, retry extension grants zero, a successful renewal grants 200 for the next period, and a duplicate never grants extra. Check cancellation from the hosted link and confirm the subscription keeps access until the end of its paid period. [Verotel signed postbacks](https://controlcenter.verotel.com/flexpay-doc/postbacks.html)
+4. Confirm offer, renewal and cancellation terms, tax display, and applicable age-assurance rules for the markets you plan to open. Signup records an 18+ declaration. [Ofcom age assurance](https://www.ofcom.org.uk/online-safety/protecting-children/age-assurance)
+5. Protect `/billing-admin*` and `/api/billing-admin*` with the founder Access policy and its matching Worker audience before enabling `LAUNCH_BILLING_ADMIN_ENABLED=true`. The founder can set promotion limits, dates, affiliate codes and commission rates there. Promotions apply to one-time packs. Referral links use `/billing?ref=CODE`, retain first valid attribution for 30 days, and preserve it through registration. Commission uses the discounted amount after reversals before processor fees and tax. It applies to attributable top-ups and the first subscription payment. Review and pay commissions manually.
 
-| Setting | Where and what to supply |
-| --- | --- |
-| `PUBLIC_READER_ENABLED`, `PRIVATE_APP_ENABLED`, `PUBLIC_APP_ORIGIN` | Existing [reader rollout instructions](../deploy/cloudflare/public-reader.md). Verify signup, verification, login, reset and cross-device revocation before making checkout available. |
-| `PUBLIC_READER_OTP_KEY`, `AUTH_SES_ACCESS_KEY_ID`, `AUTH_SES_SECRET_ACCESS_KEY` and optional `AUTH_SES_SESSION_TOKEN` | Worker secrets. Set SES origin, region and verified From address per the reader rollout. Test delivery and bounce handling with a real staging inbox. |
-| `OPENAI_API_KEY` | Restricted project key as a Worker secret. Keep the existing budget store and project spend controls. A user's project key never enters browser code. |
-| `LAUNCH_AI_USAGE_ENABLED`, `LAUNCH_AI_MONTHLY_TOKEN_CAP`, `LAUNCH_AI_TRIAL_TOKENS` | Turn on metering only with a confirmed positive monthly ceiling. Choose the optional one-time trial in tokens, default zero. Existing unmetered behavior continues with the feature flag unset. |
-| `LAUNCH_PLAN_CATALOG` | Worker variable containing an approved JSON array of packs. Each entry uses `id`, `name`, `currency`, integer `amountMinor` and integer `credits`. No production amounts or credit quantities are preset. |
-| `VEROTEL_SHOP_ID`, `VEROTEL_SIGNATURE_KEY` | Confirmed merchant site ID and a server-only Worker secret. Ask the processor to confirm signed purchase, credit and chargeback postbacks (including v2 transaction and parent IDs), minimum order amount and the duplicate-reference/retry contract. |
-| `LAUNCH_BILLING_ADMIN_ENABLED` | Enable founder campaign administration only after a valid Access audience protects `/billing-admin*` and `/api/billing-admin*` at the edge and in the Worker. |
-| `LAUNCH_BILLING_POSTBACK_ENABLED`, `LAUNCH_BILLING_ENABLED` | Start with the postback flag. Make only `/api/billing/verotel/postback` reachable by processor servers without a reader session. Keep keys in the Worker and do not log the postback query. Enable purchases after staging accounting and merchant tests. |
+## 3. Open the reader and activate billing
 
-The v6 SQLite migration adds separate commerce and AI usage Durable Object bindings. Verify it through a Worker dry run and a separate staging deployment before production changes. For a purchase incident, turn off new checkout first and preserve postbacks and the settlement ledger for reconciliation. Order totals, opaque merchant references and attributed commission need a documented retention and refund process, including after reader account deletion.
+1. Complete the [reader opening steps](../deploy/cloudflare/public-reader.md). Protect founder, research, Alpha and beta routes and their Access audiences before removing the whole-host Access rule for the public app. Verify signup again in a fresh browser and confirm ordinary readers cannot reach the protected surfaces.
+2. Add the approved live merchant credentials and exact signed production postback URL. After merchant tests and email delivery pass, enable `LAUNCH_BILLING_POSTBACK_ENABLED=true`, then `LAUNCH_BILLING_ENABLED=true`. Verify a controlled purchase and cancellation with the provider, check the settlement ledger, and reconcile the amount on the processor dashboard. The browser never submits card numbers to SatinLore.
+3. When publishing the separate homepage redesign, link the primary CTA to [Create an account](https://app.satinlore.com/signup?next=billing). Use `/login` for existing accounts. Publish the approved copy and crawlable guide pages separately. Keep checkout and private account pages out of search indexing.
+4. To pause purchases, set `LAUNCH_BILLING_ENABLED=false`. Leave signed postbacks and the ledger running while reconciling existing orders. To close public registration, restore the whole-host Access policy before switching `PUBLIC_READER_ENABLED` off. Keep account storage, the auth key and the commerce ledger intact.
 
-## Provider and release decisions
+The [Nocturne recognition and hardware gates](nocturne-release-qualification.md) are evaluated separately. Use only measured behavior in the launch copy.
 
-- Verotel documents signed FlexPay for prepaid credits, but lists it as Premium-only with processing-history and minimum-volume requirements. Obtain acceptance and merchant test credentials before enabling this adapter. CCBill explicitly serves adult startups and is a stronger underwriting route if Verotel's requirements rule it out. Its Webhooks and reconciliation contract would need a separate adapter and test. [Verotel FlexPay](https://controlcenter.verotel.com/flexpay-doc/purchase.html) · [Verotel eligibility](https://www.verotel.com/en/productchoice.html) · [CCBill adult processing](https://ccbill.com/industries/adult-business)
-- Approve currency, pack prices, token allowance, tax display, credit/refund terms and affiliate commission rules before publishing plans. Recurring renewals and automatic affiliate payouts are outside the one-time pack integration.
-- Check the product's launch scope and any applicable age-assurance requirements with the exact product and markets. The account checkbox records a self-declaration. [Ofcom](https://www.ofcom.org.uk/online-safety/protecting-children/age-assurance)
-- Keep the live marketing site separately managed. On an approved rollout, connect the draft's signup CTA to the real reader, confirm availability copy, publish dedicated crawlable pages for the three guide topics and add the approved URLs to the marketing sitemap. Decide the indexed canonical URL, social metadata and internal links during that publication. Keep billing and account pages out of search indexing.
-- [Nocturne recognition and hardware gates](nocturne-release-qualification.md) are separate from working account and billing flows. Describe the simulator, supported setup and AI behavior within the evidence already measured.
-
-## Reproduce local tests
+## Reproduce the staging checks
 
 ```sh
 python3 scripts/check.py
@@ -48,6 +63,4 @@ npm exec wrangler deploy -- --dry-run
 node scripts/launch-browser-check.mjs
 ```
 
-The browser test uses Chromium with a synthetic merchant, synthetic SES and model replies, and isolated Worker SQLite. The account, billing and token tests can also run directly with `node --test tests/public-auth.test.mjs tests/public-account-ui.test.mjs tests/launch-billing-worker.test.mjs tests/commerce.test.mjs tests/launch-usage.test.mjs`.
-
-The managed Chromium rehearsal on 15 November 2026 created a test promotion and referral, registered a disposable reader, verified the mock email, signed in and returned to the referral. The fixture quote discounted £10.00 to £8.00. Repeated signed payment callbacks granted exactly 30,000 fixture credits once. The fixture refund returned credits to zero and reversed the £1.60 attributed commission. All-device sign-out returned the reader to the sign-in form. The standalone draft's simulator, zero ceiling, Stop preview, AO3 guide and local-only signup control were exercised separately. The direct terminal browser runner was blocked by the workspace's Chromium process restrictions. The managed browser journey covered the stated UI actions, and the Worker tests covered token reservations, concurrency and usage settlement with synthetic provider responses.
+The Worker tests cover account state, signed provider callbacks, subscription periods, credits, promotions, affiliates, refunds and usage metering with synthetic services. The browser runner uses a disposable Worker SQLite store, a synthetic merchant, synthetic SES and model replies. Complete a separate provider acceptance run before enabling live payments.

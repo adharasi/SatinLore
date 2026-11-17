@@ -218,8 +218,9 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   }
   click('public-account-close', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-  function open(opener, continuation = null) {
+  function open(opener, continuation = null, {register = false} = {}) {
     next = continuation; status.textContent = '';
+    if (register && !session) showView('register');
     openDialog(opener); focusView();
   }
   trigger.hidden = false;

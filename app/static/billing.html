@@ -10,12 +10,15 @@
   <link rel="stylesheet" href="/static/billing.css">
   <script type="module" src="/static/billing.mjs"></script>
 </head>
-<body>
+<body class="billing-reader">
   <header class="billing-header"><a href="/">SatinLore</a><a href="/">Back to the reader</a></header>
   <main>
     <h1>Plans &amp; usage</h1>
     <p id="billing-status" role="status">Checking your account…</p>
-    <p id="billing-sign-in" hidden><a id="billing-sign-in-link" href="/?signin=1&amp;next=billing">Sign in or create an account</a></p>
+    <div id="billing-sign-in" class="billing-actions" hidden>
+      <a id="billing-sign-up-link" class="billing-primary" href="/signup?next=billing">Create an account</a>
+      <a id="billing-sign-in-link" class="billing-link" href="/login?next=billing">Sign in</a>
+    </div>
     <section id="usage-section" hidden aria-labelledby="usage-heading">
       <h2 id="usage-heading">AI analysis usage</h2>
       <dl class="usage-grid">
@@ -23,25 +26,55 @@
         <div><dt>Used this month</dt><dd id="month-used">—</dd></div>
         <div><dt>Monthly limit</dt><dd id="month-limit">—</dd></div>
       </dl>
+      <p id="credit-breakdown" hidden></p>
       <p id="usage-note"></p>
-      <button type="button" id="refresh-usage">Refresh usage</button>
+    </section>
+    <section id="subscription-section" hidden aria-labelledby="subscription-heading">
+      <h2 id="subscription-heading">Your subscription</h2>
+      <p id="subscription-status" role="status"></p>
+      <p id="subscription-details"></p>
+      <button type="button" id="show-cancel-subscription" hidden>Cancel renewal</button>
+      <div id="subscription-cancel" class="billing-confirmation" hidden>
+        <p>Continue to Verotel to confirm cancellation. You can use any remaining subscription credits through the paid period. Check your status here after you return.</p>
+        <div class="billing-actions">
+          <button type="button" id="back-cancel-subscription">Back</button>
+          <button type="button" id="cancel-subscription">Continue to cancellation</button>
+        </div>
+      </div>
+      <p id="subscription-message" role="status"></p>
     </section>
     <section id="order-section" hidden aria-labelledby="order-heading">
       <h2 id="order-heading">Your order</h2>
       <p id="order-status" role="status"></p>
     </section>
+    <button type="button" id="refresh-usage" hidden>Refresh usage</button>
     <section id="plans-section" hidden aria-labelledby="plans-heading">
-      <h2 id="plans-heading">Buy AI credits</h2>
-      <p>Make a one-time purchase. One credit covers one token of AI analysis. Your monthly usage limit still applies.</p>
+      <h2 id="plans-heading">Get AI credits</h2>
+      <p>One credit covers $0.01 of GPT-6 Luna API usage. Subscription credits are used first and expire at the end of each paid period. One-time credits carry over. Your monthly usage limit still applies.</p>
       <form id="plan-form">
-        <label for="plan">Credit pack</label><select id="plan" required></select>
-        <label for="promotion">Promo code <small>(optional)</small></label>
-        <input id="promotion" maxlength="32" autocomplete="off" spellcheck="false">
-        <div class="billing-actions"><button type="submit" id="check-price">Check price</button></div>
+        <fieldset class="billing-options">
+          <legend>Choose a plan or credit pack</legend>
+          <div id="monthly-plans" class="billing-option-group" hidden>
+            <h3>Subscription</h3>
+            <div id="monthly-options" class="billing-option-list"></div>
+            <p id="monthly-plan-note" class="billing-note"></p>
+          </div>
+          <div id="top-up-plans" class="billing-option-group" hidden>
+            <h3>One-time credit packs</h3>
+            <div id="top-up-options" class="billing-option-list"></div>
+          </div>
+        </fieldset>
+        <div id="billing-promo" class="billing-promo">
+          <label for="promotion">Promo code <small>(optional)</small></label>
+          <input id="promotion" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="billing-actions">
+          <button type="submit" id="check-price">Check price</button>
+          <button type="button" id="checkout" class="billing-primary" disabled>Continue to secure checkout</button>
+        </div>
         <p id="quote-status" role="status"></p>
-        <button type="button" id="checkout" disabled>Continue to secure checkout</button>
       </form>
-      <p>Checkout opens on Verotel. Credits appear when SatinLore receives payment confirmation.</p>
+      <p class="billing-note">Verotel handles checkout. Credits appear after payment is confirmed.</p>
     </section>
   </main>
 </body>

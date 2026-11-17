@@ -2,19 +2,26 @@ import { accountIdentity } from "./accounts.mjs";
 import { readEntitlement } from "./commerce.mjs";
 
 export const LAUNCH_USAGE_PATH = "/api/account/usage";
+export const LAUNCH_COST_METERING_FLAG = "LAUNCH_AI_COST_METERING_ENABLED";
+const UNIT = "nano_usd";
+const DEFAULT_MONTHLY_CAP = "10000000000";
+const PLAN_PERIOD_CAP = 2_000_000_000;
+// OpenAI Standard, short context: https://developers.openai.com/api/docs/pricing
+const LUNA = { input: 100, cached: 10, output: 500, write30m: 125, write12h: 250 };
 const APP_ORIGIN = "https://app.satinlore.com";
 const INTERNAL_URL = "https://launch-usage.internal/ledger";
 const OPERATION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const LEASE_MS = 60_000;
 const RECEIPT_MS = 35 * 86_400_000;
-const MAX_TOKENS = Math.floor(Number.MAX_SAFE_INTEGER / 4);
+const MAX_AMOUNT = Math.floor(Number.MAX_SAFE_INTEGER / 4);
+const LIMITED = { error: "analysis_credit_limit" };
 const OPERATIONS = {
-  status: ["policy"], reserve: ["id", "tokens", "policy"], dispatch: ["id", "policy"],
-  settle: ["id", "tokens"], refund: ["id"], "refund-before-fetch": ["id"], unknown: ["id"],
+  status: ["policy"], reserve: ["id", "amount", "policy"], dispatch: ["id", "policy"],
+  settle: ["id", "amount"], refund: ["id"], "refund-before-fetch": ["id"], unknown: ["id"],
 };
 const reply = (value, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
-const unavailable = () => reply({ error: "AI token usage is temporarily unavailable." }, 503);
-const count = value => Number.isSafeInteger(value) && value >= 0 && value <= MAX_TOKENS;
+const unavailable = () => reply({ error: "AI analysis usage is temporarily unavailable." }, 503);
+const count = value => Number.isSafeInteger(value) && value >= 0 && value <= MAX_AMOUNT;
 const exact = (value, keys) => value && typeof value === "object" && Object.keys(value).length === keys.length &&
   keys.every(key => Object.hasOwn(value, key));
 
@@ -27,15 +34,24 @@ function monthEnd(now) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
 }
 
+function validGrant(grant) {
+  return exact(grant, ["id", "credits", "startsAt", "endsAt"]) && typeof grant.id === "string" && /^[a-zA-Z0-9:_.-]{1,128}$/.test(grant.id) &&
+    count(grant.credits) && grant.credits <= PLAN_PERIOD_CAP && count(grant.startsAt) && count(grant.endsAt) && grant.startsAt < grant.endsAt;
+}
+
 function validPolicy(policy) {
-  return exact(policy, ["monthlyCap", "trial", "purchased", "revision"]) && Object.values(policy).every(count) && policy.monthlyCap > 0;
+  if (!exact(policy, ["monthlyCap", "trial", "purchased", "revision", "subscriptionGrants"])) return false;
+  const { monthlyCap, trial, purchased, revision, subscriptionGrants } = policy;
+  return count(monthlyCap) && monthlyCap > 0 && count(trial) && count(purchased) && count(revision) &&
+    Array.isArray(subscriptionGrants) && subscriptionGrants.length <= 48 && subscriptionGrants.every(validGrant) &&
+    new Set(subscriptionGrants.map(grant => grant.id)).size === subscriptionGrants.length;
 }
 
 function validOperation(value) {
   if (typeof value?.operation !== "string" || !Object.hasOwn(OPERATIONS, value.operation)) return false;
   const fields = OPERATIONS[value.operation];
   return exact(value, ["operation", ...fields]) && (!fields.includes("id") || (typeof value.id === "string" && OPERATION_ID.test(value.id))) &&
-    (!fields.includes("tokens") || (count(value.tokens) && (value.operation !== "reserve" || value.tokens > 0))) &&
+    (!fields.includes("amount") || (count(value.amount) && (value.operation !== "reserve" || value.amount > 0))) &&
     (!fields.includes("policy") || validPolicy(value.policy));
 }
 
@@ -52,39 +68,101 @@ export class LaunchUsage {
       ends_at INTEGER PRIMARY KEY, used INTEGER NOT NULL, reserved INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS attempts (
       id TEXT PRIMARY KEY, ends_at INTEGER NOT NULL, reserved INTEGER NOT NULL, used INTEGER NOT NULL,
-      state TEXT NOT NULL, expires_at INTEGER NOT NULL)`);
+      state TEXT NOT NULL, expires_at INTEGER NOT NULL, allocation TEXT NOT NULL)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS subscription_periods (
+      id TEXT PRIMARY KEY, starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, used INTEGER NOT NULL, reserved INTEGER NOT NULL)`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS attempts_expiry ON attempts(expires_at)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS attempts_period ON attempts(ends_at)");
   }
 
-  snapshot(now, { monthlyCap, trial, purchased, revision }) {
-    // Assign the configured lifetime trial once, so later rollout changes cannot spend purchased credits retroactively.
+  subscriptionPeriods(grants, now) {
+    const active = [];
+    for (const { id, startsAt, endsAt, credits: granted } of grants) {
+      if (startsAt > now || endsAt <= now) continue;
+      this.sql.exec("INSERT OR IGNORE INTO subscription_periods VALUES (?, ?, ?, 0, 0)", id, startsAt, endsAt);
+      const period = this.sql.exec("SELECT * FROM subscription_periods WHERE id = ?", id).one();
+      if (period.starts_at !== startsAt || period.ends_at !== endsAt) throw new Error("Plan period changed");
+      active.push({ id, endsAt, granted, used: period.used, reserved: period.reserved,
+        remaining: Math.max(0, granted - period.used - period.reserved) });
+    }
+    return active.sort((left, right) => left.endsAt - right.endsAt || left.id.localeCompare(right.id));
+  }
+
+  snapshot(now, { monthlyCap, trial, purchased, revision, subscriptionGrants }) {
+    // The first authenticated usage grant is permanent for this identity.
     this.sql.exec("UPDATE balance SET purchased = ?, revision = ?, trial = COALESCE(trial, ?) WHERE id = 1 AND revision < ?",
       purchased, revision, trial, revision);
     const { revision: latest, ...balance } = this.sql.exec("SELECT used, reserved, purchased, trial, revision FROM balance WHERE id = 1").one();
     if (latest !== revision || balance.purchased !== purchased) throw new Error("Invalid entitlement revision");
     const endsAt = monthEnd(now);
     const month = this.sql.exec("SELECT used, reserved FROM periods WHERE ends_at = ?", endsAt).toArray()[0] ?? { used: 0, reserved: 0 };
+    const active = this.subscriptionPeriods(subscriptionGrants, now);
+    const subscription = { granted: 0, used: 0, reserved: 0, remaining: 0, endsAt: active[0]?.endsAt ?? null };
+    for (const period of active) {
+      for (const key of ["granted", "used", "reserved", "remaining"]) subscription[key] += period[key];
+    }
     const monthRemaining = Math.max(0, monthlyCap - month.used - month.reserved);
     const creditRemaining = Math.max(0, balance.trial + balance.purchased - balance.used - balance.reserved);
-    return {
+    return { active, usage: {
       enabled: true,
-      available: monthRemaining > 0 && creditRemaining > 0,
+      unit: UNIT,
+      available: monthRemaining > 0 && (creditRemaining > 0 || subscription.remaining > 0),
       month: { endsAt, limit: monthlyCap, ...month, remaining: monthRemaining },
       credits: { ...balance, remaining: creditRemaining },
-    };
+      subscription,
+    } };
   }
 
-  changeTotals(endsAt, used, reserved) {
-    this.sql.exec("UPDATE balance SET used = used + ?, reserved = reserved + ? WHERE id = 1", used, reserved);
-    this.sql.exec("UPDATE periods SET used = used + ?, reserved = reserved + ? WHERE ends_at = ?", used, reserved, endsAt);
+  changeSource(source, used, reserved) {
+    if (source === null) this.sql.exec("UPDATE balance SET used = used + ?, reserved = reserved + ? WHERE id = 1", used, reserved);
+    else this.sql.exec("UPDATE subscription_periods SET used = used + ?, reserved = reserved + ? WHERE id = ?", used, reserved, source);
   }
 
-  finish(attempt, state, tokens, now) {
+  finish(attempt, state, amount, now) {
+    const allocation = JSON.parse(attempt.allocation);
+    let before = attempt.used, after = amount;
+    for (const { source, held } of allocation) {
+      const previous = Math.min(held, before), next = Math.min(held, after);
+      this.changeSource(source, next - previous, attempt.state === "unknown" ? 0 : -held);
+      before -= previous;
+      after -= next;
+    }
+    // Attribute a provider overrun to the original first funding source. It cannot debit a different grant or spill into top-ups.
+    if (before || after) this.changeSource(allocation[0].source, after - before, 0);
     const held = attempt.state === "unknown" ? 0 : attempt.reserved;
-    this.changeTotals(attempt.ends_at, tokens - attempt.used, -held);
-    this.sql.exec("UPDATE attempts SET used = ?, state = ?, expires_at = ? WHERE id = ?", tokens, state, now + RECEIPT_MS, attempt.id);
+    this.sql.exec("UPDATE periods SET used = used + ?, reserved = reserved - ? WHERE ends_at = ?", amount - attempt.used, held, attempt.ends_at);
+    this.sql.exec("UPDATE attempts SET used = ?, state = ?, expires_at = ? WHERE id = ?", amount, state, now + RECEIPT_MS, attempt.id);
     return reply({ state });
+  }
+
+  reserveAttempt(id, amount, now, { usage, active }) {
+    if (amount > Math.min(usage.month.remaining, usage.subscription.remaining + usage.credits.remaining)) return reply(LIMITED, 429);
+    const allocation = [];
+    let remaining = amount;
+    for (const { id: source, remaining: budget } of active) {
+      const held = Math.min(remaining, budget);
+      if (held) allocation.push({ source, held });
+      remaining -= held;
+      if (remaining === 0) break;
+    }
+    if (remaining > 0) allocation.push({ source: null, held: remaining });
+    this.sql.exec("INSERT OR IGNORE INTO periods VALUES (?, 0, 0)", usage.month.endsAt);
+    this.sql.exec("INSERT INTO attempts VALUES (?, ?, ?, 0, 'reserved', ?, ?)", id, usage.month.endsAt, amount, now + LEASE_MS, JSON.stringify(allocation));
+    for (const { source, held } of allocation) this.changeSource(source, 0, held);
+    this.sql.exec("UPDATE periods SET reserved = reserved + ? WHERE ends_at = ?", amount, usage.month.endsAt);
+    return reply({ state: "reserved" });
+  }
+
+  dispatchAttempt(attempt, now, { usage, active }) {
+    const balances = new Map(active.map(period => [period.id, period.granted - period.used - period.reserved]));
+    balances.set(null, usage.credits.trial + usage.credits.purchased - usage.credits.used - usage.credits.reserved);
+    if (attempt.ends_at !== usage.month.endsAt || usage.month.used + usage.month.reserved > usage.month.limit ||
+        JSON.parse(attempt.allocation).some(({ source }) => !balances.has(source) || balances.get(source) < 0)) {
+      this.finish(attempt, "refunded", 0, now);
+      return reply(LIMITED, 429);
+    }
+    this.sql.exec("UPDATE attempts SET state = 'dispatched', expires_at = ? WHERE id = ?", now + LEASE_MS, attempt.id);
+    return reply({ state: "dispatched" });
   }
 
   expire(now) {
@@ -96,33 +174,20 @@ export class LaunchUsage {
     this.sql.exec("DELETE FROM periods WHERE ends_at <= ? AND NOT EXISTS (SELECT 1 FROM attempts WHERE attempts.ends_at = periods.ends_at)", now - RECEIPT_MS);
   }
 
-  process({ operation, id, tokens, policy }, now) {
+  process({ operation, id, amount, policy }, now) {
     this.expire(now);
-    const usage = policy && this.snapshot(now, policy);
-    if (operation === "status") return reply(usage);
+    const status = policy && this.snapshot(now, policy);
+    if (operation === "status") return reply(status.usage);
     const attempt = this.sql.exec("SELECT * FROM attempts WHERE id = ?", id).toArray()[0];
     const conflict = () => reply({ state: attempt?.state ?? "missing" }, 409);
     if (operation === "reserve") {
-      if (attempt) return attempt.state === "reserved" && attempt.reserved === tokens ? reply({ state: "reserved" }) : conflict();
-      if (tokens > Math.min(usage.month.remaining, usage.credits.remaining)) return reply({ error: "token_limit_reached" }, 429);
-      this.sql.exec("INSERT OR IGNORE INTO periods VALUES (?, 0, 0)", usage.month.endsAt);
-      this.sql.exec("INSERT INTO attempts VALUES (?, ?, ?, 0, 'reserved', ?)", id, usage.month.endsAt, tokens, now + LEASE_MS);
-      this.changeTotals(usage.month.endsAt, 0, tokens);
-      return reply({ state: "reserved" });
+      if (attempt) return attempt.state === "reserved" && attempt.reserved === amount ? reply({ state: "reserved" }) : conflict();
+      return this.reserveAttempt(id, amount, now, status);
     }
-    if (operation === "dispatch") {
-      if (attempt?.state !== "reserved") return conflict();
-      if (attempt.ends_at !== usage.month.endsAt || usage.month.used + usage.month.reserved > usage.month.limit ||
-          usage.credits.used + usage.credits.reserved > usage.credits.trial + usage.credits.purchased) {
-        this.finish(attempt, "refunded", 0, now);
-        return reply({ error: "token_limit_reached" }, 429);
-      }
-      this.sql.exec("UPDATE attempts SET state = 'dispatched', expires_at = ? WHERE id = ?", now + LEASE_MS, id);
-      return reply({ state: "dispatched" });
-    }
+    if (operation === "dispatch") return attempt?.state === "reserved" ? this.dispatchAttempt(attempt, now, status) : conflict();
     if (operation === "settle") {
-      if (attempt?.state === "settled" && attempt.used === tokens) return reply({ state: "settled" });
-      return ["dispatched", "unknown"].includes(attempt?.state) ? this.finish(attempt, "settled", tokens, now) : conflict();
+      if (attempt?.state === "settled" && attempt.used === amount) return reply({ state: "settled" });
+      return ["dispatched", "unknown"].includes(attempt?.state) ? this.finish(attempt, "settled", amount, now) : conflict();
     }
     if (operation === "refund" || operation === "refund-before-fetch") {
       if (attempt?.state === "refunded") return reply({ state: "refunded" });
@@ -156,14 +221,22 @@ export class LaunchUsage {
   }
 }
 
-/** A conservative hold covers the complete UTF-8 envelope, provider framing and requested output. */
-export function estimateLaunchTokens(payload, outputTokens) {
-  return new TextEncoder().encode(payload).byteLength + 1024 + outputTokens;
+/** Hold the entire text envelope at the uncached price plus provider framing and maximum output. */
+export function estimateLunaCost(payload, outputTokens) {
+  return (new TextEncoder().encode(payload).byteLength + 1024) * LUNA.input + outputTokens * LUNA.output;
 }
 
-export function reportedLaunchTokens(usage) {
-  const { input_tokens: input, output_tokens: output, total_tokens: total } = usage ?? {};
-  return count(input) && count(output) && count(total) && input + output === total ? total : null;
+export function reportedLunaCost(usage) {
+  const { input_tokens: input, output_tokens: output, total_tokens: total, input_tokens_details: details } = usage ?? {};
+  if (details !== undefined && (!details || typeof details !== "object" || Array.isArray(details))) return null;
+  const { cached_tokens: cached = 0, cache_write_tokens: written = 0, cache_write_tokens_details: writes = {} } = details ?? {};
+  if (!writes || typeof writes !== "object" || Array.isArray(writes)) return null;
+  const { ttl_30m_tokens: write30m = 0, ttl_12h_tokens: write12h = 0 } = writes;
+  if (![input, output, total, cached, written, write30m, write12h].every(count) || input + output !== total ||
+      cached + written > input || write30m + write12h !== written) return null;
+  const cost = (input - cached - written) * LUNA.input + cached * LUNA.cached +
+    write30m * LUNA.write30m + write12h * LUNA.write12h + output * LUNA.output;
+  return count(cost) ? cost : null;
 }
 
 function emailSession(config, session) {
@@ -175,16 +248,26 @@ function usableNamespace(namespace) {
   return typeof namespace?.idFromName === "function" && typeof namespace.get === "function";
 }
 
+function launchTrafficLimits(env) {
+  const accountDay = configuredCount(env.LAUNCH_AI_ACCOUNT_REQUESTS_PER_DAY ?? "100");
+  const appDay = configuredCount(env.LAUNCH_AI_APP_REQUESTS_PER_DAY ?? "1000");
+  const appMonth = configuredCount(env.LAUNCH_AI_APP_REQUESTS_PER_MONTH ?? "15000");
+  if (!accountDay || accountDay > 10_000 || !appDay || appDay > 100_000 || !appMonth || appMonth > 3_100_000 ||
+      accountDay > appDay || appDay > appMonth) return null;
+  return { accountDay, appDay, appMonth };
+}
+
 export function launchUsageConfigured(env) {
-  return env.LAUNCH_AI_USAGE_ENABLED === "true" && configuredCount(env.LAUNCH_AI_MONTHLY_TOKEN_CAP) > 0 &&
-    configuredCount(env.LAUNCH_AI_TRIAL_TOKENS ?? "0") !== null && usableNamespace(env.LAUNCH_USAGE) && usableNamespace(env.COMMERCE);
+  return env[LAUNCH_COST_METERING_FLAG] === "true" && configuredCount(env.LAUNCH_AI_MONTHLY_CAP_NANO_USD ?? DEFAULT_MONTHLY_CAP) > 0 &&
+    configuredCount(env.LAUNCH_AI_TRIAL_NANO_USD ?? "0") !== null && Boolean(launchTrafficLimits(env)) &&
+    usableNamespace(env.LAUNCH_USAGE) && usableNamespace(env.COMMERCE);
 }
 
 export function createLaunchUsage(env, { config, session }) {
-  if (env.LAUNCH_AI_USAGE_ENABLED !== "true") return { enabled: false };
+  if (env[LAUNCH_COST_METERING_FLAG] !== "true") return { enabled: false };
   const configured = launchUsageConfigured(env);
-  const monthlyCap = configuredCount(env.LAUNCH_AI_MONTHLY_TOKEN_CAP);
-  const trial = configuredCount(env.LAUNCH_AI_TRIAL_TOKENS ?? "0");
+  const monthlyCap = configuredCount(env.LAUNCH_AI_MONTHLY_CAP_NANO_USD ?? DEFAULT_MONTHLY_CAP);
+  const trial = configuredCount(env.LAUNCH_AI_TRIAL_NANO_USD ?? "0");
   async function command(operation, fields = {}) {
     const readsPolicy = ["status", "reserve", "dispatch"].includes(operation);
     if (!configured || (readsPolicy && !emailSession(config, session))) return unavailable();
@@ -193,13 +276,13 @@ export function createLaunchUsage(env, { config, session }) {
       if (readsPolicy) {
         const response = await readEntitlement(env.COMMERCE, { subject });
         if (!response.ok) return unavailable();
-        const { credits: purchased, revision } = await response.json();
-        const policy = { monthlyCap, trial, purchased, revision };
-        if (!validPolicy(policy)) return unavailable();
+        const { unit, credits: purchased, revision, subscriptionGrants } = await response.json();
+        const policy = { monthlyCap, trial, purchased, revision, subscriptionGrants };
+        if (unit !== UNIT || !validPolicy(policy)) return unavailable();
         fields = { ...fields, policy };
       }
       const namespace = env.LAUNCH_USAGE;
-      return await namespace.get(namespace.idFromName(subject)).fetch(new Request(INTERNAL_URL, {
+      return await namespace.get(namespace.idFromName(`cost:v1:${subject}`)).fetch(new Request(INTERNAL_URL, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(5000),
         body: JSON.stringify({ operation, ...fields }),
       }));
@@ -211,16 +294,17 @@ export function createLaunchUsage(env, { config, session }) {
   }
   return {
     enabled: true,
-    estimateTokens: estimateLaunchTokens,
+    estimateCost: estimateLunaCost,
+    trafficLimits: launchTrafficLimits(env),
     status: () => command("status"),
-    reserve: (id, tokens) => command("reserve", { id, tokens }),
+    reserve: (id, amount) => command("reserve", { id, amount }),
     dispatch: id => command("dispatch", { id }),
     refund: id => complete("refund", { id }),
     // Only the handler with the dispatch acknowledgement can prove fetch never ran.
     refundBeforeFetch: id => complete("refund-before-fetch", { id }),
     finalize: (id, usage) => {
-      const tokens = reportedLaunchTokens(usage);
-      return tokens === null ? complete("unknown", { id }) : complete("settle", { id, tokens });
+      const amount = reportedLunaCost(usage);
+      return amount === null ? complete("unknown", { id }) : complete("settle", { id, amount });
     },
   };
 }
@@ -229,11 +313,11 @@ export async function handleLaunchUsage(request, env, { config, session }) {
   const url = new URL(request.url);
   const origin = request.headers.get("Origin");
   if (!emailSession(config, session) || url.origin !== config.origin || (origin !== null && origin !== config.origin) ||
-      ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) return reply({ error: "Sign in to SatinLore to view AI token usage." }, 403);
+      ["cross-site", "same-site"].includes(request.headers.get("Sec-Fetch-Site"))) return reply({ error: "Sign in to SatinLore to view AI analysis usage." }, 403);
   if (url.pathname !== LAUNCH_USAGE_PATH || url.search) return reply({ error: "Use the SatinLore account controls." }, 400);
   if (!["GET", "HEAD"].includes(request.method)) return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
   const usage = createLaunchUsage(env, { config, session });
   const result = usage.enabled ? await usage.status() : reply({ enabled: false, available: false });
-  if (!emailSession(config, session)) return reply({ error: "Sign in to SatinLore to view AI token usage." }, 403);
+  if (!emailSession(config, session)) return reply({ error: "Sign in to SatinLore to view AI analysis usage." }, 403);
   return request.method === "HEAD" ? new Response(null, result) : result;
 }

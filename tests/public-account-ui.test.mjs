@@ -21,6 +21,42 @@ test("auth requests are same-origin and carry only the form fields", async () =>
   }), {message: "Wait before trying again.", retryAfter: 60});
 });
 
+test("a billing signup link opens registration and returns the verified reader to its referral", async t => {
+  let signedIn = false;
+  const destinations = [];
+  const location = {search: "?signin=1&mode=register&ref=FIXTURE&next=billing", assign: path => destinations.push(path)};
+  const app = workspace({publicAuth: true, launchBilling: true, location, authRequest: async (action, body) => {
+    if (action === "register") return {challenge: "new-account", resendAfter: 60};
+    if (action === "verify") {
+      assert.deepEqual(body, {challenge: "new-account", code: "123456"});
+      return {verified: true};
+    }
+    assert.equal(action, "login");
+    assert.equal(body.email, address);
+    signedIn = true;
+    return {authenticated: true, expiresAt: app.now() + 600000};
+  }});
+  t.after(() => app.destroy());
+  app.access(async () => Response.json({authenticated: signedIn, expiresAt: signedIn ? app.now() + 600000 : null}));
+  await app.settle();
+  const node = id => app.nodes.get(id);
+  assert.equal(node("public-account-dialog").open, true);
+  assert.equal(node("public-login-form").hidden, true);
+  assert.equal(node("public-register-form").hidden, false);
+  assert.equal(app.document.activeElement, node("public-register-email"));
+  node("public-register-email").value = address;
+  node("public-register-password").value = originalPassword;
+  node("public-adult").checked = true;
+  await node("public-register-form").dispatch("submit");
+  node("public-code").value = "123456";
+  await node("public-code-form").dispatch("submit");
+  assert.equal(node("public-login-form").hidden, false);
+  assert.deepEqual(destinations, []);
+  node("public-password").value = originalPassword;
+  await node("public-login-form").dispatch("submit");
+  assert.deepEqual(destinations, ["/billing?ref=FIXTURE"]);
+});
+
 test("guest simulation, email verification and password sign-in preserve the reader", async t => {
   let signedIn = false, currentPassword = "";
   const calls = [];

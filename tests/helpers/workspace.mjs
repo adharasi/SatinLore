@@ -30,7 +30,7 @@ import {storyToyRecommendation} from "../../app/static/reader/toy-recommendation
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
-export function workspace({hosted = false, locks = true, publicAuth = false, authRequest, libraryRequest, sceneRequest} = {}) {
+export function workspace({hosted = false, locks = true, publicAuth = false, launchBilling = false, location, authRequest, libraryRequest, sceneRequest} = {}) {
   let time = 1000000, timerId = 0, context, narrow = false, document;
   const timers = new Map(), nodes = new Map(), errors = [], documentListeners = new Map(), windowListeners = new Map();
   const preferenceValues = new Map(), downloads = [];
@@ -104,6 +104,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
     querySelector(selector) {
       if (selector === 'meta[name="satinlore-hosted-access"]') return hosted ? {content: "true"} : null;
       if (selector === 'meta[name="satinlore-public-auth"]') return publicAuth ? {content: "true"} : null;
+      if (selector === 'meta[name="satinlore-launch-usage"]') return launchBilling ? {content: "true"} : null;
       if (selector === "dialog[open]") return [...nodes.values()].find(node => node.tagName === "DIALOG" && node.open) || null;
       if (selector === ".workspace-header") return nodes.get("workspace-header");
       return null;
@@ -113,6 +114,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, aut
   };
   for (const node of [...nodes.values(), root, body]) node.ownerDocument = document;
   const window = {
+    location,
     matchMedia: query => ({matches: query.includes("prefers-color-scheme") ? false : narrow, addEventListener() {}}),
     addEventListener(name, callback) { if (!windowListeners.has(name)) windowListeners.set(name, []); windowListeners.get(name).push(callback); },
     removeEventListener() {},

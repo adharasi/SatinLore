@@ -2,16 +2,24 @@ import assert from "node:assert/strict";
 import {DatabaseSync} from "node:sqlite";
 import test from "node:test";
 import {cancelCheckout, listCommerceRecords, quoteCheckout, readCheckout, readEntitlement, reserveCheckout,
-  reverseCheckout, SatinLoreCommerce, saveAffiliate, savePromotion, settleCheckout} from "../deploy/cloudflare/commerce.mjs";
+  readSubscription, reverseCheckout, SatinLoreCommerce, saveAffiliate, savePromotion, settleCheckout, settleSubscription,
+  updateSubscriptionLifecycle} from "../deploy/cloudflare/commerce.mjs";
 
 const reader = `account:v1:${"a".repeat(64)}`;
 const other = `account:v1:${"b".repeat(64)}`;
-const plan = {id: "test-plan", currency: "USD", amountMinor: 1001, credits: 1003};
+const unit = "nano_usd";
+const plan = {id: "test-plan", currency: "USD", amountMinor: 1001, credits: 1003, unit};
+const monthly = {id: "monthly", currency: "USD", amountMinor: 999, credits: 2_000_000_000, kind: "monthly", unit};
+const balance = (credits, revision) => ({credits, revision, unit, subscription: null, subscriptionGrants: []});
 const request = (changes = {}) => ({subject: reader, plan, idempotencyKey: crypto.randomUUID(), ...changes});
 const purchase = (id, changes = {}) => ({id, currency: "USD", amountMinor: 1001, providerSaleId: "111",
   providerTransactionId: "121", eventId: "v2:purchase:121", ...changes});
 const refund = (id, changes = {}) => ({id, currency: "USD", amountMinor: 371, providerSaleId: "111",
-  providerTransactionId: "122", parentTransactionId: "121", reason: "refund", eventId: "v2:credit:122", ...changes});
+  providerTransactionId: "122", parentTransactionId: "121", reason: "refund", kind: "one-time", eventId: "v2:credit:122", ...changes});
+const utc = date => Date.parse(`${date}T00:00:00Z`);
+const monthlySale = (id, periodEnd, transaction, renewal = false, changes = {}) => ({id, currency: "USD", amountMinor: 999,
+  providerSaleId: "201", providerTransactionId: transaction, eventId: `verotel:${transaction}`, periodEnd, renewal, ...changes});
+const lifecycle = (id, event, periodEnd, key = event) => ({id, providerSaleId: "201", event, periodEnd, eventId: `test:lifecycle:${key}`});
 
 function fixture(t) {
   const db = new DatabaseSync(":memory:");
@@ -124,13 +132,13 @@ test("purchase and cumulative partial refunds bind immutable provider identifier
   assert.deepEqual((await Promise.all(responses.map(res => body(res)))).map(row => row.duplicate).sort(), [false, true]);
   assert.equal((await body(settleCheckout(namespace, purchase(second.checkout.id, {providerTransactionId: "777", eventId: "v2:purchase:777"})), 409)).code,
     "provider_identity_conflict");
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), {credits: 1003, revision: 1});
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), balance(1003, 1));
   assert.equal((await body(cancelCheckout(namespace, {id: first.checkout.id, subject: reader}))).checkout.status, "paid");
   const partial = refund(first.checkout.id);
   assert.equal((await body(reverseCheckout(namespace, {...partial, parentTransactionId: "191"}), 409)).code, "provider_identity_conflict");
   assert.equal((await body(reverseCheckout(namespace, partial))).checkout.refundedMinor, 371);
   assert.equal((await body(reverseCheckout(namespace, {...partial, amountMinor: 372}), 409)).code, "provider_event_conflict");
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), {credits: 631, revision: 2});
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), balance(631, 2));
   reset();
   assert.equal((await body(reverseCheckout(namespace, partial))).duplicate, true);
   const report = await body(listCommerceRecords(namespace));
@@ -144,7 +152,7 @@ test("purchase and cumulative partial refunds bind immutable provider identifier
   const complete = refund(first.checkout.id, {providerTransactionId: "123", eventId: "v2:credit:123", amountMinor: 630});
   assert.equal((await body(reverseCheckout(namespace, {...complete, amountMinor: 631}), 409)).code, "excess_reversal");
   assert.equal((await body(reverseCheckout(namespace, complete))).checkout.status, "refunded");
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), {credits: 0, revision: 3});
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), balance(0, 3));
   assert.equal((await body(settleCheckout(namespace, event))).checkout.status, "refunded");
   assert.equal(db.prepare("SELECT COUNT(*) n FROM commerce_events").get().n, 3);
 });
@@ -157,7 +165,7 @@ test("a refund arriving before purchase pins its actual parent and never grants 
   assert.equal((await body(reverseCheckout(namespace, before))).checkout.grantedCredits, 0);
   assert.equal((await body(settleCheckout(namespace, purchase(id, {providerSaleId: "191"})), 409)).code, "provider_identity_conflict");
   assert.equal((await body(settleCheckout(namespace, purchase(id)))).checkout.status, "refunded");
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), {credits: 0, revision: 0});
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), balance(0, 0));
   const duplicate = await body(reverseCheckout(namespace, before));
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.checkout.status, "refunded");
@@ -181,8 +189,8 @@ test("a late signed sale settles only if its expired promotion capacity remains 
   assert.equal(history.providerSaleId, "111");
   const otherPurchase = purchase(pipelined.id, {amountMinor: 876, providerTransactionId: "153", providerSaleId: "124", eventId: "v2:purchase:153"});
   assert.equal((await body(settleCheckout(namespace, otherPurchase))).checkout.status, "paid");
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), {credits: 0, revision: 0});
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: other})), {credits: 1003, revision: 1});
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), balance(0, 0));
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: other})), balance(1003, 1));
   const pending = (await body(reserveCheckout(namespace, request()), 201)).checkout;
   now = pending.expiresAt;
   const late = await body(settleCheckout(namespace, purchase(pending.id, {providerSaleId: "125", providerTransactionId: "154", eventId: "v2:purchase:154"})));
@@ -203,7 +211,7 @@ test("explicit close, chargeback and provider identity conflicts fail safely", a
   assert.equal((await body(reverseCheckout(namespace, chargeback))).checkout.status, "charged-back");
   assert.equal((await body(reverseCheckout(namespace, {...chargeback, providerTransactionId: "233", eventId: "v2:chargeback:233"}), 409)).code,
     "excess_reversal");
-  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), {credits: 0, revision: 2});
+  assert.deepEqual(await body(readEntitlement(namespace, {subject: reader})), balance(0, 2));
 });
 
 test("missing binding and malformed server commands fail closed without retaining purchase metadata", async t => {
@@ -214,4 +222,170 @@ test("missing binding and malformed server commands fail closed without retainin
   assert.equal((await body(reserveCheckout(namespace, request({subscriberEmail: "synthetic@example.invalid"})), 400)).code, "invalid_commerce_request");
   assert.equal((await body(readEntitlement(namespace, {subject: "synthetic@example.invalid"}), 400)).code, "invalid_commerce_request");
   assert.equal(db.prepare("SELECT COUNT(*) n FROM commerce_orders").get().n, 0);
+});
+
+test("verified initial and month-end rebill grant separate paid periods and keep one-time balance independent", async t => {
+  let now = utc("2027-01-31") + 14_400_000;
+  t.mock.method(Date, "now", () => now);
+  const {namespace, reset} = fixture(t);
+  await body(saveAffiliate(namespace, {code: "creator", commissionBps: 2000, enabled: true}));
+  const input = request({plan: monthly, affiliateCode: "CREATOR"});
+  const {checkout} = await body(reserveCheckout(namespace, input), 201);
+  assert.equal((await body(reserveCheckout(namespace, input))).duplicate, true);
+  assert.equal((await body(reserveCheckout(namespace, request({plan: monthly})), 409)).code, "subscription_exists");
+  const {checkout: topUp} = await body(reserveCheckout(namespace, request()), 201);
+  await body(settleCheckout(namespace, purchase(topUp.id)));
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants.length, 0);
+  const first = monthlySale(checkout.id, utc("2027-02-28"), "211");
+  assert.equal((await body(settleCheckout(namespace, purchase(checkout.id)), 409)).code, "checkout_payment_kind_mismatch");
+  await body(settleSubscription(namespace, first));
+  assert.equal((await body(settleSubscription(namespace, first))).duplicate, true);
+  assert.equal((await body(settleSubscription(namespace, {...first, periodEnd: utc("2027-02-27")}), 409)).code, "provider_event_conflict");
+  let entitlement = await body(readEntitlement(namespace, {subject: reader}));
+  assert.equal(entitlement.unit, unit);
+  assert.equal(entitlement.credits, plan.credits);
+  assert.equal(entitlement.revision, 2);
+  assert.deepEqual(entitlement.subscriptionGrants, [{id: `${checkout.id}:${first.periodEnd}`, startsAt: now, endsAt: first.periodEnd, credits: monthly.credits}]);
+  assert.equal(Object.hasOwn(entitlement.subscription, "providerSaleId"), false);
+  assert.equal((await body(readSubscription(namespace, {subject: reader}))).subscription.providerSaleId, "201");
+  assert.equal((await body(readSubscription(namespace, {subject: other}))).subscription, null);
+  now = utc("2027-02-28") - 60_000;
+  const renewed = monthlySale(checkout.id, utc("2027-03-31"), "212", true);
+  await body(settleSubscription(namespace, renewed));
+  reset();
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants[0].endsAt, first.periodEnd);
+  now = first.periodEnd;
+  entitlement = await body(readEntitlement(namespace, {subject: reader}));
+  assert.deepEqual(entitlement.subscriptionGrants, [{id: `${checkout.id}:${renewed.periodEnd}`, startsAt: first.periodEnd,
+    endsAt: renewed.periodEnd, credits: monthly.credits}]);
+  assert.equal(entitlement.credits, plan.credits);
+  const charges = (await body(listCommerceRecords(namespace))).subscriptionCharges;
+  assert.deepEqual(charges.map(row => [row.affiliateCode, row.commissionMinor]), [["CREATOR", 0], ["CREATOR", 199]]);
+});
+
+test("cancel and expiry keep the paid period while extend never grants additional included funds", async t => {
+  let now = utc("2027-03-30");
+  t.mock.method(Date, "now", () => now);
+  const {namespace} = fixture(t);
+  const {checkout} = await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+  const first = monthlySale(checkout.id, utc("2027-04-30"), "211");
+  await body(settleSubscription(namespace, first));
+  const stop = lifecycle(checkout.id, "cancel", first.periodEnd);
+  const {subscription} = await body(updateSubscriptionLifecycle(namespace, stop));
+  assert.equal(subscription.status, "cancelled");
+  assert.equal(subscription.paidThrough, first.periodEnd);
+  assert.equal(subscription.renews, false);
+  assert.equal((await body(updateSubscriptionLifecycle(namespace, stop))).duplicate, true);
+  assert.equal((await body(updateSubscriptionLifecycle(namespace, {...stop, periodEnd: utc("2027-04-29")}), 409)).code, "provider_event_conflict");
+  const extend = lifecycle(checkout.id, "extend", utc("2027-05-04"));
+  assert.equal((await body(updateSubscriptionLifecycle(namespace, extend))).subscription.paidThrough, first.periodEnd);
+  // Identical dates do not establish whether an uncancel followed or preceded a cancellation.
+  assert.equal((await body(updateSubscriptionLifecycle(namespace, lifecycle(checkout.id, "uncancel", first.periodEnd)))).subscription.status,
+    "cancelled");
+  assert.equal((await body(reserveCheckout(namespace, request({plan: monthly})), 409)).code, "subscription_exists");
+  now = first.periodEnd - 1;
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants.length, 1);
+  now = first.periodEnd;
+  const rebill = monthlySale(checkout.id, utc("2027-05-30"), "212", true);
+  assert.equal((await body(settleSubscription(namespace, rebill), 409)).code, "subscription_renewal_closed");
+  assert.equal((await body(updateSubscriptionLifecycle(namespace, lifecycle(checkout.id, "expire", null)))).subscription.status, "expired");
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants.length, 0);
+  await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+});
+
+test("out-of-order rebills wait for a connected paid date, without granting two balances or overlapping a short month", async t => {
+  let now = utc("2027-01-31");
+  t.mock.method(Date, "now", () => now);
+  const {namespace} = fixture(t);
+  const {checkout} = await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+  const initial = monthlySale(checkout.id, utc("2027-02-28"), "211");
+  await body(settleSubscription(namespace, initial));
+  now = utc("2027-03-31");
+  const later = monthlySale(checkout.id, utc("2027-04-30"), "213", true);
+  await body(settleSubscription(namespace, later));
+  let snapshot = await body(readEntitlement(namespace, {subject: reader}));
+  assert.equal(snapshot.subscription.status, "past-due");
+  assert.equal(snapshot.subscription.paidThrough, initial.periodEnd);
+  assert.deepEqual(snapshot.subscriptionGrants, []);
+  const intervening = monthlySale(checkout.id, utc("2027-03-31"), "212", true);
+  await body(settleSubscription(namespace, intervening));
+  snapshot = await body(readEntitlement(namespace, {subject: reader}));
+  assert.deepEqual(snapshot.subscriptionGrants, [{id: `${checkout.id}:${later.periodEnd}`, startsAt: intervening.periodEnd,
+    endsAt: later.periodEnd, credits: monthly.credits}]);
+  assert.equal((await body(settleSubscription(namespace, later))).duplicate, true);
+  const overlap = monthlySale(checkout.id, utc("2027-04-29"), "214", true);
+  assert.equal((await body(settleSubscription(namespace, overlap), 409)).code, "subscription_period_conflict");
+});
+
+test("signed extend anchors a shifted renewal only after a separate verified payment", async t => {
+  let now = utc("2027-01-01");
+  t.mock.method(Date, "now", () => now);
+  const {namespace} = fixture(t);
+  const {checkout} = await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+  const first = monthlySale(checkout.id, utc("2027-02-01"), "211");
+  await body(settleSubscription(namespace, first));
+  const extension = lifecycle(checkout.id, "extend", utc("2027-02-06"));
+  const rebill = monthlySale(checkout.id, utc("2027-03-06"), "212", true);
+  now = first.periodEnd;
+  assert.deepEqual((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants, []);
+  now = extension.periodEnd;
+  await body(settleSubscription(namespace, rebill));
+  assert.deepEqual((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants, []);
+  assert.equal((await body(listCommerceRecords(namespace))).subscriptionCharges[0].status, "pending-period-link");
+  const before = (await body(readEntitlement(namespace, {subject: reader}))).revision;
+  await body(updateSubscriptionLifecycle(namespace, extension));
+  const result = await body(readEntitlement(namespace, {subject: reader}));
+  assert.deepEqual(result.subscriptionGrants, [{id: `${checkout.id}:${rebill.periodEnd}`, credits: monthly.credits,
+    startsAt: extension.periodEnd, endsAt: rebill.periodEnd}]);
+  assert.equal(result.revision, before + 1);
+  assert.equal((await body(listCommerceRecords(namespace))).subscriptionCharges[0].status, "linked");
+  assert.equal((await body(updateSubscriptionLifecycle(namespace, extension))).duplicate, true);
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).revision, result.revision);
+});
+
+test("monthly reversal is scoped to its signed parent and handles a terminated refund before payment", async t => {
+  let now = utc("2027-04-30");
+  t.mock.method(Date, "now", () => now);
+  const {namespace} = fixture(t);
+  const {checkout} = await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+  const first = monthlySale(checkout.id, utc("2027-05-30"), "211");
+  await body(settleSubscription(namespace, first));
+  now = first.periodEnd;
+  const second = monthlySale(checkout.id, utc("2027-06-30"), "212", true);
+  await body(settleSubscription(namespace, second));
+  const credit = refund(checkout.id, {kind: "monthly", providerSaleId: "201", providerTransactionId: "217",
+    parentTransactionId: "211", eventId: "verotel:217", amountMinor: 499});
+  assert.equal((await body(reverseCheckout(namespace, {...credit, kind: "one-time"}), 409)).code, "checkout_payment_kind_mismatch");
+  await body(reverseCheckout(namespace, credit));
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).subscriptionGrants[0].credits, monthly.credits);
+  const upcoming = monthlySale(checkout.id, utc("2027-07-30"), "213", true);
+  now = utc("2027-06-30");
+  const terminated = {...credit, parentTransactionId: "213", providerTransactionId: "218", eventId: "verotel:218", terminated: true,
+    amountMinor: 999};
+  await body(reverseCheckout(namespace, terminated));
+  assert.equal((await body(reverseCheckout(namespace, {...terminated, terminated: false}), 409)).code, "provider_event_conflict");
+  await body(settleSubscription(namespace, upcoming));
+  const recovered = await body(readEntitlement(namespace, {subject: reader}));
+  assert.equal(recovered.subscription.status, "expired");
+  assert.equal(recovered.subscription.renews, false);
+  assert.deepEqual(recovered.subscriptionGrants, []);
+  assert.equal((await body(listCommerceRecords(namespace))).subscriptionCharges[0].refundedMinor, 999);
+});
+
+test("superseded recurring checkout is preserved for review and legacy token rows never become money", async t => {
+  let now = utc("2027-05-01");
+  t.mock.method(Date, "now", () => now);
+  const {namespace, db} = fixture(t);
+  const {checkout: old} = await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+  now = old.expiresAt;
+  const {checkout: current} = await body(reserveCheckout(namespace, request({plan: monthly})), 201);
+  const cancelled = monthlySale(old.id, utc("2027-06-01"), "211");
+  assert.equal((await body(settleSubscription(namespace, cancelled), 409)).code, "subscription_exists");
+  assert.equal((await body(settleSubscription(namespace, cancelled), 409)).code, "subscription_exists");
+  assert.equal((await body(readSubscription(namespace, {subject: reader}))).subscription.id, current.id);
+  db.prepare("INSERT INTO commerce_entitlements VALUES (?,?,?)").run(reader, 100_000, 6);
+  const {checkout: legacy} = await body(reserveCheckout(namespace, request()), 201);
+  db.prepare("UPDATE commerce_orders SET grant_unit='legacy_tokens' WHERE id=?").run(legacy.id);
+  assert.equal((await body(settleCheckout(namespace, purchase(legacy.id)), 409)).code, "checkout_legacy_units");
+  assert.equal((await body(readEntitlement(namespace, {subject: reader}))).credits, 0);
 });

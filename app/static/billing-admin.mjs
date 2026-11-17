@@ -13,6 +13,10 @@ async function call(path = "", body) {
 
 const dateValue = value => new Date(value).toISOString().slice(0, 16);
 const money = (currency, minor) => new Intl.NumberFormat(undefined, {style: "currency", currency}).format(minor / 100);
+const number = new Intl.NumberFormat(undefined, {maximumFractionDigits: 7});
+const day = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeZone: "UTC"});
+const grant = (amount, unit) => unit === "nano_usd" ?
+  `${number.format(amount / 10_000_000)} credits` : `${number.format(amount)} legacy tokens`;
 
 function fill(form, values) {
   for (const [name, value] of Object.entries(values)) {
@@ -45,7 +49,7 @@ function edit(action) {
 }
 
 async function reload() {
-  const {promotions, affiliates, checkouts} = await call();
+  const {promotions, affiliates, checkouts, subscriptionCharges = []} = await call();
   render("promotions-list", promotions, row => [
     `${row.code} · ${row.discountBps / 100}% off · ${row.claimed}/${row.maxRedemptions} claimed · ${row.enabled ? "Active" : "Disabled"} `,
     edit(() => fill(promotion, {code: row.code, percent: row.discountBps / 100, limit: row.maxRedemptions,
@@ -59,10 +63,22 @@ async function reload() {
       edit(() => fill(affiliate, {code: row.code, percent: row.commissionBps / 100, enabled: row.enabled}))];
   });
   render("orders-list", checkouts, row => [
-    `${row.id} · ${row.planId} · ${row.status} · ${money(row.currency, row.amountMinor)} · ${row.grantedCredits} credits` +
+    `${row.id} · ${row.planId} · ${row.status} · ${money(row.currency, row.amountMinor)} · ${grant(row.grantedCredits, row.unit)}` +
     (row.affiliateCode ? ` · ${row.affiliateCode}: ${money(row.currency, row.commissionMinor)} commission` : "") +
     (row.reviewReason ? ` · Review: ${row.reviewReason}` : ""),
   ]);
+  render("subscription-charges-list", subscriptionCharges, row => {
+    const end = day.format(row.endsAt);
+    const period = row.startsAt === null ?
+      (row.reviewReason ? `Period ending ${end} (UTC)` : `Awaiting a linked billing period ending ${end} (UTC)`) :
+      `${day.format(row.startsAt)} to ${end} (UTC)`;
+    return [
+      `${row.checkoutId} · Transaction ${row.providerTransactionId} · ${period} · ${money(row.currency, row.amountMinor)} · ${grant(row.grantedCredits, "nano_usd")}` +
+      (row.refundedMinor ? ` · ${money(row.currency, row.refundedMinor)} refunded` : "") +
+      (row.affiliateCode ? ` · ${row.affiliateCode}: ${money(row.currency, row.commissionMinor)} commission` : "") +
+      (row.reviewReason ? ` · Review: ${row.reviewReason}` : ""),
+    ];
+  });
 }
 
 async function perform(action, completed = "") {

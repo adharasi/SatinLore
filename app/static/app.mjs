@@ -2497,7 +2497,7 @@ if (hostedMode) {
     const openBilling = billing ? () => window.location.assign(`/billing${parameters.size ? `?${parameters}` : ""}`) : null;
     void accessCheck.then(allowed => {
       if (allowed) return openBilling ? openBilling() : offerExperience();
-      return publicAccount?.open($("public-account"), openBilling);
+      return publicAccount?.open($("public-account"), openBilling, {register: accountQuery.get("mode") === "register"});
     });
   } else if (publicMode) void accessCheck.then(allowed => { if (allowed) return offerExperience(); });
 }

@@ -1,14 +1,16 @@
 import { accountIdentity, accountJson, AccountError } from "./accounts.mjs";
-import { listCommerceRecords, quoteCheckout, readCheckout, reserveCheckout, reverseCheckout, saveAffiliate,
-  savePromotion, settleCheckout } from "./commerce.mjs";
+import { listCommerceRecords, quoteCheckout, readCheckout, readSubscription, reserveCheckout, reverseCheckout, saveAffiliate,
+  savePromotion, settleCheckout, settleSubscription, updateSubscriptionLifecycle } from "./commerce.mjs";
 import { APP_ORIGIN } from "./public-auth.mjs";
 import { launchUsageConfigured } from "./launch-usage.mjs";
 import { analysisConfigured } from "./scene-analysis.mjs";
+import { LAUNCH_PLANS, MONTHLY_PERIOD } from "./launch-plans.mjs";
 
 export const BILLING_API = "/api/billing";
 export const BILLING_ADMIN_API = "/api/billing-admin";
 export const BILLING_POSTBACK = `${BILLING_API}/verotel/postback`;
 const ORDER_PAGE = "https://secure.verotel.com/startorder";
+const CANCEL_PAGE = "https://secure.verotel.com/cancel-subscription";
 const currencies = new Set(["USD", "EUR", "GBP", "AUD", "CAD", "CHF", "DKK", "NOK", "SEK"]);
 const numericId = /^[1-9][0-9]{0,29}$/u;
 const orderId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u;
@@ -16,7 +18,9 @@ const code = /^[A-Z0-9][A-Z0-9_-]{1,31}$/u;
 const planId = /^[a-z0-9][a-z0-9-]{1,31}$/u;
 const hex = /^[a-f0-9]{64}$/u;
 const eventParams = new Set(["shopID", "type", "event", "referenceID", "saleID", "transactionID", "parentID",
-  "priceAmount", "priceCurrency", "paymentMethod", "custom1", "custom2", "custom3", "truncatedPAN", "CCBrand", "version"]);
+  "priceAmount", "priceCurrency", "paymentMethod", "custom1", "custom2", "custom3", "truncatedPAN", "CCBrand", "version",
+  "subscriptionType", "period", "nextChargeOn", "expiresOn", "subscriptionPhase", "amount", "currency", "cancelledBy",
+  "uncancelledBy"]);
 const encode = new TextEncoder();
 const json = (value, status = 200) => Response.json(value, {status});
 const commerceMessages = new Map([
@@ -27,6 +31,8 @@ const commerceMessages = new Map([
   ["quote_changed", "The price changed. Check the price again before continuing."],
   ["checkout_closed", "This order is closed. Check the price to create a new order."],
   ["pending_checkout_limit", "You have several pending checkouts. Complete an existing order or try later."],
+  ["subscription_exists", "A subscription already exists for this account. Check its status before starting another."],
+  ["active_subscription_exists", "A subscription already exists for this account. Check its status before starting another."],
 ]);
 
 async function publicResult(response) {
@@ -36,17 +42,19 @@ async function publicResult(response) {
     "This billing request could not be completed. Check your selection and try again.")}, response.status);
 }
 
-function catalog(value) {
-  if (typeof value !== "string" || value.length > 8_192) return null;
+function catalog(env) {
+  const value = env.LAUNCH_PLAN_CATALOG;
+  if (value !== undefined && (typeof value !== "string" || value.length > 8_192)) return null;
   try {
-    const entries = JSON.parse(value);
+    const entries = value === undefined ? LAUNCH_PLANS : JSON.parse(value);
     if (!Array.isArray(entries) || !entries.length || entries.length > 12) return null;
     const checked = new Map();
-    for (const {id, name, currency, amountMinor, credits} of entries) {
+    for (const {id, name, currency, amountMinor, credits, kind = "one-time"} of entries) {
       if (!planId.test(id) || checked.has(id) || typeof name !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9 .-]{1,58}$/u.test(name) ||
-          !currencies.has(currency) || !Number.isSafeInteger(amountMinor) || amountMinor < 100 || amountMinor > 100_000 ||
-          !Number.isSafeInteger(credits) || credits < 1 || credits > 100_000_000) return null;
-      checked.set(id, {id, name, currency, amountMinor, credits});
+          currency !== "USD" || !Number.isSafeInteger(amountMinor) || amountMinor < 100 || amountMinor > 100_000 ||
+          !Number.isSafeInteger(credits) || credits < 1 || credits > 100_000_000_000 ||
+          !["one-time", "monthly"].includes(kind) || kind === "monthly" && credits !== 2_000_000_000) return null;
+      checked.set(id, {id, name, currency, amountMinor, credits, kind, ...(kind === "monthly" ? {rebillAmountMinor: amountMinor} : {})});
     }
     return checked;
   } catch { return null; }
@@ -57,7 +65,7 @@ export function launchBillingAvailable(env) {
     launchUsageConfigured(env) && analysisConfigured(env.OPENAI_API_KEY, env.SCENE_ANALYSIS_BUDGET) &&
     numericId.test(env.VEROTEL_SHOP_ID ?? "") &&
     typeof env.VEROTEL_SIGNATURE_KEY === "string" && /^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY) &&
-    Boolean(catalog(env.LAUNCH_PLAN_CATALOG));
+    Boolean(catalog(env));
 }
 
 function mutable(request) {
@@ -86,11 +94,51 @@ function minorUnits(value) {
 
 async function verotelCheckout(checkout, plan, env) {
   const amount = checkout.amountMinor;
-  const params = {description: plan.name, priceAmount: `${Math.trunc(amount / 100)}.${String(amount % 100).padStart(2, "0")}`,
-    priceCurrency: checkout.currency, referenceID: checkout.id, shopID: env.VEROTEL_SHOP_ID, type: "purchase", version: "4",
+  const monthly = plan.kind === "monthly";
+  const mode = monthly ? {name: plan.name, type: "subscription", subscriptionType: "recurring", period: MONTHLY_PERIOD} :
+    {description: plan.name, type: "purchase"};
+  const params = {...mode, priceAmount: `${Math.trunc(amount / 100)}.${String(amount % 100).padStart(2, "0")}`,
+    priceCurrency: checkout.currency, referenceID: checkout.id, shopID: env.VEROTEL_SHOP_ID, version: "4",
     successURL: `${APP_ORIGIN}/billing?order=${checkout.id}`, declineURL: `${APP_ORIGIN}/billing?cancelled=1`};
   params.signature = await flexPaySignature(env.VEROTEL_SIGNATURE_KEY, params);
   return `${ORDER_PAGE}?${new URLSearchParams(params)}`;
+}
+
+function verotelDate(value) {
+  if (typeof value !== "string" || !/^20[0-9]{2}-[0-9]{2}-[0-9]{2}$/u.test(value)) return null;
+  const date = new Date(value + "T00:00:00.000Z");
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? date.getTime() : null;
+}
+
+function providerEvent(params, signature) {
+  const {type, event = "", referenceID: id, saleID: providerSaleId, transactionID: providerTransactionId, parentID: parentTransactionId} = params;
+  const subscription = type === "subscription";
+  const merchantIds = {id, providerSaleId};
+  if (!orderId.test(id ?? "") || !numericId.test(providerSaleId ?? "") || !["purchase", "subscription"].includes(type) ||
+      (subscription ? params.subscriptionType !== "recurring" : params.subscriptionType !== undefined)) return null;
+  if (subscription && ["cancel", "expiry", "uncancel", "extend"].includes(event)) {
+    if (providerTransactionId !== undefined || parentTransactionId !== undefined ||
+        params.priceAmount !== undefined || params.amount !== undefined) return null;
+    const periodEnd = event === "expiry" ? null : verotelDate(event === "cancel" ? params.expiresOn :
+      event === "extend" ? params.nextChargeOn ?? params.expiresOn : params.nextChargeOn);
+    if (["cancel", "uncancel"].includes(event) && periodEnd === null) return null;
+    return {apply: updateSubscriptionLifecycle, fields: {...merchantIds, eventId: `verotel:${signature}`, periodEnd,
+      event: event === "expiry" ? "expire" : event}};
+  }
+  const reversal = event === "credit" || event === "chargeback";
+  const renewal = event === "rebill";
+  const amountMinor = minorUnits(renewal ? params.amount : params.priceAmount);
+  const currency = renewal ? params.currency : params.priceCurrency;
+  if (!numericId.test(providerTransactionId ?? "") || !amountMinor || !currencies.has(currency) ||
+      (reversal ? !numericId.test(parentTransactionId ?? "") : parentTransactionId !== undefined)) return null;
+  const fields = {...merchantIds, eventId: `verotel:${providerTransactionId}`, providerTransactionId, currency, amountMinor};
+  if (reversal) return {apply: reverseCheckout, fields: {...fields, kind: subscription ? "monthly" : "one-time", parentTransactionId,
+    reason: event === "credit" ? "refund" : "chargeback", ...(subscription ? {terminated: params.subscriptionPhase === "terminated" || event === "chargeback"} : {})}};
+  if (!subscription) return event === "" ? {apply: settleCheckout, fields} : null;
+  if (!["initial", "rebill"].includes(event) || !renewal && params.period !== MONTHLY_PERIOD ||
+      (renewal ? params.priceAmount !== undefined || params.priceCurrency !== undefined : params.amount !== undefined || params.currency !== undefined)) return null;
+  const periodEnd = verotelDate(params.nextChargeOn);
+  return periodEnd === null ? null : {apply: settleSubscription, fields: {...fields, periodEnd, renewal}};
 }
 
 // Only this signed server-to-server event can grant or reverse an order. A hosted return lacks a v2 transaction ID.
@@ -110,18 +158,12 @@ export async function handleBillingPostback(request, env) {
         /[\u0000-\u001f\u007f]|:[A-Za-z][A-Za-z0-9]*=/u.test(value)) return close("Invalid postback", 400);
     params[name] = value;
   }
-  const {shopID, type, event = "", referenceID, saleID, transactionID, parentID, priceCurrency, priceAmount} = params;
-  const amountMinor = minorUnits(priceAmount);
-  const reversal = event === "credit" || event === "chargeback";
-  if (shopID !== env.VEROTEL_SHOP_ID || type !== "purchase" || (event && !reversal) || !orderId.test(referenceID ?? "") ||
-      !numericId.test(saleID ?? "") || !numericId.test(transactionID ?? "") || !currencies.has(priceCurrency) ||
-      !amountMinor || (reversal ? !numericId.test(parentID ?? "") : parentID !== undefined) ||
+  if (params.shopID !== env.VEROTEL_SHOP_ID ||
       !equalSignature(signature, await flexPaySignature(env.VEROTEL_SIGNATURE_KEY, params))) return close("Invalid postback", 400);
+  const event = providerEvent(params, signature);
+  if (!event) return close("Invalid postback", 400);
   try {
-    const apply = reversal ? reverseCheckout : settleCheckout;
-    const result = await apply(env.COMMERCE, {
-      id: referenceID, eventId: `verotel:${transactionID}`, providerSaleId: saleID, providerTransactionId: transactionID,
-      currency: priceCurrency, amountMinor, ...(reversal ? {parentTransactionId: parentID, reason: event === "credit" ? "refund" : "chargeback"} : {})});
+    const result = await event.apply(env.COMMERCE, event.fields);
     return result.ok ? close("OK", 200) : close("Could not reconcile", result.status);
   } catch { return close("Unavailable", 503); }
 }
@@ -129,13 +171,44 @@ export async function handleBillingPostback(request, env) {
 function purchaseSelection(body, plans) {
   if (!body || typeof body !== "object" || Array.isArray(body) ||
       Object.keys(body).some(key => !["planId", "promo", "ref", "idempotencyKey", "expectedAmountMinor", "expectedCurrency",
-        "expectedCredits"].includes(key))) return null;
+        "expectedCredits", "expectedKind", "expectedRebillAmountMinor"].includes(key))) return null;
   const plan = plans.get(body.planId);
   const promotionCode = typeof body.promo === "string" ? body.promo.trim().toUpperCase() : "";
   const affiliateCode = typeof body.ref === "string" ? body.ref.trim().toUpperCase() : "";
   if (!plan || body.promo !== undefined && !code.test(promotionCode) ||
       body.ref !== undefined && !code.test(affiliateCode)) return null;
   return {plan, ...(promotionCode ? {promotionCode} : {}), ...(affiliateCode ? {affiliateCode} : {})};
+}
+
+async function manageSubscription(request, env, {subject, session, reverify}, cancel) {
+  if (request.method !== (cancel ? "POST" : "GET")) return json({error: "Use the subscription controls."}, 405);
+  if (cancel && !mutable(request)) return json({error: "Use the subscription controls on SatinLore."}, 403);
+  let id;
+  if (cancel) {
+    const body = await accountJson(request, APP_ORIGIN, 512);
+    if (!body || Object.keys(body).length !== 2 || body.confirm !== true || !orderId.test(body.id ?? "")) {
+      return json({error: "Confirm which subscription to cancel."}, 400);
+    }
+    id = body.id;
+  }
+  const response = await readSubscription(env.COMMERCE, {subject});
+  if (!response.ok) return publicResult(response);
+  const {subscription} = await response.json();
+  if (!cancel) {
+    if (!subscription) return json({subscription: null});
+    const {providerSaleId, ...publicFields} = subscription;
+    return json({subscription: publicFields});
+  }
+  if (subscription?.id !== id || subscription.renews !== true || !numericId.test(subscription.providerSaleId ?? "")) {
+    return json({error: "This subscription cannot be cancelled from this account."}, 404);
+  }
+  if (!numericId.test(env.VEROTEL_SHOP_ID ?? "") ||
+      !/^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY ?? "")) return json({error: "Contact support for cancellation."}, 503);
+  const renewed = await reverify();
+  if (!renewed || renewed.subject !== session.subject || renewed.expiresAt <= Date.now()) return json({error: "Sign in again to continue."}, 401);
+  const params = {saleID: subscription.providerSaleId, shopID: env.VEROTEL_SHOP_ID, version: "4"};
+  params.signature = await flexPaySignature(env.VEROTEL_SIGNATURE_KEY, params);
+  return json({cancelUrl: `${CANCEL_PAGE}?${new URLSearchParams(params)}`});
 }
 
 export async function handleBilling(request, env, {config, session, reverify}) {
@@ -145,13 +218,17 @@ export async function handleBilling(request, env, {config, session, reverify}) {
   }
   try {
     const subject = await accountIdentity(config, session);
+    if (pathname === `${BILLING_API}/subscription` || pathname === `${BILLING_API}/cancel-subscription`) {
+      if (search) return json({error: "Use the subscription controls."}, 400);
+      return await manageSubscription(request, env, {subject, session, reverify}, pathname.endsWith("/cancel-subscription"));
+    }
     if (pathname === `${BILLING_API}/order` && request.method === "GET") {
       const id = searchParams.get("id");
       if ([...searchParams].length !== 1 || !orderId.test(id ?? "")) return json({error: "Choose a valid order."}, 400);
       return await publicResult(await readCheckout(env.COMMERCE, {subject, id}));
     }
     if (!launchBillingAvailable(env)) return json({error: "Purchases are currently unavailable."}, 503);
-    const plans = catalog(env.LAUNCH_PLAN_CATALOG);
+    const plans = catalog(env);
     if (pathname === `${BILLING_API}/plans` && request.method === "GET" && !search) return json({plans: [...plans.values()]});
     const quote = pathname === `${BILLING_API}/quote`;
     if (!quote && pathname !== `${BILLING_API}/checkout`) return json({error: "Not found."}, 404);
@@ -159,15 +236,20 @@ export async function handleBilling(request, env, {config, session, reverify}) {
     if (!mutable(request)) return json({error: "Use the plans form on SatinLore."}, 403);
     const body = await accountJson(request, APP_ORIGIN, 2048);
     const selection = purchaseSelection(body, plans);
-    if (!selection || (quote ? ["idempotencyKey", "expectedAmountMinor", "expectedCurrency", "expectedCredits"].some(key => Object.hasOwn(body, key)) :
+    if (!selection || (quote ? ["idempotencyKey", "expectedAmountMinor", "expectedCurrency", "expectedCredits", "expectedKind",
+      "expectedRebillAmountMinor"].some(key => Object.hasOwn(body, key)) :
       !orderId.test(body.idempotencyKey ?? "") || !Number.isSafeInteger(body.expectedAmountMinor) || body.expectedAmountMinor < 1 ||
       !currencies.has(body.expectedCurrency) || !Number.isSafeInteger(body.expectedCredits))) {
       return json({error: "Choose a valid plan and code."}, 400);
     }
-    const {name, ...plan} = selection.plan;
-    if (!quote && (body.expectedCurrency !== plan.currency || body.expectedCredits !== plan.credits)) {
+    const {name, kind, rebillAmountMinor, ...terms} = selection.plan;
+    if (kind === "monthly" && selection.promotionCode) return json({error: "This promo code can only be used on top-ups."}, 409);
+    if (!quote && (body.expectedCurrency !== terms.currency || body.expectedCredits !== terms.credits ||
+        (kind === "monthly" || body.expectedKind !== undefined) && body.expectedKind !== kind ||
+        body.expectedRebillAmountMinor !== rebillAmountMinor)) {
       return json({error: "This pack changed. Refresh plans before continuing."}, 409);
     }
+    const plan = {...terms, unit: "nano_usd", kind, ...(kind === "monthly" ? {rebillAmountMinor} : {})};
     const renewed = await reverify();
     if (!renewed || renewed.subject !== session.subject || renewed.expiresAt <= Date.now()) {
       return json({error: "Sign in again to continue."}, 401);
@@ -175,12 +257,16 @@ export async function handleBilling(request, env, {config, session, reverify}) {
     const apply = quote ? quoteCheckout : reserveCheckout;
     const response = await publicResult(await apply(env.COMMERCE, {subject, ...selection, plan,
       ...(!quote ? {idempotencyKey: body.idempotencyKey, expectedAmountMinor: body.expectedAmountMinor} : {})}));
-    if (quote || !response.ok) return response;
+    if (!response.ok) return response;
+    if (quote) {
+      const {quote: quoted} = await response.json();
+      return json({quote: {...quoted, kind, ...(kind === "monthly" ? {rebillAmountMinor} : {})}});
+    }
     const {checkout} = await response.json();
     if (!checkout || checkout.status !== "pending" || checkout.expiresAt <= Date.now()) {
       return json({error: "This checkout is closed. Refresh your plans to start another purchase."}, 409);
     }
-    return json({checkout, checkoutUrl: await verotelCheckout(checkout, {name}, env)});
+    return json({checkout, checkoutUrl: await verotelCheckout(checkout, {name, kind}, env)});
   } catch (error) {
     if (error instanceof AccountError) return json({error: error.message}, error.status);
     return json({error: "Checkout could not be confirmed. Retry the same order."}, 503);

@@ -12,6 +12,7 @@ import {flexPaySignature} from "../deploy/cloudflare/launch-billing.mjs";
 const app = "https://app.satinlore.com", checkout = "https://secure.verotel.com";
 const issuer = "https://launch-fixture.cloudflareaccess.com", audience = "f".repeat(64);
 const signatureKey = "local-test-flexpay-signature";
+const shopId = "81234";
 const email = "reader@example.test", founderEmail = "founder@example.test";
 const password = "fictional test credentials for launch";
 const nextPassword = "changed test credentials for launch";
@@ -22,7 +23,7 @@ const founder = await new SignJWT({email: founderEmail, type: "app"}).setProtect
 const packagePath = new URL("../dist/private-app/", import.meta.url);
 const assetType = {html: "text/html", mjs: "text/javascript", js: "text/javascript", css: "text/css", svg: "image/svg+xml"};
 const codes = [];
-let modelCalls = 0, checkoutUrl;
+let modelCalls = 0, checkoutUrl, cancelUrl;
 const compiled = await build({stdin: {resolveDir: fileURLToPath(new URL("../", import.meta.url)), sourcefile: "launch-fixture.mjs", contents: `
   import {createLocalJWKSet} from "jose";
   import {createPrivateAppWorker} from "./deploy/cloudflare/worker.mjs";
@@ -40,11 +41,8 @@ const mf = new Miniflare({
     AUTH_SES_ACCESS_KEY_ID: "A".repeat(20), AUTH_SES_SECRET_ACCESS_KEY: "B".repeat(40),
     FOUNDER_EMAIL: founderEmail, ACCESS_TEAM_DOMAIN: new URL(issuer).host, ACCESS_AUD: audience,
     LAUNCH_BILLING_ENABLED: "true", LAUNCH_BILLING_ADMIN_ENABLED: "true", LAUNCH_BILLING_POSTBACK_ENABLED: "true",
-    LAUNCH_AI_USAGE_ENABLED: "true", LAUNCH_AI_MONTHLY_TOKEN_CAP: "40000", LAUNCH_AI_TRIAL_TOKENS: "0",
-    VEROTEL_SHOP_ID: "81234", VEROTEL_SIGNATURE_KEY: signatureKey, OPENAI_API_KEY: "sk-proj-fixture-openai-key",
-    LAUNCH_PLAN_CATALOG: JSON.stringify([
-      {id: "fixture-pack", name: "Fixture credits", currency: "GBP", amountMinor: 1000, credits: 30000},
-    ]),
+    LAUNCH_AI_COST_METERING_ENABLED: "true", LAUNCH_AI_TRIAL_NANO_USD: "0",
+    VEROTEL_SHOP_ID: shopId, VEROTEL_SIGNATURE_KEY: signatureKey, OPENAI_API_KEY: "sk-proj-fixture-openai-key",
   },
   durableObjects: Object.fromEntries(Object.entries(stores).map(([name, className]) => [name, {className, useSQLite: true}])),
   serviceBindings: {ASSETS: async request => {
@@ -64,10 +62,11 @@ const mf = new Miniflare({
     }
     if (request.url === "https://api.openai.com/v1/responses") {
       modelCalls++;
-      const {model, store, input} = await request.json();
+      const {model, store, input, service_tier: tier} = await request.json();
       assert.equal(model, "gpt-6-luna"); assert.equal(store, false);
+      assert.equal(tier, "default");
       assert.equal(JSON.parse(input).cues[0].id, 2);
-      return Response.json({status: "completed", usage: {input_tokens: 50, output_tokens: 20, total_tokens: 70},
+      return Response.json({status: "completed", usage: {input_tokens: 200, output_tokens: 200, total_tokens: 400},
         output: [{type: "message", role: "assistant", content: [{type: "output_text", text: JSON.stringify({labels: [{id: 2, label: "accents"}]})}]}]});
     }
     throw new Error("Unexpected external fixture request.");
@@ -78,12 +77,16 @@ let browser;
 const errors = [];
 const excludedOrigins = [];
 async function context({isFounder = false, width = 1180} = {}) {
-  const browserContext = await browser.newContext({viewport: {width, height: 860}, locale: "en-GB", reducedMotion: "reduce"});
+  const browserContext = await browser.newContext({viewport: {width, height: 860}, locale: "en-US", reducedMotion: "reduce"});
   await browserContext.route("**/*", async route => {
     const incoming = route.request(), url = new URL(incoming.url());
     if (url.origin === checkout && url.pathname === "/startorder") {
       checkoutUrl = url;
       return route.fulfill({contentType: "text/html", body: "<title>Fixture checkout</title><h1>Fixture checkout</h1>"});
+    }
+    if (url.origin === checkout && url.pathname === "/cancel-subscription") {
+      cancelUrl = url;
+      return route.fulfill({contentType: "text/html", body: "<title>Fixture cancellation</title><h1>Fixture cancellation</h1>"});
     }
     if (url.origin !== app) { excludedOrigins.push(url.origin); return route.abort(); }
     const headers = await incoming.allHeaders();
@@ -99,13 +102,18 @@ async function context({isFounder = false, width = 1180} = {}) {
 }
 
 async function postback(fields) {
-  const params = {shopID: "81234", type: "purchase", referenceID: checkoutUrl.searchParams.get("referenceID"),
-    saleID: "4422", transactionID: "4423", priceAmount: "8.00", priceCurrency: "GBP", ...fields};
+  const params = {shopID: shopId, referenceID: checkoutUrl.searchParams.get("referenceID"), ...fields};
   params.signature = await flexPaySignature(signatureKey, params);
   return mf.dispatchFetch(`${app}/api/billing/verotel/postback?${new URLSearchParams(params)}`);
 }
+async function confirmPayment(fields) {
+  const response = await postback(fields);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "OK");
+}
 const sceneRequest = page => page.evaluate(async () => (await fetch("/api/scene-analysis", {method: "POST", headers: {"Content-Type": "application/json"},
   body: JSON.stringify({cues: [{id: 2, phase: "peak", rhythm: "dynamic", previous: "sustain", next: "recover", movementCount: 2, shape: "accented"}]})})).status);
+const readUsage = page => page.evaluate(async () => (await fetch("/api/account/usage")).json());
 
 try {
   browser = await chromium.launch({headless: true, ...(process.env.SATINLORE_CHROMIUM_EXECUTABLE_PATH ?
@@ -130,8 +138,8 @@ try {
   const reader = await context({width: 390});
   const page = reader.page;
   await page.goto(app + link);
-  await page.getByRole("link", {name: "Sign in or create an account"}).click();
-  await page.locator("#public-show-register").click();
+  await page.getByRole("link", {name: "Create an account"}).click();
+  await expect(page.locator("#public-register-form")).toBeVisible();
   await page.locator("#public-register-email").fill(email);
   await page.locator("#public-register-password").fill(password);
   await page.locator("#public-adult").check();
@@ -145,39 +153,99 @@ try {
   await page.locator("#public-login").click();
   await page.waitForURL(`${app}${link}`);
   await expect(page.locator("#credit-remaining")).toHaveText("0");
+  await expect(page.locator("#month-limit")).toHaveText("1,000");
   assert.equal(await sceneRequest(page), 429);
   assert.equal(modelCalls, 0);
 
+  const monthlyOption = page.locator('input[name="billing-plan"][value="monthly"]');
+  const packOption = id => page.locator(`input[name="billing-plan"][value="${id}"]`);
+  await expect(page.locator("#monthly-options")).toContainText("$9.99 / month");
+  await expect(page.locator("#monthly-options")).toContainText("200 credits per month");
+  for (const [name, price, credits] of [["Starter Top-up", "$4.99", "100 credits"],
+    ["Plus Top-up", "$9.49", "200 credits"], ["Stock-up", "$17.99", "400 credits"]]) {
+    const card = page.locator("#top-up-options label").filter({hasText: name});
+    await expect(card).toContainText(price);
+    await expect(card).toContainText(credits);
+  }
+  await packOption("starter-top-up").check();
   await page.locator("#promotion").fill("fixture20");
   await page.getByRole("button", {name: "Check price"}).click();
-  await expect(page.locator("#quote-status")).toContainText("£8.00");
+  await expect(page.locator("#quote-status")).toContainText("100 credits for $4.00. One-time payment.");
   await page.getByRole("button", {name: "Continue to secure checkout"}).click();
   await expect(page.getByRole("heading", {name: "Fixture checkout"})).toBeVisible();
-  assert.equal(checkoutUrl.searchParams.get("priceAmount"), "8.00");
+  assert.equal(checkoutUrl.searchParams.get("type"), "purchase");
+  assert.equal(checkoutUrl.searchParams.get("priceAmount"), "4.00");
   const orderUrl = checkoutUrl.searchParams.get("successURL");
   await page.goto(orderUrl);
   await expect(page.locator("#order-status")).toContainText("Waiting for payment confirmation");
   await expect(page.locator("#credit-remaining")).toHaveText("0");
-  for (let attempt = 0; attempt < 2; attempt++) assert.equal(await (await postback()).text(), "OK");
+  const packPayment = {type: "purchase", saleID: "4422", transactionID: "4423", priceAmount: "4.00", priceCurrency: "USD"};
+  for (let attempt = 0; attempt < 2; attempt++) await confirmPayment(packPayment);
   await page.getByRole("button", {name: "Refresh usage"}).click();
   await expect(page.locator("#order-status")).toContainText("Payment confirmed");
-  await expect(page.locator("#credit-remaining")).toHaveText("30,000");
+  await expect(page.locator("#credit-remaining")).toHaveText("100");
   assert.equal(await sceneRequest(page), 200);
   assert.equal(modelCalls, 1);
   await page.getByRole("button", {name: "Refresh usage"}).click();
-  await expect(page.locator("#month-used")).toHaveText("70");
-  await expect(page.locator("#credit-remaining")).toHaveText("29,930");
+  await expect(page.locator("#month-used")).toHaveText("0.01");
+  await expect(page.locator("#credit-remaining")).toHaveText("99.99");
+  const charged = await readUsage(page);
+  assert.equal(charged.unit, "nano_usd");
+  assert.equal(charged.month.used, 120_000);
+  assert.equal(charged.credits.remaining, 999_880_000);
 
   await admin.page.getByRole("button", {name: "Refresh records"}).click();
-  await expect(admin.page.locator("#orders-list")).toContainText("FIXTURE-PARTNER: £1.60 commission");
-  assert.equal(await (await postback({event: "credit", transactionID: "4424", parentID: "4423"})).text(), "OK");
+  await expect(admin.page.locator("#orders-list")).toContainText("FIXTURE-PARTNER: $0.80 commission");
+  await confirmPayment({...packPayment, event: "credit", transactionID: "4424", parentID: "4423"});
   await page.getByRole("button", {name: "Refresh usage"}).click();
   await expect(page.locator("#order-status")).toContainText("refunded");
   await expect(page.locator("#credit-remaining")).toHaveText("0");
   assert.equal(await sceneRequest(page), 429);
   assert.equal(modelCalls, 1);
   await admin.page.getByRole("button", {name: "Refresh records"}).click();
-  await expect(admin.page.locator("#orders-list")).toContainText("FIXTURE-PARTNER: £0.00 commission");
+  await expect(admin.page.locator("#orders-list")).toContainText("FIXTURE-PARTNER: $0.00 commission");
+
+  await monthlyOption.check();
+  await expect(page.locator("#promotion")).toBeHidden();
+  await page.getByRole("button", {name: "Check price"}).click();
+  await expect(page.locator("#quote-status")).toContainText("200 credits per month. $9.99 today, then $9.99 per month until canceled.");
+  await page.getByRole("button", {name: "Continue to secure checkout"}).click();
+  await expect(page.getByRole("heading", {name: "Fixture checkout"})).toBeVisible();
+  assert.equal(checkoutUrl.searchParams.get("type"), "subscription");
+  assert.equal(checkoutUrl.searchParams.get("subscriptionType"), "recurring");
+  assert.equal(checkoutUrl.searchParams.get("period"), "P1M");
+  assert.equal(checkoutUrl.searchParams.get("priceAmount"), "9.99");
+  const subscriptionOrder = checkoutUrl.searchParams.get("successURL");
+  await page.goto(subscriptionOrder);
+  await expect(page.locator("#subscription-status")).toContainText("Waiting for payment confirmation");
+  await expect(page.locator("#credit-remaining")).toHaveText("0");
+  const nextChargeOn = new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10);
+  const subscriptionPayment = {type: "subscription", subscriptionType: "recurring", saleID: "5522", transactionID: "5523",
+    event: "initial", period: "P1M", priceAmount: "9.99", priceCurrency: "USD", nextChargeOn};
+  for (let attempt = 0; attempt < 2; attempt++) await confirmPayment(subscriptionPayment);
+  await page.getByRole("button", {name: "Refresh usage"}).click();
+  await expect(page.locator("#subscription-status")).toHaveText("Active");
+  await expect(page.locator("#credit-remaining")).toHaveText("200");
+  await expect(page.locator("#credit-breakdown")).toContainText("200 subscription credits");
+  await expect(monthlyOption).toBeDisabled();
+  await expect(packOption("starter-top-up")).toBeEnabled();
+  await admin.page.getByRole("button", {name: "Refresh records"}).click();
+  await expect(admin.page.locator("#subscription-charges-list")).toContainText("$9.99 · 200 credits");
+
+  await page.getByRole("button", {name: "Cancel renewal"}).click();
+  await page.getByRole("button", {name: "Continue to cancellation"}).click();
+  await expect(page.getByRole("heading", {name: "Fixture cancellation"})).toBeVisible();
+  assert.equal(cancelUrl.searchParams.get("saleID"), subscriptionPayment.saleID);
+  assert.equal(cancelUrl.searchParams.get("shopID"), shopId);
+  await page.goto(subscriptionOrder);
+  await expect(page.locator("#subscription-status")).toHaveText("Active");
+  await confirmPayment({type: "subscription", subscriptionType: "recurring", saleID: subscriptionPayment.saleID,
+    event: "cancel", expiresOn: nextChargeOn});
+  await page.getByRole("button", {name: "Refresh usage"}).click();
+  await expect(page.locator("#subscription-status")).toHaveText("Renewal canceled");
+  await expect(page.getByRole("button", {name: "Cancel renewal"})).toBeHidden();
+  await expect(page.locator("#credit-remaining")).toHaveText("200");
+  await expect(monthlyOption).toBeDisabled();
   await page.getByRole("link", {name: "Back to the reader"}).click();
   await expect(page.locator("#public-account")).toBeVisible();
   const onboarding = page.locator("#experience-dialog");
@@ -191,7 +259,7 @@ try {
   await expect(page.locator("#public-account-status")).toContainText(/password changed/i);
   assert.deepEqual(errors, []);
   assert.deepEqual(excludedOrigins, []);
-  console.log(`Launch browser checks passed in Chromium ${browser.version()}: signup, verified sign-in, affiliate return, promo price, checkout, duplicate settlement, quota, refund, commission and password change. No real provider requests.`);
+  console.log(`Launch browser checks passed in Chromium ${browser.version()}: signup and referral return, promo top-up and refund, cost metering, monthly enrollment, duplicate callbacks, provider-confirmed cancellation and password change. No real provider requests.`);
 } finally {
   await browser?.close();
   await mf.dispose();

@@ -11,9 +11,8 @@ import { DECISIONS_STORY_STUDY_PATH, WHOLE_STORY_LUNA_STUDY_PATH, handleDecision
 import { APP_ORIGIN, handlePublicAuth, publicReaderConfiguration, revokePublicReader, verifyPublicReader } from "./public-auth.mjs";
 import { CORPUS_BATCH_STREAM_TYPE, CORPUS_STUDY_PATH, handleCorpusStudy } from "./corpus-study.mjs";
 import { LUNA_CORPUS_PATH, handleLunaCorpus } from "./luna-corpus.mjs";
-import { BILLING_API, BILLING_ADMIN_API, BILLING_POSTBACK, handleBilling, handleBillingAdmin, handleBillingPostback,
-  launchBillingAvailable } from "./launch-billing.mjs";
-import { LAUNCH_USAGE_PATH, createLaunchUsage, handleLaunchUsage } from "./launch-usage.mjs";
+import { BILLING_API, BILLING_ADMIN_API, BILLING_POSTBACK, handleBilling, handleBillingAdmin, handleBillingPostback } from "./launch-billing.mjs";
+import { LAUNCH_COST_METERING_FLAG, LAUNCH_USAGE_PATH, createLaunchUsage, handleLaunchUsage } from "./launch-usage.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
@@ -30,6 +29,7 @@ const ALPHA_ADMIN_PATHS = new Set(["/admin", "/admin/"]);
 const ALPHA_ADMIN_ASSETS = new Set(["/alpha/static/alpha-admin.mjs", "/alpha/static/alpha-admin.css"]);
 const BETA_ADMIN_PATHS = new Set(["/admin", "/admin/", "/beta-admin.html", "/static/beta-admin.mjs", "/static/beta-admin.css"]);
 const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html", "/simulation.html"]);
+const launchUsageEnabled = env => env[LAUNCH_COST_METERING_FLAG] === "true";
 const LAUNCH_ADMIN_DOCUMENTS = new Map([["/billing-admin", "/billing-admin.html"], ["/billing-admin.html", "/billing-admin.html"],
   ["/billing-admin/app.mjs", "/billing-admin/app.mjs"]]);
 const PUBLIC_ASSET_PATHS = new Set(PRIVATE_ASSET_PATHS.filter(path => PUBLIC_DOCUMENTS.has(path) ||
@@ -201,7 +201,7 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
       headers.delete("Content-Length");
       headers.delete("Content-Encoding");
       headers.delete("ETag");
-      const usage = launchBillingAvailable(env) || env.LAUNCH_AI_USAGE_ENABLED === "true" ?
+      const usage = launchUsageEnabled(env) ?
         '<meta name="satinlore-launch-usage" content="true">' : "";
       return finish(new Response(document.replace("</head>", `<meta name="satinlore-public-auth" content="true">${usage}</head>`),
         { status: asset.status, headers }));
@@ -334,10 +334,22 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         if (authResponse) return finish(authResponse);
       }
       const read = ["GET", "HEAD"].includes(request.method);
+      if (url.pathname === "/signup" || url.pathname === "/login") {
+        if (!publicAuth || !read) return finish(json({error: "Not found."}, 404));
+        const destination = new URLSearchParams({signin: "1"});
+        if (url.pathname === "/signup") destination.set("mode", "register");
+        const ref = url.searchParams.get("ref"), order = url.searchParams.get("order");
+        if (ref && /^[a-z0-9][a-z0-9_-]{1,31}$/iu.test(ref)) destination.set("ref", ref.toUpperCase());
+        if (order && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(order) && url.pathname === "/login") {
+          destination.set("order", order);
+        }
+        if (destination.has("ref") || destination.has("order") || url.searchParams.get("next") === "billing") destination.set("next", "billing");
+        return finish(new Response(null, {status: 303, headers: {Location: `/?${destination}`}}));
+      }
       const path = PRIVATE_DOCUMENT_ROUTES[url.pathname] ?? url.pathname;
       if (publicAuth && BETA_ADMIN_PATHS.has(url.pathname)) return finish(json({ error: "Not found." }, 404));
       if (path === "/billing.html") {
-        if (!publicAuth || env.LAUNCH_AI_USAGE_ENABLED !== "true" || !read) return finish(json({error: "Not found."}, 404));
+        if (!publicAuth || !launchUsageEnabled(env) || !read) return finish(json({error: "Not found."}, 404));
         return serveAsset(request, env, path, {origin: config.origin});
       }
       if (publicAuth && read && PUBLIC_ASSET_PATHS.has(path)) {
@@ -398,7 +410,7 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         return handleLovense(request, env, { config, session, lovenseFetcher, reverify });
       }
       if (url.pathname === "/api/scene-analysis") {
-        const launchUsage = session.authMode === "email" && env.LAUNCH_AI_USAGE_ENABLED === "true" ? createLaunchUsage(env, {config, session}) : null;
+        const launchUsage = session.authMode === "email" && launchUsageEnabled(env) ? createLaunchUsage(env, {config, session}) : null;
         return finish(await handleSceneAnalysis(request, env, { config, session, analysisFetcher, reverify, launchUsage }));
       }
       if (url.pathname === "/api/story-import") {

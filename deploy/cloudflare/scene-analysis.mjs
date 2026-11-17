@@ -15,6 +15,7 @@ import { LUNA_PROTOCOL_RUBRIC_VERSION } from "../../scripts/lib/luna-protocol-pr
 
 const API_URL = "https://api.openai.com/v1/responses";
 const BUDGET_URL = "https://scene-analysis.internal/reserve";
+const LAUNCH_BUDGET_URL = "https://scene-analysis.internal/reserve-launch";
 const NEUTRAL_SPEND_URL = "https://scene-analysis.internal/founder-neutral-spend";
 export const DECISIONS_STORY_STUDY_PATH = "/api/scene-analysis/decisions-story-study";
 export const WHOLE_STORY_LUNA_STUDY_PATH = "/api/scene-analysis/whole-story-luna-study";
@@ -301,8 +302,8 @@ function checkedContext(response, { version, paragraphs }, session) {
   } : null };
 }
 
-function budgetStub(namespace) {
-  return namespace.get(namespace.idFromName("scene-analysis:v1"));
+function budgetStub(namespace, launch = false) {
+  return namespace.get(namespace.idFromName(launch ? "scene-analysis:launch:v1" : "scene-analysis:v1"));
 }
 
 export async function budgetReader(config, session) {
@@ -315,6 +316,14 @@ async function reserveBudget(namespace, config, session, suite, signal) {
   return budgetStub(namespace).fetch(new Request(BUDGET_URL, {
     method: "POST", signal, headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reader, ...(suite ? { suite } : {}) }),
+  }));
+}
+
+async function reserveLaunchRequest(namespace, config, session, limits) {
+  const reader = await budgetReader(config, session);
+  return budgetStub(namespace, true).fetch(new Request(LAUNCH_BUDGET_URL, {
+    method: "POST", signal: AbortSignal.timeout(3000), headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reader, limits }),
   }));
 }
 
@@ -342,9 +351,11 @@ export function analysisConfigured(key, budget) {
     typeof budget?.idFromName === "function" && typeof budget.get === "function";
 }
 
-function budgetLimited(permission) {
+function budgetLimited(permission, launch = false) {
   const retry = permission.headers.get("Retry-After");
-  return failure("rate_limited", 429, "Nocturne has reached the beta usage limit. The local analysis is still available.",
+  const message = launch ? "Nocturne has reached the request limit. The local analysis is still available." :
+    "Nocturne has reached the beta usage limit. The local analysis is still available.";
+  return failure("rate_limited", 429, message,
     { "Retry-After": retry && /^\d{1,7}$/.test(retry) ? retry : "60" });
 }
 
@@ -629,7 +640,7 @@ export async function handleDecisionsBenchmark(request, env, { config, session, 
   }
 }
 
-const launchTokenLimited = () => failure("token_limit_reached", 429, "Nocturne has reached your AI token limit. The local analysis is still available.");
+const launchCreditLimited = () => failure("analysis_credit_limit", 429, "Nocturne has reached your AI analysis limit. The local analysis is still available.");
 
 export async function handleSceneAnalysis(request, env, { config, session, reverify, analysisFetcher = fetch, launchUsage }) {
   const url = new URL(request.url);
@@ -643,10 +654,10 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const key = env.OPENAI_API_KEY;
   const budget = env.SCENE_ANALYSIS_BUDGET;
   const available = analysisConfigured(key, budget);
-  const metered = session.authMode === "email" && env.LAUNCH_AI_USAGE_ENABLED === "true";
+  const metered = session.authMode === "email" && env.LAUNCH_AI_COST_METERING_ENABLED === "true";
   if (read) {
     if (!available || !metered) return Response.json({ available });
-    const usage = await launchUsage?.status();
+    const usage = await launchUsage?.status?.();
     if (!usage?.ok) return providerUnavailable(session, "budget_unavailable");
     return Response.json({ available: (await usage.json()).available });
   }
@@ -671,27 +682,30 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
     model: MODEL, instructions,
     input: JSON.stringify(context ? { paragraphs: context.paragraphs } : { cues }), text: { format },
     store: false, prompt_cache_options: { mode: "explicit" }, reasoning: { effort: "none" }, max_output_tokens: outputTokens,
+    ...(metered ? { service_tier: "default" } : {}),
   });
-  let tokens;
+  let cost;
   if (metered) {
     // Avoid consuming the existing shared request allowance for an unfunded account.
-    const response = await launchUsage?.status();
+    const response = await launchUsage?.status?.();
     if (!response?.ok) return providerUnavailable(session, "budget_unavailable");
-    const { month, credits } = await response.json();
-    tokens = launchUsage.estimateTokens(body, outputTokens);
-    if (tokens > Math.min(month.remaining, credits.remaining)) return launchTokenLimited();
+    const { month, credits, subscription } = await response.json();
+    cost = launchUsage.estimateCost(body, outputTokens);
+    if (cost > Math.min(month.remaining, credits.remaining + subscription.remaining)) return launchCreditLimited();
   }
   let permission;
-  try { permission = await reserveBudget(budget, config, session); }
-  catch { return providerUnavailable(session, "budget_unavailable"); }
-  if (permission.status === 429) return budgetLimited(permission);
+  try {
+    permission = metered ? await reserveLaunchRequest(budget, config, session, launchUsage.trafficLimits) :
+      await reserveBudget(budget, config, session);
+  } catch { return providerUnavailable(session, "budget_unavailable"); }
+  if (permission.status === 429) return budgetLimited(permission, metered);
   if (permission.status !== 204) return providerUnavailable(session, "budget_unavailable");
   if (request.signal.aborted || Date.now() >= session.expiresAt) return invalidSession();
 
   const attempt = metered ? crypto.randomUUID() : null;
   if (attempt) {
-    const reservation = await launchUsage.reserve(attempt, tokens);
-    if (reservation.status === 429) return launchTokenLimited();
+    const reservation = await launchUsage.reserve(attempt, cost);
+    if (reservation.status === 429) return launchCreditLimited();
     if (!reservation.ok) {
       if (reservation.status !== 409) await launchUsage.refund(attempt);
       return providerUnavailable(session, "budget_unavailable");
@@ -704,7 +718,7 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
       return invalidSession();
     }
     const dispatched = await launchUsage.dispatch(attempt);
-    if (dispatched.status === 429) return launchTokenLimited();
+    if (dispatched.status === 429) return launchCreditLimited();
     if (!dispatched.ok) {
       // The dispatch lease can have been committed even if no acknowledgement arrived.
       if (dispatched.status !== 409 && !(await launchUsage.refund(attempt)).ok) await launchUsage.finalize(attempt);
@@ -731,7 +745,8 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
       let parsed;
       try { parsed = await readBoundedJson(response, 24_576, signal); }
       catch { return signal.aborted ? providerUnavailable(session, timeout.aborted ? "provider_timeout" : undefined) : invalidResult(session); }
-      reportedUsage = parsed?.usage;
+      // The metered request pins Standard and uses no explicit cache breakpoints.
+      if (!metered || parsed?.service_tier === undefined || parsed.service_tier === "default") reportedUsage = parsed?.usage;
       const renewed = await reverify();
       if (!renewed || renewed.subject !== session.subject || Date.now() >= renewed.expiresAt || request.signal.aborted) return invalidSession();
       const result = context ? checkedContext(parsed, context, session) : checkedLabels(parsed, cues, session);
@@ -744,6 +759,12 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const result = await analyze();
   if (attempt && !(await launchUsage.finalize(attempt, reportedUsage)).ok && result.ok) return providerUnavailable(session, "budget_unavailable");
   return result;
+}
+
+function validLaunchRequestLimits(limits) {
+  const within = (value, maximum) => Number.isSafeInteger(value) && value >= 1 && value <= maximum;
+  return exactObject(limits, ["accountDay", "appDay", "appMonth"]) && within(limits.accountDay, 10_000) &&
+    within(limits.appDay, 100_000) && within(limits.appMonth, 3_100_000) && limits.accountDay <= limits.appDay && limits.appDay <= limits.appMonth;
 }
 
 function utcQuotaEnds(now) {
@@ -857,16 +878,21 @@ export class SceneAnalysisBudget {
     if (corpusResponse) return corpusResponse;
     try {
       if (request.url === NEUTRAL_SPEND_URL && request.method === "POST") return await this.handleNeutralSpend(request);
-      if (request.url !== BUDGET_URL || request.method !== "POST") return new Response(null, { status: 404 });
+      const launch = request.url === LAUNCH_BUDGET_URL;
+      if ((!launch && request.url !== BUDGET_URL) || request.method !== "POST") return new Response(null, { status: 404 });
       const value = await readBoundedJson(request, 256, AbortSignal.timeout(3000));
-      const suite = exactObject(value, ["reader", "suite"]) ? value.suite : null;
+      const suite = !launch && exactObject(value, ["reader", "suite"]) ? value.suite : null;
       const suiteLimit = typeof suite === "string" && Object.hasOwn(RESEARCH_SUITE_DAY_LIMITS, suite) ? RESEARCH_SUITE_DAY_LIMITS[suite] : null;
-      if ((suiteLimit === null && !exactObject(value, ["reader"])) || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) {
-        return new Response(null, { status: 400 });
-      }
+      const validBudget = launch ? exactObject(value, ["reader", "limits"]) && validLaunchRequestLimits(value.limits) :
+        suiteLimit !== null || exactObject(value, ["reader"]);
+      if (!validBudget || typeof value.reader !== "string" || !/^[a-f0-9]{64}$/.test(value.reader)) return new Response(null, { status: 400 });
       const now = Date.now();
       const { dayEnds, monthEnds } = utcQuotaEnds(now);
-      const windows = [
+      const windows = launch ? [
+        { key: `launch-reader:${value.reader}`, expires: dayEnds, limit: value.limits.accountDay },
+        { key: "launch-day", expires: dayEnds, limit: value.limits.appDay },
+        { key: "launch-month", expires: monthEnds, limit: value.limits.appMonth },
+      ] : [
         suiteLimit === null ? { key: `reader:${value.reader}`, expires: dayEnds, limit: 12 } :
           { key: `study:${suite}`, expires: dayEnds, limit: suiteLimit },
         { key: "global-day", expires: dayEnds, limit: 100 },
