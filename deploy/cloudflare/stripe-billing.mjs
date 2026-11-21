@@ -25,7 +25,8 @@ const positive = value => Number.isSafeInteger(value) && value > 0 && value <= 1
 const time = value => Number.isSafeInteger(value) && value >= 1_000_000_000 && value < 10_000_000_000 ? value * 1000 : null;
 
 function stripeKeyConfigured(env) {
-  return ["test", "live"].includes(env.STRIPE_MODE) && typeof env.STRIPE_SECRET_KEY === "string" &&
+  return (env.BETA_PREVIEW_PREFIX !== "/beta" || env.STRIPE_MODE === "test") &&
+    ["test", "live"].includes(env.STRIPE_MODE) && typeof env.STRIPE_SECRET_KEY === "string" &&
     /^(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{12,240}$/u.test(env.STRIPE_SECRET_KEY) && env.STRIPE_SECRET_KEY.split("_")[1] === env.STRIPE_MODE;
 }
 
@@ -63,7 +64,7 @@ async function stripeRequest(env, path, body, fetcher, idempotencyKey) {
   const headers = {Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`, "Stripe-Version": STRIPE_API_VERSION};
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   if (body) headers["Content-Type"] = "application/x-www-form-urlencoded";
-  const response = await fetcher(`${STRIPE_ORIGIN}/v1/${path}`, {method: body ? "POST" : "GET", headers, redirect: "error",
+  const response = await fetcher(`${STRIPE_ORIGIN}/v1/${path}`, {method: body ? "POST" : "GET", headers, redirect: "manual",
     signal: AbortSignal.timeout(8000), ...(body ? {body: new URLSearchParams(body)} : {})});
   if (!response.ok) throw new Error("Stripe request failed");
   const value = JSON.parse(await boundedText(response));
@@ -82,15 +83,20 @@ function hostedUrl(value, portal = false) {
   return url.href;
 }
 
+function stripeBillingUrl(env) {
+  return `${APP_ORIGIN}${env.BETA_PREVIEW_PREFIX === "/beta" ? "/beta" : ""}/billing`;
+}
+
 export async function stripeCheckout(checkout, plan, env, fetcher = fetch) {
   const monthly = plan.kind === "monthly";
   const data = monthly ? "subscription_data" : "payment_intent_data";
+  const returnUrl = stripeBillingUrl(env);
   const body = {
     mode: monthly ? "subscription" : "payment",
     "payment_method_types[0]": "card",
     client_reference_id: checkout.id,
-    success_url: `${APP_ORIGIN}/billing?order=${checkout.id}`,
-    cancel_url: `${APP_ORIGIN}/billing?order=${checkout.id}&cancelled=1`,
+    success_url: `${returnUrl}?order=${checkout.id}`,
+    cancel_url: `${returnUrl}?order=${checkout.id}&cancelled=1`,
     expires_at: String(Math.floor(checkout.expiresAt / 1000)),
     [`${data}[metadata][${ORDER_METADATA}]`]: checkout.id,
     [`${data}[metadata][${SOURCE_METADATA}]`]: "v1",
@@ -118,7 +124,7 @@ export async function stripeCancelUrl(subscription, env, fetcher = fetch) {
       !stripeIdentifier(live.customer, "cus") || live.status === "canceled" || live.cancel_at_period_end === true) {
     throw new Error("Stripe subscription is unavailable");
   }
-  const returnUrl = `${APP_ORIGIN}/billing`;
+  const returnUrl = stripeBillingUrl(env);
   const body = {customer: live.customer, return_url: returnUrl, "flow_data[type]": "subscription_cancel",
     "flow_data[subscription_cancel][subscription]": live.id, "flow_data[after_completion][type]": "redirect",
     "flow_data[after_completion][redirect][return_url]": returnUrl,

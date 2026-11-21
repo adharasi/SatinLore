@@ -5,7 +5,7 @@ import test from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { BILLING_ADMIN_API, BILLING_API, BILLING_POSTBACK, flexPaySignature } from "../deploy/cloudflare/launch-billing.mjs";
 import { LAUNCH_USAGE_PATH } from "../deploy/cloudflare/launch-usage.mjs";
-import { STRIPE_API_VERSION, STRIPE_WEBHOOK_PATH } from "../deploy/cloudflare/stripe-billing.mjs";
+import { stripeCancelUrl, stripeConfigured, STRIPE_API_VERSION, STRIPE_WEBHOOK_PATH } from "../deploy/cloudflare/stripe-billing.mjs";
 import { createPrivateAppWorker, LaunchUsage, PublicReaderAuth, ReaderAccount, SatinLoreCommerce } from "../deploy/cloudflare/worker.mjs";
 
 const origin = "https://app.satinlore.com";
@@ -485,6 +485,36 @@ const stripeLiveFlags = {...stripeFlags, STRIPE_MODE: "live", STRIPE_SECRET_KEY:
   OPENAI_API_KEY: settings.OPENAI_API_KEY};
 const stripeMetadata = id => ({satinlore_reader: "v1", satinlore_checkout: id});
 
+test("Stripe configuration refuses live billing in the beta preview", () => {
+  assert.equal(stripeConfigured({...stripeFlags, BETA_PREVIEW_PREFIX: "/beta"}), true);
+  assert.equal(stripeConfigured({...stripeLiveFlags, BETA_PREVIEW_PREFIX: "/beta"}), false);
+  assert.equal(stripeConfigured(stripeLiveFlags), true);
+});
+
+test("Stripe returns from beta subscription cancellation to beta billing", async () => {
+  const id = randomUUID();
+  const providerSaleId = "sub_BetaPortal";
+  const portal = "https://billing.stripe.com/p/session?secret=test_Beta";
+  const env = {...stripeFlags, BETA_PREVIEW_PREFIX: "/beta", STRIPE_PORTAL_CONFIGURATION_ID: "bpc_BetaPortal"};
+  const result = await stripeCancelUrl({id, providerSaleId}, env, async (url, init) => {
+    if (url === `https://api.stripe.com/v1/subscriptions/${providerSaleId}`) {
+      return Response.json({object: "subscription", id: providerSaleId, customer: "cus_BetaPortal", metadata: stripeMetadata(id),
+        status: "active", cancel_at_period_end: false, livemode: false});
+    }
+    assert.equal(url, "https://api.stripe.com/v1/billing_portal/sessions");
+    assert.equal(init.body.get("return_url"), `${origin}/beta/billing`);
+    assert.equal(init.body.get("flow_data[after_completion][redirect][return_url]"), `${origin}/beta/billing`);
+    assert.equal(init.body.get("configuration"), "bpc_BetaPortal");
+    return Response.json({object: "billing_portal.session", customer: "cus_BetaPortal", livemode: false, url: portal});
+  });
+  assert.equal(result, portal);
+  await assert.rejects(stripeCancelUrl({id, providerSaleId}, env, async (url, init) => {
+    assert.equal(url, `https://api.stripe.com/v1/subscriptions/${providerSaleId}`);
+    assert.equal(init.redirect, "manual");
+    return new Response(null, {status: 302, headers: {Location: "https://example.test/stripe-redirect"}});
+  }), /Stripe request failed/);
+});
+
 function stripeEvent(type, value, changes = {}) {
   return {id: "evt_" + randomUUID().replaceAll("-", ""), object: "event", api_version: STRIPE_API_VERSION,
     livemode: false, created: Math.floor(Date.now() / 1000), type, data: {object: value}, ...changes};
@@ -501,12 +531,14 @@ test("Stripe sandbox quote opens given exact signed-in price, and only a signed 
     assert.equal(url, "https://api.stripe.com/v1/checkout/sessions");
     assert.equal(init.headers.Authorization, "Bearer " + stripeFlags.STRIPE_SECRET_KEY);
     assert.equal(init.headers["Stripe-Version"], STRIPE_API_VERSION);
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     assert.ok(Number(init.body.get("expires_at")) > Math.floor(Date.now() / 1000) + 1800);
     assert.equal(init.body.get("line_items[0][price_data][unit_amount]"), "499");
     assert.equal(init.body.get("payment_intent_data[metadata][satinlore_reader]"), "v1");
     const id = init.body.get("client_reference_id");
     assert.equal(init.body.get("payment_intent_data[metadata][satinlore_checkout]"), id);
+    assert.equal(init.body.get("success_url"), `${origin}/billing?order=${id}`);
+    assert.equal(init.body.get("cancel_url"), `${origin}/billing?order=${id}&cancelled=1`);
     assert.equal(init.headers["Idempotency-Key"], "satinlore-checkout-" + id);
     calls.push(id);
     return Response.json({object: "checkout.session", mode: "payment", client_reference_id: id, amount_total: 499, currency: "usd",
@@ -567,6 +599,8 @@ test("Stripe invoice grants the verified paid period and binds hosted cancellati
     assert.equal(init.body.get("flow_data[type]"), "subscription_cancel");
     assert.equal(init.body.get("flow_data[subscription_cancel][subscription]"), "sub_SandboxMonthly");
     assert.equal(init.body.get("customer"), "cus_Original");
+    assert.equal(init.body.get("return_url"), `${origin}/billing`);
+    assert.equal(init.body.get("flow_data[after_completion][redirect][return_url]"), `${origin}/billing`);
     return Response.json({object: "billing_portal.session", customer: "cus_Original", livemode: false,
       url: "https://billing.stripe.com/p/session?secret=test_Fixture"});
   }});

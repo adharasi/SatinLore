@@ -1,3 +1,5 @@
+import {appFetch, appPath} from "./access.mjs";
+
 const node = id => document.getElementById(id);
 const status = node("billing-status");
 const form = node("plan-form");
@@ -23,7 +25,7 @@ const plansById = new Map();
 let approved = null, sequence = 0, checking = false, subscription = null, signedIn = false;
 
 async function api(path, body) {
-  const response = await fetch(path, {
+  const response = await appFetch(path, {
     credentials: "same-origin", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000),
     ...(body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {}),
   });
@@ -337,10 +339,10 @@ try {
   if (!signedIn) {
     const parameters = new URLSearchParams({next: "billing", ...(ref ? {ref} : {}), ...(order ? {order} : {})});
     const signIn = node("billing-sign-in-link");
-    signIn.href = `/login?${parameters}`;
+    signIn.href = appPath(`/login?${parameters}`);
     if (order) signIn.textContent = "Sign in to check your order";
     parameters.delete("order");
-    node("billing-sign-up-link").href = `/signup?${parameters}`;
+    node("billing-sign-up-link").href = appPath(`/signup?${parameters}`);
     node("billing-sign-up-link").hidden = Boolean(order);
     node("billing-sign-in").hidden = false;
     status.textContent = order ? "Sign in with the account that placed this order." : "Create an account or sign in to view plans and manage AI credits.";

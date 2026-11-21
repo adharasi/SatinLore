@@ -1,5 +1,6 @@
 import { accountIdentity } from "./accounts.mjs";
 import { launchCommerceNamespace, readEntitlement, stripeTestRealm } from "./commerce.mjs";
+import { analysisConfigured } from "./scene-analysis.mjs";
 
 export const LAUNCH_USAGE_PATH = "/api/account/usage";
 export const LAUNCH_COST_METERING_FLAG = "LAUNCH_AI_COST_METERING_ENABLED";
@@ -273,6 +274,12 @@ export function launchUsageConfigured(env) {
     usableNamespace(env.LAUNCH_USAGE) && usableNamespace(env.COMMERCE);
 }
 
+export function betaSandboxAiEnabled(env) {
+  return env.BETA_PREVIEW_PREFIX === "/beta" && stripeTestRealm(env) && env.BETA_OPENAI_ENABLED === "true" &&
+    env.LAUNCH_AI_PAUSED !== "true" && configuredCount(env[LAUNCH_APP_CAP_SETTING]) > 0 && launchUsageConfigured(env) &&
+    env.BETA_OPENAI_API_KEY !== env.OPENAI_API_KEY && analysisConfigured(env.BETA_OPENAI_API_KEY, env.SCENE_ANALYSIS_BUDGET);
+}
+
 export function createLaunchUsage(env, { config, session }) {
   if (env[LAUNCH_COST_METERING_FLAG] !== "true") return { enabled: false };
   const configured = launchUsageConfigured(env);
@@ -280,6 +287,8 @@ export function createLaunchUsage(env, { config, session }) {
   const appCapConfigured = env[LAUNCH_APP_CAP_SETTING] !== undefined;
   const appCap = appCapConfigured ? configuredCount(env[LAUNCH_APP_CAP_SETTING]) : MAX_AMOUNT;
   const testRealm = stripeTestRealm(env);
+  const paused = env.LAUNCH_AI_PAUSED === "true" ||
+    ((testRealm || env.BETA_PREVIEW_PREFIX === "/beta") && !betaSandboxAiEnabled(env));
   const commerce = launchCommerceNamespace(env);
   const trial = configuredCount(env.LAUNCH_AI_TRIAL_NANO_USD ?? "0");
   const usesPolicy = operation => ["status", "reserve", "dispatch"].includes(operation);
@@ -325,7 +334,6 @@ export function createLaunchUsage(env, { config, session }) {
   }
   async function status() {
     const account = await accountCommand("status");
-    const paused = testRealm || env.LAUNCH_AI_PAUSED === "true";
     if (!account.ok || (!appCapConfigured && !paused)) return account;
     const usage = await account.json();
     if (usage.available && !paused) {
@@ -336,7 +344,7 @@ export function createLaunchUsage(env, { config, session }) {
     return reply(usage);
   }
   async function reserve(id, amount) {
-    if (testRealm) return unavailable();
+    if (paused) return unavailable();
     const account = await accountCommand("reserve", { id, amount });
     if (!account.ok) return account;
     const app = await appCommand("reserve", { id, amount });
@@ -347,7 +355,7 @@ export function createLaunchUsage(env, { config, session }) {
     return appLimit(app);
   }
   async function dispatch(id) {
-    if (testRealm) return unavailable();
+    if (paused) return unavailable();
     const account = await accountCommand("dispatch", { id });
     if (!account.ok) {
       await complete(appCommand, "refund", { id });

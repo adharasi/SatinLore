@@ -1,7 +1,9 @@
 /* Blocking, local-only bootstrap: resolve appearance before the stylesheet paints. */
 (() => {
   "use strict";
-  const KEY = "satinlore.appearance";
+  const preview = document.querySelector?.('meta[name="satinlore-base-path"]')?.content === "/beta";
+  const simulator = document.querySelector?.('meta[name="satinlore-simulator-path"]')?.content === "/beta/simulator";
+  const KEY = `${preview ? "preview." : simulator ? "beta." : ""}satinlore.appearance`;
   const SELECTS = ["appearance", "reading-appearance"];
   const allowed = new Set(["system", "light", "dark"]);
   const media = window.matchMedia("(prefers-color-scheme: dark)");

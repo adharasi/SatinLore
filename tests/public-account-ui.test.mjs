@@ -21,20 +21,23 @@ test("auth requests are same-origin and carry only the form fields", async () =>
   }), {message: "Wait before trying again.", retryAfter: 60});
 });
 
-test("a billing signup link opens registration and returns the verified reader to its referral", async t => {
+for (const basePath of ["", "/beta"]) test(`a billing signup returns the verified reader to its ${basePath ? "beta" : "production"} referral`, async t => {
   let signedIn = false;
-  const destinations = [];
+  const destinations = [], accountRequests = [];
   const location = {search: "?signin=1&mode=register&ref=FIXTURE&next=billing", assign: path => destinations.push(path)};
-  const app = workspace({publicAuth: true, launchBilling: true, location, authRequest: async (action, body) => {
-    if (action === "register") return {challenge: "new-account", resendAfter: 60};
+  const app = workspace({publicAuth: true, launchBilling: true, basePath, location, browserFetch: async (path, options) => {
+    if (!path.startsWith(`${basePath}/api/auth/`)) return Response.json({error: "Fixture route unavailable."}, {status: 404});
+    accountRequests.push(path);
+    const action = path.split("/").at(-1), body = JSON.parse(options.body);
+    if (action === "register") return Response.json({challenge: "new-account", resendAfter: 60});
     if (action === "verify") {
       assert.deepEqual(body, {challenge: "new-account", code: "123456"});
-      return {verified: true};
+      return Response.json({verified: true});
     }
     assert.equal(action, "login");
     assert.equal(body.email, address);
     signedIn = true;
-    return {authenticated: true, expiresAt: app.now() + 600000};
+    return Response.json({authenticated: true, expiresAt: app.now() + 600000});
   }});
   t.after(() => app.destroy());
   app.access(async () => Response.json({authenticated: signedIn, expiresAt: signedIn ? app.now() + 600000 : null}));
@@ -54,7 +57,9 @@ test("a billing signup link opens registration and returns the verified reader t
   assert.deepEqual(destinations, []);
   node("public-password").value = originalPassword;
   await node("public-login-form").dispatch("submit");
-  assert.deepEqual(destinations, ["/billing?ref=FIXTURE"]);
+  assert.deepEqual(accountRequests, ["register", "verify", "login"].map(action => `${basePath}/api/auth/${action}`));
+  assert.deepEqual(destinations, [`${basePath}/billing?ref=FIXTURE`]);
+  assert.deepEqual(node("reader-support-links").children.map(link => link.href), basePath ? ["/beta/simulator"] : []);
 });
 
 test("guest reading, email verification and password sign-in preserve the reader", async t => {
@@ -199,7 +204,7 @@ test("the hosted launch fallback is physical-only and the scoped beta can only p
   await beta.click("practice-story-close");
   assert.equal(beta.read("hostedAnalysis"), false);
   await assert.rejects(beta.read('controller.beginConnection({mode: "lovense"})'), /supported toy and connection/);
-  beta.read('betaStorage.setItem("example", "only in beta")');
+  beta.read('localStorageAdapter.setItem("example", "only in beta")');
   assert.equal(beta.preferenceValues.get("beta.example"), "only in beta");
   assert.equal(beta.preferenceValues.has("example"), false);
   await beta.add();

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {workspace} from "./helpers/workspace.mjs";
 import {serializeBackup} from "../app/static/reader/backup.mjs";
 import {READER_PREFERENCES_KEY} from "../app/static/reader/preferences.mjs";
+import {LIBRARY_KEY} from "../app/static/reader/storage.mjs";
 
 const backupRecord = (changes = {}) => ({id: "old-backup-id", title: "Restored neutral story", text: "The train arrived.\n\nA quiet station.",
   corrections: [0, 3], position: 1, analysisVersion: "rules-v1", ...changes});
@@ -71,6 +72,43 @@ test("actual export controls initiate current/all backups and restore fresh paus
   assert.equal(app.downloads[1].records.length, 2);
   assert.equal(app.read("stories.every(story => !story.saved)"), true);
   assert.deepEqual(app.errors, []);
+});
+
+test("beta reader keeps browser stories, preferences, resume positions and backups in its own scope", async t => {
+  const app = workspace({publicAuth: true, basePath: "/beta"});
+  t.after(() => app.destroy());
+  app.libraryValues.set(LIBRARY_KEY, "production story fixture");
+  app.libraryValues.set(`beta.${LIBRARY_KEY}`, "simulator story fixture");
+  app.preferenceValues.set("satinlore.appearance", "light");
+  app.document.documentElement.dataset.appearanceDefault = "dark";
+  app.bootAppearance();
+  await app.settle();
+  assert.equal(app.document.documentElement.dataset.theme, "dark");
+  await app.click("toggle-dark-mode");
+  assert.equal(app.preferenceValues.get("preview.satinlore.appearance"), "light");
+  await change(app, "reading-width", "full");
+  assert.equal(app.preferenceValues.has(READER_PREFERENCES_KEY), false);
+  assert.equal(JSON.parse(app.preferenceValues.get(`preview.${READER_PREFERENCES_KEY}`)).preferences.width, "full");
+
+  await app.add("A story created in beta.");
+  await app.click("save-story"); await app.click("confirm-save"); await app.settle();
+  await app.click("export-library");
+  assert.equal(app.libraryValues.get(LIBRARY_KEY), "production story fixture");
+  assert.equal(app.libraryValues.get(`beta.${LIBRARY_KEY}`), "simulator story fixture");
+  assert.match(app.libraryValues.get(`preview.${LIBRARY_KEY}`), /A story created in beta/);
+  assert.deepEqual(Array.from(app.downloads[0].records, record => record.text), ["A story created in beta."]);
+  assert.equal(app.downloads[0].options.preview, true);
+
+  const resumeKey = "satinlore.account-resume.v1";
+  app.sessionValues.set(resumeKey, "production resume fixture");
+  await app.read("accountLibrary.open()");
+  app.read('accountLibrary.rememberPosition(accountLibrary.owner, "beta-story", 1, 0)');
+  assert.match(app.sessionValues.get(`preview.${resumeKey}`), /beta-story/);
+  app.read("accountLibrary.forgetResumePositions(); announceSessionChange();");
+  assert.equal(app.sessionValues.get(resumeKey), "production resume fixture");
+  assert.equal(app.sessionValues.has(`preview.${resumeKey}`), false);
+  assert.equal(app.preferenceValues.has("satinlore.public-session-change"), false);
+  assert.equal(app.preferenceValues.has("preview.satinlore.public-session-change"), true);
 });
 
 test("restoring duplicate titles preserves originals and distinguishes fresh copies", async t => {

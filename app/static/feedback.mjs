@@ -1,4 +1,4 @@
-import { HostedAccessGuard } from "./access.mjs";
+import { appFetch, appPath, HostedAccessGuard } from "./access.mjs";
 import { createStoryId } from "./reader/identity.mjs";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -17,7 +17,7 @@ function records(data) {
   return data.feedback;
 }
 export class FeedbackClient {
-  constructor({ fetcher = (...args) => fetch(...args), makeKey = createStoryId, authorize = async () => false } = {}) {
+  constructor({ fetcher = appFetch, makeKey = createStoryId, authorize = async () => false } = {}) {
     this.fetcher = fetcher; this.makeKey = makeKey; this.authorize = authorize;
     this.pending = null; this.busy = false; this.controllers = new Set(); this.generation = 0;
   }
@@ -103,7 +103,7 @@ export function initializeFeedbackPage() {
       $("feedback-access").hidden = false; $("feedback-access").replaceChildren(document.createTextNode("Please check your sign-in to use feedback tools. "));
       const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Check sign-in again";
       retry.addEventListener("click", () => void reload());
-      const login = document.createElement("a"); login.href = "/?sign-in=feedback"; login.textContent = "Go to the reader to sign in";
+      const login = document.createElement("a"); login.href = appPath("/?sign-in=feedback"); login.textContent = "Go to the reader to sign in";
       $("feedback-access").append(retry, login); update();
     },
   });

@@ -1,3 +1,5 @@
+import {appFetch, appPath} from "../static/access.mjs";
+
 const node = id => document.getElementById(id);
 const status = node("admin-status"), promotion = node("promotion-form"), affiliate = node("affiliate-form");
 const reconciliation = node("reconciliation-form"), reconciliationStatus = node("reconciliation-status");
@@ -6,7 +8,7 @@ let busy = false;
 let filterRevision = 0;
 
 async function call(path = "", body) {
-  const response = await fetch(`/api/billing-admin${path}`, {
+  const response = await appFetch(`/api/billing-admin${path}`, {
     credentials: "same-origin", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000),
     ...(body ? {method: "POST", body: JSON.stringify(body), headers: {"Content-Type": "application/json"}} : {}),
   });
@@ -65,7 +67,7 @@ async function reload() {
   ]);
   render("affiliates-list", affiliates, row => {
     const link = document.createElement("a");
-    const path = `/billing?ref=${encodeURIComponent(row.code)}`;
+    const path = appPath(`/billing?ref=${encodeURIComponent(row.code)}`);
     link.href = path; link.textContent = new URL(path, window.location.origin).href;
     return [`${row.code} · ${row.commissionBps / 100}% · ${row.enabled ? "Active" : "Disabled"} · `, link, " ",
       edit(() => fill(affiliate, {code: row.code, percent: row.commissionBps / 100, enabled: row.enabled}))];
@@ -107,7 +109,7 @@ function showReconciliation({orders, transactions, truncated}, query) {
   ], "No transactions match your filters.");
   reconciliationStatus.textContent = truncated ? "Showing the latest 500 transactions. Narrow the dates to download the activity." :
     `${number.format(transactions.length)} ${transactions.length === 1 ? "transaction" : "transactions"} found.`;
-  download.href = `/api/billing-admin/reconciliation.csv?${query}`;
+  download.href = appPath(`/api/billing-admin/reconciliation.csv?${query}`);
   download.hidden = truncated || !transactions.length;
 }
 

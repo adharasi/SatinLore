@@ -67,7 +67,7 @@ export class BackupImporter {
   }
 }
 /** Initiating a download does not prove that a browser wrote a file. No network/persistence calls occur here. */
-export function downloadBackup(stories, {filename = "satinlore-library-backup.json", document = globalThis.document,
+export function downloadBackup(stories, {filename = "satinlore-library-backup.json", preview = false, document = globalThis.document,
   urls = globalThis.URL, schedule = globalThis.setTimeout} = {}) {
   const raw = serializeBackup(stories);
   let url;
@@ -78,7 +78,8 @@ export function downloadBackup(stories, {filename = "satinlore-library-backup.js
     const link = document.createElement("a");
     link.href = url;
     // Use a generic name; a private title never enters the download URL or filesystem name.
-    link.download = filename === "satinlore-story-backup.json" ? filename : "satinlore-library-backup.json";
+    const kind = filename === "satinlore-story-backup.json" ? "story" : "library";
+    link.download = `satinlore-${preview ? "beta-" : ""}${kind}-backup.json`;
     link.hidden = true;
     document.body.append(link);
     try { link.click(); } finally { link.remove(); }

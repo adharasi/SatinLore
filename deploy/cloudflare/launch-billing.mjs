@@ -67,6 +67,7 @@ function catalog(env) {
 }
 
 export function launchBillingAvailable(env) {
+  if (env.BETA_PREVIEW_PREFIX === "/beta" && !stripeTestRealm(env)) return false;
   return env.LAUNCH_BILLING_ENABLED === "true" && env.LAUNCH_BILLING_POSTBACK_ENABLED === "true" && env.PUBLIC_READER_ENABLED === "true" &&
     launchUsageConfigured(env) && (stripeTestRealm(env) || analysisConfigured(env.OPENAI_API_KEY, env.SCENE_ANALYSIS_BUDGET)) &&
     (env.LAUNCH_PAYMENT_PROVIDER === "stripe" ? stripeConfigured(env) :
@@ -152,7 +153,7 @@ function providerEvent(params, signature) {
 export async function handleBillingPostback(request, env) {
   const close = (body, status) => new Response(body, {status, headers: {"Content-Type": "text/plain; charset=utf-8"}});
   // Pausing new purchases must not prevent already-issued payments and reversals from reconciling.
-  if (!env.COMMERCE || !numericId.test(env.VEROTEL_SHOP_ID ?? "") ||
+  if (env.BETA_PREVIEW_PREFIX === "/beta" || !env.COMMERCE || !numericId.test(env.VEROTEL_SHOP_ID ?? "") ||
       !/^[A-Za-z0-9_-]{16,128}$/u.test(env.VEROTEL_SIGNATURE_KEY ?? "")) return close("Unavailable", 503);
   if (request.method !== "GET") return close("Method not allowed", 405);
   const url = new URL(request.url);

@@ -2,7 +2,7 @@
 
 For the public email sign-in rollout, use the [public reader activation checklist](public-reader.md). The private setup below remains the reference for the beta and founder routes.
 
-This adapter hosts the browser reader at `https://app.satinlore.com`. Configure verified email for the public reader and signed Cloudflare Access for the [private test path](../../docs/launch-rollout.md#private-beta-access). The guided pairing path uses the sandboxed Lovense transport and needs the server settings below. Hardware behaviour remains unqualified until recorded on physical devices. The marketing site has a separate deployment. The Python `/device-check` invitation flow runs locally.
+This adapter hosts the browser reader at `https://app.satinlore.com`. Configure verified email for the public reader and follow the [beta deployment guide](../../docs/beta-preview.md) for the private launch preview. The guided pairing path uses the sandboxed Lovense transport and needs the server settings below. Hardware behaviour remains unqualified until recorded on physical devices. The marketing site has a separate deployment. The Python `/device-check` invitation flow runs locally.
 
 ## Current account and beta-host refinement
 
@@ -82,7 +82,7 @@ The ordinary reader hostname is **`app.satinlore.com`** and the separately recor
 
 17. Close existing incognito windows, then in a fresh private/incognito session, open `https://app.satinlore.com`. It should ask you to sign in through Cloudflare Access. Do the next check before entering the PIN.
 18. While still logged out, visit `https://app.satinlore.com/static/app.mjs` and `https://app.satinlore.com/api/access`. Both must require Access login or deny access; neither should reveal reader code or access data before login.
-19. Configure the [private test path](../../docs/launch-rollout.md#private-beta-access) before opening the app. Sign in to `https://app.satinlore.com/beta` as an authorised tester and paste neutral sample text. Connect the simulator, confirm Start, and try strength −/+, Pause and Stop. Choose **Save on this browser**, reload and confirm the story returns **paused**. Check Light/Dark and phone layout. Use the main reader and the Lovense setup section below for the physical pairing check.
+19. Configure the [private test path](../../docs/beta-preview.md) before opening the app. Sign in to `https://app.satinlore.com/beta/simulator` as an authorised tester and paste neutral sample text. Connect the simulator, confirm Start, and try strength −/+, Pause and Stop. Choose **Save on this browser**, reload and confirm the story returns **paused**. Check Light/Dark and phone layout. Use the launch reader at `/beta/` and the Lovense setup section below for the physical pairing check.
 20. Open `https://app.satinlore.com/api/health` while signed in. Expect `status: "ok"`, `device_mode: "lovense"`, `beta_ready: false`. This endpoint reports availability. Record physical-device qualification separately.
 21. Report whether the Worker build, Access login and reader checks passed, plus the exact error text if anything failed. Do not share PINs, cookies, assertion tokens or private story text.
 

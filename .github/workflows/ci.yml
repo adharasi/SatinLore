@@ -26,6 +26,7 @@ jobs:
       - run: python scripts/check.py
       - run: npm run build:worker
       - run: npm exec wrangler deploy -- --dry-run
+      - run: npm exec wrangler deploy -- --config wrangler.beta.jsonc --dry-run
       - run: npx playwright install --with-deps --only-shell chromium
         id: browser_runtime
       - run: npm run test:browser

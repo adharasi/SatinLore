@@ -3,8 +3,23 @@
 const CHECK_FAILED = "Sign-in could not be checked. Playback is paused.";
 const SESSION_EXPIRED = "Your sign-in has expired. Playback is paused.";
 
+export function appBasePath(document = globalThis.document) {
+  return document?.querySelector?.('meta[name="satinlore-base-path"]')?.content === "/beta" ? "/beta" : "";
+}
+
+export function appPath(path, document = globalThis.document) {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return path;
+  return appBasePath(document) + path;
+}
+
+export const appFetch = (path, options) => fetch(appPath(path), options);
+
+export function simulatorBasePath(document = globalThis.document) {
+  return document?.querySelector?.('meta[name="satinlore-simulator-path"]')?.content === "/beta/simulator" ? "/beta/simulator" : "/beta";
+}
+
 export class HostedAccessGuard {
-  constructor({request = options => fetch("/api/access", options), now = () => Date.now(),
+  constructor({request = options => appFetch("/api/access", options), now = () => Date.now(),
     setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = id => clearTimeout(id),
     onChange = () => {}, onLost = () => {}, interval = 60000, timeout = 8000, allowGuest = false} = {}) {
     this.request = request; this.now = now; this.setTimer = setTimer; this.clearTimer = clearTimer;

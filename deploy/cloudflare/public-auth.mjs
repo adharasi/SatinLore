@@ -5,6 +5,7 @@ import { sendReaderCode } from "./reader-auth-email.mjs";
 export const APP_ORIGIN = "https://app.satinlore.com";
 const AUTH_ORIGIN = "https://reader-auth.internal";
 const AUTH_COOKIE = "__Host-satinlore-reader";
+export const BETA_READER_COOKIE = "__Secure-satinlore-beta-reader";
 const AUTH_ROUTES = new Set(["request", "register", "resend", "verify", "login", "forgot", "reset", "logout", "change-password", "logout-all"]);
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -55,7 +56,9 @@ export function publicReaderConfiguration(env) {
       typeof accessKey !== "string" || !/^[A-Z0-9]{16,128}$/.test(accessKey) ||
       typeof secretKey !== "string" || !/^[A-Za-z0-9/+=]{32,128}$/.test(secretKey) ||
       (sessionToken !== undefined && (typeof sessionToken !== "string" || !/^[A-Za-z0-9/_+=-]{16,4096}$/.test(sessionToken)))) return null;
+  const beta = env.BETA_PREVIEW_PREFIX === "/beta";
   return {
+    cookieName: beta ? BETA_READER_COOKIE : AUTH_COOKIE, cookiePath: beta ? "/beta" : "/",
     origin: APP_ORIGIN, issuer: APP_ORIGIN, audience: "satinlore-public-email-v1",
     key, store, email: { region, from, accessKey, secretKey, sessionToken },
   };
@@ -87,16 +90,16 @@ function oneTimeCode() {
   return String(values[0] % 1_000_000).padStart(6, "0");
 }
 
-function cookieToken(request) {
+function cookieToken(request, config) {
   const pairs = (request.headers.get("Cookie") || "").split(";");
-  const matches = pairs.map(pair => pair.trim()).filter(pair => pair.startsWith(AUTH_COOKIE + "="));
-  const token = matches.length === 1 ? matches[0].slice(AUTH_COOKIE.length + 1) : "";
+  const matches = pairs.map(pair => pair.trim()).filter(pair => pair.startsWith(config.cookieName + "="));
+  const token = matches.length === 1 ? matches[0].slice(config.cookieName.length + 1) : "";
   return HEX.test(token) ? token : null;
 }
 
-function readerCookie(token = "", remember = false) {
+function readerCookie(config, token = "", remember = false) {
   const expiration = !token ? "; Max-Age=0" : remember ? `; Max-Age=${REMEMBERED_LIFETIME / 1000}` : "";
-  return `${AUTH_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Lax${expiration}`;
+  return `${config.cookieName}=${token}; Path=${config.cookiePath}; Secure; HttpOnly; SameSite=Lax${expiration}`;
 }
 
 async function authStore(config, action, body) {
@@ -108,7 +111,7 @@ async function authStore(config, action, body) {
 
 export async function verifyPublicReader(request, config) {
   if (new URL(request.url).origin !== config.origin) return null;
-  const token = cookieToken(request);
+  const token = cookieToken(request, config);
   if (!token) return null;
   try {
     const response = await authStore(config, "session", { tokenHash: await digest(token) });
@@ -124,7 +127,7 @@ export async function verifyPublicReader(request, config) {
 export async function revokePublicReader(config, session) {
   try {
     const response = await authStore(config, "revoke", { subject: session.subject });
-    if (response.ok) return { "Set-Cookie": readerCookie() };
+    if (response.ok) return { "Set-Cookie": readerCookie(config) };
   } catch { /* The caller reports that revocation was not confirmed. */ }
   return null;
 }
@@ -215,7 +218,7 @@ async function finishEmailChallenge(purpose, body, env, config) {
   const committed = await authStore(config, `password/${reset ? "reset" : "register"}`, update);
   if (committed.status === 401) return invalidCode();
   if (!committed.ok) return unavailable();
-  return reset ? json({ reset: true }, 200, { "Set-Cookie": readerCookie() }) : json({ verified: true });
+  return reset ? json({ reset: true }, 200, { "Set-Cookie": readerCookie(config) }) : json({ verified: true });
 }
 
 async function loginWithPassword(body, request, config) {
@@ -235,14 +238,14 @@ async function loginWithPassword(body, request, config) {
   if (opened.status === 429) return quotaResponse(opened, "Too many sign-in attempts. Wait a little and try again.");
   if (opened.status === 401) return unauthenticated();
   if (!opened.ok) return unavailable();
-  const previous = cookieToken(request);
+  const previous = cookieToken(request, config);
   if (previous) await authStore(config, "logout", { tokenHash: await digest(previous) });
   const { expiresAt } = await opened.json();
-  return json({ authenticated: true, expiresAt }, 200, { "Set-Cookie": readerCookie(token, body.remember) });
+  return json({ authenticated: true, expiresAt }, 200, { "Set-Cookie": readerCookie(config, token, body.remember) });
 }
 
 async function changePassword(body, request, config) {
-  const token = cookieToken(request);
+  const token = cookieToken(request, config);
   if (!token) return sessionRequired();
   if (!exact(body, "currentPassword", "password")) return json({ error: "Enter your current and new password." }, 400);
   const current = normalizePassword(body.currentPassword);
@@ -259,17 +262,17 @@ async function changePassword(body, request, config) {
   if (changed.status === 403) return sessionRequired();
   if (changed.status === 401) return json({ error: "The current password did not match." }, 401);
   if (!changed.ok) return unavailable();
-  return json({ changed: true }, 200, { "Set-Cookie": readerCookie() });
+  return json({ changed: true }, 200, { "Set-Cookie": readerCookie(config) });
 }
 
 async function logoutEverywhere(body, request, config) {
   if (!exact(body)) return json({ error: "Use the sign-out button on SatinLore." }, 400);
-  const token = cookieToken(request);
+  const token = cookieToken(request, config);
   if (!token) return sessionRequired();
   const cleared = await authStore(config, "logout-all", { tokenHash: await digest(token) });
   if (cleared.status === 401) return sessionRequired();
   if (!cleared.ok) return unavailable();
-  return json({ authenticated: false, expiresAt: null }, 200, { "Set-Cookie": readerCookie() });
+  return json({ authenticated: false, expiresAt: null }, 200, { "Set-Cookie": readerCookie(config) });
 }
 
 export async function handlePublicAuth(request, env, config, emailFetcher, ctx) {
@@ -292,9 +295,9 @@ export async function handlePublicAuth(request, env, config, emailFetcher, ctx) 
     if (action === "logout-all") return await logoutEverywhere(body, request, config);
     if (action === "logout") {
       if (!exact(body)) return json({ error: "Use the sign-out button on SatinLore." }, 400);
-      const token = cookieToken(request);
+      const token = cookieToken(request, config);
       if (token && !(await authStore(config, "logout", { tokenHash: await digest(token) })).ok) return unavailable();
-      return json({ authenticated: false, expiresAt: null }, 200, { "Set-Cookie": readerCookie() });
+      return json({ authenticated: false, expiresAt: null }, 200, { "Set-Cookie": readerCookie(config) });
     }
     return await finishEmailChallenge(action, body, env, config);
   } catch {

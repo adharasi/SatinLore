@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {HostedAccessGuard} from "../app/static/access.mjs";
+import {appPath, HostedAccessGuard, simulatorBasePath} from "../app/static/access.mjs";
 
 function deferred() {
   let resolve, reject;
@@ -53,6 +53,18 @@ test("hosted access starts blocked and uses only the same-origin no-cache access
   assert.equal(calls[0].options.redirect, "error");
   assert.equal(calls[0].options.body, undefined);
   assert.deepEqual(calls[0].options.headers, {"X-Requested-With": "XMLHttpRequest"});
+});
+
+test("beta routes honor exact server markers and leave external destinations alone", () => {
+  const document = (name, content) => ({querySelector: selector => selector === `meta[name="satinlore-${name}"]` ? {content} : null});
+  const beta = document("base-path", "/beta");
+  assert.equal(appPath("/?sign-in=feedback", beta), "/beta/?sign-in=feedback");
+  assert.equal(appPath("/api/access", beta), "/beta/api/access");
+  assert.equal(appPath("/api/access", document("base-path", "/beta/")), "/api/access");
+  assert.equal(appPath("https://checkout.stripe.com/c/pay/fixture", beta), "https://checkout.stripe.com/c/pay/fixture");
+  assert.equal(appPath("//checkout.stripe.com/c/pay/fixture", beta), "//checkout.stripe.com/c/pay/fixture");
+  assert.equal(simulatorBasePath(document("simulator-path", "/beta/simulator")), "/beta/simulator");
+  assert.equal(simulatorBasePath(beta), "/beta");
 });
 
 test("access denial, redirects, invalid expiry and network failures block Start without leaking errors", async () => {

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { Miniflare } from "miniflare";
 import { accountIdentity } from "../deploy/cloudflare/accounts.mjs";
-import { createLaunchUsage, handleLaunchUsage, LaunchUsage, LAUNCH_USAGE_PATH, estimateLunaCost, reportedLunaCost } from "../deploy/cloudflare/launch-usage.mjs";
+import { betaSandboxAiEnabled, createLaunchUsage, handleLaunchUsage, LaunchUsage, LAUNCH_USAGE_PATH, estimateLunaCost, reportedLunaCost } from "../deploy/cloudflare/launch-usage.mjs";
 import { handleSceneAnalysis, SceneAnalysisBudget } from "../deploy/cloudflare/scene-analysis.mjs";
 
 const ORIGIN = "https://app.satinlore.com";
@@ -293,6 +293,41 @@ test("Stripe test credits are visible in their own namespace but cannot reserve 
   assert.equal((await scene()).status, 503);
   assert.equal((await createLaunchUsage(env, {config, session}).dispatch(randomUUID())).status, 503);
   assert.equal(providerCalls.length, 0);
+});
+
+test("beta OpenAI opt-in requires a separate key and caps sandbox ledger spending", async t => {
+  const { env, session, usage, scene, providerCalls } = sceneFixture(t);
+  Object.assign(env, { BETA_PREVIEW_PREFIX: "/beta", BETA_OPENAI_ENABLED: "true", BETA_OPENAI_API_KEY: "sk-proj-beta-fixture-only",
+    LAUNCH_PAYMENT_PROVIDER: "stripe", STRIPE_MODE: "test", LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD: "1000000" });
+  assert.equal(betaSandboxAiEnabled(env), true);
+  for (const overrides of [
+    { BETA_PREVIEW_PREFIX: undefined }, { BETA_OPENAI_ENABLED: undefined }, { BETA_OPENAI_API_KEY: undefined },
+    { BETA_OPENAI_API_KEY: env.OPENAI_API_KEY }, { STRIPE_MODE: "live" }, { LAUNCH_AI_PAUSED: "true" },
+    { LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD: undefined }, { LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD: "0" },
+  ]) assert.equal(betaSandboxAiEnabled({ ...env, ...overrides }), false);
+  assert.equal((await scene({ who: { ...session, authMode: "access" } })).status, 503);
+  assert.equal(providerCalls.length, 0);
+
+  const names = [];
+  const sandbox = binding => ({ idFromName(name) {
+    assert.ok(name.startsWith("stripe-test:"));
+    names.push(name);
+    return binding.idFromName(name.slice("stripe-test:".length));
+  }, get: name => binding.get(name) });
+  env.COMMERCE = sandbox(env.COMMERCE);
+  env.LAUNCH_USAGE = sandbox(env.LAUNCH_USAGE);
+  const ledger = createLaunchUsage(env, { config, session });
+  const id = randomUUID();
+  assert.equal((await (await usage()).json()).available, true);
+  assert.equal((await ledger.reserve(id, 1_000_000)).status, 200);
+  assert.equal((await ledger.dispatch(id)).status, 200);
+  assert.equal((await ledger.finalize(id, { input_tokens: 80, output_tokens: 22, total_tokens: 102 })).status, 200);
+  assert.equal((await (await usage()).json()).credits.used, 19_000);
+  const limit = await ledger.reserve(randomUUID(), 1_000_000);
+  assert.equal(limit.status, 429);
+  assert.deepEqual(await limit.json(), { error: "analysis_app_spend_limit" });
+  assert.ok(names.includes("stripe-test:launch"));
+  assert.ok(names.includes("stripe-test:cost:v1:app"));
 });
 
 test("production scene path sends no private payload to the ledger and settles the Luna cost mix", async t => {

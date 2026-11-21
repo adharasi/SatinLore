@@ -661,11 +661,12 @@ export async function handleSceneAnalysis(request, env, { config, session, rever
   const budget = env.SCENE_ANALYSIS_BUDGET;
   const available = analysisConfigured(key, budget);
   const publicReader = session.authMode === "email";
-  if (publicReader && env.LAUNCH_AI_PAUSED === "true") {
+  const metered = publicReader && (env.LAUNCH_AI_COST_METERING_ENABLED === "true" || env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD !== undefined);
+  const betaUnmetered = env.BETA_PREVIEW_PREFIX === "/beta" && (!metered || !launchUsage?.enabled);
+  if (betaUnmetered || (publicReader && env.LAUNCH_AI_PAUSED === "true")) {
     if (read) return Response.json({ available: false });
     return failure("unavailable", 503, "Nocturne is temporarily paused. The local analysis is still available.");
   }
-  const metered = publicReader && (env.LAUNCH_AI_COST_METERING_ENABLED === "true" || env.LAUNCH_AI_APP_MONTHLY_CAP_NANO_USD !== undefined);
   if (read) {
     if (!available || !metered) return Response.json({ available });
     const usage = await launchUsage?.status?.();

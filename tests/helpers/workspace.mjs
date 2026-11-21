@@ -11,11 +11,12 @@ import {isReadingJump, selectReadingParagraph} from "../../app/static/reader/pos
 import {PlaybackController} from "../../app/static/playback/controller.mjs";
 import {createReaderSimulation} from "../../app/static/devices/reader-beta-device.mjs";
 import {ReaderDeviceController} from "../../app/static/devices/reader-device.mjs";
-import {HostedAccessGuard} from "../../app/static/access.mjs";
+import {BridgeTransport} from "../../app/static/devices/bridge-transport.mjs";
+import {appBasePath, appPath, HostedAccessGuard, simulatorBasePath} from "../../app/static/access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "../../app/static/reader/library-view.mjs";
 import {BackupImporter, serializeBackup} from "../../app/static/reader/backup.mjs";
 import {ReaderPreferences} from "../../app/static/reader/preferences.mjs";
-import {StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "../../app/static/reader/storage.mjs";
+import {LIBRARY_KEY, StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "../../app/static/reader/storage.mjs";
 import {FolderStore, selectFolderStories} from "../../app/static/reader/folders.mjs";
 import {WebStoryImporter, identifyStoryUrl, readStoryFile} from "../../app/static/reader/web-import.mjs";
 import {PRACTICE_STORIES} from "../../app/static/reader/practice-stories.mjs";
@@ -23,7 +24,7 @@ import {ReaderAccountClient, mountAccountWorkspace} from "../../app/static/reade
 import {AccountLibrary} from "../../app/static/reader/account-library.mjs";
 import {DEFAULT_EXPERIENCE, validateExperience} from "../../app/static/reader/experience-preferences.mjs";
 import {mountExperienceDialog} from "../../app/static/reader/experience-dialog.mjs";
-import {mountPublicAccount} from "../../app/static/reader/public-account.mjs";
+import {mountPublicAccount, requestAccount} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "../../app/static/reader/calibration.mjs";
 import {nocturneCandidates, nocturneAvailable, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "../../app/static/reader/nocturne.mjs";
@@ -31,10 +32,10 @@ import {storyToyRecommendation} from "../../app/static/reader/toy-recommendation
 
 // Execute the actual application bindings with only DOM, storage, clock, access
 // and Web Locks boundaries replaced. This is not a browser or layout check.
-export function workspace({hosted = false, locks = true, publicAuth = false, launchBilling = false, readerMode, location, authRequest, libraryRequest, sceneRequest, bridge} = {}) {
+export function workspace({hosted = false, locks = true, publicAuth = false, launchBilling = false, readerMode, basePath, location, authRequest, libraryRequest, sceneRequest, bridge, browserFetch = fetch} = {}) {
   let time = 1000000, timerId = 0, context, narrow = false, document;
   const timers = new Map(), nodes = new Map(), errors = [], documentListeners = new Map(), windowListeners = new Map();
-  const preferenceValues = new Map(), downloads = [];
+  const preferenceValues = new Map(), libraryValues = new Map(), sessionValues = new Map(), downloads = [];
   const setTimer = (callback, delay) => { timers.set(++timerId, {callback, at: time + delay}); return timerId; };
   const clearTimer = id => timers.delete(id);
   const now = () => time;
@@ -106,6 +107,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
       if (selector === 'meta[name="satinlore-hosted-access"]') return hosted ? {content: "true"} : null;
       if (selector === 'meta[name="satinlore-public-auth"]') return publicAuth ? {content: "true"} : null;
       if (selector === 'meta[name="satinlore-reader-mode"]') return readerMode ? {content: readerMode} : null;
+      if (selector === 'meta[name="satinlore-base-path"]') return basePath ? {content: basePath} : null;
       if (selector === 'meta[name="satinlore-launch-usage"]') return launchBilling ? {content: "true"} : null;
       if (selector === "dialog[open]") return [...nodes.values()].find(node => node.tagName === "DIALOG" && node.open) || null;
       if (selector === ".workspace-header") return nodes.get("workspace-header");
@@ -115,13 +117,15 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
     addEventListener(name, callback) { if (!documentListeners.has(name)) documentListeners.set(name, []); documentListeners.get(name).push(callback); },
   };
   for (const node of [...nodes.values(), root, body]) node.ownerDocument = document;
+  const localValues = key => key.endsWith(LIBRARY_KEY) ? libraryValues : preferenceValues;
   const window = {
     location,
     matchMedia: query => ({matches: query.includes("prefers-color-scheme") ? false : narrow, addEventListener() {}}),
     addEventListener(name, callback) { if (!windowListeners.has(name)) windowListeners.set(name, []); windowListeners.get(name).push(callback); },
     removeEventListener() {},
     dispatchEvent(event) { for (const callback of windowListeners.get(event.type) || []) callback(event); },
-    localStorage: {getItem: key => preferenceValues.get(key) ?? null, setItem: (key,value) => preferenceValues.set(key,value)},
+    localStorage: {getItem: key => localValues(key).get(key) ?? null, setItem: (key, value) => localValues(key).set(key, value), removeItem: key => localValues(key).delete(key)},
+    sessionStorage: {getItem: key => sessionValues.get(key) ?? null, setItem: (key, value) => sessionValues.set(key, value), removeItem: key => sessionValues.delete(key)},
     scrollTo({top}) { context.scrollY = top; },
     visualViewport: null,
   };
@@ -135,7 +139,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
   class TestController extends ReaderDeviceController {
     constructor(options) {
       const onChange = options.onChange;
-      super({...options, bridge, now, setTimer, clearTimer, onChange(state) {
+      super({...options, bridge: bridge ?? options.bridge, now, setTimer, clearTimer, onChange(state) {
         try { return onChange(state); } catch (error) { errors.push(error); throw error; }
       }});
     }
@@ -143,27 +147,29 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
   class TestGuard extends HostedAccessGuard {
     constructor(options) { super({...options, now, setTimer, clearTimer, request: opts => { accessCalls++; return accessRequest(opts); }}); }
   }
-  const libraryValues = new Map();
   class MemoryStore extends StoryStore {
-    constructor() { super({storage: {getItem: key => libraryValues.get(key) ?? null, setItem: (key,value) => libraryValues.set(key,value), removeItem: key => libraryValues.delete(key)}, withLock: task => task(), now}); }
+    constructor({storage = window.localStorage} = {}) { super({storage, withLock: task => task(), now}); }
   }
   class TestPreferences extends ReaderPreferences {
-    constructor() { super({storage: {getItem: key => preferenceValues.get(key) ?? null, setItem: (key, value) => preferenceValues.set(key, value)}}); }
+    constructor({storage = window.localStorage} = {}) { super({storage}); }
   }
   const source = readFileSync(new URL("../../app/static/app.mjs", import.meta.url), "utf8").replace(/^import .+;\s*$/gm, "")
     .replace('await import("./reader/beta-toolkit.mjs")', "testBetaTools");
   context = vm.createContext({document, window, navigator, crypto: webcrypto,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
-    MockDevice: TestDevice, preparePlainStoryText, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE,
+    MockDevice: TestDevice, preparePlainStoryText, TextImporter, createStoryId, ReaderModel, StoryStore: MemoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE, LIBRARY_KEY,
     isReadingJump, selectReadingParagraph, PlaybackController, ReaderDeviceController: TestController, HostedAccessGuard: TestGuard,
+    BridgeTransport, appBasePath: () => appBasePath(document), appPath: path => appPath(path, document),
+    appFetch: (path, options) => browserFetch(appPath(path, document), options), simulatorBasePath: () => simulatorBasePath(document),
     selectLibraryStories, storyMetadata, renderStoryTabs, BackupImporter, serializeBackup,
     downloadBackup: (records, options) => { downloads.push({records, options}); return {message: "Backup download started."}; },
     ReaderPreferences: TestPreferences, FolderStore, selectFolderStories,
     WebStoryImporter, identifyStoryUrl, readStoryFile,
     testBetaTools: {createReaderSimulation, createSimulatorView: () => null, PRACTICE_STORIES, createBetaRecorder, mountBetaRecording},
     ReaderAccountClient, mountAccountWorkspace, clampCalibration, simulatorScenePatternLabel,
-    AccountLibrary: class extends AccountLibrary { constructor() { super({request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
+    AccountLibrary: class extends AccountLibrary { constructor(options) { super({...options, request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
+    requestAccount,
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates,
     nocturneAvailable: () => nocturneAvailable(sceneRequest),
     requestNocturne: (cues, options) => requestNocturne(cues, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),
@@ -187,7 +193,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
     time = target; await settle();
   }
   return {
-    nodes, document, errors, settle, advance, now, preferenceValues, downloads, libraryValues,
+    nodes, document, errors, settle, advance, now, preferenceValues, downloads, libraryValues, sessionValues,
     read: expression => vm.runInContext(expression, context),
     bootAppearance() {
       vm.runInContext(readFileSync(new URL("../../app/static/appearance.js", import.meta.url), "utf8"), context);

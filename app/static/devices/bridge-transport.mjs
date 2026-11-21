@@ -28,7 +28,7 @@ export class BridgeTransport {
     Channel = globalThis.MessageChannel, request = (path, options = {}) => fetch(path, {
       credentials: "same-origin", cache: "no-store", redirect: "error", ...options,
     }), framePath = "/device-bridge", now = Date.now, setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer), onChange = () => {}} = {}) {
-    if (!["/device-bridge", "/alpha/device-bridge"].includes(framePath)) throw new Error("Use the isolated SatinLore bridge.");
+    if (!["/device-bridge", "/alpha/device-bridge", "/beta/device-bridge"].includes(framePath)) throw new Error("Use the isolated SatinLore bridge.");
     Object.assign(this, {document, window, navigator, Channel, request, framePath, now, setTimer, clearTimer, onChange});
     this.channels = framePath === "/alpha/device-bridge" ? ALPHA_CHANNELS : CHANNELS;
     this.listeners = new Set(); this.pending = new Map(); this.toys = []; this.selected = null;

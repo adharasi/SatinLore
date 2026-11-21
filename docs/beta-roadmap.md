@@ -6,7 +6,7 @@ There are separate gates: **S** for the software experience and **H** for physic
 
 ## Launch reader and private test workspace
 
-The launch branch serves physical pairing and reading on the app homepage. `/beta` and the lab beneath it require a dedicated Access audience and an approved tester. The local test build and existing separately authorised beta and Alpha environments retain their test workflows. The launch branch also includes founder-only FlexPay payment lookup and reconciliation. Local Worker and browser fixtures verify the paths and UI. The [launch runbook](launch-rollout.md) covers the remaining production Access, merchant, email and physical device checks.
+The launch branch serves physical pairing and reading on the app homepage. The separate [private launch preview](beta-preview.md) at `/beta/` runs accounts, Stripe sandbox checkout, token metering, founder billing admin and the simulator behind a dedicated Access audience and an approved tester policy. The local test build and separately authorised recording and Alpha environments retain their workflows. The [launch runbook](launch-rollout.md) covers production deployment after the beta, merchant, email and physical device checks.
 
 ## Defaults and contextual Nocturne — 5 November 2026
 

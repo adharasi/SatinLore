@@ -60,7 +60,7 @@ The `app.satinlore.com` reader processes stories locally by default. With public
 
 The reader explains why Start is unavailable, provides a nearby sign-in retry and supports repeated Start/Stop/reconnect without restoring an armed session. A synchronous access-check failure no longer leaves retries stuck.
 
-The beta reader and lab use a dedicated Cloudflare Access audience at `app.satinlore.com/beta`. The separate `beta.satinlore.com` recording programme and Alpha study keep their own sign-in. The Python invitation/device-check backend stays local. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for setup, checks and rollback. Physical playback and model performance are qualified separately.
+The [private beta launch preview](docs/beta-preview.md) uses a separate Worker and dedicated Cloudflare Access audience at `app.satinlore.com/beta/`. It includes beta accounts, Stripe sandbox billing, usage and the approved tester simulator. The separate `beta.satinlore.com` recording programme and Alpha study keep their own sign-in. The Python invitation/device-check backend stays local. See [the Cloudflare deployment runbook](deploy/cloudflare/README.md) for setup, checks and rollback. Physical playback and model performance are qualified separately.
 
 The reader links to `/help` for controls and privacy and `/support` for feedback. The founder inbox is on `beta.satinlore.com/feedback-admin`. The beta lab for repeatable failure scenarios is at `/beta/simulator-lab` on the app hostname. An AO3 link import uses the authenticated `/api/story-import` service to fetch the selected public source. The service neither retains the source nor forwards browser credentials.
 

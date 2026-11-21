@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFileSync } from "node:fs";
 import { setTimeout as nextTurn } from "node:timers/promises";
-import { HostedAccessGuard } from "../app/static/access.mjs";
+import { appPath, HostedAccessGuard } from "../app/static/access.mjs";
 import { createStoryId } from "../app/static/reader/identity.mjs";
 
 // Actual page bindings with only DOM/network/timer boundaries replaced. These
 // are functional checks; browser layout and hardware are not exercised here.
-function feedbackPage(t, { unavailable = false } = {}) {
+function feedbackPage(t, {unavailable = false, basePath = ""} = {}) {
   const nodes = new Map(), writes = [];
   let access = async () => Response.json({ authenticated: true, expiresAt: Date.now() + 3600000 });
   let write = async () => Response.json({ ok: true, id: crypto.randomUUID(), duplicate: false, createdAt: Date.now(), expiresAt: Date.now() + 2592000000 }, { status: 201 });
@@ -27,17 +27,19 @@ function feedbackPage(t, { unavailable = false } = {}) {
   }
   for (const match of readFileSync(new URL("../app/static/feedback.html", import.meta.url), "utf8").matchAll(/<([a-z][a-z0-9]*)\b([^>]*\bid="([^"]+)"[^>]*)>/gi)) nodes.set(match[3], new Element(match[1]));
   nodes.get("feedback-category").value = "bug";
-  const document = { hidden: false, activeElement: null, getElementById: id => nodes.get(id) || null, addEventListener() {}, createElement: tag => new Element(tag), createTextNode: text => ({ textContent: text }), createDocumentFragment: () => new Element("fragment") };
+  const document = { hidden: false, activeElement: null, getElementById: id => nodes.get(id) || null, addEventListener() {}, createElement: tag => new Element(tag), createTextNode: text => ({ textContent: text }), createDocumentFragment: () => new Element("fragment"),
+    querySelector: selector => selector === 'meta[name="satinlore-base-path"]' ? {content: basePath} : null };
   const fetcher = async (path, options) => {
-    if (path === "/api/access") return access();
+    if (path === `${basePath}/api/access`) return access();
     if (options.method === "POST") { writes.push({ path, body: JSON.parse(options.body) }); return write(path, options); }
     return unavailable ? Response.json({ error: "Synthetic unavailable service" }, { status: 503 }) : Response.json({ feedback: [] });
   };
-  class Guard extends HostedAccessGuard { constructor(options) { super({ ...options, request: opts => fetcher("/api/access", opts), setTimer: () => 1, clearTimer() {} }); } }
+  const scopedFetch = (path, options) => fetcher(appPath(path, document), options);
+  class Guard extends HostedAccessGuard { constructor(options) { super({ ...options, request: opts => scopedFetch("/api/access", opts), setTimer: () => 1, clearTimer() {} }); } }
   const source = readFileSync(new URL("../app/static/feedback.mjs", import.meta.url), "utf8")
     .replace(/^import .+;\s*$/gm, "").replace(/^export /gm, "")
     .replace('if (typeof document !== "undefined") initializeFeedbackPage();', "");
-  const context = vm.createContext({ document, window: { addEventListener() {} }, fetch: fetcher, HostedAccessGuard: Guard, createStoryId, TextEncoder, AbortController, setTimeout: () => 1, clearTimeout() {}, console });
+  const context = vm.createContext({ document, window: { addEventListener() {} }, appPath: path => appPath(path, document), appFetch: scopedFetch, HostedAccessGuard: Guard, createStoryId, TextEncoder, AbortController, setTimeout: () => 1, clearTimeout() {}, console });
   vm.runInContext(source + "\nglobalThis.pageFixture = initializeFeedbackPage();", context);
   t.after(() => context.pageFixture.guard.destroy());
   return { nodes, writes, access: callback => { access = callback; }, write: callback => { write = callback; }, async settle() { await nextTurn(0); await nextTurn(0); } };
@@ -56,6 +58,16 @@ test("the real feedback form locks its draft while saving and resets only after 
   assert.equal(page.nodes.get("feedback-form").resetCount, 1);
   assert.match(page.nodes.get("feedback-send-status").textContent, /feedback is saved/);
   assert.equal(page.nodes.get("feedback-message").disabled, false);
+});
+test("beta feedback saves locally scoped records and returns denied users to the beta reader", async t => {
+  const page = feedbackPage(t, {basePath: "/beta"}); await page.settle();
+  page.nodes.get("feedback-message").value = "Beta feedback fixture.";
+  await page.nodes.get("feedback-form").dispatch("submit");
+  assert.equal(page.writes[0].path, "/beta/api/feedback");
+  page.access(async () => new Response(null, {status: 401}));
+  await page.nodes.get("feedback-refresh").click();
+  await page.settle();
+  assert.equal(page.nodes.get("feedback-access").children.at(-1).href, "/beta/?sign-in=feedback");
 });
 test("a failed real form request preserves the draft and never renders saved feedback", async t => {
   const page = feedbackPage(t); await page.settle();

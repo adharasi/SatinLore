@@ -1,11 +1,12 @@
 import {ReaderDeviceController} from "./devices/reader-device.mjs";
+import {BridgeTransport} from "./devices/bridge-transport.mjs";
 import {channelLabel} from "./devices/toy-profiles.mjs";
 import {preparePlainStoryText, TextImporter} from "./reader/import.mjs";
 import {createStoryId} from "./reader/identity.mjs";
 import {ReaderModel} from "./reader/model.mjs";
-import {StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "./reader/storage.mjs";
+import {LIBRARY_KEY, StoryStore, MAX_STORY_DESCRIPTION, MAX_STORY_TITLE} from "./reader/storage.mjs";
 import {isReadingJump, selectReadingParagraph} from "./reader/position.mjs";
-import {HostedAccessGuard} from "./access.mjs";
+import {appBasePath, appFetch, appPath, HostedAccessGuard, simulatorBasePath} from "./access.mjs";
 import {selectLibraryStories, storyMetadata, renderStoryTabs} from "./reader/library-view.mjs";
 import {BackupImporter, serializeBackup, downloadBackup} from "./reader/backup.mjs";
 import {ReaderPreferences} from "./reader/preferences.mjs";
@@ -16,7 +17,7 @@ import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-works
 import {AccountLibrary} from "./reader/account-library.mjs";
 import {DEFAULT_EXPERIENCE, validateExperience} from "./reader/experience-preferences.mjs";
 import {mountExperienceDialog} from "./reader/experience-dialog.mjs";
-import {mountPublicAccount} from "./reader/public-account.mjs";
+import {mountPublicAccount, requestAccount} from "./reader/public-account.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "./reader/calibration.mjs";
 import {nocturneAvailable, nocturneCandidates, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "./reader/nocturne.mjs";
@@ -27,17 +28,20 @@ const publicMode = document.querySelector('meta[name="satinlore-public-auth"]')?
 const readerMode = document.querySelector('meta[name="satinlore-reader-mode"]')?.content;
 const liveReader = publicMode || readerMode === "live";
 const scopedBeta = !liveReader && readerMode === "beta";
+const preview = appBasePath() === "/beta";
 const betaTools = liveReader ? null : await import("./reader/beta-toolkit.mjs");
 const practiceStories = betaTools?.PRACTICE_STORIES ?? [];
-const betaStorage = scopedBeta ? {
-  getItem: key => window.localStorage.getItem(`beta.${key}`),
-  setItem: (key, value) => window.localStorage.setItem(`beta.${key}`, value),
-  removeItem: key => window.localStorage.removeItem(`beta.${key}`),
-} : undefined;
+const storageKey = key => `${preview ? "preview." : scopedBeta ? "beta." : ""}${key}`;
+const storageAdapter = storage => ({
+  getItem: key => window[storage].getItem(storageKey(key)),
+  setItem: (key, value) => window[storage].setItem(storageKey(key), value),
+  removeItem: key => window[storage].removeItem(storageKey(key)),
+});
+const localStorageAdapter = preview || scopedBeta ? storageAdapter("localStorage") : undefined;
 const importer = new TextImporter();
-const store = new StoryStore({storage: betaStorage});
+const store = new StoryStore({storage: localStorageAdapter});
 const folderStore = new FolderStore({store});
-const webImporter = new WebStoryImporter();
+const webImporter = new WebStoryImporter({fetcher: appFetch});
 let folders = [];
 let folderFilter = "all";
 let folderSignature = "";
@@ -50,7 +54,7 @@ let savingPatternChoice = false;
 let recordedDevice = "", recordedStory = "", recordedStep = "", feelChannelSignature = "", feelEditingChannel = null, combinationSignature = "";
 let connection = {mode: liveReader ? "lovense" : "simulator", model: "lush", toys: [], selectedId: null};
 const backupImporter = new BackupImporter();
-const preferences = new ReaderPreferences({storage: betaStorage});
+const preferences = new ReaderPreferences({storage: localStorageAdapter});
 const stories = [];
 let libraryQuery = "";
 let librarySort = "updated";
@@ -90,8 +94,10 @@ let libraryLoading = true;
 let libraryMutation = false;
 let focusArrangement = null;
 const dialogOpeners = new Map();
-const accountLibrary = publicMode ? new AccountLibrary() : null;
-const sessionChangeKey = "satinlore.public-session-change";
+const accountLibrary = publicMode ? new AccountLibrary({request: appFetch,
+  ...(preview ? {storage: () => storageAdapter("sessionStorage")} : {}),
+}) : null;
+const sessionChangeKey = storageKey("satinlore.public-session-change");
 let pendingAccountLibrary = null, localLibraryReady = Promise.resolve();
 let accountPreferences = null;
 let accountExperience = null, guestExperience = null;
@@ -681,7 +687,10 @@ function controlRecovery(state) {
   text("start-help", "The controls could not update. Stop was requested. Check your toy and reconnect before continuing.");
   show("The controls could not update. Reconnect; your story remains readable.");
 }
-const controller = new ReaderDeviceController({document, window, navigator, storyRhythms: true, createSimulation: betaTools?.createReaderSimulation, allowLive: !scopedBeta,
+const previewBridge = preview ? new BridgeTransport({document, window, navigator, framePath: appPath("/device-bridge"),
+  request: (path, options) => appFetch(path, {credentials: "same-origin", cache: "no-store", redirect: "error", ...options}),
+}) : null;
+const controller = new ReaderDeviceController({document, window, navigator, bridge: previewBridge, storyRhythms: true, createSimulation: betaTools?.createReaderSimulation, allowLive: !scopedBeta,
   independentRhythms: !hostedMode || window.location?.hostname === "app.satinlore.com",
   authorize: async () => !hostedMode || Boolean(await hostedAccess?.check({fresh: true}) && hasVerifiedAccess()),
   onSetupChange: state => { connection = state; setupFlow?.update({...latest, ...state, canStart: !$("start").disabled, readiness: $("start-help").textContent}); },
@@ -812,7 +821,7 @@ async function runNocturneContext({automatic = false} = {}) {
     session.requests++;
     session.bytesAttempted += sourceBytes;
     for (const id of newIds) session.attempted.add(id);
-    const result = await requestNocturneContext(paragraphs, {consent: true, signal: operation.abort.signal});
+    const result = await requestNocturneContext(paragraphs, {consent: true, signal: operation.abort.signal, request: appFetch});
     if (!current()) return;
     if (result.labels) {
       for (const id of newIds) story.model.nocturneContext.set(id, result.labels.get(id));
@@ -832,7 +841,7 @@ async function runNocturneContext({automatic = false} = {}) {
 async function checkNocturne() {
   if (!hostedAnalysis || !hasVerifiedAccess() || checkingNocturne) return;
   checkingNocturne = true; display();
-  const available = await nocturneAvailable();
+  const available = await nocturneAvailable(appFetch);
   nocturneReady = hasVerifiedAccess() ? available : null;
   checkingNocturne = false; display();
 }
@@ -864,7 +873,7 @@ async function runNocturne() {
   const operation = {story, abort: new AbortController(), generation: story.model.analysisGeneration};
   nocturneOperation = operation; display();
   try {
-    const {labels, code} = await requestNocturne(cues, {signal: operation.abort.signal});
+    const {labels, code} = await requestNocturne(cues, {signal: operation.abort.signal, request: appFetch});
     if (nocturneOperation !== operation || story !== currentStory() || story.model.analysisGeneration !== operation.generation ||
         story.sceneModel !== "nocturne" || document.hidden || !hasVerifiedAccess()) return;
     if (labels?.size) {
@@ -1744,7 +1753,7 @@ async function restoreBackup(file) {
 }
 function exportStories(records, filename, status = "library-transfer-status") {
   pause("Paused while you export a local backup.");
-  try { text(status, downloadBackup(records, {filename}).message); }
+  try { text(status, downloadBackup(records, {filename, ...(preview ? {preview} : {})}).message); }
   catch (error) { text(status, error.message); }
 }
 $("new-story").addEventListener("click", openDraft);
@@ -2266,7 +2275,7 @@ window.addEventListener("storage", event => {
     void hostedAccess.check({fresh: true});
     return;
   }
-  if (event.key !== "satinlore.library.v1" && event.key !== null) return;
+  if (event.key !== storageKey(LIBRARY_KEY) && event.key !== null) return;
   pause("The local library changed in another tab. Saved copies will not be overwritten silently.");
   libraryError = "The library changed in another tab. Reload to see its saved stories; session-only text remains in this tab until reload.";
   renderLibrary();
@@ -2435,6 +2444,7 @@ if (publicMode) {
   }
   text("account-storage-description", "Choose Save to my account on any story you want to open on other devices. Your reading settings and toy presets also sync when you sign in.");
   publicAccount = mountPublicAccount({document,
+    request: (action, body) => requestAccount(action, body, appFetch),
     openDialog: opener => openDialog("public-account-dialog", opener),
     closeDialog: () => closeDialog("public-account-dialog"),
     onVerified: async () => {
@@ -2458,13 +2468,19 @@ if (publicMode) {
   });
 }
 
+if (preview) {
+  const simulator = document.createElement("a");
+  simulator.href = appPath("/simulator"); simulator.textContent = "Test simulator";
+  $("reader-support-links").append(simulator);
+}
+
 // Local hardware checks stay available only in the local application.
 for (const link of document.querySelectorAll('a[href="/device-check"]')) link.hidden = hostedMode;
 if (hostedMode) {
   const accessStatus = $("access-status");
   hostedAccess = new HostedAccessGuard({
     allowGuest: publicMode,
-    ...(scopedBeta ? {request: options => fetch("/beta/api/access", options)} : {}),
+    ...(scopedBeta ? {request: options => fetch(`${simulatorBasePath()}/api/access`, options)} : {}),
     onChange: state => {
       hostedAccessReady = state.allowed;
       controller.setAuthorized?.(state.allowed, {
@@ -2497,7 +2513,7 @@ if (hostedMode) {
         const retry = document.createElement("button"); retry.type = "button"; retry.className = "quiet-control";
         retry.textContent = "Check sign-in again";
         retry.addEventListener("click", () => void hostedAccess.check());
-        const login = document.createElement("a"); login.href = scopedBeta ? "/beta" : "/"; login.textContent = "Reload to sign in";
+        const login = document.createElement("a"); login.href = scopedBeta ? simulatorBasePath() : appPath("/"); login.textContent = "Reload to sign in";
         accessStatus.replaceChildren(explanation, retry, document.createTextNode(" "), login);
         accessStatus.hidden = false;
       }
@@ -2506,7 +2522,7 @@ if (hostedMode) {
   const accessCheck = hostedAccess.start({visible: !document.hidden});
   const accountQuery = new URLSearchParams(window.location?.search);
   if (publicMode && window.location?.search === "?sign-in=feedback") {
-    const openFeedback = () => window.location.assign("/support");
+    const openFeedback = () => window.location.assign(appPath("/support"));
     void accessCheck.then(allowed => allowed ? openFeedback() : publicAccount?.open($("public-account"), openFeedback));
   } else if (publicMode && accountQuery.get("signin") === "1") {
     const billing = accountQuery.get("next") === "billing" && document.querySelector('meta[name="satinlore-launch-usage"]');
@@ -2514,7 +2530,7 @@ if (hostedMode) {
     const ref = accountQuery.get("ref"), order = accountQuery.get("order");
     if (/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(ref ?? "")) parameters.set("ref", ref);
     if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(order ?? "")) parameters.set("order", order);
-    const openBilling = billing ? () => window.location.assign(`/billing${parameters.size ? `?${parameters}` : ""}`) : null;
+    const openBilling = billing ? () => window.location.assign(appPath(`/billing${parameters.size ? `?${parameters}` : ""}`)) : null;
     void accessCheck.then(allowed => {
       if (allowed) return openBilling ? openBilling() : offerExperience();
       return publicAccount?.open($("public-account"), openBilling, {register: accountQuery.get("mode") === "register"});
@@ -2586,7 +2602,7 @@ if (document.createElementNS) {
     onFinish: () => { openDraft(); setPanel("settings", true, {restore: false}); selectSettingsTab("reader"); },
   });
   connection = controller.setupSnapshot();
-  accountClient = new ReaderAccountClient({hosted:hostedMode && !scopedBeta});
+  accountClient = new ReaderAccountClient({hosted:hostedMode && !scopedBeta, request: appFetch});
   if (publicMode && !publicSignedIn) accountClient.clear();
   accountWorkspace = mountAccountWorkspace({client:accountClient,document,welcomeMount:$("account-welcome"),settingsMount:$("account-settings-mount"),presetMount:$("preset-mount"),
     publicMode, allowSimulation: !liveReader, onSignIn: () => publicAccount?.open($("public-account")),

@@ -2,7 +2,7 @@ import { SimulationClock } from "./simulation/clock.mjs";
 import { ScenarioTransport } from "./simulation/transport.mjs";
 import { SIMULATION_SCENARIOS, simulationScenario } from "./simulation/scenarios.mjs";
 import { AsyncPlaybackController } from "./playback/async-controller.mjs";
-import { HostedAccessGuard } from "./access.mjs";
+import { HostedAccessGuard, simulatorBasePath } from "./access.mjs";
 
 const $ = id => document.getElementById(id);
 const hosted = document.querySelector('meta[name="satinlore-hosted-access"]')?.content === "true";
@@ -99,7 +99,7 @@ $("lab-confirm-start").addEventListener("click", async () => {
 });
 $("clear-trace").addEventListener("click", () => { trace = []; $("lab-trace").replaceChildren(); });
 const guard = hosted ? new HostedAccessGuard({
-  ...(scopedBeta ? {request: options => fetch("/beta/api/access", options)} : {}),
+  ...(scopedBeta ? {request: options => fetch(`${simulatorBasePath()}/api/access`, options)} : {}),
   onChange: state => {
     accessAllowed = state.allowed;
     current?.controller.setAuthorized(accessAllowed);

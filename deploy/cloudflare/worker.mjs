@@ -13,7 +13,7 @@ import { CORPUS_BATCH_STREAM_TYPE, CORPUS_STUDY_PATH, handleCorpusStudy } from "
 import { LUNA_CORPUS_PATH, handleLunaCorpus } from "./luna-corpus.mjs";
 import { BILLING_API, BILLING_ADMIN_API, BILLING_POSTBACK, handleBilling, handleBillingAdmin, handleBillingPostback } from "./launch-billing.mjs";
 import { STRIPE_WEBHOOK_PATH, handleStripeWebhook } from "./stripe-billing.mjs";
-import { LAUNCH_COST_METERING_FLAG, LAUNCH_USAGE_PATH, createLaunchUsage, handleLaunchUsage } from "./launch-usage.mjs";
+import { LAUNCH_COST_METERING_FLAG, LAUNCH_USAGE_PATH, betaSandboxAiEnabled, createLaunchUsage, handleLaunchUsage } from "./launch-usage.mjs";
 export { PrivateFeedback } from "./feedback.mjs";
 export { ReaderAccount } from "./accounts.mjs";
 export { BetaRecordings } from "./beta-recordings.mjs";
@@ -82,7 +82,7 @@ export function privateAppConfiguration(env, origin = APP_ORIGIN, { appBeta = fa
     ...(testerEmails.length ? { testerEmails: [...new Set(testerEmails)] } : {}) };
 }
 
-function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false, betaPage = false } = {}) {
+function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN, alphaPage = false, alphaAdmin = false, betaPage = false, betaPreview = false } = {}) {
   const result = new Response(head ? null : response.body, response);
   result.headers.set("Cache-Control", "no-store");
   result.headers.set("Referrer-Policy", "no-referrer");
@@ -93,6 +93,8 @@ function secure(response, { head = false, bridgeHash = null, origin = APP_ORIGIN
   let pagePolicy = CONTENT_POLICY.replaceAll(APP_ORIGIN, origin);
   if (alphaPage || alphaAdmin) pagePolicy += "; media-src 'self' blob:";
   if (alphaPage) pagePolicy = pagePolicy.replace(/frame-src [^;]+/, `frame-src ${APP_ORIGIN}/alpha/device-bridge`);
+  if (betaPreview) pagePolicy = pagePolicy.replace(/frame-src [^;]+/,
+    `frame-src ${APP_ORIGIN}/beta/device-bridge ${APP_ORIGIN}/beta/device-bridge.html`);
   if (betaPage) pagePolicy = pagePolicy.replace(/frame-src [^;]+/, "frame-src 'none'");
   result.headers.set("Content-Security-Policy", bridgeHash ?
     `default-src 'none'; sandbox allow-scripts; script-src 'sha256-${bridgeHash}' https://*.lovense.com https://*.lovense-api.com; connect-src ${BRIDGE_VENDOR_HTTPS} ${BRIDGE_VENDOR_WSS}; img-src ${BRIDGE_VENDOR_HTTPS}; object-src 'none'; frame-ancestors ${origin}; base-uri 'none'; form-action 'none'` : pagePolicy);
@@ -193,7 +195,8 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
   scopedBeta = false } = {}) {
   const head = request.method === "HEAD";
   const betaDocument = scopedBeta && ["/index.html", "/simulation.html"].includes(path);
-  const finish = response => secure(response, { head, origin, alphaPage, alphaAdmin, betaPage: betaDocument });
+  const betaPreview = env.BETA_PREVIEW_PREFIX === "/beta";
+  const finish = response => secure(response, { head, origin, alphaPage, alphaAdmin, betaPage: betaDocument, betaPreview });
   if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") return finish(json({ error: "The private preview is not available." }, 503));
   try {
     const assetUrl = new URL(path, origin);
@@ -211,7 +214,8 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
     }
     const publicDocument = publicAuth && PUBLIC_DOCUMENTS.has(path);
     const liveReaderDocument = origin === APP_ORIGIN && !scopedBeta && path === "/index.html";
-    if (!head && (publicDocument || betaDocument || liveReaderDocument)) {
+    const betaReaderDocument = betaPreview && !scopedBeta && path.endsWith(".html");
+    if (!head && (publicDocument || betaDocument || liveReaderDocument || betaReaderDocument)) {
       let document = await asset.text();
       const headers = new Headers(asset.headers);
       headers.delete("Content-Length");
@@ -224,9 +228,18 @@ async function serveAsset(request, env, path, { origin = APP_ORIGIN, alphaPage =
       }
       if (liveReaderDocument) meta.push('<meta name="satinlore-reader-mode" content="live">');
       if (betaDocument) {
+        const simulatorPath = betaPreview ? `${APP_BETA_PATH}/simulator` : APP_BETA_PATH;
         meta.push('<meta name="satinlore-reader-mode" content="beta">');
-        document = document.replace(/((?:href|src)=["'])\/static\//gu, `$1${APP_BETA_PATH}/static/`)
-          .replace(/href=(["'])\/\1/gu, `href=$1${APP_BETA_PATH}$1`);
+        document = document.replace(/((?:href|src)=["'])\/static\//gu, `$1${simulatorPath}/static/`)
+          .replace(/href=(["'])\/\1/gu, `href=$1${simulatorPath}$1`);
+        if (betaPreview) {
+          document = document.replace(/(href=["'])(\/(?:help|support))(?=[#?"'])/gu, `$1${APP_BETA_PATH}$2`)
+            .replace("<head>", `<head><meta name="satinlore-simulator-path" content="${simulatorPath}">`);
+        }
+      }
+      if (betaReaderDocument) {
+        document = document.replace(/((?:href|src|action)=["'])(\/(?!\/)[^"']*)/gu, `$1${APP_BETA_PATH}$2`)
+          .replace("<head>", `<head><meta name="satinlore-base-path" content="${APP_BETA_PATH}">`);
       }
       return finish(new Response(document.replace("</head>", `${meta.join("")}</head>`), { status: asset.status, headers }));
     }
@@ -464,8 +477,10 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
       }
       if (url.pathname === "/api/scene-analysis") {
         const launchUsage = session.authMode === "email" && launchUsageEnabled(env) ? createLaunchUsage(env, {config, session}) : null;
-        const analysisEnv = env.LAUNCH_PAYMENT_PROVIDER === "stripe" && env.STRIPE_MODE === "test" ?
-          {...env, LAUNCH_AI_PAUSED: "true"} : env;
+        const stripeSandbox = env.LAUNCH_PAYMENT_PROVIDER === "stripe" && env.STRIPE_MODE === "test";
+        const sandboxAiEnabled = stripeSandbox && Boolean(launchUsage) && betaSandboxAiEnabled(env);
+        const analysisEnv = stripeSandbox ? { ...env, OPENAI_API_KEY: sandboxAiEnabled ? env.BETA_OPENAI_API_KEY : undefined,
+          LAUNCH_AI_PAUSED: sandboxAiEnabled ? env.LAUNCH_AI_PAUSED : "true" } : env;
         return finish(await handleSceneAnalysis(request, analysisEnv, { config, session, analysisFetcher, reverify, launchUsage }));
       }
       if (url.pathname === "/api/story-import") {

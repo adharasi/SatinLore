@@ -7,7 +7,7 @@ const bridgeUrl = new URL(location.href);
 const expectedParentOrigin = bridgeUrl.origin;
 const alpha = bridgeUrl.pathname === "/alpha/device-bridge";
 const preserveFlexerRenewals = expectedParentOrigin === "https://app.satinlore.com" &&
-  ["/device-bridge", "/device-bridge.html", "/alpha/device-bridge"].includes(bridgeUrl.pathname);
+  ["/device-bridge", "/device-bridge.html", "/alpha/device-bridge", "/beta/device-bridge"].includes(bridgeUrl.pathname);
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,96}$/;
 const TOY_ID = /^[A-Za-z0-9_-]{1,128}$/;
 let connectedPort = null;
