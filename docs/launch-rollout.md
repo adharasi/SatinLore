@@ -1,15 +1,17 @@
 # SatinLore launch rollout
 
-The reader is deployed from `adharasi/SatinLore`. The public homepage is deployed from `adharasi/satinlore-website`. Both release candidates use `launch/accounts-usage-commerce`. Configure the reader, private beta and Stripe before adding purchase links to the public homepage.
+Keep both production Workers configured to build from `main`. The reader uses `adharasi/SatinLore` and the public homepage uses `adharasi/satinlore-website`. Test the `launch/accounts-usage-commerce` branch before merging it into `main`. [Cloudflare Workers build branches](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)
 
-## 1. Deploy the reader from the launch branch
+## 1. Test the launch branch before merging
 
-1. In Cloudflare, select **Workers & Pages → satinlore-private-app → Settings → Builds → Branch control**. Select `launch/accounts-usage-commerce` as the production branch when ready. Deploy the tip of that branch and check its commit in **Deployments**. If changing the branch does not trigger a build, use the build dashboard to deploy that commit, or from the authenticated launch checkout run `npm ci --ignore-scripts`, `npm run build:worker`, then `npx wrangler deploy`. Check for both `COMMERCE` and `LAUNCH_USAGE` Durable Object bindings and the v6 migration. [Cloudflare Workers build branches](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)
-2. Keep the existing whole-host Access policy during setup. In **Settings → Variables & Secrets**, keep `PRIVATE_APP_ENABLED=true`, `PUBLIC_APP_ORIGIN=https://app.satinlore.com`, and the existing authentication and Lovense bindings. Keep `LAUNCH_BILLING_ENABLED=false` while setting up. Keep `PUBLIC_READER_OTP_KEY` if it already exists. It also preserves account identities.
-3. Follow the [email and reader setup](../deploy/cloudflare/public-reader.md). Confirm SES production sending in the verified region, set `PUBLIC_READER_ENABLED=true`, and configure the public AI meter in step 3 below. Check signup, inbox verification, login, password reset and all-device sign-out in two browser profiles. Physically check a supported device, including Pause and Stop. [Lovense runtime settings](../deploy/cloudflare/README.md)
-4. Apply the private beta and founder Access policies below before you remove the whole-host Access policy from the public app. Preserve any existing policies for the separately hosted beta, Alpha, founder and research routes.
+1. Run the local checks at the bottom of this guide on the reader launch branch. They cover the protected simulator route, signup and login, Stripe webhook handling and AI metering using fixtures. Run the homepage preview from the website launch branch. [Homepage test and deploy guide](https://github.com/adharasi/satinlore-website/blob/launch/accounts-usage-commerce/docs/launch-homepage.md)
+2. The launch revision's `/beta` handler serves the simulator and `/beta/simulator-lab`. Signup uses `/signup` and `/api/auth/*`, billing uses `/billing` and `/api/billing/*`, and AI usage uses `/api/account/usage`. Cloudflare Access controls who can open a route. Worker routing and deployment determine which revision serves it.
+3. A hosted beta for the full release requires a separate staging Worker running this branch, its own Durable Objects, an approved tester policy, and a Stripe sandbox destination for that Worker. To use `/beta` as the entry to that environment, implement and verify the staging origin and routes first. The current branch pins the reader origins and Stripe return URLs to the production app.
+4. Merge each release to `main` after its agreed tests pass. Check that the reader's main-branch deployment has `COMMERCE` and `LAUNCH_USAGE` bindings and the v6 migration. For the first production check, keep whole-host Access enabled and keep `LAUNCH_BILLING_ENABLED=false`. Retain `PRIVATE_APP_ENABLED=true`, `PUBLIC_APP_ORIGIN=https://app.satinlore.com`, the Lovense settings, and any existing `PUBLIC_READER_OTP_KEY`.
 
-## 2. Configure private beta
+## Private beta access
+
+Apply these settings when the simulator route is present on the Worker you intend to test. They grant access to the simulator and its lab.
 
 1. In **Cloudflare Zero Trust → Access controls → Applications**, choose **Add an application → Self-hosted**. Name it **SatinLore private beta**.
 2. In that one application add both public hostnames and paths:
@@ -32,7 +34,7 @@ The reader is deployed from `adharasi/SatinLore`. The public homepage is deploye
 
 5. Open `https://app.satinlore.com/beta` in a fresh private window. Check that an anonymous visitor gets challenged, a regular reader email session alone cannot enter, and a listed tester with the new Access login can enter. As the tester, verify `/beta/simulator-lab` works. Check that `/simulator-lab` on the public root returns 404 and that root Help and setup show physical pairing only.
 6. For founder billing, keep `/billing-admin`, `/billing-admin/*`, `/api/billing-admin`, and `/api/billing-admin/*` behind the founder-only Access application that uses `ACCESS_AUD`. Verify access from a founder browser and denial from an ordinary reader. Enable `LAUNCH_BILLING_ADMIN_ENABLED=true` when the founder policy is in place. Testers do not need founder permissions.
-7. Once those checks pass, remove only the whole-host Access destination for `app.satinlore.com` so guests can reach the reader. Keep the exact path policies and the separate `beta.satinlore.com` application. Verify `/signup` and `/login` again from a fresh browser.
+7. At production rollout, follow the [email and reader setup](../deploy/cloudflare/public-reader.md). Confirm SES delivery, check signup and login with two browser profiles, and check pairing, Pause and Stop with a supported device. Open the public reader after these checks by removing only the whole-host Access destination for `app.satinlore.com`. Keep the exact beta and founder policies and the separately hosted beta, Alpha and research scopes. Verify `/signup` and `/login` again from a fresh browser.
 
 ## 3. Control AI spending
 
@@ -71,11 +73,11 @@ Stripe is the selected provider. Its UK policy lists adult content and services 
 
 1. In a Stripe sandbox, set your customer-facing business details and configure **Settings → Billing → Customer portal** so subscribers can cancel at the end of the paid period. Disable plan changes from the portal unless you have tested them with SatinLore's price and entitlement rules. Save the portal configuration. [Stripe portal settings](https://docs.stripe.com/customer-management/configure-portal)
 2. The Worker creates USD card checkout sessions from its own catalog, including the monthly renewal interval and any one-time discount. There are no Stripe Price IDs to copy. Turn off Adaptive Pricing for Checkout in each mode so the signed invoice currency agrees with the catalog. Keep the standard Stripe-hosted Checkout and Customer Portal URLs. [Stripe Adaptive Pricing settings](https://docs.stripe.com/payments/currencies/localize-prices/adaptive-pricing)
-3. In **Stripe → Workbench → Webhooks**, add an account event destination for the sandbox equivalent of `https://app.satinlore.com/api/billing/stripe/webhook`. Use API version `2024-06-20`. Choose the event types below. Copy the endpoint-specific signing secret. The exact webhook path must be reachable by Stripe without a reader session or an Access prompt. Keep Access on founder and beta paths. [Stripe webhooks](https://docs.stripe.com/webhooks)
+3. Once the staging Worker is available, in **Stripe → Workbench → Webhooks** add a sandbox event destination for its webhook URL. The live endpoint is `https://app.satinlore.com/api/billing/stripe/webhook`. Use Snapshot events and API version `2024-06-20`. Choose the event types below and copy the destination's signing secret. Stripe needs to reach the exact webhook path without a reader session or an Access prompt. Keep Access on founder and beta pages. [Stripe webhooks](https://docs.stripe.com/webhooks)
 
    Subscribe to `payment_intent.succeeded`, `invoice.payment_succeeded`, `customer.subscription.updated`, `customer.subscription.deleted`, `refund.created`, `refund.updated`, and `charge.dispute.closed`. A lost dispute reverses the applicable credits and commissions after Stripe closes it.
 
-4. In the reader Worker **Variables & Secrets**, set:
+4. In the staging Worker's **Variables & Secrets**, use the sandbox values below. Apply the live values to the production reader when ready to enable live payments.
 
    | Setting | Type | Example |
    | --- | --- | --- |
@@ -96,8 +98,8 @@ Review offer and renewal terms, tax display and applicable age-assurance require
 
 ## 5. Publish the redesigned homepage
 
-1. Open **Workers & Pages → satinlore-website → Settings → Builds → Branch control** in Cloudflare and select the marketing repository branch `launch/accounts-usage-commerce`. This is a separate Worker from the reader. Its configuration binds both `satinlore.com` and `launch.satinlore.com`, and a normal branch push to a non-production branch does not publish to them.
-2. After testing reader signup, set `MARKETING_LAUNCH_ENABLED=true` in the marketing Worker's **Variables & Secrets**. Keep `MARKETING_BILLING_ENABLED=false` until you have activated and tested live Stripe checkout. Trigger or confirm the production deployment from the launch branch. Check the public homepage, account and sign-in buttons, privacy links, waitlist destination and canonical URL. [Cloudflare Workers build branches](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)
+1. Merge the tested website branch into its `main` branch. Confirm the `satinlore-website` Worker deployed that main commit. That Worker serves both `satinlore.com` and `launch.satinlore.com`. [Cloudflare Workers build branches](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)
+2. After testing production reader signup, set `MARKETING_LAUNCH_ENABLED=true` in the marketing Worker's **Variables & Secrets**. Keep `MARKETING_BILLING_ENABLED=false` until you have activated and tested live Stripe checkout. Check the public homepage, account and sign-in buttons, privacy links, waitlist destination and canonical URL.
 3. After verified live billing, set `MARKETING_BILLING_ENABLED=true` so the public plans button links to the reader's protected billing area. Verify prices agree with the checkout. To pause purchases, switch this off, set `LAUNCH_BILLING_ENABLED=false` on the reader and leave webhooks enabled so existing payments and refunds continue to reconcile.
 
 The [Nocturne recognition and hardware gates](nocturne-release-qualification.md) apply separately. Keep the app's private and billing pages out of search indexing.
@@ -108,7 +110,8 @@ The [Nocturne recognition and hardware gates](nocturne-release-qualification.md)
 python3 scripts/check.py
 npm run build:worker
 npm exec wrangler deploy -- --dry-run
+node --test tests/private-worker.test.mjs tests/public-auth.test.mjs tests/launch-billing-worker.test.mjs tests/launch-usage.test.mjs tests/billing-ui.test.mjs
 node scripts/launch-browser-check.mjs
 ```
 
-These checks use synthetic inputs and payment fixtures. Run the separate merchant and hardware acceptance checks before opening paid playback on the production Worker.
+These checks use synthetic inputs and payment fixtures. The browser smoke script uses the older Verotel fixture. The Stripe tests are in `tests/launch-billing-worker.test.mjs`. Run the separate merchant and hardware acceptance checks before opening paid playback on the production Worker.
