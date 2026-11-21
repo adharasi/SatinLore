@@ -17,7 +17,7 @@ import {ReaderAccountClient, mountAccountWorkspace} from "./reader/account-works
 import {AccountLibrary} from "./reader/account-library.mjs";
 import {DEFAULT_EXPERIENCE, validateExperience} from "./reader/experience-preferences.mjs";
 import {mountExperienceDialog} from "./reader/experience-dialog.mjs";
-import {mountPublicAccount, requestAccount} from "./reader/public-account.mjs";
+import {accountContinuation, mountPublicAccount, requestAccount, signupPath} from "./reader/public-account.mjs";
 import {mountReadingFeedback} from "./reader/reading-feedback.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "./reader/calibration.mjs";
 import {nocturneAvailable, nocturneCandidates, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "./reader/nocturne.mjs";
@@ -2438,6 +2438,8 @@ function updatePublicSession(signedIn) {
 
 if (publicMode) {
   text("open-account-welcome", "Sign in");
+  const signupLink = $("public-show-register");
+  if (signupLink) signupLink.href = appPath(signupPath(window.location?.search));
   if (document.querySelector('meta[name="satinlore-launch-usage"]')) {
     const billing = $("public-billing-link");
     if (billing) billing.hidden = false;
@@ -2526,14 +2528,11 @@ if (hostedMode) {
     void accessCheck.then(allowed => allowed ? openFeedback() : publicAccount?.open($("public-account"), openFeedback));
   } else if (publicMode && accountQuery.get("signin") === "1") {
     const billing = accountQuery.get("next") === "billing" && document.querySelector('meta[name="satinlore-launch-usage"]');
-    const parameters = new URLSearchParams();
-    const ref = accountQuery.get("ref"), order = accountQuery.get("order");
-    if (/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(ref ?? "")) parameters.set("ref", ref);
-    if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(order ?? "")) parameters.set("order", order);
+    const parameters = accountContinuation(window.location?.search);
     const openBilling = billing ? () => window.location.assign(appPath(`/billing${parameters.size ? `?${parameters}` : ""}`)) : null;
     void accessCheck.then(allowed => {
       if (allowed) return openBilling ? openBilling() : offerExperience();
-      return publicAccount?.open($("public-account"), openBilling, {register: accountQuery.get("mode") === "register"});
+      return publicAccount?.open($("public-account"), openBilling);
     });
   } else if (publicMode) void accessCheck.then(allowed => { if (allowed) return offerExperience(); });
 }

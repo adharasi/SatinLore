@@ -95,8 +95,8 @@ async function browserPage(width, account = {pendingPassword: "", savedPassword:
       return route.fulfill({json: {...row, ok: true, duplicate: false}});
     }
     if (path.startsWith("/api/")) return route.fulfill({status: 401, json: {error: "Sign in first."}});
-    const file = ({"/": "index.html", "/support": "feedback.html", "/help": "help.html"})[path] ?? path.slice(1);
-    if (!/^(?:(?:index|feedback|help)\.html|static\/[A-Za-z0-9_.\/-]+)$/.test(file) || file.includes("..")) return route.fulfill({status: 404});
+    const file = ({"/": "index.html", "/signup": "signup.html", "/support": "feedback.html", "/help": "help.html"})[path] ?? path.slice(1);
+    if (!/^(?:(?:index|signup|feedback|help)\.html|static\/[A-Za-z0-9_.\/-]+)$/.test(file) || file.includes("..")) return route.fulfill({status: 404});
     let body = await readFile(new URL("../dist/private-app/" + file, import.meta.url), "utf8");
     if (file.endsWith(".html")) body = body.replace("</head>", '<meta name="satinlore-public-auth" content="true"><meta name="satinlore-reader-mode" content="live"></head>');
     return route.fulfill({contentType: mime[file.split(".").at(-1)], body});
@@ -104,26 +104,40 @@ async function browserPage(width, account = {pendingPassword: "", savedPassword:
   return {context, page: await context.newPage(), posts, account, requestedPaths};
 }
 
-async function registerAndSignIn(page, {wrongFirst = false, remember = false} = {}) {
+async function registerAndSignIn(page, {wrongFirst = false, remember = false, completeInSignup = false} = {}) {
   await expect(page.locator("#public-account-dialog")).toBeVisible();
-  await page.locator("#public-show-register").click();
-  await page.locator("#public-register-email").fill(email);
-  await page.locator("#public-register-password").fill(password);
-  await page.locator("#public-adult").check();
-  await page.locator("#public-register").click();
+  const readerUrl = page.url();
+  const feedback = new URL(readerUrl).searchParams.get("sign-in") === "feedback";
+  const [signup] = await Promise.all([page.context().waitForEvent("page"), page.locator("#public-show-register").click()]);
+  await signup.waitForURL(origin + (feedback ? "/signup?next=feedback" : "/signup"));
+  await expect(signup.locator("#public-register-form")).toBeVisible();
+  await expect(signup.locator("#workspace-header, #draft-story, script[src$='/app.mjs']")).toHaveCount(0);
+  const fits = await signup.locator("body").evaluate(body => body.scrollWidth <= document.documentElement.clientWidth);
+  assert.equal(fits, true, "Standalone signup fits the browser viewport.");
+  await signup.locator("#public-register-email").fill(email);
+  await signup.locator("#public-register-password").fill(password);
+  await signup.locator("#public-adult").check();
+  await signup.locator("#public-register").click();
   if (wrongFirst) {
-    await page.locator("#public-code").fill("000000");
-    await page.locator("#public-verify-code").click();
-    await expect(page.locator("#public-account-status")).toContainText("didn’t match");
+    await signup.locator("#public-code").fill("000000");
+    await signup.locator("#public-verify-code").click();
+    await expect(signup.locator("#public-account-status")).toContainText("didn’t match");
   }
-  await page.locator("#public-code").fill(code);
-  await page.locator("#public-verify-code").click();
-  await expect(page.locator("#public-account-status")).toContainText("Email verified");
-  await expect(page.locator("#public-email")).toHaveValue(email);
-  await expect(page.locator("#public-register-password")).toHaveValue("");
-  await page.locator("#public-password").fill(password);
-  await page.locator("#public-remember").setChecked(remember);
-  await page.locator("#public-login").click();
+  await signup.locator("#public-code").fill(code);
+  await signup.locator("#public-verify-code").click();
+  await expect(signup.locator("#public-account-status")).toContainText("Email verified");
+  await expect(signup.locator("#public-email")).toHaveValue(email);
+  await expect(signup.locator("#public-register-password")).toHaveValue("");
+  assert.equal(page.url(), readerUrl, "Creating an account does not navigate the original reader tab.");
+  if (!completeInSignup) {
+    await signup.close();
+    await page.locator("#public-email").fill(email);
+  }
+  const signInPage = completeInSignup ? signup : page;
+  await signInPage.locator("#public-password").fill(password);
+  await signInPage.locator("#public-remember").setChecked(remember);
+  await signInPage.locator("#public-login").click();
+  return signInPage;
 }
 
 async function setMaximum(page, maximum) {
@@ -347,7 +361,7 @@ try {
   assert.equal(headerFits, true, "Reader controls fit a 320px viewport.");
   await expect(mobile.page.locator("#public-account-label")).toBeVisible();
   await expect(mobile.page.locator(".header-feedback-link span")).toBeVisible();
-  await registerAndSignIn(mobile.page);
+  mobile.page = await registerAndSignIn(mobile.page, {completeInSignup: true});
   await mobile.page.waitForURL(origin + "/support");
   await expect(mobile.page.locator("#feedback-send")).toBeEnabled();
   await mobile.page.goto(origin);

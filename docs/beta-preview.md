@@ -57,7 +57,7 @@ If the local branch does not exist, use `git switch --track origin/launch/accoun
    | `AUTH_SES_SECRET_ACCESS_KEY` | Secret | The matching IAM secret |
    | `AUTH_SES_SESSION_TOKEN` | Secret | Add only when using temporary IAM credentials |
 
-3. In a fresh browser profile, open [beta signup](https://app.satinlore.com/beta/signup), complete Cloudflare Access, create a SatinLore test account and verify its email. Sign in, save a neutral sample story to the account, and confirm you can reopen it in another profile with both sign-ins. Change the password, try a password reset, and test sign-out everywhere. Cloudflare Access controls who enters the preview and the SatinLore account controls the reader session.
+3. In a fresh browser profile, open [beta signup](https://app.satinlore.com/beta/signup) and complete Cloudflare Access. Confirm the account setup page opens before entering the reader. Create a SatinLore test account, verify its email and sign in. Save a neutral sample story to the account and confirm you can reopen it in another profile with both sign-ins. Change the password, try a password reset, and test sign-out everywhere. Cloudflare Access controls who enters the preview and the SatinLore account controls the reader session.
 4. Use a second test inbox to verify it sees an empty library and zero starting credits. Test signed-out Access in a fresh profile, a tester's inability to reach beta billing admin, and separation from the production site's session and browser data.
 
 ## 4. Configure Stripe sandbox checkout

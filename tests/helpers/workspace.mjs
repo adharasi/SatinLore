@@ -24,7 +24,7 @@ import {ReaderAccountClient, mountAccountWorkspace} from "../../app/static/reade
 import {AccountLibrary} from "../../app/static/reader/account-library.mjs";
 import {DEFAULT_EXPERIENCE, validateExperience} from "../../app/static/reader/experience-preferences.mjs";
 import {mountExperienceDialog} from "../../app/static/reader/experience-dialog.mjs";
-import {mountPublicAccount, requestAccount} from "../../app/static/reader/public-account.mjs";
+import {accountContinuation, mountPublicAccount, requestAccount, signupPath} from "../../app/static/reader/public-account.mjs";
 import {createBetaRecorder, mountBetaRecording} from "../../app/static/reader/beta-recording.mjs";
 import {clampCalibration, DEFAULT_SIMULATOR_MAXIMUM, simulatorScenePatternLabel} from "../../app/static/reader/calibration.mjs";
 import {nocturneCandidates, nocturneAvailable, requestNocturne, nocturneContextCandidates, nocturneContextNeedsReview, NOCTURNE_CONTEXT_SESSION_REQUESTS, NOCTURNE_CONTEXT_SESSION_BYTES, requestNocturneContext} from "../../app/static/reader/nocturne.mjs";
@@ -169,7 +169,7 @@ export function workspace({hosted = false, locks = true, publicAuth = false, lau
     ReaderAccountClient, mountAccountWorkspace, clampCalibration, simulatorScenePatternLabel,
     AccountLibrary: class extends AccountLibrary { constructor(options) { super({...options, request: libraryRequest ?? (() => Promise.resolve(Response.json({owner:"00000000-0000-4000-8000-000000000001", revision:0, stories:[], preferences:null})))}); } },
     mountPublicAccount: options => mountPublicAccount({...options, ...(authRequest ? {request: authRequest} : {}), setTimer, clearTimer}),
-    requestAccount,
+    accountContinuation, requestAccount, signupPath,
     DEFAULT_SIMULATOR_MAXIMUM, nocturneCandidates,
     nocturneAvailable: () => nocturneAvailable(sceneRequest),
     requestNocturne: (cues, options) => requestNocturne(cues, {...options, ...(sceneRequest ? {request: sceneRequest} : {})}),

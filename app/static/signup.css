@@ -1,0 +1,57 @@
+:root { --dock-space: 0px; }
+
+.signup-page {
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(ellipse at 50% 12%, var(--selection), var(--page) 67%);
+}
+.signup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px clamp(16px, 5vw, 44px);
+  border-bottom: 1px solid var(--separator);
+}
+.signup-header a { display: inline-flex; align-items: center; min-height: 44px; }
+.signup-brand { color: var(--text); font: 400 1.625rem/1.15 var(--serif); letter-spacing: -.03em; text-decoration: none; }
+.signup-main {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: clamp(22px, 5vw, 56px) 16px;
+}
+.signup-card {
+  width: min(100%, 30rem);
+  padding: clamp(20px, 6vw, 42px);
+  border: 1px solid var(--separator);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.signup-card h1 { margin-bottom: 12px; font-size: clamp(1.875rem, 4.5vw, 2.625rem); }
+.signup-intro { margin-bottom: 24px; color: var(--secondary); }
+.signup-card label:not(.signup-check) { margin-bottom: 6px; }
+.signup-card input:not([type="checkbox"]) {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--secondary);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.signup-card input[aria-describedby] { margin-bottom: 4px; }
+.signup-check { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 0 14px; }
+.signup-check input { margin: 0; }
+.signup-primary { width: 100%; min-height: 46px; }
+.signup-actions { display: flex; flex-wrap: wrap; justify-content: space-between; }
+.signup-card button.quiet-button { color: var(--action); padding-inline: 4px; }
+.signup-status { margin-block: 16px 0; }
+.signup-status:empty { margin: 0; }
+.signup-status[data-error] { color: var(--stop); }
+.signup-footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid var(--separator); font-size: .875rem; }
+.signup-footer p { margin-bottom: 0; }
+.signup-footer a { display: inline-flex; align-items: center; min-height: 44px; }

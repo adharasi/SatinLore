@@ -298,21 +298,7 @@
       <label for="public-password">Password</label><input id="public-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
       <label class="public-account-check"><input id="public-remember" type="checkbox"> Keep me signed in for 30 days</label>
       <div class="dialog-actions"><button id="public-login" type="submit" class="primary">Sign in</button></div>
-      <div class="public-account-links"><button id="public-show-register" type="button" class="quiet-control">Create an account</button><button id="public-show-forgot" type="button" class="quiet-control">Forgot password?</button></div>
-    </form>
-    <form id="public-register-form" hidden>
-      <label for="public-register-email">Email address</label><input id="public-register-email" name="email" type="email" autocomplete="username" maxlength="254" required>
-      <label for="public-register-password">Password</label><input id="public-register-password" name="password" type="password" autocomplete="new-password" maxlength="256" aria-describedby="public-password-help" required>
-      <p id="public-password-help" class="note">Use 15 to 128 characters. A passphrase of several words works well.</p>
-      <label class="public-account-check"><input id="public-adult" type="checkbox" required> I am 18 or older.</label>
-      <p class="note"><a href="/help#privacy-help" target="_blank" rel="noopener">How SatinLore handles your account and data</a></p>
-      <div class="dialog-actions"><button id="public-register" type="submit" class="primary">Create account</button></div>
-      <div class="public-account-links"><button id="public-register-back" type="button" class="quiet-control">Back to sign in</button></div>
-    </form>
-    <form id="public-code-form" hidden>
-      <label for="public-code">Six-digit code</label><input id="public-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
-      <div class="dialog-actions"><button id="public-verify-code" type="submit" class="primary">Verify email</button></div>
-      <div class="public-account-links"><button id="public-change-email" type="button" class="quiet-control">Change email</button><button id="public-resend-code" type="button" class="quiet-control">Send a new code</button></div>
+      <div class="public-account-links"><a id="public-show-register" href="/signup" target="_blank" rel="noopener" class="quiet-control">Create an account</a><button id="public-show-forgot" type="button" class="quiet-control">Forgot password?</button></div>
     </form>
     <form id="public-forgot-form" hidden>
       <label for="public-forgot-email">Email address</label><input id="public-forgot-email" name="email" type="email" autocomplete="username" maxlength="254" required>

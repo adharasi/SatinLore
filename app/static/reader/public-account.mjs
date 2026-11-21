@@ -1,11 +1,27 @@
 const unavailable = 'Account sign-in could not be reached. Try again.';
 const invalidPassword = 'Choose a password with 15 to 128 characters.';
-const validCode = value => /^[0-9]{6}$/.test(value);
-const validPassword = value => {
+export const validCode = value => /^[0-9]{6}$/.test(value);
+export const validPassword = value => {
   const normalized = value.normalize('NFC');
   const length = [...normalized].length;
   return length >= 15 && length <= 128 && new TextEncoder().encode(normalized).length <= 512;
 };
+
+export function accountContinuation(search = '') {
+  const source = new URLSearchParams(search), continuation = new URLSearchParams();
+  const ref = source.get('ref'), order = source.get('order');
+  if (/^[A-Za-z0-9][A-Za-z0-9_-]{1,31}$/u.test(ref ?? '')) continuation.set('ref', ref.toUpperCase());
+  if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(order ?? '')) continuation.set('order', order);
+  return continuation;
+}
+
+export function signupPath(search = '') {
+  const continuation = accountContinuation(search);
+  const source = new URLSearchParams(search);
+  if (continuation.size || source.get('next') === 'billing') continuation.set('next', 'billing');
+  else if (source.get('next') === 'feedback' || source.get('sign-in') === 'feedback') continuation.set('next', 'feedback');
+  return `/signup${continuation.size ? `?${continuation}` : ''}`;
+}
 
 export async function requestAccount(action, data, request = fetch) {
   const response = await request(`/api/auth/${action}`, {
@@ -27,23 +43,19 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   const node = id => document.getElementById(id);
   const dialog = node('public-account-dialog'), status = node('public-account-status');
   const email = node('public-email'), password = node('public-password'), remember = node('public-remember');
-  const signupEmail = node('public-register-email'), signupPassword = node('public-register-password'), adult = node('public-adult');
   const forgotEmail = node('public-forgot-email'), resetPassword = node('public-reset-password');
-  const code = node('public-code'), resetCode = node('public-reset-code');
+  const resetCode = node('public-reset-code');
   const changePasswordForm = node('public-change-password-form');
   const currentPassword = node('public-current-password'), newPassword = node('public-new-password');
   const trigger = node('public-account');
-  const resendButtons = ['public-resend-code', 'public-resend-reset'].map(node);
+  const resendButton = node('public-resend-reset');
   const views = {
     login: ['public-login-form', email, 'Sign in to SatinLore'],
-    register: ['public-register-form', signupEmail, 'Create an account'],
-    verify: ['public-code-form', code, 'Verify your email'],
     forgot: ['public-forgot-form', forgotEmail, 'Forgot your password?'],
     reset: ['public-reset-form', resetCode, 'Choose a new password'],
   };
-  const actions = ['public-login', 'public-register', 'public-verify-code', 'public-forgot', 'public-reset',
-    'public-show-register', 'public-show-forgot', 'public-register-back', 'public-forgot-back',
-    'public-change-email', 'public-reset-back', 'public-sign-out', 'public-show-change-password',
+  const actions = ['public-login', 'public-forgot', 'public-reset', 'public-show-forgot', 'public-forgot-back',
+    'public-reset-back', 'public-sign-out', 'public-show-change-password',
     'public-change-password-back', 'public-change-password', 'public-sign-out-all'].map(node).filter(Boolean);
   let session = false, busy = false, view = 'login', managingPassword = false, challenge = '', challengeEmail = '';
   let canResend = true, timer = null, next = null, visit = 0;
@@ -51,8 +63,6 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   function render() {
     const copy = {
       login: 'Sign in with your email and password. You can read without an account.',
-      register: 'Choose a password. We’ll ask you to confirm your email before you sign in.',
-      verify: `Check ${challengeEmail} for a six-digit verification code. It expires after 10 minutes.`,
       forgot: 'Enter the email address you used to create your account.',
       reset: `If you have an account for ${challengeEmail}, check your inbox for a six-digit code. It expires after 10 minutes.`,
     };
@@ -67,7 +77,7 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
     node('public-account-session').hidden = !session || managingPassword;
     if (changePasswordForm) changePasswordForm.hidden = !session || !managingPassword;
     for (const action of actions) action.disabled = busy;
-    for (const button of resendButtons) button.disabled = busy || !canResend;
+    resendButton.disabled = busy || !canResend;
     dialog.setAttribute('aria-busy', String(busy));
   }
   function focusView() {
@@ -76,13 +86,13 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   }
   function clearChallenge() {
     clearTimer(timer); timer = null; challenge = ''; challengeEmail = ''; canResend = true;
-    code.value = ''; resetCode.value = '';
+    resetCode.value = '';
   }
   function clearForm() {
     clearChallenge(); view = 'login';
     resetPasswordManagement();
-    for (const input of [email, password, signupEmail, signupPassword, forgotEmail, resetPassword]) input.value = '';
-    adult.checked = false; remember.checked = false;
+    for (const input of [email, password, forgotEmail, resetPassword]) input.value = '';
+    remember.checked = false;
   }
   function resetPasswordManagement() {
     managingPassword = false;
@@ -90,8 +100,8 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
     if (newPassword) newPassword.value = '';
   }
   function showView(name, inputEmail = '', message = '') {
-    password.value = ''; signupPassword.value = ''; resetPassword.value = '';
-    if (name !== 'verify' && name !== 'reset') {
+    password.value = ''; resetPassword.value = '';
+    if (name !== 'reset') {
       clearChallenge();
       views[name][1].value = inputEmail;
     }
@@ -118,12 +128,12 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
       }
     } finally { busy = false; render(); }
   }
-  function useChallenge(value, address, nextView) {
+  function useChallenge(value, address) {
     if (typeof value?.challenge !== 'string' || !value.challenge || value.challenge.length > 512) throw new Error();
     challenge = value.challenge; challengeEmail = address;
-    code.value = ''; resetCode.value = '';
+    resetCode.value = '';
     waitToResend(value.resendAfter || 60);
-    showView(nextView, '', 'If the email doesn’t arrive, check your spam folder or request another code after a minute.');
+    showView('reset', '', 'If the email doesn’t arrive, check your spam folder or request another code after a minute.');
   }
   function submit(id, handler) {
     node(id)?.addEventListener('submit', event => { event.preventDefault(); return handler(); });
@@ -143,25 +153,10 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
       close(); await onSignedIn(continuation);
     });
   });
-  submit('public-register-form', () => {
-    const address = signupEmail.value.trim();
-    if (!address || !adult.checked) return;
-    if (!validPassword(signupPassword.value)) { status.textContent = invalidPassword; signupPassword.focus(); return; }
-    return perform(() => request('register', {email: address, password: signupPassword.value, adult: true}),
-      value => useChallenge(value, address, 'verify'));
-  });
-  submit('public-code-form', () => {
-    if (!challenge || !validCode(code.value)) return;
-    return perform(() => request('verify', {challenge, code: code.value}), value => {
-      if (value?.verified !== true) throw new Error();
-      showView('login', challengeEmail, 'Email verified. Sign in with the password you chose.');
-      password.focus();
-    });
-  });
   submit('public-forgot-form', () => {
     const address = forgotEmail.value.trim();
     if (!address) return;
-    return perform(() => request('forgot', {email: address}), value => useChallenge(value, address, 'reset'));
+    return perform(() => request('forgot', {email: address}), value => useChallenge(value, address));
   });
   submit('public-reset-form', () => {
     if (!challenge || !validCode(resetCode.value)) return;
@@ -174,16 +169,12 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   });
   function resendCode() {
     if (!challenge || !canResend) return;
-    const address = challengeEmail, nextView = view;
-    return perform(() => request('resend', {challenge, email: address}), value => useChallenge(value, address, nextView));
+    const address = challengeEmail;
+    return perform(() => request('resend', {challenge, email: address}), value => useChallenge(value, address));
   }
-  click('public-show-register', () => showView('register', email.value));
   click('public-show-forgot', () => showView('forgot', email.value));
-  click('public-register-back', () => showView('login', signupEmail.value));
   click('public-forgot-back', () => showView('login', forgotEmail.value));
-  click('public-change-email', () => showView('register', challengeEmail));
   click('public-reset-back', () => showView('forgot', challengeEmail));
-  click('public-resend-code', resendCode);
   click('public-resend-reset', resendCode);
   function signOut(requestSignOut, message) {
     return perform(() => onSignOut(requestSignOut), () => {
@@ -218,9 +209,8 @@ export function mountPublicAccount({document, openDialog, closeDialog, onVerifie
   }
   click('public-account-close', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-  function open(opener, continuation = null, {register = false} = {}) {
+  function open(opener, continuation = null) {
     next = continuation; status.textContent = '';
-    if (register && !session) showView('register');
     openDialog(opener); focusView();
   }
   trigger.hidden = false;

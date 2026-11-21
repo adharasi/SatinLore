@@ -23,6 +23,7 @@ const BETA_ONLY_ROUTES = new Set(["/simulator-lab", "/simulation.html", "/static
   "/static/devices/profile-simulator.mjs", "/static/devices/reader-beta-device.mjs", "/static/playback/controller.mjs",
   "/static/reader/beta-toolkit.mjs", "/static/reader/simulator-view.mjs", "/static/reader/practice-stories.mjs",
   "/static/reader/beta-recording.mjs", "/static/reader/beta-recording.css", "/static/reader/beta-stories.mjs"]);
+const PUBLIC_ACCOUNT_ROUTES = new Set(["/signup", "/signup.html", "/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"]);
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const otherKeys = await generateKeyPair("RS256");
 const publicJwk = { ...await exportJWK(publicKey), kid: "synthetic-key", alg: "RS256" };
@@ -71,7 +72,7 @@ test("every static reader route denies missing tokens before fetching assets or 
   const f = fixture();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const result = await f.worker.fetch(request(path), f.env);
-    if (BETA_ONLY_ROUTES.has(path) || ["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
+    if (BETA_ONLY_ROUTES.has(path) || PUBLIC_ACCOUNT_ROUTES.has(path)) {
       assert.equal(result.status, 404, path);
       continue;
     }
@@ -87,7 +88,7 @@ test("valid founder assertions grant only read-only allowlisted files and strip 
   const f = fixture(), jwt = await token();
   for (const path of [...Object.keys(PRIVATE_DOCUMENT_ROUTES), ...PRIVATE_ASSET_PATHS]) {
     const response = await f.worker.fetch(request(path, jwt), f.env);
-    if (BETA_ONLY_ROUTES.has(path) || ["/billing", "/billing.html", "/billing-admin.html", "/billing-admin/app.mjs"].includes(path)) {
+    if (BETA_ONLY_ROUTES.has(path) || PUBLIC_ACCOUNT_ROUTES.has(path)) {
       assert.equal(response.status, 404, path);
       continue;
     }

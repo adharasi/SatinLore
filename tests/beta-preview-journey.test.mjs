@@ -44,10 +44,11 @@ test("mounted beta isolates password accounts and supports a sandbox subscriptio
       const production = createPrivateAppWorker({ keyResolver });
       const ASSETS = { fetch: async request => {
         const path = new URL(request.url).pathname;
-        return path.endsWith(".html")
-          ? new Response('<!doctype html><html><head><script src="/static/app.mjs" type="module"></script></head><body><a href="/billing">Billing</a></body></html>',
-            { headers: { "Content-Type": "text/html" } })
-          : new Response("export {};", { headers: { "Content-Type": "application/javascript" } });
+        if (!path.endsWith(".html")) return new Response("export {};", { headers: { "Content-Type": "application/javascript" } });
+        const markup = path === "/signup.html"
+          ? '<!doctype html><html><head><script src="/static/signup.mjs" type="module"></script></head><body>Create an account</body></html>'
+          : '<!doctype html><html><head><script src="/static/app.mjs" type="module"></script></head><body><a href="/billing">Billing</a></body></html>';
+        return new Response(markup, { headers: { "Content-Type": "text/html" } });
       } };
       export default { fetch(request, env, ctx) {
         return (env.JOURNEY_BETA ? beta : production).fetch(request, { ...env, ASSETS }, ctx);
@@ -176,8 +177,9 @@ test("mounted beta isolates password accounts and supports a sandbox subscriptio
   assert.match(html, /href="\/beta\/billing"/);
   assert.equal((await beta("/beta/static/app.mjs")).status, 200);
   const signup = await beta("/beta/signup?next=billing");
-  assert.equal(signup.status, 303);
-  assert.equal(signup.headers.get("Location"), "/beta/?signin=1&mode=register&next=billing");
+  assert.equal(signup.status, 200);
+  assert.match(await signup.text(), /src="\/beta\/static\/signup\.mjs"/);
+  assert.equal((await beta("/beta/static/signup.mjs")).status, 200);
 
   const stageAuth = (path, body, options) => beta("/beta/api/auth/" + path, { body, ...options });
   const liveAuth = (path, body) => productionRequest("/api/auth/" + path, { body });

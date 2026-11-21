@@ -165,20 +165,31 @@ test("FlexPay 4 checkout signature matches Verotel's published example", async (
   }), "ccaf2357fe330654322a1b0f3f92984b3fe2a1462d6fc5082650a00c5ada2f2a");
 });
 
-test("signup and login aliases carry only safe app billing intent into the reader", async t => {
+test("signup serves its own document and account aliases carry only safe billing intent", async t => {
   const { request } = fixture(t);
   const order = randomUUID();
   const register = await request(`/signup?ref=partner-test&order=${order}&next=https%3A%2F%2Fexample.test`);
-  assert.equal(register.status, 303);
-  assert.equal(register.headers.get("Location"), "/?signin=1&mode=register&ref=PARTNER-TEST&next=billing");
+  assert.equal(register.status, 200);
+  assert.equal(register.headers.get("Location"), null);
   assert.equal(register.headers.get("Cache-Control"), "no-store");
+  assert.match(register.headers.get("X-Robots-Tag"), /noindex/);
+  assert.equal(await register.text(), "/signup.html");
+  const legacy = await request("/?signin=1&mode=register&ref=partner-test&next=https%3A%2F%2Fexample.test");
+  assert.equal(legacy.status, 303);
+  assert.equal(legacy.headers.get("Location"), "/signup?ref=PARTNER-TEST&next=billing");
+  assert.equal((await request("/index.html?signin=1&mode=register&ref=bad%2Fref")).headers.get("Location"), "/signup");
+  const head = await request("/signup", { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(head.body, null);
   const signIn = await request(`/login?order=${order}&ref=bad%2Fcode&next=%2F%2Fexample.test`);
   assert.equal(signIn.status, 303);
   assert.equal(signIn.headers.get("Location"), `/?signin=1&order=${order}&next=billing`);
   assert.equal((await request("/login?next=billing", { method: "HEAD" })).headers.get("Location"), "/?signin=1&next=billing");
   assert.equal((await request("/login?next=https%3A%2F%2Fexample.test&order=wrong")).headers.get("Location"), "/?signin=1");
   assert.equal((await request("/signup", { body: {} })).status, 404);
+  assert.equal((await request("/signup.html")).status, 404);
   assert.equal((await request("/signup", { host: beta })).status, 404);
+  assert.equal((await request("/signup", { flags: { PUBLIC_READER_ENABLED: "false" } })).status, 404);
   assert.equal((await request("/login", { flags: { PUBLIC_READER_ENABLED: "false" } })).status, 404);
 });
 

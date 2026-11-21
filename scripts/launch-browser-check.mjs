@@ -143,7 +143,10 @@ try {
   const page = reader.page;
   await page.goto(app + link);
   await page.getByRole("link", {name: "Create an account"}).click();
+  await page.waitForURL(url => url.origin === app && url.pathname === "/signup" &&
+    url.searchParams.get("ref") === "FIXTURE-PARTNER" && url.searchParams.get("next") === "billing");
   await expect(page.locator("#public-register-form")).toBeVisible();
+  await expect(page.locator("#workspace-header, #draft-story, script[src$='/app.mjs']")).toHaveCount(0);
   await page.locator("#public-register-email").fill(email);
   await page.locator("#public-register-password").fill(password);
   await page.locator("#public-adult").check();
@@ -153,6 +156,7 @@ try {
   await page.locator("#public-code").fill(codes[0]);
   await page.locator("#public-verify-code").click();
   await expect(page.locator("#public-account-status")).toContainText("Email verified");
+  assert.equal(new URL(page.url()).pathname, "/signup");
   await page.locator("#public-password").fill(password);
   await page.locator("#public-login").click();
   await page.waitForURL(`${app}${link}`);

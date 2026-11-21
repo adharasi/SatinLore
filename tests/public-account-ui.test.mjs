@@ -21,21 +21,15 @@ test("auth requests are same-origin and carry only the form fields", async () =>
   }), {message: "Wait before trying again.", retryAfter: 60});
 });
 
-for (const basePath of ["", "/beta"]) test(`a billing signup returns the verified reader to its ${basePath ? "beta" : "production"} referral`, async t => {
+for (const basePath of ["", "/beta"]) test(`the reader sign-in and signup link retain their ${basePath ? "beta" : "production"} billing referral`, async t => {
   let signedIn = false;
   const destinations = [], accountRequests = [];
-  const location = {search: "?signin=1&mode=register&ref=FIXTURE&next=billing", assign: path => destinations.push(path)};
+  const location = {search: "?signin=1&ref=FIXTURE&next=billing", assign: path => destinations.push(path)};
   const app = workspace({publicAuth: true, launchBilling: true, basePath, location, browserFetch: async (path, options) => {
     if (!path.startsWith(`${basePath}/api/auth/`)) return Response.json({error: "Fixture route unavailable."}, {status: 404});
     accountRequests.push(path);
-    const action = path.split("/").at(-1), body = JSON.parse(options.body);
-    if (action === "register") return Response.json({challenge: "new-account", resendAfter: 60});
-    if (action === "verify") {
-      assert.deepEqual(body, {challenge: "new-account", code: "123456"});
-      return Response.json({verified: true});
-    }
-    assert.equal(action, "login");
-    assert.equal(body.email, address);
+    assert.equal(path, `${basePath}/api/auth/login`);
+    assert.equal(JSON.parse(options.body).email, address);
     signedIn = true;
     return Response.json({authenticated: true, expiresAt: app.now() + 600000});
   }});
@@ -44,36 +38,27 @@ for (const basePath of ["", "/beta"]) test(`a billing signup returns the verifie
   await app.settle();
   const node = id => app.nodes.get(id);
   assert.equal(node("public-account-dialog").open, true);
-  assert.equal(node("public-login-form").hidden, true);
-  assert.equal(node("public-register-form").hidden, false);
-  assert.equal(app.document.activeElement, node("public-register-email"));
-  node("public-register-email").value = address;
-  node("public-register-password").value = originalPassword;
-  node("public-adult").checked = true;
-  await node("public-register-form").dispatch("submit");
-  node("public-code").value = "123456";
-  await node("public-code-form").dispatch("submit");
   assert.equal(node("public-login-form").hidden, false);
+  assert.equal(node("public-register-form"), undefined);
+  assert.equal(node("public-show-register").tagName, "A");
+  const signupUrl = new URL(node("public-show-register").href, "https://app.satinlore.com");
+  assert.equal(signupUrl.pathname, `${basePath}/signup`);
+  assert.equal(signupUrl.searchParams.get("ref"), "FIXTURE");
+  assert.equal(signupUrl.searchParams.get("next"), "billing");
   assert.deepEqual(destinations, []);
+  node("public-email").value = address;
   node("public-password").value = originalPassword;
   await node("public-login-form").dispatch("submit");
-  assert.deepEqual(accountRequests, ["register", "verify", "login"].map(action => `${basePath}/api/auth/${action}`));
+  assert.deepEqual(accountRequests, [`${basePath}/api/auth/login`]);
   assert.deepEqual(destinations, [`${basePath}/billing?ref=FIXTURE`]);
   assert.deepEqual(node("reader-support-links").children.map(link => link.href), basePath ? ["/beta/simulator"] : []);
 });
 
-test("guest reading, email verification and password sign-in preserve the reader", async t => {
-  let signedIn = false, currentPassword = "";
+test("guest reading, password sign-in and password recovery preserve the reader", async t => {
+  let signedIn = false, currentPassword = originalPassword;
   const calls = [];
   const app = workspace({publicAuth: true, authRequest: async (action, body) => {
     calls.push({action, body});
-    if (action === "register") return {challenge: "register", expiresIn: 600, resendAfter: 60};
-    if (action === "resend") return {challenge: "replacement-code", expiresIn: 600, resendAfter: 60};
-    if (action === "verify") {
-      if (body.code === "000000") throw error("The code didn’t match.");
-      currentPassword = originalPassword;
-      return {verified: true};
-    }
     if (action === "forgot") return {challenge: "recover", expiresIn: 600, resendAfter: 60};
     if (action === "reset") { currentPassword = body.password; return {reset: true}; }
     if (action === "login" && body.password !== currentPassword) throw error("The email or password is incorrect.");
@@ -108,38 +93,10 @@ test("guest reading, email verification and password sign-in preserve the reader
   assert.equal(node("nocturne-run").hidden, true);
   await app.click("nocturne-sign-in");
   assert.equal(node("public-account-dialog").open, true);
-  await app.click("public-show-register");
-  node("public-register-email").value = address;
-  node("public-register-password").value = originalPassword;
-  await submit("public-register-form");
-  assert.equal(calls.length, 0, "Age confirmation is required before registering.");
-  node("public-adult").checked = true;
-  node("public-register-password").value = "too short";
-  await submit("public-register-form");
-  assert.match(node("public-account-status").textContent, /15 to 128/);
-  assert.equal(calls.length, 0);
-  node("public-register-password").value = originalPassword;
-  await submit("public-register-form");
-  assert.deepEqual(calls.at(-1), {action: "register", body: {email: address, password: originalPassword, adult: true}});
-  assert.equal(node("public-code-form").hidden, false);
-  assert.equal(node("public-register-password").value, "");
-  assert.equal(node("public-resend-code").disabled, true);
   await app.visibility(true);
-  assert.equal(node("public-account-dialog").open, true, "The dialog stays open while checking email in another tab.");
+  assert.equal(node("public-account-dialog").open, true, "The sign-in dialog stays open when the reader changes tabs.");
   await app.visibility(false);
-  await app.advance(60000);
-  await app.click("public-resend-code");
-  assert.deepEqual(calls.at(-1), {action: "resend", body: {challenge: "register", email: address}});
-
-  node("public-code").value = "000000";
-  await submit("public-code-form");
-  assert.match(node("public-account-status").textContent, /didn’t match/);
-  node("public-code").value = "123456";
-  await submit("public-code-form");
-  assert.deepEqual(calls.at(-1), {action: "verify", body: {challenge: "replacement-code", code: "123456"}});
-  assert.equal(node("public-login-form").hidden, false);
-  assert.equal(node("public-email").value, address);
-  assert.equal(app.read("hasVerifiedAccess()"), false, "Email verification must not sign in.");
+  node("public-email").value = address;
   node("public-password").value = originalPassword;
   node("public-remember").checked = true;
   await submit("public-login-form");
@@ -147,7 +104,6 @@ test("guest reading, email verification and password sign-in preserve the reader
   assert.deepEqual(calls.at(-1), {action: "login", body: {email: address, password: originalPassword, remember: true}});
   assert.equal(node("public-account-dialog").open, false);
   assert.equal(node("public-account-label").textContent, "Account");
-  assert.equal(node("public-code").value, "");
   assert.equal(node("public-email").value, "");
   assert.equal(node("public-password").value, "");
   assert.equal(node("nocturne-run").hidden, false);
@@ -224,18 +180,17 @@ test("closing an account form clears the password and ignores an earlier respons
   await app.settle();
   const node = id => app.nodes.get(id);
   await app.click("public-account");
-  await app.click("public-show-register");
-  node("public-register-email").value = address;
-  node("public-register-password").value = originalPassword;
-  node("public-adult").checked = true;
-  const registration = node("public-register-form").dispatch("submit");
+  node("public-email").value = address;
+  node("public-password").value = originalPassword;
+  const login = node("public-login-form").dispatch("submit");
   await app.click("public-account-close");
-  assert.equal(node("public-register-password").value, "");
+  assert.equal(node("public-password").value, "");
   await app.click("public-account");
-  finish({challenge: "old-challenge", expiresIn: 600, resendAfter: 60});
-  await registration;
+  finish({authenticated: true, expiresAt: app.now() + 600000});
+  await login;
+  assert.equal(node("public-account-dialog").open, true);
   assert.equal(node("public-login-form").hidden, false);
-  assert.equal(node("public-code-form").hidden, true);
+  assert.equal(app.read("hasVerifiedAccess()"), false);
 });
 
 test("signed-in password changes and all-device sign-out return the reader to a guest session", async t => {

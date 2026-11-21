@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-appearance-default="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Create your account | SatinLore</title>
+  <script src="/static/appearance.js"></script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="stylesheet" href="/static/signup.css">
+  <script type="module" src="/static/signup.mjs"></script>
+</head>
+<body class="signup-page">
+  <header class="signup-header"><span class="signup-brand">SatinLore</span><a href="/">Back to reader</a></header>
+  <main class="signup-main">
+    <section class="signup-card" aria-labelledby="public-account-heading">
+      <h1 id="public-account-heading">Create your account</h1>
+      <p id="public-account-intro" class="signup-intro">Enter your email and choose a password. We’ll send you a code to confirm your email.</p>
+      <form id="public-register-form" method="post">
+        <label for="public-register-email">Email address</label>
+        <input id="public-register-email" name="email" type="email" autocomplete="username" maxlength="254" required>
+        <label for="public-register-password">Password</label>
+        <input id="public-register-password" name="password" type="password" autocomplete="new-password" maxlength="256" aria-describedby="public-password-help" required>
+        <p id="public-password-help" class="note">Use 15 to 128 characters.</p>
+        <label class="signup-check"><input id="public-adult" type="checkbox" required> I am 18 or older.</label>
+        <button id="public-register" type="submit" class="primary signup-primary">Create account</button>
+      </form>
+      <form id="public-code-form" method="post" hidden>
+        <label for="public-code">Six-digit code</label>
+        <input id="public-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+        <button id="public-verify-code" type="submit" class="primary signup-primary">Verify email</button>
+        <div class="signup-actions"><button id="public-change-email" class="quiet-button" type="button">Change email</button><button id="public-resend-code" class="quiet-button" type="button">Send a new code</button></div>
+      </form>
+      <form id="public-login-form" method="post" hidden>
+        <label for="public-email">Email address</label>
+        <input id="public-email" name="email" type="email" autocomplete="username" maxlength="254" required>
+        <label for="public-password">Password</label>
+        <input id="public-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+        <label class="signup-check"><input id="public-remember" type="checkbox"> Keep me signed in for 30 days</label>
+        <button id="public-login" type="submit" class="primary signup-primary">Sign in</button>
+      </form>
+      <p id="public-account-status" class="signup-status" role="status"></p>
+      <noscript><p>Enable JavaScript to create your account.</p></noscript>
+      <footer class="signup-footer">
+        <p id="signup-existing-account">Already have an account? <a id="signup-sign-in" href="/login">Sign in</a></p>
+        <a href="/help#privacy-help" target="_blank" rel="noopener">Account and data privacy</a>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>

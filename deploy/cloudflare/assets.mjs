@@ -43,6 +43,9 @@ export const READER_ASSETS = Object.freeze([
   ["reader/experience-preferences.mjs", "/static/reader/experience-preferences.mjs"],
   ["reader/experience-dialog.mjs", "/static/reader/experience-dialog.mjs"],
   ["reader/public-account.mjs", "/static/reader/public-account.mjs"],
+  ["signup.html", "/signup.html"],
+  ["signup.mjs", "/static/signup.mjs"],
+  ["signup.css", "/static/signup.css"],
   ["billing.html", "/billing.html"],
   ["billing.mjs", "/static/billing.mjs"],
   ["billing.css", "/static/billing.css"],
@@ -100,7 +103,7 @@ export const ALPHA_SESSION_ASSET_PATHS = Object.freeze(ALPHA_STATIC_PATHS.filter
   "/alpha/static/alpha-movement-view.mjs"].includes(path) || BETA_ONLY_ASSET_PATHS.includes(path.slice("/alpha".length))));
 export const PRIVATE_DOCUMENT_ROUTES = Object.freeze({
   "/": "/index.html", "/help": "/help.html", "/support": "/feedback.html", "/simulator-lab": "/simulation.html", "/device-bridge": "/device-bridge.html",
-  "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html", "/billing": "/billing.html",
+  "/admin": "/beta-admin.html", "/admin/": "/beta-admin.html", "/billing": "/billing.html", "/signup": "/signup.html",
 });
 // Served only by the authenticated research route. Do not add to reader assets.
 export const CORPUS_STUDY_CLIENT_ASSET = "/_research/corpus-study.mjs";

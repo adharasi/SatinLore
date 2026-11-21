@@ -34,7 +34,7 @@ const APP_BETA_PATH = "/beta";
 const APP_BETA_DOCUMENTS = new Map([[APP_BETA_PATH, "/index.html"], [`${APP_BETA_PATH}/`, "/index.html"],
   [`${APP_BETA_PATH}/simulator-lab`, "/simulation.html"]]);
 const BETA_ONLY_ASSETS = new Set(BETA_ONLY_ASSET_PATHS);
-const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html"]);
+const PUBLIC_DOCUMENTS = new Set(["/index.html", "/help.html", "/feedback.html", "/signup.html"]);
 const launchUsageEnabled = env => env[LAUNCH_COST_METERING_FLAG] === "true";
 const LAUNCH_ADMIN_DOCUMENTS = new Map([["/billing-admin", "/billing-admin.html"], ["/billing-admin.html", "/billing-admin.html"],
   ["/billing-admin/app.mjs", "/billing-admin/app.mjs"]]);
@@ -401,17 +401,20 @@ export function createPrivateAppWorker({ keyResolver, storyFetcher, storyParser,
         if (authResponse) return finish(authResponse);
       }
       const read = ["GET", "HEAD"].includes(request.method);
-      if (url.pathname === "/signup" || url.pathname === "/login") {
+      if (path === "/signup.html" && (!publicAuth || !read || url.pathname !== "/signup")) {
+        return finish(json({error: "Not found."}, 404));
+      }
+      const legacySignup = publicAuth && path === "/index.html" && url.searchParams.get("signin") === "1" &&
+        url.searchParams.get("mode") === "register";
+      if (url.pathname === "/login" || legacySignup) {
         if (!publicAuth || !read) return finish(json({error: "Not found."}, 404));
-        const destination = new URLSearchParams({signin: "1"});
-        if (url.pathname === "/signup") destination.set("mode", "register");
+        const destination = new URLSearchParams(legacySignup ? undefined : {signin: "1"});
         const ref = url.searchParams.get("ref"), order = url.searchParams.get("order");
-        if (ref && /^[a-z0-9][a-z0-9_-]{1,31}$/iu.test(ref)) destination.set("ref", ref.toUpperCase());
-        if (order && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(order) && url.pathname === "/login") {
-          destination.set("order", order);
-        }
+        if (ref && /^[A-Za-z0-9][A-Za-z0-9_-]{1,31}$/u.test(ref)) destination.set("ref", ref.toUpperCase());
+        if (order && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(order)) destination.set("order", order);
         if (destination.has("ref") || destination.has("order") || url.searchParams.get("next") === "billing") destination.set("next", "billing");
-        return finish(new Response(null, {status: 303, headers: {Location: `/?${destination}`}}));
+        const target = legacySignup ? "/signup" : "/";
+        return finish(new Response(null, {status: 303, headers: {Location: `${target}${destination.size ? `?${destination}` : ""}`}}));
       }
       if (publicAuth && BETA_ADMIN_PATHS.has(url.pathname)) return finish(json({ error: "Not found." }, 404));
       if (path === "/billing.html") {

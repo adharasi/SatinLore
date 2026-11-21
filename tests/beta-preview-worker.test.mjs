@@ -49,7 +49,8 @@ function fixture(overrides) {
     ASSETS: { async fetch(request) {
       reads.push(request);
       const path = new URL(request.url).pathname;
-      const body = path.endsWith(".html") ? '<!doctype html><head><script src="/static/app.mjs"></script></head>' : "// synthetic asset";
+      const body = path === "/signup.html" ? await readFile(new URL("../app/static/signup.html", import.meta.url), "utf8") :
+        path.endsWith(".html") ? '<!doctype html><head><script src="/static/app.mjs"></script></head>' : "// synthetic asset";
       return new Response(body, { headers: { "Set-Cookie": `__Host-satinlore-reader=${TOKEN}; Path=/; Secure; HttpOnly` } });
     } },
     ...overrides,
@@ -85,24 +86,35 @@ test("the beta Worker only routes its namespace and requires the exact dedicated
   assert.equal(anonymousAuth.status, 503);
 });
 
-test("staging scope is retained by signup redirects and responses stay out of caches and indexes", async () => {
+test("beta signup serves a standalone page inside Access and stays out of caches and indexes", async () => {
   const tester = await assertion(TESTER);
   const { request, reads } = fixture();
-  const signup = await request("/beta/signup?ref=writer&next=billing", { token: tester });
-  assert.equal(signup.status, 303);
-  assert.equal(signup.headers.get("Location"), "/beta/?signin=1&mode=register&ref=WRITER&next=billing");
-  const page = await request(signup.headers.get("Location"), {
+  const url = "/beta/signup?ref=writer&next=billing";
+  assert.equal((await request(url)).status, 403);
+  const page = await request(url, {
     token: tester, headers: { Cookie: `__Host-satinlore-reader=${TOKEN}` },
   });
   assert.equal(page.status, 200);
+  assert.equal(page.headers.get("Location"), null);
   assert.equal(page.headers.get("Cache-Control"), "no-store");
   assert.equal(page.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
   assert.equal(page.headers.get("Set-Cookie"), null);
   assert.equal(reads.length, 1);
-  assert.equal(reads[0].url, `${ORIGIN}/index.html`);
+  assert.equal(reads[0].url, `${ORIGIN}/signup.html`);
   assert.equal(reads[0].headers.get("Cf-Access-Jwt-Assertion"), null);
   assert.equal(reads[0].headers.get("Cookie"), null);
-  const head = await request("/beta/", { method: "HEAD", token: tester });
+  const html = await page.text();
+  assert.match(html, /name="satinlore-base-path" content="\/beta"/);
+  assert.match(html, /src="\/beta\/static\/signup\.mjs"/);
+  assert.match(html, /href="\/beta\/static\/signup\.css"/);
+  assert.match(html, /id="public-register-form"/);
+  assert.doesNotMatch(html, /static\/app\.mjs|workspace-header|draft-story/);
+  assert.equal((await request("/beta/static/signup.mjs", { token: tester })).status, 200);
+  assert.equal((await request("/beta/static/signup.mjs")).status, 403);
+  const legacy = await request("/beta/?signin=1&mode=register&ref=writer", { token: tester });
+  assert.equal(legacy.status, 303);
+  assert.equal(legacy.headers.get("Location"), "/beta/signup?ref=WRITER&next=billing");
+  const head = await request("/beta/signup", { method: "HEAD", token: tester });
   assert.equal(head.status, 200);
   assert.equal(head.body, null);
 });
